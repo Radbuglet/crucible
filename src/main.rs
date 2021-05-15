@@ -1,4 +1,5 @@
 #![feature(const_type_id)]
+#![feature(decl_macro)]
 
 pub mod core;
 pub mod engine;
