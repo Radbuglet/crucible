@@ -2,7 +2,6 @@ use std::any::TypeId;
 use std::hash;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
-use crate::core::router::AncestryNode;
 
 // === Keys === //
 
@@ -143,38 +142,5 @@ impl<B: ?Sized + GameObject> GameObjectExt for B {
         } else {
             None
         }
-    }
-}
-
-// === Ancestry integration === //
-
-pub trait GObjAncestryExt {
-    fn try_get_obj_attributed<T: ?Sized>(&self, key: Key<T>) -> Option<(&T, &dyn GameObject)>;
-
-    fn try_get_obj<T: ?Sized>(&self, key: Key<T>) -> Option<&T> {
-        self.try_get_obj_attributed(key)
-            .map(|(comp, _)| comp)
-    }
-
-    fn get_obj<T: ?Sized>(&self, key: Key<T>) -> &T {
-        self.try_get_obj_attributed(key)
-            .unwrap().0
-    }
-
-    fn has_obj<T: ?Sized>(&self, key: Key<T>) -> bool {
-        self.try_get_obj_attributed(key)
-            .is_some()
-    }
-}
-
-impl<'a> GObjAncestryExt for AncestryNode<'a, &'a dyn GameObject> {
-    fn try_get_obj_attributed<T: ?Sized>(&self, key: Key<T>) -> Option<(&T, &dyn GameObject)> {
-        for ancestor in self.ancestors() {
-            if let Some(component) = ancestor.try_get(key) {
-                return Some((component, *ancestor))
-            }
-        }
-
-        None
     }
 }
