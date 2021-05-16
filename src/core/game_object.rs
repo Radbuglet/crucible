@@ -1,18 +1,21 @@
-// TODO: Docs, safety, clean up
-
 use std::any::TypeId;
 use std::hash;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
+use crate::core::router::AncestryNode;
 
 // === Keys === //
 
+/// The untyped program unique identifier underlying [Key].
 #[derive(Hash, Eq, PartialEq, Copy, Clone)]
 struct RawKey(TypeId);
 
 pub struct Key<T: ?Sized> {
-    // Parameter lifetime is invariant because users could potentially provide keys with an insufficient
-    // lifetime.
+    /// Marker to bind the `T` generic parameter.
+    ///
+    /// Parameter lifetime is invariant because users could potentially provide keys with an insufficient
+    /// lifetime. The effect on dropck (which tells it that we can access instances of `T` during `Drop`)
+    /// doesn't matter.
     _ty: PhantomData<std::cell::Cell<T>>,
 
     /// The program unique identifier of the key.
@@ -20,6 +23,14 @@ pub struct Key<T: ?Sized> {
 }
 
 impl<T: ?Sized> Key<T> {
+    /// An *internal method* to create a new `Key` using the type `K` as an identifier provider. Use
+    /// the [new_key] macro to automate this process.
+    ///
+    /// ## Safety
+    ///
+    /// `K` must only ever be associated with a single type `T` and failing to do so will cause
+    /// unsoundness in the type system.
+    ///
     #[doc(hidden)]
     pub const unsafe fn new<K: 'static>() -> Self {
         Self {
@@ -63,70 +74,36 @@ pub macro new_key($type:ty) {
 
 // === Game Objects === //
 
-struct KeyTargetInner {
+pub struct KeyOut<'view, 'val> {
+    ptr_ty: PhantomData<&'view mut &'val ()>,
+    ptr: *mut (),
     is_init: bool,
     raw_key: RawKey,
 }
 
-struct KeyTarget<'val, T: ?Sized> {
-    inner: KeyTargetInner,
-    out_val: MaybeUninit<&'val T>,
-}
-
-impl<'val, T: ?Sized> KeyTarget<'val, T> {
-    pub fn new(key: Key<T>) -> Self {
-        Self {
-            inner: KeyTargetInner {
-                is_init: false,
-                raw_key: key.raw_id,
-            },
-            out_val: MaybeUninit::uninit(),
-        }
-    }
-
-    pub fn is_init(&self) -> bool {
-        self.inner.is_init
-    }
-
-    pub fn get(&self) -> Option<&'val T> {
-        if self.is_init() {
-            Some (unsafe { self.out_val.assume_init() })
-        } else {
-            None
-        }
-    }
-
-    pub fn out_view<'view>(&'view mut self) -> KeyOut<'view, 'val> {
-        KeyOut {
-            inner: &mut self.inner,
-            ptr_ty: PhantomData,
-            ptr: self.out_val.as_mut_ptr().cast::<()>(),
-        }
-    }
-}
-
-pub struct KeyOut<'view, 'val> {
-    inner: &'view mut KeyTargetInner,
-
-    // `'view` is covariant, `'val` is invariant.
-    ptr_ty: PhantomData<&'view mut &'val ()>,
-    ptr: *mut (),
-}
-
 impl<'view, 'val> KeyOut<'view, 'val> {
+    fn new<T: ?Sized>(key: Key<T>, target: &'view mut MaybeUninit<&'val T>) -> Self {
+        Self {
+            ptr_ty: PhantomData,
+            ptr: target.as_mut_ptr().cast::<()>(),
+            is_init: false,
+            raw_key: key.raw_id,
+        }
+    }
+
     pub fn is_init(&self) -> bool {
-        self.inner.is_init
+        self.is_init
     }
 
     pub fn try_put_field<T: ?Sized>(&mut self, field_key: Key<T>, field_ref: &'val T) -> bool {
-        debug_assert!(!self.is_init());
+        debug_assert!(!self.is_init);
 
-        if field_key.raw_id == self.inner.raw_key {
+        if field_key.raw_id == self.raw_key {
             unsafe {
                 self.ptr.cast::<&'val T>().write(field_ref);
             }
 
-            self.inner.is_init = true;
+            self.is_init = true;
             true
         } else {
             false
@@ -135,7 +112,9 @@ impl<'view, 'val> KeyOut<'view, 'val> {
 }
 
 pub trait GameObject {
-    fn get_raw(&self, out: &mut KeyOut) -> bool;
+    // Note: the returned value *cannot* be relied upon for correctness and solely exists for the user's
+    // convenience while composing `get_raw` calls. Internal code must use [KeyOut::is_init] instead.
+    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool;
 }
 
 pub trait GameObjectExt {
@@ -154,8 +133,48 @@ impl<B: ?Sized + GameObject> GameObjectExt for B {
     }
 
     fn try_get<'a, T: ?Sized>(&'a self, key: Key<T>) -> Option<&'a T> {
-        let mut target = KeyTarget::<'a, T>::new(key);
-        self.get_raw(&mut target.out_view());
-        target.get()
+        let mut target = MaybeUninit::<&'a T>::uninit();
+        let mut view = KeyOut::new(key, &mut target);
+
+        self.get_raw(&mut view);
+
+        if view.is_init() {
+            Some (unsafe { target.assume_init() })
+        } else {
+            None
+        }
+    }
+}
+
+// === Ancestry integration === //
+
+pub trait GObjAncestryExt {
+    fn try_get_obj_attributed<T: ?Sized>(&self, key: Key<T>) -> Option<(&T, &dyn GameObject)>;
+
+    fn try_get_obj<T: ?Sized>(&self, key: Key<T>) -> Option<&T> {
+        self.try_get_obj_attributed(key)
+            .map(|(comp, _)| comp)
+    }
+
+    fn get_obj<T: ?Sized>(&self, key: Key<T>) -> &T {
+        self.try_get_obj_attributed(key)
+            .unwrap().0
+    }
+
+    fn has_obj<T: ?Sized>(&self, key: Key<T>) -> bool {
+        self.try_get_obj_attributed(key)
+            .is_some()
+    }
+}
+
+impl<'a> GObjAncestryExt for AncestryNode<'a, &'a dyn GameObject> {
+    fn try_get_obj_attributed<T: ?Sized>(&self, key: Key<T>) -> Option<(&T, &dyn GameObject)> {
+        for ancestor in self.ancestors() {
+            if let Some(component) = ancestor.try_get(key) {
+                return Some((component, *ancestor))
+            }
+        }
+
+        None
     }
 }

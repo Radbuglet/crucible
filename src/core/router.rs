@@ -39,12 +39,3 @@ impl<'a, T> Iterator for AncestryIter<'a, T> {
             .map(|curr| &curr.value)
     }
 }
-
-pub trait EventHandler {
-    type Ancestor;
-    type Event;
-
-    fn handle(&mut self, tree: &AncestryNode<Self::Ancestor>, event: &Self::Event);
-}
-
-// TODO: Integration w/ game objects
