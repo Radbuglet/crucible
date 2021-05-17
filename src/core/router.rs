@@ -1,5 +1,4 @@
-use std::any::Any;
-use super::game_object::{new_key, Key, GameObject, GameObjectExt};
+use super::game_object::{Key, GameObject, GameObjectExt};
 
 // === Ancestry core === //
 
@@ -73,15 +72,4 @@ impl<'a> GObjAncestry<'a> {
         self.try_get_obj_attributed(key)
             .is_some()
     }
-}
-
-pub const EVENT_HANDLER_KEY: Key<dyn EventHandler> = new_key!(dyn EventHandler);
-
-pub trait EventHandler {
-    fn handle(&self, ancestry: &GObjAncestry, event: &dyn Any);
-}
-
-pub fn route_to_obj(target: &dyn GameObject, ancestry: &GObjAncestry, event: &dyn Any) {
-    target.get(EVENT_HANDLER_KEY)
-        .handle(&ancestry.child(target), event);
 }

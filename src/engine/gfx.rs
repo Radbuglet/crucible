@@ -7,8 +7,7 @@ use winit::event::WindowEvent;
 use winit::window::{Window, WindowId};
 use crate::core::game_object::{new_key, Key, GameObject, GameObjectExt};
 use crate::core::router::GObjAncestry;
-
-type WinitEvent<'a> = winit::event::Event<'a, ()>;
+use super::WinitEvent;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum GfxLoadError {
@@ -34,19 +33,34 @@ pub struct GfxSingletons {
 impl GfxSingletons {
     pub const KEY: Key<Self> = new_key!(Self);
 
-    pub async fn new(backend: wgpu::BackendBit, window: Window) -> Result<(Self, Viewport), GfxLoadError> {
-        let instance = wgpu::Instance::new(backend);
-        let surface = unsafe { instance.create_surface(&window) };
-        let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
+    async fn request_adapter(instance: &wgpu::Instance, compatible_surface: Option<&wgpu::Surface>) -> Result<wgpu::Adapter, GfxLoadError> {
+        instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-        }).await.ok_or(GfxLoadError::NoAdapter)?;
+            compatible_surface
+        }).await.ok_or(GfxLoadError::NoAdapter)
+    }
 
-        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
+    async fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue), GfxLoadError> {
+        adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("main device"),
             features: wgpu::Features::default(),
             limits: wgpu::Limits::default(),
-        }, None).await.or(Err(GfxLoadError::NoDevice))?;
+        }, None).await.or(Err(GfxLoadError::NoDevice))
+    }
+
+    pub async fn new(backend: wgpu::BackendBit) -> Result<Self, GfxLoadError> {
+        let instance = wgpu::Instance::new(backend);
+        let adapter = Self::request_adapter(&instance, None).await?;
+        let (device, queue) = Self::request_device(&adapter).await?;
+
+        Ok(Self { instance, device, queue })
+    }
+
+    pub async fn new_with_window(backend: wgpu::BackendBit, window: Window) -> Result<(Self, Viewport), GfxLoadError> {
+        let instance = wgpu::Instance::new(backend);
+        let surface = unsafe { instance.create_surface(&window) };
+        let adapter = Self::request_adapter(&instance, Some(&surface)).await?;
+        let (device, queue) = Self::request_device(&adapter).await?;
 
         let gfx = Self { instance, device, queue };
         let viewport = Viewport::from_surface(&gfx, window, surface);
@@ -57,34 +71,42 @@ impl GfxSingletons {
 
 #[derive(Default)]
 pub struct WindowManager {
-    viewports: HashMap<WindowId, Rc<dyn GameObject>>,
+    viewports: RefCell<HashMap<WindowId, Rc<dyn GameObject>>>,
 }
 
 impl WindowManager {
-    pub const KEY: Key<RefCell<Self>> = new_key!(RefCell<Self>);
+    pub const KEY: Key<Self> = new_key!(Self);
 
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn register(&mut self, viewport: Rc<dyn GameObject>) {
+    pub fn register(&self, viewport: Rc<dyn GameObject>) {
         debug_assert!(viewport.has(VIEWPORT_HANDLER_KEY), "Viewport must have an attached handler!");
         debug_assert!(viewport.has(Viewport::KEY), "Viewport must have an attached `Viewport` instance!");
 
         let window_id = viewport.get(Viewport::KEY).window_id();
-        self.viewports.insert(window_id, viewport);
+        self.viewports.borrow_mut()
+            .insert(window_id, viewport);
     }
 
-    pub fn unregister(&mut self, viewport: &dyn GameObject) {
+    pub fn unregister(&self, viewport: &dyn GameObject) {
         self.unregister_by_id(viewport.get(Viewport::KEY).window_id());
     }
 
-    pub fn unregister_by_id(&mut self, id: WindowId) {
-        self.viewports.remove(&id);
+    pub fn unregister_by_id(&self, id: WindowId) {
+        self.viewports.borrow_mut()
+            .remove(&id);
     }
 
-    pub fn viewports(&self) -> impl Iterator<Item=&Rc<dyn GameObject>> {
-        self.viewports.values()
+    pub fn fetch_viewport(&self, id: WindowId) -> Option<Rc<dyn GameObject>> {
+        self.viewports.borrow()
+            .get(&id)
+            .map(Rc::clone)
+    }
+
+    pub fn viewport_map(&self) -> &RefCell<HashMap<WindowId, Rc<dyn GameObject>>> {
+        &self.viewports
     }
 
     pub fn handle_event(&self, ancestry: &GObjAncestry, event: &WinitEvent) {
@@ -92,28 +114,30 @@ impl WindowManager {
 
         match event {
             WinitEvent::RedrawRequested(window_id) => {
-                let viewport_obj = self.viewports.get(&window_id);
+                let viewport_obj = self.fetch_viewport(*window_id);
 
                 if let Some(viewport_obj) = viewport_obj {
+                    let ancestry = ancestry.child(&*viewport_obj);
                     let viewport = viewport_obj.get(Viewport::KEY);
                     let handler = viewport_obj.get(VIEWPORT_HANDLER_KEY);
 
                     if viewport.pre_render(gfx) {
-                        handler.resized(ancestry, viewport.window().inner_size());
+                        handler.resized(&ancestry, viewport.window().inner_size());
                     }
 
                     match viewport.get_frame() {
-                        Ok(frame) => handler.redraw(ancestry, frame),
+                        Ok(frame) => handler.redraw(&ancestry, frame),
                         Err(err) => eprintln!("Error while polling swapchain: \"{}\"", err)
                     }
                 }
             }
             WinitEvent::WindowEvent { window_id, event } => {
-                let viewport_obj = self.viewports.get(&window_id);
+                let viewport_obj = self.fetch_viewport(*window_id);
 
                 if let Some(viewport_obj) = viewport_obj {
+                    let ancestry = ancestry.child(&*viewport_obj);
                     viewport_obj.get(VIEWPORT_HANDLER_KEY)
-                        .window_event(ancestry, event);
+                        .window_event(&ancestry, *window_id, event);
                 }
             }
             _ => {}
@@ -124,7 +148,7 @@ impl WindowManager {
 pub const VIEWPORT_HANDLER_KEY: Key<dyn ViewportHandler> = new_key!(dyn ViewportHandler);
 
 pub trait ViewportHandler {
-    fn window_event(&self, ancestry: &GObjAncestry, event: &WindowEvent);
+    fn window_event(&self, ancestry: &GObjAncestry, win_id: WindowId, event: &WindowEvent);
     fn resized(&self, ancestry: &GObjAncestry, new_size: PhysicalSize<u32>);
     fn redraw(&self, ancestry: &GObjAncestry, frame: wgpu::SwapChainFrame);
 }
@@ -215,7 +239,7 @@ impl Viewport {
         inner.dirty = true;
     }
 
-    // === Render functions === //
+    // === Rendering functions === //
 
     pub fn pre_render(&self, gfx: &GfxSingletons) -> bool {
         let mut inner = self.inner.borrow_mut();
