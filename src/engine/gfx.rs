@@ -1,13 +1,15 @@
-use std::cell::RefCell;
+use std::cell::{RefCell, Cell};
 use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
-use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::window::{Window, WindowId};
 use crate::core::game_object::{new_key, Key, GameObject, GameObjectExt};
 use crate::core::router::GObjAncestry;
-use super::WinitEvent;
+use crate::core::mutability::CellExt;
+use crate::engine::{WinitEvent, WindowSizePx};
+
+// === Core GFX === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum GfxLoadError {
@@ -69,90 +71,6 @@ impl GfxSingletons {
     }
 }
 
-#[derive(Default)]
-pub struct WindowManager {
-    viewports: RefCell<HashMap<WindowId, Rc<dyn GameObject>>>,
-}
-
-impl WindowManager {
-    pub const KEY: Key<Self> = new_key!(Self);
-
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn register(&self, viewport: Rc<dyn GameObject>) {
-        debug_assert!(viewport.has(VIEWPORT_HANDLER_KEY), "Viewport must have an attached handler!");
-        debug_assert!(viewport.has(Viewport::KEY), "Viewport must have an attached `Viewport` instance!");
-
-        let window_id = viewport.get(Viewport::KEY).window_id();
-        self.viewports.borrow_mut()
-            .insert(window_id, viewport);
-    }
-
-    pub fn unregister(&self, viewport: &dyn GameObject) {
-        self.unregister_by_id(viewport.get(Viewport::KEY).window_id());
-    }
-
-    pub fn unregister_by_id(&self, id: WindowId) {
-        self.viewports.borrow_mut()
-            .remove(&id);
-    }
-
-    pub fn fetch_viewport(&self, id: WindowId) -> Option<Rc<dyn GameObject>> {
-        self.viewports.borrow()
-            .get(&id)
-            .map(Rc::clone)
-    }
-
-    pub fn viewport_map(&self) -> &RefCell<HashMap<WindowId, Rc<dyn GameObject>>> {
-        &self.viewports
-    }
-
-    pub fn handle_event(&self, ancestry: &GObjAncestry, event: &WinitEvent) {
-        let gfx = ancestry.get_obj(GfxSingletons::KEY);
-
-        match event {
-            WinitEvent::RedrawRequested(window_id) => {
-                let viewport_obj = self.fetch_viewport(*window_id);
-
-                if let Some(viewport_obj) = viewport_obj {
-                    let ancestry = ancestry.child(&*viewport_obj);
-                    let viewport = viewport_obj.get(Viewport::KEY);
-                    let handler = viewport_obj.get(VIEWPORT_HANDLER_KEY);
-
-                    if viewport.pre_render(gfx) {
-                        handler.resized(&ancestry, viewport.window().inner_size());
-                    }
-
-                    match viewport.get_frame() {
-                        Ok(frame) => handler.redraw(&ancestry, frame),
-                        Err(err) => eprintln!("Error while polling swapchain: \"{}\"", err)
-                    }
-                }
-            }
-            WinitEvent::WindowEvent { window_id, event } => {
-                let viewport_obj = self.fetch_viewport(*window_id);
-
-                if let Some(viewport_obj) = viewport_obj {
-                    let ancestry = ancestry.child(&*viewport_obj);
-                    viewport_obj.get(VIEWPORT_HANDLER_KEY)
-                        .window_event(&ancestry, *window_id, event);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-pub const VIEWPORT_HANDLER_KEY: Key<dyn ViewportHandler> = new_key!(dyn ViewportHandler);
-
-pub trait ViewportHandler {
-    fn window_event(&self, ancestry: &GObjAncestry, win_id: WindowId, event: &WindowEvent);
-    fn resized(&self, ancestry: &GObjAncestry, new_size: PhysicalSize<u32>);
-    fn redraw(&self, ancestry: &GObjAncestry, frame: wgpu::SwapChainFrame);
-}
-
 pub struct Viewport {
     window: Window,
     surface: wgpu::Surface,
@@ -166,8 +84,6 @@ struct ViewportInner {
 }
 
 impl Viewport {
-    pub const KEY: Key<Self> = new_key!(Self);
-
     // === Constructors === //
 
     pub fn new(gfx: &GfxSingletons, window: Window) -> Self {
@@ -241,7 +157,7 @@ impl Viewport {
 
     // === Rendering functions === //
 
-    pub fn pre_render(&self, gfx: &GfxSingletons) -> bool {
+    pub fn pre_render(&self, gfx: &GfxSingletons) -> PreRenderOp {
         let mut inner = self.inner.borrow_mut();
         let win_sz = self.window.inner_size();
 
@@ -262,7 +178,11 @@ impl Viewport {
             inner.dirty = false;
         }
 
-        resized
+        if resized {
+            PreRenderOp::Resized(win_sz)
+        } else {
+            PreRenderOp::None
+        }
     }
 
     pub fn get_frame(&self) -> Result<wgpu::SwapChainFrame, wgpu::SwapChainError> {
@@ -270,4 +190,121 @@ impl Viewport {
             .swapchain
             .get_current_frame()
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum PreRenderOp {
+    Resized(WindowSizePx),
+    None,
+}
+
+
+// === Windowing integration === //
+
+#[derive(Default)]
+pub struct WindowManager {
+    windows: RefCell<HashMap<WindowId, Rc<RegisteredWindow>>>,
+}
+
+impl WindowManager {
+    pub const KEY: Key<Self> = new_key!(Self);
+
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(&self, viewport: Viewport, handler: Rc<dyn GameObject>) -> WindowId {
+        debug_assert!(handler.has(VIEWPORT_HANDLER_KEY));
+
+        let window_id = viewport.window_id();
+        let window = Rc::new(RegisteredWindow {
+            viewport,
+            handler: Cell::new(handler),
+        });
+
+        self.windows.borrow_mut().insert(window_id, window);
+        window_id
+    }
+
+    pub fn remove(&self, win: &Rc<RegisteredWindow>) {
+        self.remove_by_id(&win.viewport().window_id());
+    }
+
+    pub fn remove_by_id(&self, id: &WindowId) {
+        self.windows.borrow_mut().remove(id);
+    }
+
+    pub fn get_window(&self, id: &WindowId) -> Option<Rc<RegisteredWindow>> {
+        self.windows.borrow()
+            .get(id)
+            .map(Rc::clone)
+    }
+
+    pub fn viewport_map(&self) -> &RefCell<HashMap<WindowId, Rc<RegisteredWindow>>> {
+        &self.windows
+    }
+
+    pub fn handle_event(&self, ancestry: &GObjAncestry, event: &WinitEvent) {
+        match event {
+            WinitEvent::RedrawRequested(win_id) => {
+                if let Some(window) = self.get_window(win_id) {
+                    let handler_obj = window.handler();
+                    let ancestry = ancestry.child(&*handler_obj);
+                    let handler = handler_obj.get(VIEWPORT_HANDLER_KEY);
+
+                    // Pre-render
+                    if let PreRenderOp::Resized(size) = window
+                        .viewport()
+                        .pre_render(ancestry.get_obj(GfxSingletons::KEY))
+                    {
+                        handler.resized(&ancestry, &window, size);
+                    }
+
+                    // Dispatch redraw
+                    if let Ok(frame) = window.viewport().get_frame() {
+                        handler.redraw(&ancestry, &window, frame);
+                    } else {
+                        eprintln!("Failed to get swapchain frame!");
+                    }
+                }
+            }
+            WinitEvent::WindowEvent { event, window_id: win_id } => {
+                if let Some(window) = self.get_window(win_id) {
+                    let handler_obj = window.handler();
+                    let ancestry = ancestry.child(&*handler_obj);
+                    handler_obj
+                        .get(VIEWPORT_HANDLER_KEY)
+                        .window_event(&ancestry, &window, event);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+pub struct RegisteredWindow {
+    viewport: Viewport,
+    handler: Cell<Rc<dyn GameObject>>,
+}
+
+impl RegisteredWindow {
+    pub fn set_handler(&self, handler: Rc<dyn GameObject>) {
+        self.handler.set(handler);
+    }
+
+    pub fn handler(&self) -> Rc<dyn GameObject> {
+        self.handler.clone_inner()
+    }
+
+    pub fn viewport(&self) -> &Viewport {
+        &self.viewport
+    }
+}
+
+pub const VIEWPORT_HANDLER_KEY: Key<dyn ViewportHandler> = new_key!(dyn ViewportHandler);
+
+pub trait ViewportHandler {
+    fn window_event(&self, ancestry: &GObjAncestry, window: &Rc<RegisteredWindow>, event: &WindowEvent);
+    fn resized(&self, ancestry: &GObjAncestry, window: &Rc<RegisteredWindow>, new_size: WindowSizePx);
+    fn redraw(&self, ancestry: &GObjAncestry, window: &Rc<RegisteredWindow>, frame: wgpu::SwapChainFrame);
 }
