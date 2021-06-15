@@ -1,4 +1,5 @@
-use super::game_object::{Key, GameObject, GameObjectExt};
+use super::game_object::{Key, GameObject};
+use crate::core::game_object::GameObjectExt;
 
 // === Ancestry core === //
 
@@ -46,13 +47,15 @@ impl<'a, T> Iterator for AncestryIter<'a, T> {
 
 // === Game Object Routing === //
 
-pub type GObjAncestry<'a> = AncestryNode<'a, &'a dyn GameObject>;
+pub type GObjAncestry<'obj> = AncestryNode<'obj, &'obj dyn GameObject>;
 
-impl<'a> GObjAncestry<'a> {
+impl<'obj> GObjAncestry<'obj> {
     pub fn try_get_obj_attributed<T: ?Sized>(&self, key: Key<T>) -> Option<(&T, &dyn GameObject)> {
         for ancestor in self.ancestors() {
-            if let Some(component) = ancestor.try_get(key) {
-                return Some((component, *ancestor))
+            let ancestor: &'obj dyn GameObject = *ancestor;
+
+            if let Some(component) = ancestor.try_fetch_key(key) {
+                return Some((component, ancestor))
             }
         }
         None

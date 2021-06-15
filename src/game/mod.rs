@@ -51,10 +51,10 @@ impl OApplication {
             let ancestry = GObjAncestry::root(&app);
 
             // Handle inputs
-            app.get(InputTracker::KEY).handle(&event);
+            app.fetch_key(InputTracker::KEY).handle(&event);
 
             // Handle windowing
-            let wm = app.get(WindowManager::KEY);
+            let wm = app.fetch_key(WindowManager::KEY);
             wm.handle_event(&ancestry, &event);
 
             if wm.viewport_map().borrow().is_empty() {

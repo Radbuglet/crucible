@@ -214,7 +214,7 @@ impl WindowManager {
     }
 
     pub fn add(&self, viewport: Viewport, handler: Rc<dyn GameObject>) -> WindowId {
-        debug_assert!(handler.has(VIEWPORT_HANDLER_KEY));
+        debug_assert!(handler.has_key(VIEWPORT_HANDLER_KEY));
 
         let window_id = viewport.window_id();
         let window = Rc::new(RegisteredWindow {
@@ -250,7 +250,7 @@ impl WindowManager {
                 if let Some(window) = self.get_window(win_id) {
                     let handler_obj = window.handler();
                     let ancestry = ancestry.child(&*handler_obj);
-                    let handler = handler_obj.get(VIEWPORT_HANDLER_KEY);
+                    let handler = handler_obj.fetch_key(VIEWPORT_HANDLER_KEY);
 
                     // Pre-render
                     if let PreRenderOp::Resized(size) = window
@@ -273,7 +273,7 @@ impl WindowManager {
                     let handler_obj = window.handler();
                     let ancestry = ancestry.child(&*handler_obj);
                     handler_obj
-                        .get(VIEWPORT_HANDLER_KEY)
+                        .fetch_key(VIEWPORT_HANDLER_KEY)
                         .window_event(&ancestry, &window, event);
                 }
             }
