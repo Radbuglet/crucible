@@ -1,12 +1,12 @@
-// TODO: Context preservation
 // TODO: Non-ref components
-// TODO: Enable better compile-time borrow checking
 // TODO: Docs (internal and external) and tests
 
 use std::any::TypeId;
 use std::hash;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
+use std::ops::Deref;
+use std::ptr::NonNull;
 
 // === Keys === //
 
@@ -91,35 +91,17 @@ pub macro new_key($type:ty) {
     }
 }
 
-// === Game Object Core === //
+// === Provider definition === //
 
-pub trait GameObject {
+pub trait Provider {
     // Note: the returned value *cannot* be relied upon for correctness and solely exists for the user's
     // convenience while composing `get_raw` calls. Internal code must use [KeyOut::is_init] instead.
     fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool;
 }
 
-impl<T: 'static> GameObject for T {
-    default fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
-        out.try_put_field(Key::typed(), self)
-    }
-}
-
-impl<T: ?Sized + GameObject> GameObject for &'_ T {
-    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
-        (*self).get_raw(out)
-    }
-}
-
-impl<T: ?Sized + GameObject> GameObject for &'_ mut T {
-    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
-        (&**self).get_raw(out)
-    }
-}
-
 pub struct KeyOut<'view, 'val> {
     ptr_ty: PhantomData<&'view mut &'val ()>,
-    ptr: *mut (),
+    ptr: NonNull<()>,  // NonNull for niche representation
     raw_key: RawKey,
     is_init: bool,
 }
@@ -128,7 +110,7 @@ impl<'view, 'val> KeyOut<'view, 'val> {
     fn new<T: ?Sized>(key: Key<T>, target: &'view mut MaybeUninit<&'val T>) -> Self {
         Self {
             ptr_ty: PhantomData,
-            ptr: target.as_mut_ptr().cast::<()>(),
+            ptr: NonNull::from(target).cast::<()>(),
             raw_key: key.raw_id,
             is_init: false,
         }
@@ -138,12 +120,12 @@ impl<'view, 'val> KeyOut<'view, 'val> {
         self.is_init
     }
 
-    pub fn try_put_field<T: ?Sized>(&mut self, field_key: Key<T>, field_ref: &'val T) -> bool {
+    pub fn field_key<T: ?Sized>(&mut self, field_key: Key<T>, field_ref: &'val T) -> bool {
         debug_assert!(!self.is_init);
 
         if field_key.raw_id == self.raw_key {
             unsafe {
-                self.ptr.cast::<&'val T>().write(field_ref);
+                self.ptr.as_ptr().cast::<&'val T>().write(field_ref);
             }
 
             self.is_init = true;
@@ -152,39 +134,71 @@ impl<'view, 'val> KeyOut<'view, 'val> {
             false
         }
     }
+
+    pub fn field<T: ?Sized + 'static>(&mut self, field_ref: &'val T) -> bool {
+        self.field_key(Key::typed(), field_ref)
+    }
 }
 
-// === Game Object Extension Methods === //
+// === Extension methods === //
 
-pub trait GameObjectExt {
-    fn try_fetch_key<T: ?Sized>(&self, key: Key<T>) -> Option<&T>;
-    fn fetch_key<T: ?Sized>(&self, key: Key<T>) -> &T;
+pub struct Comp<'a, O: ?Sized, T: ?Sized> {
+    obj: &'a O,
+    comp: &'a T,
+}
+
+// TODO: Coercions
+
+impl<'a, O: ?Sized, T: ?Sized> Comp<'a, O, T> {
+    pub fn obj_raw(&self) -> &'a O {
+        self.obj
+    }
+
+    pub fn comp_raw(&self) -> &'a T {
+        self.comp
+    }
+}
+
+impl<O: ?Sized, T: ?Sized> Deref for Comp<'_, O, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.comp
+    }
+}
+
+pub trait ProviderExt {
+    fn try_fetch_key<T: ?Sized>(&self, key: Key<T>) -> Option<Comp<Self, T>>;
+    fn fetch_key<T: ?Sized>(&self, key: Key<T>) -> Comp<Self, T>;
     fn has_key<T: ?Sized>(&self, key: Key<T>) -> bool;
 
-    fn try_fetch<T: ?Sized + 'static>(&self) -> Option<&T>;
-    fn fetch<T: ?Sized + 'static>(&self) -> &T;
+    fn try_fetch<T: ?Sized + 'static>(&self) -> Option<Comp<Self, T>>;
+    fn fetch<T: ?Sized + 'static>(&self) -> Comp<Self, T>;
     fn has<T: ?Sized + 'static>(&self) -> bool;
 
-    fn try_fetch_many<'a, T: FetchMany<'a>>(&'a self) -> Option<T>;
-    fn fetch_many<'a, T: FetchMany<'a>>(&'a self) -> T;
+    fn try_fetch_many<'a, T: FetchMany<&'a Self>>(&'a self) -> Option<T>;
+    fn fetch_many<'a, T: FetchMany<&'a Self>>(&'a self) -> T;
 }
 
-impl<B: ?Sized + GameObject> GameObjectExt for B {
+impl<B: ?Sized + Provider> ProviderExt for B {
     // Fetch by key ==
-    fn try_fetch_key<'a, T: ?Sized>(&'a self, key: Key<T>) -> Option<&'a T> {
+    fn try_fetch_key<'a, T: ?Sized>(&'a self, key: Key<T>) -> Option<Comp<'a, Self, T>> {
         let mut target = MaybeUninit::<&'a T>::uninit();
         let mut view = KeyOut::new(key, &mut target);
 
         self.get_raw(&mut view);
 
         if view.is_init() {
-            Some (unsafe { target.assume_init() })
+            Some (Comp {
+                obj: self,
+                comp: unsafe { target.assume_init() },
+            })
         } else {
             None
         }
     }
 
-    fn fetch_key<T: ?Sized>(&self, key: Key<T>) -> &T {
+    fn fetch_key<T: ?Sized>(&self, key: Key<T>) -> Comp<Self, T> {
         self.try_fetch_key(key).unwrap()
     }
 
@@ -193,11 +207,11 @@ impl<B: ?Sized + GameObject> GameObjectExt for B {
     }
 
     // Fetch by type ==
-    fn try_fetch<T: ?Sized + 'static>(&self) -> Option<&T> {
+    fn try_fetch<T: ?Sized + 'static>(&self) -> Option<Comp<Self, T>> {
         self.try_fetch_key(Key::<T>::typed())
     }
 
-    fn fetch<T: ?Sized + 'static>(&self) -> &T {
+    fn fetch<T: ?Sized + 'static>(&self) -> Comp<Self, T> {
         self.fetch_key(Key::<T>::typed())
     }
 
@@ -206,23 +220,19 @@ impl<B: ?Sized + GameObject> GameObjectExt for B {
     }
 
     // Fetch many ==
-    fn try_fetch_many<'a, T: FetchMany<'a>>(&'a self) -> Option<T> {
-        T::try_fetch_many(self)
+    fn try_fetch_many<'a, T: FetchMany<&'a Self>>(&'a self) -> Option<T> {
+        T::inner_fetch_many(self)
     }
 
-    fn fetch_many<'a, T: FetchMany<'a>>(&'a self) -> T {
-        T::fetch_many(self)
+    fn fetch_many<'a, T: FetchMany<&'a Self>>(&'a self) -> T {
+        T::inner_fetch_many(self).unwrap()
     }
 }
 
-// === Game Object Tuple Utils === //
+// === Tuple stuff === //
 
-pub trait FetchMany<'a>: Sized {
-    fn try_fetch_many<T: ?Sized + GameObject>(obj: &'a T) -> Option<Self>;
-
-    fn fetch_many<T: ?Sized + GameObject>(obj: &'a T) -> Self {
-        Self::try_fetch_many(obj).unwrap()
-    }
+pub trait FetchMany<Obj>: Sized {
+    fn inner_fetch_many(obj: Obj) -> Option<Self>;
 }
 
 // Constructs an expression guaranteed to return a tuple, regardless of the number of elements provided.
@@ -233,7 +243,7 @@ macro tup {
     // For tuples with more than one element
     ($($elem:expr),+) => {
         (
-            $ ($ elem),+
+            $($ elem),+
             ,  // A trailing comma forces the parser to treat the parens as a tuple and not an expression.
         )
     }
@@ -241,9 +251,9 @@ macro tup {
 
 macro impl_tuple($($name:ident : $idx:tt),*) {
     // Fetching for `(&A, ..., &Z)`
-    impl<'a, $($name: ?Sized + 'static),*> FetchMany<'a> for ($(&'a $name,)*) {
+    impl<'a, Obj: ?Sized + Provider, $($name: ?Sized + 'static),*> FetchMany<&'a Obj> for ($(Comp<'a, Obj, $name>,)*) {
         #[allow(unused)]  // For empty tuples
-        fn try_fetch_many<T: ?Sized + GameObject>(obj: &'a T) -> Option<Self> {
+        fn inner_fetch_many(obj: &'a Obj) -> Option<Self> {
             Some (tup!(
                 $(obj.try_fetch::<$name>()?),*
             ))
@@ -251,7 +261,7 @@ macro impl_tuple($($name:ident : $idx:tt),*) {
     }
 
     // Providing for `(A, ..., Z)`
-    impl<$($name: GameObject),*> GameObject for ($($name,)*) {
+    impl<'me, $($name: Provider + 'static),*> Provider for ($($name,)*) {
         #[allow(unused)]  // For empty tuples
         fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
             $(self.$idx.get_raw(out) ||)*

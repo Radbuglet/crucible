@@ -4,7 +4,7 @@ use std::fmt;
 use std::rc::Rc;
 use winit::event::WindowEvent;
 use winit::window::{Window, WindowId};
-use crate::core::game_object::{new_key, Key, GameObject, GameObjectExt};
+use crate::core::provider::{Provider, ProviderExt, KeyOut};
 use crate::core::router::GObjAncestry;
 use crate::core::mutability::CellExt;
 use crate::engine::{WinitEvent, WindowSizePx};
@@ -32,9 +32,13 @@ pub struct GfxSingletons {
     pub queue: wgpu::Queue,
 }
 
-impl GfxSingletons {
-    pub const KEY: Key<Self> = new_key!(Self);
+impl Provider for GfxSingletons {
+    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
+        out.field(self)
+    }
+}
 
+impl GfxSingletons {
     async fn request_adapter(instance: &wgpu::Instance, compatible_surface: Option<&wgpu::Surface>) -> Result<wgpu::Adapter, GfxLoadError> {
         instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -198,7 +202,6 @@ pub enum PreRenderOp {
     None,
 }
 
-
 // === Windowing integration === //
 
 #[derive(Default)]
@@ -206,15 +209,19 @@ pub struct WindowManager {
     windows: RefCell<HashMap<WindowId, Rc<RegisteredWindow>>>,
 }
 
-impl WindowManager {
-    pub const KEY: Key<Self> = new_key!(Self);
+impl Provider for WindowManager {
+    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
+        out.field(self)
+    }
+}
 
+impl WindowManager {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn add(&self, viewport: Viewport, handler: Rc<dyn GameObject>) -> WindowId {
-        debug_assert!(handler.has_key(VIEWPORT_HANDLER_KEY));
+    pub fn add(&self, viewport: Viewport, handler: Rc<dyn Provider>) -> WindowId {
+        debug_assert!(handler.has::<dyn ViewportHandler>());
 
         let window_id = viewport.window_id();
         let window = Rc::new(RegisteredWindow {
@@ -250,12 +257,12 @@ impl WindowManager {
                 if let Some(window) = self.get_window(win_id) {
                     let handler_obj = window.handler();
                     let ancestry = ancestry.child(&*handler_obj);
-                    let handler = handler_obj.fetch_key(VIEWPORT_HANDLER_KEY);
+                    let handler = handler_obj.fetch::<dyn ViewportHandler>();
 
                     // Pre-render
                     if let PreRenderOp::Resized(size) = window
                         .viewport()
-                        .pre_render(ancestry.get_obj(GfxSingletons::KEY))
+                        .pre_render(&*ancestry.fetch::<GfxSingletons>())
                     {
                         handler.resized(&ancestry, &window, size);
                     }
@@ -273,7 +280,7 @@ impl WindowManager {
                     let handler_obj = window.handler();
                     let ancestry = ancestry.child(&*handler_obj);
                     handler_obj
-                        .fetch_key(VIEWPORT_HANDLER_KEY)
+                        .fetch::<dyn ViewportHandler>()
                         .window_event(&ancestry, &window, event);
                 }
             }
@@ -284,15 +291,15 @@ impl WindowManager {
 
 pub struct RegisteredWindow {
     viewport: Viewport,
-    handler: Cell<Rc<dyn GameObject>>,
+    handler: Cell<Rc<dyn Provider>>,
 }
 
 impl RegisteredWindow {
-    pub fn set_handler(&self, handler: Rc<dyn GameObject>) {
+    pub fn set_handler(&self, handler: Rc<dyn Provider>) {
         self.handler.set(handler);
     }
 
-    pub fn handler(&self) -> Rc<dyn GameObject> {
+    pub fn handler(&self) -> Rc<dyn Provider> {
         self.handler.clone_inner()
     }
 
@@ -300,8 +307,6 @@ impl RegisteredWindow {
         &self.viewport
     }
 }
-
-pub const VIEWPORT_HANDLER_KEY: Key<dyn ViewportHandler> = new_key!(dyn ViewportHandler);
 
 pub trait ViewportHandler {
     fn window_event(&self, ancestry: &GObjAncestry, window: &Rc<RegisteredWindow>, event: &WindowEvent);

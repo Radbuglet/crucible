@@ -1,5 +1,4 @@
-use super::game_object::{Key, GameObject};
-use crate::core::game_object::GameObjectExt;
+use super::provider::{Provider, KeyOut};
 
 // === Ancestry core === //
 
@@ -45,34 +44,17 @@ impl<'a, T> Iterator for AncestryIter<'a, T> {
     }
 }
 
-// === Game Object Routing === //
+// === Provider routing === //
 
-pub type GObjAncestry<'obj> = AncestryNode<'obj, &'obj dyn GameObject>;
+pub type GObjAncestry<'obj> = AncestryNode<'obj, &'obj dyn Provider>;
 
-impl<'obj> GObjAncestry<'obj> {
-    pub fn try_get_obj_attributed<T: ?Sized>(&self, key: Key<T>) -> Option<(&T, &dyn GameObject)> {
+impl Provider for GObjAncestry<'_> {
+    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
         for ancestor in self.ancestors() {
-            let ancestor: &'obj dyn GameObject = *ancestor;
-
-            if let Some(component) = ancestor.try_fetch_key(key) {
-                return Some((component, ancestor))
+            if ancestor.get_raw(out) {
+                return true;
             }
         }
-        None
-    }
-
-    pub fn try_get_obj<T: ?Sized>(&self, key: Key<T>) -> Option<&T> {
-        self.try_get_obj_attributed(key)
-            .map(|(comp, _)| comp)
-    }
-
-    pub fn get_obj<T: ?Sized>(&self, key: Key<T>) -> &T {
-        self.try_get_obj_attributed(key)
-            .unwrap().0
-    }
-
-    pub fn has_obj<T: ?Sized>(&self, key: Key<T>) -> bool {
-        self.try_get_obj_attributed(key)
-            .is_some()
+        false
     }
 }

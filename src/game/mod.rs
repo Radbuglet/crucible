@@ -3,14 +3,13 @@ use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{EventLoop, ControlFlow};
 use winit::window::WindowBuilder;
-use crate::core::game_object::{GameObject, KeyOut, GameObjectExt};
+use crate::core::provider::{Provider, KeyOut, ProviderExt};
 use crate::core::router::GObjAncestry;
 use crate::engine::WindowSizePx;
 use crate::engine::input::InputTracker;
 use crate::engine::gfx::{
     GfxSingletons, Viewport,
-    WindowManager, RegisteredWindow,
-    ViewportHandler, VIEWPORT_HANDLER_KEY,
+    WindowManager, RegisteredWindow, ViewportHandler,
 };
 use wgpu::SwapChainFrame;
 
@@ -51,10 +50,10 @@ impl OApplication {
             let ancestry = GObjAncestry::root(&app);
 
             // Handle inputs
-            app.fetch_key(InputTracker::KEY).handle(&event);
+            app.fetch::<InputTracker>().handle(&event);
 
             // Handle windowing
-            let wm = app.fetch_key(WindowManager::KEY);
+            let wm = app.fetch::<WindowManager>();
             wm.handle_event(&ancestry, &event);
 
             if wm.viewport_map().borrow().is_empty() {
@@ -65,24 +64,30 @@ impl OApplication {
     }
 }
 
-impl GameObject for OApplication {
+impl Provider for OApplication {
     fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
-        out.try_put_field(GfxSingletons::KEY, &self.gfx) ||
-            out.try_put_field(WindowManager::KEY, &self.wm) ||
-            out.try_put_field(InputTracker::KEY, &self.inp)
+        self.gfx.get_raw(out) ||
+            self.inp.get_raw(out) ||
+            self.wm.get_raw(out)
     }
 }
 
 struct MyViewportHandler;
 
+impl Provider for MyViewportHandler {
+    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
+        out.field::<dyn ViewportHandler>(self)
+    }
+}
+
 impl ViewportHandler for MyViewportHandler {
     fn window_event(&self, ancestry: &GObjAncestry, window: &Rc<RegisteredWindow>, event: &WindowEvent) {
         if let WindowEvent::CloseRequested = event {
-            ancestry.get_obj(WindowManager::KEY).remove(window);
+            ancestry.fetch::<WindowManager>().remove(window);
             return;
         }
 
-        let input_tracker = ancestry.get_obj(InputTracker::KEY);
+        let input_tracker = ancestry.fetch::<InputTracker>();
         window
             .viewport().window()
             .set_title(format!("Mouse pos: {:?}", input_tracker.mouse_pos()).as_str());
@@ -94,11 +99,5 @@ impl ViewportHandler for MyViewportHandler {
 
     fn redraw(&self, _ancestry: &GObjAncestry, _window: &Rc<RegisteredWindow>, _frame: SwapChainFrame) {
         //unimplemented!()
-    }
-}
-
-impl GameObject for MyViewportHandler {
-    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
-        out.try_put_field(VIEWPORT_HANDLER_KEY, self)
     }
 }

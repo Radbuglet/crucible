@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use cgmath::{Vector2, Zero};
 use winit::event::{DeviceEvent, WindowEvent, KeyboardInput, VirtualKeyCode, MouseButton, ElementState};
-use crate::core::game_object::{new_key, Key};
 use super::{WinitEvent, WindowPosPx};
+use crate::core::provider::{Provider, KeyOut};
 
 /// Tracks keyboard & mouse input states. Users may still need to listen for events to detect certain
 /// actions.
@@ -33,9 +33,13 @@ impl Default for InputTrackerInner {
     }
 }
 
-impl InputTracker {
-    pub const KEY: Key<Self> = new_key!(Self);
+impl Provider for InputTracker {
+    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
+        out.field(self)
+    }
+}
 
+impl InputTracker {
     pub fn new() -> Self {
         Self::default()
     }
