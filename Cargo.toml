@@ -1,11 +1,6 @@
-[package]
-name = "voxel_test"
-version = "0.1.0"
-authors = ["Radbuglet <10578060+Radbuglet@users.noreply.github.com>"]
-edition = "2018"
+[workspace]
 
-[dependencies]
-cgmath = "0.18.0"
-futures = "0.3.15"
-wgpu = "0.8.1"
-winit = "0.25.0"
+members = [
+    "src/arbre",
+    "src/client",
+]

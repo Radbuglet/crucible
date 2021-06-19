@@ -1,4 +1,4 @@
-use super::provider::{Provider, KeyOut};
+use crate::provider::{Provider, KeyOut};
 
 // === Ancestry core === //
 

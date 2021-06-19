@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
+use arbre::provider::{Provider, KeyOut};
 use cgmath::{Vector2, Zero};
 use winit::event::{DeviceEvent, WindowEvent, KeyboardInput, VirtualKeyCode, MouseButton, ElementState};
 use super::{WinitEvent, WindowPosPx};
-use crate::core::provider::{Provider, KeyOut};
 
 /// Tracks keyboard & mouse input states. Users may still need to listen for events to detect certain
 /// actions.

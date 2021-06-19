@@ -1,17 +1,16 @@
 use std::rc::Rc;
+use arbre::provider::{Provider, KeyOut, ProviderExt};
+use arbre::router::GObjAncestry;
 use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{EventLoop, ControlFlow};
 use winit::window::WindowBuilder;
-use crate::core::provider::{Provider, KeyOut, ProviderExt};
-use crate::core::router::GObjAncestry;
 use crate::engine::WindowSizePx;
 use crate::engine::input::InputTracker;
 use crate::engine::gfx::{
     GfxSingletons, Viewport,
     WindowManager, RegisteredWindow, ViewportHandler,
 };
-use wgpu::SwapChainFrame;
 
 pub struct OApplication {
     gfx: GfxSingletons,
@@ -97,7 +96,7 @@ impl ViewportHandler for MyViewportHandler {
         //unimplemented!()
     }
 
-    fn redraw(&self, _ancestry: &GObjAncestry, _window: &Rc<RegisteredWindow>, _frame: SwapChainFrame) {
+    fn redraw(&self, _ancestry: &GObjAncestry, _window: &Rc<RegisteredWindow>, _frame: wgpu::SwapChainFrame) {
         //unimplemented!()
     }
 }
