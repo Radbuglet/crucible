@@ -1,5 +1,4 @@
-// TODO: Non-ref components
-// TODO: Docs (internal and external) and tests
+// TODO: Finish docs, tests
 
 use std::any::TypeId;
 use std::hash;
@@ -10,10 +9,11 @@ use std::ptr::NonNull;
 
 // === Keys === //
 
-/// The untyped program unique identifier underlying [Key].
+/// An untyped program unique identifier underlying [Key].
 #[derive(Hash, Eq, PartialEq, Copy, Clone)]
 struct RawKey(TypeId);
 
+/// A unique identifier for a component of type `T`.
 pub struct Key<T: ?Sized> {
     /// Marker to bind the `T` generic parameter.
     ///
@@ -27,6 +27,8 @@ pub struct Key<T: ?Sized> {
 }
 
 impl<T: ?Sized + 'static> Key<T> {
+    /// Constructs the singleton key for the specified component type. As per `std::any::TypeId`'s
+    /// limitations, this type must live for `'static`.
     pub const fn typed() -> Self {
         Self {
             _ty: PhantomData,
@@ -82,6 +84,16 @@ impl<T: ?Sized> Clone for Key<T> {
     }
 }
 
+/// Constructs a brand new `Key` to a component of the specified type.
+///
+/// ## Syntax
+///
+/// ```no_run
+/// new_key!(
+///     $type:ty  // The type of the component
+/// );
+/// ```
+///
 pub macro new_key($type:ty) {
     unsafe {
         struct UniqueTy;
@@ -93,12 +105,45 @@ pub macro new_key($type:ty) {
 
 // === Provider definition === //
 
+/// An object-safe trait to fetch a requested component. While it is perfectly fine to implement this
+/// trait manually, the [provide] macro is much less verbose and generally provides sufficient flexibility.
+///
+/// ## Examples
+///
+/// TODO
+///
 pub trait Provider {
-    // Note: the returned value *cannot* be relied upon for correctness and solely exists for the user's
-    // convenience while composing `get_raw` calls. Internal code must use [KeyOut::is_init] instead.
-    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool;
+    /// An object-safe method to fetch the requested component. Implementors provide components using
+    /// the [KeyOut::provide] and [KeyOut::provide_key] methods or by calling a sub object's
+    /// [Provider::get_raw] method.
+    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>);
 }
 
+pub macro provide(  // TODO: Generics, getter methods, and docs
+    $target:ty
+    $([$(.$field:ident),*])?
+    $(=> $($type:ty),*)?
+) {
+    impl Provider for $target {
+        #[allow(unused)]  // For empty implementations
+        fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) {
+            // Forces method resolution on `Provider` trait.
+            fn get_raw<'a, T: ?Sized + Provider>(out: &mut KeyOut<'_, 'a>, field: &'a T) {
+                field.get_raw(out);
+            }
+
+            $($(
+                get_raw(out, &self.$field);
+            )*)?
+
+            $($(
+                out.provide::<$type>(self);
+            )*)?
+        }
+    }
+}
+
+/// The "out parameter" for [Provider]. Users request
 pub struct KeyOut<'view, 'val> {
     ptr_ty: PhantomData<&'view mut &'val ()>,
     ptr: NonNull<()>,  // NonNull for niche representation
@@ -116,32 +161,38 @@ impl<'view, 'val> KeyOut<'view, 'val> {
         }
     }
 
+    /// Returns whether or not this [KeyOut] has been initialized with with a valid component. Can be
+    /// used to short-circuit a search after dynamically dispatching a call to [Provider::get_raw].
+    /// In cases where the compiler has full knowledge of the [Provider::get_raw] implementation (e.g.
+    /// static dispatch without the use of [std::hint::blackbox]), the compiler should be smart enough
+    /// to detect mutual exclusion between multiple [KeyOut::provide] calls.
     pub fn is_init(&self) -> bool {
         self.is_init
     }
 
-    pub fn field_key<T: ?Sized>(&mut self, field_key: Key<T>, field_ref: &'val T) -> bool {
-        debug_assert!(!self.is_init);
-
+    /// Fills the [KeyOut] with the specified component if the user-requested key matches the provided
+    /// `field_key`. Replaces any existing component values.
+    pub fn provide_key<T: ?Sized>(&mut self, field_key: Key<T>, field_ref: &'val T) {
         if field_key.raw_id == self.raw_key {
             unsafe {
                 self.ptr.as_ptr().cast::<&'val T>().write(field_ref);
             }
-
             self.is_init = true;
-            true
-        } else {
-            false
         }
     }
 
-    pub fn field<T: ?Sized + 'static>(&mut self, field_ref: &'val T) -> bool {
-        self.field_key(Key::typed(), field_ref)
+    /// Fills the [KeyOut] with the specified component if the user-requested key matches the type's
+    /// [singleton key](Key::typed).
+    pub fn provide<T: ?Sized + 'static>(&mut self, field_ref: &'val T) {
+        self.provide_key(Key::typed(), field_ref)
     }
 }
 
 // === Extension methods === //
 
+/// A wrapper around a component instance that bundles it with the `Provider` from which it was fetched.
+///
+/// TODO: Clear up semantics for `ObjAncestry`.
 pub struct Comp<'a, O: ?Sized, T: ?Sized> {
     obj: &'a O,
     comp: &'a T,
@@ -150,6 +201,10 @@ pub struct Comp<'a, O: ?Sized, T: ?Sized> {
 // TODO: Coercions
 
 impl<'a, O: ?Sized, T: ?Sized> Comp<'a, O, T> {
+    pub fn new(obj: &'a O, comp: &'a T) -> Self {
+        Self { obj, comp }
+    }
+
     pub fn obj_raw(&self) -> &'a O {
         self.obj
     }
@@ -168,37 +223,11 @@ impl<O: ?Sized, T: ?Sized> Deref for Comp<'_, O, T> {
 }
 
 pub trait ProviderExt {
-    fn try_fetch_key<T: ?Sized>(&self, key: Key<T>) -> Option<Comp<Self, T>>;
-    fn fetch_key<T: ?Sized>(&self, key: Key<T>) -> Comp<Self, T>;
-    fn has_key<T: ?Sized>(&self, key: Key<T>) -> bool;
+    type Obj: ?Sized;
 
-    fn try_fetch<T: ?Sized + 'static>(&self) -> Option<Comp<Self, T>>;
-    fn fetch<T: ?Sized + 'static>(&self) -> Comp<Self, T>;
-    fn has<T: ?Sized + 'static>(&self) -> bool;
+    fn try_fetch_key<T: ?Sized>(&self, key: Key<T>) -> Option<Comp<Self::Obj, T>>;
 
-    fn try_fetch_many<'a, T: FetchMany<&'a Self>>(&'a self) -> Option<T>;
-    fn fetch_many<'a, T: FetchMany<&'a Self>>(&'a self) -> T;
-}
-
-impl<B: ?Sized + Provider> ProviderExt for B {
-    // Fetch by key ==
-    fn try_fetch_key<'a, T: ?Sized>(&'a self, key: Key<T>) -> Option<Comp<'a, Self, T>> {
-        let mut target = MaybeUninit::<&'a T>::uninit();
-        let mut view = KeyOut::new(key, &mut target);
-
-        self.get_raw(&mut view);
-
-        if view.is_init() {
-            Some (Comp {
-                obj: self,
-                comp: unsafe { target.assume_init() },
-            })
-        } else {
-            None
-        }
-    }
-
-    fn fetch_key<T: ?Sized>(&self, key: Key<T>) -> Comp<Self, T> {
+    fn fetch_key<T: ?Sized>(&self, key: Key<T>) -> Comp<Self::Obj, T> {
         self.try_fetch_key(key).unwrap()
     }
 
@@ -206,12 +235,11 @@ impl<B: ?Sized + Provider> ProviderExt for B {
         self.try_fetch_key(key).is_some()
     }
 
-    // Fetch by type ==
-    fn try_fetch<T: ?Sized + 'static>(&self) -> Option<Comp<Self, T>> {
+    fn try_fetch<T: ?Sized + 'static>(&self) -> Option<Comp<Self::Obj, T>> {
         self.try_fetch_key(Key::<T>::typed())
     }
 
-    fn fetch<T: ?Sized + 'static>(&self) -> Comp<Self, T> {
+    fn fetch<T: ?Sized + 'static>(&self) -> Comp<Self::Obj, T> {
         self.fetch_key(Key::<T>::typed())
     }
 
@@ -219,13 +247,29 @@ impl<B: ?Sized + Provider> ProviderExt for B {
         self.has_key(Key::<T>::typed())
     }
 
-    // Fetch many ==
     fn try_fetch_many<'a, T: FetchMany<&'a Self>>(&'a self) -> Option<T> {
         T::inner_fetch_many(self)
     }
 
     fn fetch_many<'a, T: FetchMany<&'a Self>>(&'a self) -> T {
         T::inner_fetch_many(self).unwrap()
+    }
+}
+
+impl<B: ?Sized + Provider> ProviderExt for B {
+    type Obj = Self;
+
+    fn try_fetch_key<'a, T: ?Sized>(&'a self, key: Key<T>) -> Option<Comp<'a, Self, T>> {
+        let mut target = MaybeUninit::<&'a T>::uninit();
+        let mut view = KeyOut::new(key, &mut target);
+
+        self.get_raw(&mut view);
+
+        if view.is_init() {
+            Some (Comp::new(self, unsafe { target.assume_init() }))
+        } else {
+            None
+        }
     }
 }
 
@@ -263,9 +307,8 @@ macro impl_tuple($($name:ident : $idx:tt),*) {
     // Providing for `(A, ..., Z)`
     impl<'me, $($name: Provider + 'static),*> Provider for ($($name,)*) {
         #[allow(unused)]  // For empty tuples
-        fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
-            $(self.$idx.get_raw(out) ||)*
-            false
+        fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) {
+            $(self.$idx.get_raw(out);)*
         }
     }
 }

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
-use arbre::provider::{Provider, KeyOut};
+use arbre::provider::provide;
 use cgmath::{Vector2, Zero};
 use winit::event::{DeviceEvent, WindowEvent, KeyboardInput, VirtualKeyCode, MouseButton, ElementState};
 use super::{WinitEvent, WindowPosPx};
@@ -33,11 +33,7 @@ impl Default for InputTrackerInner {
     }
 }
 
-impl Provider for InputTracker {
-    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
-        out.field(self)
-    }
-}
+provide! { InputTracker => Self }
 
 impl InputTracker {
     pub fn new() -> Self {

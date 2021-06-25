@@ -1,6 +1,6 @@
 use std::rc::Rc;
-use arbre::provider::{Provider, KeyOut, ProviderExt};
-use arbre::router::GObjAncestry;
+use arbre::provider::{provide, ProviderExt};
+use arbre::router::ObjAncestry;
 use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{EventLoop, ControlFlow};
@@ -17,6 +17,8 @@ pub struct OApplication {
     wm: WindowManager,
     inp: InputTracker,
 }
+
+provide! { OApplication[.gfx, .wm, .inp] }
 
 impl OApplication {
     pub fn start() -> ! {
@@ -46,7 +48,7 @@ impl OApplication {
         event_loop.run(move |event, _proxy, flow| {
             *flow = ControlFlow::Poll;
 
-            let ancestry = GObjAncestry::root(&app);
+            let ancestry = ObjAncestry::root(&app);
 
             // Handle inputs
             app.fetch::<InputTracker>().handle(&event);
@@ -63,24 +65,12 @@ impl OApplication {
     }
 }
 
-impl Provider for OApplication {
-    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
-        self.gfx.get_raw(out) ||
-            self.inp.get_raw(out) ||
-            self.wm.get_raw(out)
-    }
-}
-
 struct MyViewportHandler;
 
-impl Provider for MyViewportHandler {
-    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
-        out.field::<dyn ViewportHandler>(self)
-    }
-}
+provide! { MyViewportHandler => Self, dyn ViewportHandler }
 
 impl ViewportHandler for MyViewportHandler {
-    fn window_event(&self, ancestry: &GObjAncestry, window: &Rc<RegisteredWindow>, event: &WindowEvent) {
+    fn window_event(&self, ancestry: &ObjAncestry, window: &Rc<RegisteredWindow>, event: &WindowEvent) {
         if let WindowEvent::CloseRequested = event {
             ancestry.fetch::<WindowManager>().remove(window);
             return;
@@ -92,11 +82,11 @@ impl ViewportHandler for MyViewportHandler {
             .set_title(format!("Mouse pos: {:?}", input_tracker.mouse_pos()).as_str());
     }
 
-    fn resized(&self, _ancestry: &GObjAncestry, _window: &Rc<RegisteredWindow>, _new_size: WindowSizePx) {
+    fn resized(&self, _ancestry: &ObjAncestry, _window: &Rc<RegisteredWindow>, _new_size: WindowSizePx) {
         //unimplemented!()
     }
 
-    fn redraw(&self, _ancestry: &GObjAncestry, _window: &Rc<RegisteredWindow>, _frame: wgpu::SwapChainFrame) {
+    fn redraw(&self, _ancestry: &ObjAncestry, _window: &Rc<RegisteredWindow>, _frame: wgpu::SwapChainFrame) {
         //unimplemented!()
     }
 }

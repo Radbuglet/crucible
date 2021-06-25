@@ -2,8 +2,8 @@ use std::cell::{RefCell, Cell};
 use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
-use arbre::provider::{Provider, ProviderExt, KeyOut};
-use arbre::router::GObjAncestry;
+use arbre::provider::{provide, Provider, ProviderExt};
+use arbre::router::ObjAncestry;
 use arbre::mutability::CellExt;
 use winit::event::WindowEvent;
 use winit::window::{Window, WindowId};
@@ -32,11 +32,7 @@ pub struct GfxSingletons {
     pub queue: wgpu::Queue,
 }
 
-impl Provider for GfxSingletons {
-    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
-        out.field(self)
-    }
-}
+provide! { GfxSingletons => Self }
 
 impl GfxSingletons {
     async fn request_adapter(instance: &wgpu::Instance, compatible_surface: Option<&wgpu::Surface>) -> Result<wgpu::Adapter, GfxLoadError> {
@@ -209,11 +205,7 @@ pub struct WindowManager {
     windows: RefCell<HashMap<WindowId, Rc<RegisteredWindow>>>,
 }
 
-impl Provider for WindowManager {
-    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
-        out.field(self)
-    }
-}
+provide! { WindowManager => Self }
 
 impl WindowManager {
     pub fn new() -> Self {
@@ -251,7 +243,7 @@ impl WindowManager {
         &self.windows
     }
 
-    pub fn handle_event(&self, ancestry: &GObjAncestry, event: &WinitEvent) {
+    pub fn handle_event(&self, ancestry: &ObjAncestry, event: &WinitEvent) {
         match event {
             WinitEvent::RedrawRequested(win_id) => {
                 if let Some(window) = self.get_window(win_id) {
@@ -309,7 +301,7 @@ impl RegisteredWindow {
 }
 
 pub trait ViewportHandler {
-    fn window_event(&self, ancestry: &GObjAncestry, window: &Rc<RegisteredWindow>, event: &WindowEvent);
-    fn resized(&self, ancestry: &GObjAncestry, window: &Rc<RegisteredWindow>, new_size: WindowSizePx);
-    fn redraw(&self, ancestry: &GObjAncestry, window: &Rc<RegisteredWindow>, frame: wgpu::SwapChainFrame);
+    fn window_event(&self, ancestry: &ObjAncestry, window: &Rc<RegisteredWindow>, event: &WindowEvent);
+    fn resized(&self, ancestry: &ObjAncestry, window: &Rc<RegisteredWindow>, new_size: WindowSizePx);
+    fn redraw(&self, ancestry: &ObjAncestry, window: &Rc<RegisteredWindow>, frame: wgpu::SwapChainFrame);
 }

@@ -1,6 +1,4 @@
-use crate::provider::{Provider, KeyOut};
-
-// === Ancestry core === //
+use crate::provider::{Comp, Key, Provider, ProviderExt};
 
 pub struct AncestryNode<'a, T> {
     pub parent: Option<&'a AncestryNode<'a, T>>,
@@ -44,17 +42,17 @@ impl<'a, T> Iterator for AncestryIter<'a, T> {
     }
 }
 
-// === Provider routing === //
+pub type ObjAncestry<'obj> = AncestryNode<'obj, &'obj dyn Provider>;
 
-pub type GObjAncestry<'obj> = AncestryNode<'obj, &'obj dyn Provider>;
+impl<'obj> ProviderExt for ObjAncestry<'obj> {
+    type Obj = dyn Provider + 'obj;
 
-impl Provider for GObjAncestry<'_> {
-    fn get_raw<'val>(&'val self, out: &mut KeyOut<'_, 'val>) -> bool {
+    fn try_fetch_key<T: ?Sized>(&self, key: Key<T>) -> Option<Comp<Self::Obj, T>> {
         for ancestor in self.ancestors() {
-            if ancestor.get_raw(out) {
-                return true;
+            if let Some(component) = ancestor.try_fetch_key(key) {
+                return Some(component);
             }
         }
-        false
+        None
     }
 }
