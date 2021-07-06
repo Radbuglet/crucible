@@ -3,7 +3,7 @@ use std::marker::{PhantomData, Unsize};
 use std::ops::{CoerceUnsized, Deref};
 use std::ptr::NonNull;
 
-use crate::inner::ub::unchecked_index_mut;
+use crate::util::ub::unchecked_index_mut;
 use crate::weak::Weak;
 
 // TODO: Code review.
@@ -210,7 +210,7 @@ impl World {
     /// `use_world` calls must never be nested. Users must not yield control to user code from within the
     /// handler unless it is though panic unwinding.
     unsafe fn run<F: FnOnce(&mut Self) -> R, R>(handler: F) -> R {
-        use crate::inner::ub::ManualCell;
+        use crate::util::ub::ManualCell;
 
         thread_local! {
             static WORLD: ManualCell<World> = ManualCell::new(World::new());

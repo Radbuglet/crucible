@@ -105,7 +105,7 @@ impl<T: ?Sized> ManualCell<T> {
 
             #[cfg(not(debug_assertions))]
             // Safety: provided by caller
-            ptr: &*self.cell.as_ptr()
+            ptr: &*self.cell.get()
         }
     }
 
@@ -117,7 +117,7 @@ impl<T: ?Sized> ManualCell<T> {
 
             #[cfg(not(debug_assertions))]
             // Safety: provided by caller
-            ptr: &mut *self.cell.as_ptr()
+            ptr: &mut *self.cell.get()
         }
     }
 
