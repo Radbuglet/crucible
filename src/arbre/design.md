@@ -329,3 +329,54 @@ The probability of randomly encountering a perfect mapping given $n$ keys and $m
 ## Performance cost of double-layered FHS hashing
 
 **TODO**
+
+# Examples
+
+The following sample gives a look at a more elegant syntax for the object model. This syntax will be reflected in the design document once I'm confident of its flexibility. 
+
+```rust
+#[derive(Comp)]
+#[expose(Self)]
+struct PlayerClient<#[root] R> {  // Roots are now explicit and bound by the user. This should hopefully help IDEs.
+	#[extend]
+    shared: PlayerShared<R>,
+    
+    #[extend(ALTERNATE_TABLE_HERE)]
+    client_stuff: (),
+}
+
+#[derive(Comp)]
+#[expose(Self)]
+struct PlayerShared<#[root] R> {
+    #[extend]
+    stats: EntityStats<R, { EntityStatsDeps::default() }>,
+}
+
+#[deps]
+pub struct EntityStatsDeps {
+    #[default_to(...)]  // A new way to specify defaults for dependencies. Mandatory if the type is not `'static`.
+    listener: dyn Listener,
+}
+
+#[derive(Comp)]
+#[expose(Self)]
+struct EntityStats<#[root] R, const DEPS: EntityStatsDeps> {
+	hp: LimitedValue<f32>,
+	hunger: LimitedValue<f32>,
+	effects: RefCell<Vec<AnyOrc>>,  // `AnyOrc` is an alias to `Orc<dyn Obj>`
+}
+
+#[method_proxy(pub EntityStatsProxy)]  // `method_proxy` is now a generic macro without any Arbre-specific behavior.
+impl<#[ignore] R, #[ignore] const DEPS: EntityStatsDeps> EntityStats<R, { DEPS }> {  // Users can now specify the number of parameters they want to ignore.
+	pub fn damage(self: Comp<Self>) {
+        // ...
+	}
+}
+
+#[derive(Comp)]
+#[expose(Self)]
+struct EntityLocation {
+	pub chunk_pos: Cell<ChunkPosEnt>,
+	pub rel_pos: Cell<RelPosEnt>,
+}
+```
