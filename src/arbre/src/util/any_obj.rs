@@ -20,7 +20,7 @@ pub union AnyObj<H> {
 /// - Doesn't check sizes at compile time.
 /// - Can be used in the CTFE.
 /// - Is super unsafe.
-pub const unsafe fn bad_transmute<A, B>(value: A) -> B {
+const unsafe fn bad_transmute<A, B>(value: A) -> B {
     #[repr(C)]
     union Transmute<A, B> { a: ManuallyDrop<A>, b: ManuallyDrop<B> }
 

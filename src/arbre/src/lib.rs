@@ -1,3 +1,7 @@
+// === Unstable features === //
+// As with any good language hack, Arbre uses a ton of unstable features to just barely make its
+// system work.
+
 // Makes macro declarations simpler
 #![feature(decl_macro)]
 
@@ -29,8 +33,13 @@
 #![feature(const_fn_union)]
 #![feature(const_mut_refs)]
 
+// For converting a wide pointer to a Sized pointer.
+#![feature(ptr_metadata)]
+
+// To make Comp easier to implement
+#![feature(associated_type_defaults)]
+
+// === Module declarations === //
+
 mod util;
-pub mod mutability;
-pub mod object_db;
-pub mod provider;
-pub mod weak;
+pub mod obj;

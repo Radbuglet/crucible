@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use arbre::provider::{provide, ProviderExt};
+use arbre::obj::{provide, ProviderExt};
 use arbre::router::ObjAncestry;
 use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;

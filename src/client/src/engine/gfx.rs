@@ -2,7 +2,7 @@ use std::cell::{RefCell, Cell};
 use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
-use arbre::provider::{provide, Provider, ProviderExt};
+use arbre::obj::{provide, Obj, ProviderExt};
 use arbre::router::ObjAncestry;
 use arbre::mutability::CellExt;
 use winit::event::WindowEvent;
@@ -212,7 +212,7 @@ impl WindowManager {
         Self::default()
     }
 
-    pub fn add(&self, viewport: Viewport, handler: Rc<dyn Provider>) -> WindowId {
+    pub fn add(&self, viewport: Viewport, handler: Rc<dyn Obj>) -> WindowId {
         debug_assert!(handler.has::<dyn ViewportHandler>());
 
         let window_id = viewport.window_id();
@@ -283,15 +283,15 @@ impl WindowManager {
 
 pub struct RegisteredWindow {
     viewport: Viewport,
-    handler: Cell<Rc<dyn Provider>>,
+    handler: Cell<Rc<dyn Obj>>,
 }
 
 impl RegisteredWindow {
-    pub fn set_handler(&self, handler: Rc<dyn Provider>) {
+    pub fn set_handler(&self, handler: Rc<dyn Obj>) {
         self.handler.set(handler);
     }
 
-    pub fn handler(&self) -> Rc<dyn Provider> {
+    pub fn handler(&self) -> Rc<dyn Obj> {
         self.handler.clone_inner()
     }
 

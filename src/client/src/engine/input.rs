@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
-use arbre::provider::provide;
+use arbre::obj::provide;
 use cgmath::{Vector2, Zero};
 use winit::event::{DeviceEvent, WindowEvent, KeyboardInput, VirtualKeyCode, MouseButton, ElementState};
 use super::{WinitEvent, WindowPosPx};
