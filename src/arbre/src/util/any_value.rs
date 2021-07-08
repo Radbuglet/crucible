@@ -6,12 +6,15 @@ use std::{mem, mem::ManuallyDrop};
 /// - Has less alignment requirements than the parent type `H`.
 /// - Has smaller size requirements than the parent type `H`.
 ///
-/// These match up with the rules for [std::mem::transmute]'ing values.
+/// `AnyObj` will also pick up certain characteristics of the sub type. For example, if `H` implements
+/// `Copy`, `AnyObj` will also be `Copy`—even if the actual value doesn't implement `Copy`. These
+/// derivations are never unsafe on their own, but they may impact soundness proofs for later `get_xx`
+/// method calls.
 // We abuse a quirk in the Rust layout system where the unused portion of a union can accept any bit
 // pattern, including those imbued with pointer providence. This seems to be blessed by the Rust
 // developers because MaybeUninit works this way as well.
 #[repr(C)]
-pub union AnyObj<H> {
+pub union AnyValue<H> {
     zst: (),
     value: ManuallyDrop<H>,
 }
@@ -27,7 +30,7 @@ const unsafe fn bad_transmute<A, B>(value: A) -> B {
     ManuallyDrop::into_inner(Transmute { a: ManuallyDrop::new(value) }.b)
 }
 
-impl<H> AnyObj<H> {
+impl<H> AnyValue<H> {
     /// Constructs an `AnyObj` without any initialized value.
     /// Users can initialize this value by writing through `as_mut_ptr`.
     pub const fn empty() -> Self {
@@ -49,7 +52,7 @@ impl<H> AnyObj<H> {
         // FIXME: Aneurysms (this would be less morally deficient if CTFE supported `write`)
 
         // We create an `AnyObj` with active variants "value"
-        let obj = AnyObj::<T> { value: ManuallyDrop::new(value) };
+        let obj = AnyValue::<T> { value: ManuallyDrop::new(value) };
 
         // Since the Rust Abstract Machine(TM) doesn't track union variants, there's an implicit coercion
         // to the "zst" active variant. Thus, while transmuting from `T` to `H` may not be legal, transmuting
@@ -78,7 +81,8 @@ impl<H> AnyObj<H> {
     }
 }
 
-impl<H> Clone for AnyObj<H> {
+impl<H: Copy> Copy for AnyValue<H> {}
+impl<H> Clone for AnyValue<H> {
     fn clone(&self) -> Self {
         let mut obj = Self::empty();
         unsafe { obj.as_mut_ptr::<H>().copy_from(self.as_ptr(), 1) };

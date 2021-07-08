@@ -26,8 +26,8 @@ macro derive_phantom($target:ident, $new:ident) {
 
 pub struct PhantomInvariant<T: ?Sized>(PhantomData<*mut T>);
 pub struct PhantomCovariant<T: ?Sized>(PhantomData<*mut T>);
-pub struct PhantomContravariant<T: ?Sized>(PhantomData<fn(T)>);
+// pub struct PhantomContravariant<T: ?Sized>(PhantomData<fn(T)>);
 
 derive_phantom!(PhantomInvariant, new);
 derive_phantom!(PhantomCovariant, new);
-derive_phantom!(PhantomContravariant, new);
+// derive_phantom!(PhantomContravariant, new);

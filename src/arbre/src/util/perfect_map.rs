@@ -1,5 +1,5 @@
-use std::num::NonZeroU64 as Id;
 use std::mem::MaybeUninit;
+use std::num::NonZeroU64 as Key;
 
 pub struct PerfectMap<T, const SZ: usize> {
     buckets: [(u64, MaybeUninit<T>); SZ],
@@ -7,7 +7,7 @@ pub struct PerfectMap<T, const SZ: usize> {
 }
 
 impl<T: Copy, const SZ: usize> PerfectMap<T, { SZ }> {
-    pub const fn new(entries: &[(Id, T)]) -> Self {
+    pub const fn new(entries: &[(Key, T)]) -> Self {
         // Validate entries
         // TODO
 
@@ -62,7 +62,7 @@ impl<T, const SZ: usize> PerfectMap<T, { SZ }> {
         ((id * mul) % SZ as u64) as usize
     }
 
-    pub const fn get(&self, id: Id) -> Option<&T> {
+    pub const fn get(&self, id: Key) -> Option<&T> {
         let id = id.get();
         let (bucket_id, meta) = &self.buckets[Self::get_index(id, self.mul)];
 
@@ -73,7 +73,7 @@ impl<T, const SZ: usize> PerfectMap<T, { SZ }> {
         }
     }
 
-    pub const fn get_mut(&mut self, id: Id) -> Option<&mut T> {
+    pub const fn get_mut(&mut self, id: Key) -> Option<&mut T> {
         let id = id.get();
         let (bucket_id, meta) = &mut self.buckets[Self::get_index(id, self.mul)];
 
