@@ -38,7 +38,7 @@ impl<H> AnyValue<H> {
     }
 
     pub const fn new<T>(value: T) -> Self {
-        // === Check validity of passed value `T` (should evaluate at compile time)
+        // === Check validity of passed value `T` (should be elided at compile time)
         if mem::size_of::<T>() > mem::size_of::<H>() {
             panic!("Type has a larger size than its container type.");
         }
@@ -49,7 +49,7 @@ impl<H> AnyValue<H> {
         }
 
         // === Construct object
-        // FIXME: Aneurysms (this would be less morally deficient if CTFE supported `write`)
+        // FIXME: Aneurysms (this would be less morally deficient if the CTFE supported `write`)
 
         // We create an `AnyObj` with active variants "value"
         let obj = AnyValue::<T> { value: ManuallyDrop::new(value) };

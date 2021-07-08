@@ -2,14 +2,12 @@
 // As with any good language hack, Arbre uses a ton of unstable features to just barely make its
 // system work.
 
-// TODO: Move `feature` declarations to the places where they're needed.
-
-// The cornerstone of implementing `root` monomorphization on dynamically dispatched traits.
-#![feature(arbitrary_self_types)]
-
 // This crate is such a spaghetti pile of unstable features that we need to suppress Rust's call to
 // reason.
 #![allow(incomplete_features)]
+
+// The cornerstone of implementing `root` monomorphization on dynamically dispatched traits.
+#![feature(arbitrary_self_types)]
 
 // Makes macro declarations simpler
 #![feature(decl_macro)]
@@ -54,4 +52,6 @@
 // === Module declarations === //
 
 mod util;
-pub mod obj;
+pub mod fetch;
+pub mod key;
+pub mod vtable;

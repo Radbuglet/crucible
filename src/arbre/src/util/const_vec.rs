@@ -5,7 +5,7 @@ pub struct ConstVec<T, const CAP: usize> {
     len: usize,
 }
 
-impl<T, const CAP: usize> ConstVec<T, { CAP }> {
+impl<T: Copy, const CAP: usize> ConstVec<T, { CAP }> {
     const UNINIT_ELEM: MaybeUninit<T> = MaybeUninit::<T>::uninit();
 
     pub const fn new() -> Self {
@@ -21,7 +21,7 @@ impl<T, const CAP: usize> ConstVec<T, { CAP }> {
 
     pub const fn push(&mut self, elem: T) {
         if self.len == CAP {
-            panic!("Cannot push element: `ConstVec` would grow past its capacity.")
+            panic!("Cannot push element: `ConstVec` would grow past its capacity.");
         }
         self.array[self.len] = MaybeUninit::new(elem);
         self.len += 1;
@@ -46,5 +46,15 @@ impl<T, const CAP: usize> ConstVec<T, { CAP }> {
             panic!("Index out of bounds.");
         }
         unsafe { self.array[index].assume_init_mut() }
+    }
+
+    pub const fn clone(&self) -> Self {
+        let mut other = ConstVec::new();
+        let mut index = 0;
+        while index < self.len() {
+            other.push(*self.get(index));
+            index += 1;
+        }
+        other
     }
 }
