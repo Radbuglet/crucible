@@ -23,7 +23,7 @@ impl RawKey {
         self.0
     }
 
-    pub(crate) const fn eq_other(self, other: Self) -> bool {
+    pub(crate) const fn const_eq(self, other: Self) -> bool {
         self.0.get() == other.0.get()
     }
 }

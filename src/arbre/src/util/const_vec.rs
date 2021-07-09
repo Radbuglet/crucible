@@ -19,12 +19,20 @@ impl<T: Copy, const CAP: usize> ConstVec<T, { CAP }> {
         self.len
     }
 
+    pub const fn try_push(&mut self, elem: T) -> bool {
+        if self.len != CAP {
+            self.array[self.len] = MaybeUninit::new(elem);
+            self.len += 1;
+            true
+        } else {
+            false
+        }
+    }
+
     pub const fn push(&mut self, elem: T) {
-        if self.len == CAP {
+        if !self.try_push(elem) {
             panic!("Cannot push element: `ConstVec` would grow past its capacity.");
         }
-        self.array[self.len] = MaybeUninit::new(elem);
-        self.len += 1;
     }
 
     pub const fn pop(&mut self) {
@@ -46,6 +54,11 @@ impl<T: Copy, const CAP: usize> ConstVec<T, { CAP }> {
             panic!("Index out of bounds.");
         }
         unsafe { self.array[index].assume_init_mut() }
+    }
+
+    pub const fn swap_remove(&mut self, removed: usize) {
+        self.array[removed] = self.array[self.len - 1];
+        self.pop();
     }
 
     pub const fn clone(&self) -> Self {

@@ -5,6 +5,7 @@ use crate::util::{AnyValue, ConstVec, PerfectMap, PhantomInvariant, ref_addr};
 
 const TABLE_BUCKETS: usize = 32;
 const MAX_COMPS: usize = 16;
+const TOO_MANY_COMPS_ERR: &'static str = "VTables can currently only support up to 16 components.";
 
 pub struct Field<S, T: ?Sized> {
     _ty: PhantomInvariant<(S, T)>,
@@ -101,12 +102,12 @@ impl<S, R: ?Sized> VTable<S, R> {
         }
     }
 
-    const fn get_inner(&self, key: RawKey) -> Option<(usize, &RawField)> {
+    const fn find_entry(&self, key: RawKey) -> Option<usize> {
         let mut index = 0;
         while index < self.entries.len() {
-            let (other_key, entry) = self.entries.get(index);
-            if key.eq_other(*other_key) {
-                return Some ((index, entry));
+            let (other_key, _) = self.entries.get(index);
+            if key.const_eq(*other_key) {
+                return Some (index);
             }
             index += 1;
         }
@@ -114,7 +115,14 @@ impl<S, R: ?Sized> VTable<S, R> {
     }
 
     pub const fn expose_key<T: ?Sized + Comp<Root = R>>(&mut self, key: Key<T>, field: Field<S, T>) {
-        todo!()
+        let entry = (key.raw(), field.raw());
+        if let Some (replace_index) = self.find_entry(key.raw()) {
+            *self.entries.get_mut(replace_index) = entry;
+        } else {
+            if !self.entries.try_push(entry) {
+                panic!(TOO_MANY_COMPS_ERR);
+            }
+        }
     }
 
     pub const fn expose<T: ?Sized + 'static + Comp<Root = R>>(&mut self, field: Field<S, T>) {
@@ -122,7 +130,9 @@ impl<S, R: ?Sized> VTable<S, R> {
     }
 
     pub const fn without(&mut self, key: RawKey) {
-        todo!()
+        if let Some (index) = self.find_entry(key) {
+            self.entries.swap_remove(index);
+        }
     }
 
     pub const fn merge(&mut self, other: Self) {
@@ -138,7 +148,10 @@ impl<S, R: ?Sized> VTable<S, R> {
     }
 
     pub const fn clone(&self) -> Self {
-        todo!()
+        Self {
+            _ty: PhantomInvariant::new(),
+            entries: self.entries.clone(),
+        }
     }
 
     pub const fn build(&self) -> RawVTable {
