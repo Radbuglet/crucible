@@ -70,6 +70,12 @@ impl<T: ?Sized> Key<T> {
     }
 }
 
+impl<T: ?Sized> Into<RawKey> for Key<T> {
+    fn into(self) -> RawKey {
+        self.raw()
+    }
+}
+
 impl<T: ?Sized> hash::Hash for Key<T> {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         self.raw_id.hash(state)

@@ -2,6 +2,9 @@ use std::mem::MaybeUninit;
 use std::num::NonZeroU64 as Key;
 
 pub struct PerfectMap<T, const SZ: usize> {
+    // We avoid using enums to define the entry type here, instead writing out the optimization
+    // manually because rustc doesn't seem to be capable of using their niche layouts to optimize
+    // pattern matching.  https://godbolt.org/z/93GTWY1P4
     buckets: [(u64, MaybeUninit<T>); SZ],
     mul: u64,
 }

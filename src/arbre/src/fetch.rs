@@ -5,9 +5,10 @@ use crate::util::ref_addr;
 
 // === Component === //
 
-/// Specifies the root [Obj] type required by the specific component when creating a [CompRef]. All
-/// types receive `type Root = dyn Obj` as a default, allowing a [CompRef] to be created with an
-/// arbitrary root parameter but this can be overridden by implementing this trait manually.
+/// Specifies the root [Obj] type required by the specific component when creating a [CompRef]. A
+/// value of `dyn Obj` allows a [CompRef] to be created with any root parameter implementing `Obj`.
+/// Every `?Sized` type has an implementation where `Root = dyn Obj` but this can be specialized by
+/// implementing the trait manually.
 pub trait Comp {
     type Root: ?Sized;
 }
@@ -16,10 +17,15 @@ impl<T: ?Sized> Comp for T {
     default type Root = dyn Obj;
 }
 
-/// An internal trait allowing a type to be converted from `Self` to `dyn Obj` and back. All `Sized`
-/// types implementing `Obj` can be converted back and forth into `dyn Obj` but only the `dyn Obj`
-/// unsized type can be converted to the `dyn Obj` representation. This is because of limitations on
-/// trait conversion: `&dyn Trait` references only contain the v-table of .
+/// An _**internal**_ trait which performs each individual cast in the component root casting model. In
+/// this model, the root from which a component is fetched is upcasted to a `dyn Obj` and then later
+/// down-casted to its concrete form once `CompRef`'s full type is derived. The [RootCastTo] trait
+/// compliments this trait by defining whether such a round-trip is possible.
+///
+/// All `Sized` types implementing `Obj` can be converted back and forth into `dyn Obj` but only the
+/// `dyn Obj` unsized type can be converted to the `dyn Obj` representation. This is because of
+/// limitations on  trait conversion: `&dyn Trait` references only contain `Trait`'s v-table, with
+/// no way to downcast it to other traits.
 #[doc(hidden)]
 pub trait DynObjConvert {
     /// Converts the object to `dyn Obj`.
@@ -63,11 +69,26 @@ impl<T: Sized + Obj> DynObjConvert for T {
     }
 }
 
-/// A reference to a component within an [Obj] that also included the [Obj] instance from which it was
-/// derived. By requiring specific root object types through the [Comp::Root] associated type,
-/// the component can derive the original type of [Obj].
+/// An _**internal**_ trait which indicates that a certain type can be legally casted from `Self` to
+/// `Target` through [DynObjConvert]'s `Self -> dyn Obj -> Target` casting scheme.
 ///
-/// [CompRef] provides no guarantee that the referenced `root` is actually the top-level root of the
+/// ## Safety
+///
+/// See above definition. This trait must always remain consistent with [DynObjConvert]'s actual
+/// capabilities *i.e.* a `dyn Obj` obtained from `Self` must be safely castable to `Target` through
+/// [from_dyn].
+///
+#[doc(hidden)]
+pub unsafe trait RootCastTo<Target: ?Sized> {}
+
+unsafe impl<T: Sized> RootCastTo<T> for T {}  // Reflexive casts
+unsafe impl<T: Sized> RootCastTo<dyn Obj> for T {}  // Weakening casts
+
+/// A reference to a component within an [Obj] which includes the root [Obj] instance from which it
+/// was derived. The concrete type of the root is specified by the component's [Comp::Root] associated
+/// type parameter.
+///
+/// [CompRef] provides no guarantee that the referenced root is actually the top-level root of the
 /// object and, in fact, provides a safe mechanism for users to bundle their own root with a component.
 /// This may impact the soundness of certain [ObjExt::fetch_key_unchecked] operations.
 pub struct CompRef<'a, T: ?Sized> {
@@ -75,35 +96,40 @@ pub struct CompRef<'a, T: ?Sized> {
     comp: &'a T,
 }
 
-impl<'a, T: Comp> CompRef<'a, T> where T::Root: DynObjConvert {
-    /// Constructs a new [CompRef] with an (appropriately typed) object root. The type of the root is
+impl<'a, T: Comp> CompRef<'a, T> {
+    /// Constructs a new [CompRef] with an appropriately typed object root. The type of the root is
     /// determined by the type of the component's [Comp::Root] associated type, which is `dyn Obj` by
     /// default.
     ///
     /// This method only works on `Sized` or `dyn Obj` [Comp::Root] types. The type of the component
     /// must be `Sized` since [Comp] is not object safe.
-    pub fn new(root: &'a T::Root, comp: &'a T) -> Self {
+    pub fn new<T2>(root: &'a T2, comp: &'a T) -> Self
+    where
+        T2: RootCastTo<T::Root> + DynObjConvert
+    {
         Self {
             root: root.to_dyn(),
             comp
         }
     }
+}
 
+impl<'a, T: Comp> CompRef<'a, T> where T::Root: DynObjConvert {
     /// Fetches the [Obj] root under the type requested by the component's [Comp] implementation,
-    /// which is `dyn Obj` by default. When `Comp::Root` is `Sized`, this reference should be
-    /// functionally equivalent to the reference returned by [root_raw], but the additional type
-    /// information gained by obtaining the object's concrete type (which is a zero-cost operation)
-    /// will allow the compiler to elide fetches and dynamic dispatches when the component is `dyn`,
-    /// greatly improving performance.
+    /// which is `dyn Obj` by default. When `Comp::Root` is `Sized`, this reference is functionally
+    /// equivalent to the reference returned by [root_raw], but the additional type information gained
+    /// by obtaining the object's concrete type (which is a zero-cost operation) will allow the compiler
+    /// to elide fetches and dynamic dispatches when the component is `dyn`, greatly improving
+    /// performance.
     ///
     /// The lifetime of the returned reference is the lifetime of the [CompRef] instance and not the
     /// lifetime of any references to it, potentially allowing the reference to the root to outlive
     /// the lifetime of [CompRef]'s borrow. Since [CompRef] is [Copy], instances are generally passed
     /// by value instead of by reference.
     ///
-    /// This method only works on `Sized` or `dyn Obj` [Comp::Root] types. The type of the component
-    /// must be `Sized` since [Comp] is not object safe. If these requirements cannot be met, [root_raw]
-    /// may be used instead.
+    /// This method only works when [Comp::Root] is `Sized` or `dyn Obj`. The type of the component
+    /// `T` must be `Sized` since [Comp] is not object safe. If these requirements cannot be met,
+    /// [root_raw] may be used instead.
     pub fn root(&self) -> &'a T::Root {
         // Safety: this object's invariants require that `root` point to an instance of `T::Root`.
         unsafe { T::Root::from_dyn(self.root) }
@@ -114,15 +140,12 @@ impl<'a, T: ?Sized> CompRef<'a, T> {
     /// Constructs a new [CompRef] with an (appropriately typed) object root. In cases where `T: Sized`,
     /// you almost certainly want to use the safe variant [new], which checks the validity of the `root`
     /// type at compile time. However, if you're creating a reference to a component that is `?Sized`,
-    /// [new_unsafe] is the only option.
+    /// this method is your only option.
     ///
     /// ## Safety
     ///
-    /// [CompRef] maintains that `root`'s ype must always match `comp's` [Comp::Root] type.
-    ///
-    /// While there is no way for users to run [CompRef::root] when `T: ?Sized` (the only method
-    /// relying on this invariant), users can dynamically invoke component methods which automatically
-    /// and safely coerce `dyn SomeTrait` to the component's concrete (`Sized`) type.
+    /// [CompRef] maintains that `root`'s type must be castable to `comp's` [Comp::Root] type. Cast
+    /// validity is entirely dictated by an implementation of [RootCastTo].
     ///
     pub unsafe fn new_unsafe(root: &'a dyn Obj, comp: &'a T) -> Self {
         Self { root, comp }
@@ -167,7 +190,7 @@ impl<T: ?Sized> Clone for CompRef<'_, T> {
 
 // === Object === //
 
-/// A utility trait to safely derive [Obj] implementations. [ObjDecl] is not object-safe and `dyn Obj`
+/// A utility trait to safely derive [Obj] implementations. [ObjDecl] is not object-safe so `dyn Obj`
 /// must be used to pass object references instead.
 ///
 /// [ObjDecl] has two parts: `Root` and `TABLE`.
@@ -185,13 +208,14 @@ pub trait ObjDecl: Sized {
     const TABLE: VTable<Self, Self::Root>;
 }
 
-// TODO: Fix signature (`Root = dyn Obj` should work as well).
-unsafe impl<T: 'static + ObjDecl<Root = T>> Obj for T {
+unsafe impl<T: 'static + ObjDecl> Obj for T
+where
+    T::Root: RootCastTo<T>,
+{
     fn table(&self) -> &'static RawVTable {
         todo!()
     }
 }
-
 
 /// An object-safe trait allowing the object to be queried for components using the [ObjExt] extension
 /// methods. This trait can be derived safely using the [ObjDecl] declarative trait. Out of the three
@@ -203,55 +227,123 @@ unsafe impl<T: 'static + ObjDecl<Root = T>> Obj for T {
 ///
 /// ## Safety
 ///
-/// TODO
+/// 1: Every field in the v-table must always be valid for the struct. In essence, this means that
 ///
+/// - Every entry's offset must point to a field whose type corresponds with the entry's [Key] type,
+///   including its lifetime requirements. Metadata must be valid for the reference.
+/// - Each entry's field offset must result in a properly aligned reference for all properly aligned
+///   instances of the struct. This means that both the field offset and the struct's overall alignment
+///   must be checked.
+/// - These must *always* hold true for the struct. This means that offsets to union and enum variants
+///   will likely cause unsoundness.
+///
+/// 2: Furthermore, each field must be capable of casting `Self` to the desired root parameter. Cast
+/// validity is entirely dictated by the [RootCastTo] trait.
+///
+/// All these requirements should hold for all [RawVTables] built from their properly typed [VTable]
+/// counterpart, hence the equally powerful safe [ObjDecl] utility trait.
 // TODO: Consider allowing non-`'static` objects in the future.
 pub unsafe trait Obj: 'static {
     // TODO: Migrate to associated variable constants once available.
     fn table(&self) -> &'static RawVTable;
 }
 
-// TODO: Document
+/// An extension trait for [Obj] providing querying methods. Users are free to derive this trait on
+/// other "fetch targets" (e.g. a helper which fetches components from some node hierarchy) and this
+/// trait only requires an implementation of [ObjExt::try_fetch_key].
 pub trait ObjExt {
-    fn try_fetch_key<T: ?Sized + Comp<Root = Self>>(&self, key: Key<T>) -> Option<CompRef<T>>;
+    /// Fetches a component based off the passed [Key], returning `None` if the component isn't present.
+    ///
+    /// This is the only required trait for user-defined implementations of [ObjExt].
+    ///
+    /// See also: [try_fetch], which fetches a component from its singleton key.
+    fn try_fetch_key<T: ?Sized>(&self, key: Key<T>) -> Option<CompRef<T>>;
 
-    fn fetch_key<T: ?Sized + Comp<Root = Self>>(&self, key: Key<T>) -> CompRef<T> {
+    /// Fetches a component based off the passed [Key], panicking if the component isn't present.
+    ///
+    /// See also: [fetch], which fetches a component from its singleton key.
+    fn fetch_key<T: ?Sized>(&self, key: Key<T>) -> CompRef<T> {
         self.try_fetch_key(key).unwrap()
     }
 
-    unsafe fn fetch_key_unchecked<T: ?Sized + Comp<Root = Self>>(&self, key: Key<T>) -> CompRef<T> {
+    /// Fetches a component based off the passed [Key], causing UB if the component isn't present.
+    /// This method is likely unnecessary if `Obj`'s implementation is statically known since the
+    /// compiler should be able to elide the fetch entirely.
+    ///
+    /// See also: [fetch_unchecked], which fetches a component from its singleton key.
+    ///
+    /// ## Safety
+    ///
+    /// The caller must guarantee that the component is present. This guarantee may be difficult to
+    /// prove, especially when interacting with [CompRef]. Be sure to check what each object's *formal*
+    /// guarantees before using this method (in particular, [CompRef] may not always be created under
+    /// the same root instance).
+    ///
+    /// This method only really serves as a slightly more efficient version of [fetch_key], as the
+    /// unreachable hint can allow the compiler to skip over the `is_none` check in `unwrap`. If
+    /// these requirements are too hard to meet, [fetch_key] can be a much safer direct substitute.
+    unsafe fn fetch_key_unchecked<T: ?Sized>(&self, key: Key<T>) -> CompRef<T> {
         // Safety: provided by caller
         self.try_fetch_key(key).unwrap_unchecked()
     }
 
-    fn has_key<T: ?Sized + Comp<Root = Self>>(&self, key: Key<T>) -> bool {
+    /// Returns whether the object has a component under the passed [Key].
+    ///
+    /// See also: [has], which looks for a component under its singleton key.
+    fn has_key<T: ?Sized>(&self, key: Key<T>) -> bool {
         self.try_fetch_key(key).is_some()
     }
 
-    fn try_fetch<T: ?Sized + 'static + Comp<Root = Self>>(&self) -> Option<CompRef<T>> {
+    /// Fetches a component under the singleton key obtained from the component type (`T`) itself,
+    /// returning `None` if the component isn't present.
+    ///
+    /// See also: [try_fetch_key], which fetches a component from an arbitrary user-supplied [Key].
+    fn try_fetch<T: ?Sized + 'static>(&self) -> Option<CompRef<T>> {
         self.try_fetch_key(Key::<T>::typed())
     }
 
-    fn fetch<T: ?Sized + 'static + Comp<Root = Self>>(&self) -> CompRef<T> {
+    /// Fetches a component under the singleton key obtained from the component type (`T`) itself,
+    /// panicking if the component isn't present.
+    ///
+    /// See also: [fetch_key], which fetches a component from an arbitrary user-supplied [Key].
+    fn fetch<T: ?Sized + 'static>(&self) -> CompRef<T> {
         self.fetch_key(Key::<T>::typed())
     }
 
-    unsafe fn fetch_unchecked<T: ?Sized + 'static + Comp<Root = Self>>(&self) -> CompRef<T> {
+    /// Fetches a component under the singleton key obtained from the component type (`T`) itself, causing
+    /// UB if the component isn't present. This method is likely unnecessary if `Obj`'s implementation
+    /// is statically known since the compiler should be able to elide the fetch entirely.
+    ///
+    /// See also: [fetch_key_unchecked], which fetches a component from an arbitrary user-supplied [Key].
+    ///
+    /// ## Safety
+    ///
+    /// See the safety section in [fetch_key_unchecked].
+    ///
+    unsafe fn fetch_unchecked<T: ?Sized + 'static>(&self) -> CompRef<T> {
         // Safety: provided by caller
         self.fetch_key_unchecked(Key::<T>::typed())
     }
 
-    fn has<T: ?Sized + 'static + Comp<Root = Self>>(&self) -> bool {
+    /// Returns whether the object has a component associated with the singleton key obtained from
+    /// the component type (`T`) itself.
+    ///
+    /// See also: [has_ley], which looks for a component under an arbitrary user-supplied [Key].
+    fn has<T: ?Sized + 'static>(&self) -> bool {
         self.has_key(Key::<T>::typed())
     }
 }
 
 impl<A: ?Sized + Obj + DynObjConvert> ObjExt for A {
-    fn try_fetch_key<'a, T: ?Sized + Comp<Root = Self>>(&'a self, key: Key<T>) -> Option<CompRef<'a, T>> {
+    fn try_fetch_key<'a, T: ?Sized>(&'a self, key: Key<T>) -> Option<CompRef<'a, T>> {
         self.table().get(key.raw())
             .map(|entry| unsafe {
-                // TODO: Safety
-                let field: &'a T = entry.fetch_unchecked_ref::<T>(ref_addr(self));
+                // Safety: We know from v-table's first invariant that this entry references a component
+                // of type `T` and that it can be borrowed for the lifetime of the struct.
+                let field: &'a T = &*entry.fetch_unchecked::<T>(ref_addr(self));
+
+                // Safety: We know from v-table's second invariant that the `dyn Obj` representation
+                // of the root can be down-casted into the requested root type.
                 CompRef::new_unsafe(self.to_dyn(), field)
             })
     }

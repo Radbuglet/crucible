@@ -69,10 +69,6 @@ impl RawField {
         let meta = self.meta.get::<<T as Pointee>::Metadata>();
         from_raw_parts::<T>(addr, meta)
     }
-
-    pub unsafe fn fetch_unchecked_ref<T: ?Sized>(&self, root: *const ()) -> &T {
-        &*self.fetch_unchecked(root)
-    }
 }
 
 // === Raw V-Table === //
@@ -82,7 +78,7 @@ pub struct RawVTable {
 }
 
 impl RawVTable {
-    pub(crate) fn get(&self, key: RawKey) -> Option<&RawField> {
+    pub fn get(&self, key: RawKey) -> Option<&RawField> {
         self.map.get(key.map_key())
     }
 }
@@ -120,7 +116,7 @@ impl<S, R: ?Sized> VTable<S, R> {
             *self.entries.get_mut(replace_index) = entry;
         } else {
             if !self.entries.try_push(entry) {
-                panic!(TOO_MANY_COMPS_ERR);
+                panic!(TOO_MANY_COMPS_ERR);  // FIXME: const fn still requires this deprecated feature.
             }
         }
     }

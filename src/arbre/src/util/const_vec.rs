@@ -6,11 +6,9 @@ pub struct ConstVec<T, const CAP: usize> {
 }
 
 impl<T: Copy, const CAP: usize> ConstVec<T, { CAP }> {
-    const UNINIT_ELEM: MaybeUninit<T> = MaybeUninit::<T>::uninit();
-
     pub const fn new() -> Self {
         Self {
-            array: [Self::UNINIT_ELEM; CAP],
+            array: [MaybeUninit::<T>::uninit(); CAP],
             len: 0,
         }
     }

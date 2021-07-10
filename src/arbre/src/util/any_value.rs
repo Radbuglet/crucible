@@ -51,12 +51,12 @@ impl<H> AnyValue<H> {
         // === Construct object
         // FIXME: Aneurysms (this would be less morally deficient if the CTFE supported `write`)
 
-        // We create an `AnyObj` with active variants "value"
+        // We create an `AnyObj` with active variant `value`
         let obj = AnyValue::<T> { value: ManuallyDrop::new(value) };
 
         // Since the Rust Abstract Machine(TM) doesn't track union variants, there's an implicit coercion
-        // to the "zst" active variant. Thus, while transmuting from `T` to `H` may not be legal, transmuting
-        // from `AnyObj<T> { value: ... }` to `AnyObj<H> { zst: ... }` should be.
+        // to the `zst` active variant. Thus, while transmuting from `T` to `H` may not be legal, transmuting
+        // from `AnyObj<T> { zst: () }` to `AnyObj<H> { zst: () }` should be.
         unsafe { bad_transmute(obj) }
     }
 
