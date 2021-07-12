@@ -4,12 +4,8 @@ pub use any_value::*;
 mod const_vec;
 pub use const_vec::*;
 
-mod perfect_map;
-pub use perfect_map::*;
+mod pointer;
+pub use pointer::*;
 
 mod variance;
 pub use variance::*;
-
-pub const fn ref_addr<T: ?Sized>(ptr: &T) -> *const () {
-    (ptr as *const T).to_raw_parts().0
-}

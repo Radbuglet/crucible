@@ -1,5 +1,6 @@
 use std::hash;
 use std::intrinsics::type_id;
+use std::marker::PhantomData;
 use std::num::NonZeroU64;
 use crate::util::PhantomInvariant;
 
@@ -19,7 +20,7 @@ impl RawKey {
         }
     }
 
-    pub(crate) const fn map_key(self) -> NonZeroU64 {
+    pub(crate) const fn as_u64(self) -> NonZeroU64 {
         self.0
     }
 
@@ -32,7 +33,7 @@ impl RawKey {
 pub struct Key<T: ?Sized> {
     /// Marker to bind the `T` generic parameter. Parameter lifetime is invariant because users could
     /// potentially provide keys with an insufficient lifetime.
-    _ty: PhantomInvariant<T>,
+    ty: PhantomInvariant<T>,
 
     /// The program unique identifier of the key.
     raw_id: RawKey,
@@ -43,7 +44,7 @@ impl<T: ?Sized + 'static> Key<T> {
     /// limitations, this type must live for `'static`.
     pub const fn typed() -> Self {
         Self {
-            _ty: PhantomInvariant::new(),
+            ty: PhantomData,
             raw_id: RawKey::new::<T>(),
         }
     }
@@ -60,7 +61,7 @@ impl<T: ?Sized> Key<T> {
     ///
     pub const unsafe fn new_unchecked(raw_id: RawKey) -> Self {
         Self {
-            _ty: PhantomInvariant::new(),
+            ty: PhantomData,
             raw_id,
         }
     }
@@ -93,7 +94,7 @@ impl<T: ?Sized> Copy for Key<T> {}
 impl<T: ?Sized> Clone for Key<T> {
     fn clone(&self) -> Self {
         Self {
-            _ty: PhantomInvariant::new(),
+            ty: PhantomData,
             raw_id: self.raw_id,
         }
     }

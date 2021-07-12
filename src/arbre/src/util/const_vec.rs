@@ -1,4 +1,5 @@
 use std::mem::MaybeUninit;
+use std::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
 
 pub struct ConstVec<T, const CAP: usize> {
     array: [MaybeUninit<T>; CAP],
@@ -57,6 +58,31 @@ impl<T: Copy, const CAP: usize> ConstVec<T, { CAP }> {
     pub const fn swap_remove(&mut self, removed: usize) {
         self.array[removed] = self.array[self.len - 1];
         self.pop();
+    }
+
+    pub const fn as_slice(&self) -> &[T] {
+        unsafe {
+            // Safety:
+            // - `array`'s root is a valid pointer.
+            // - `MaybeUninit<T>` is `#[repr(transparent)]`, allowing us to reinterpret the array pointer
+            //    as `*const T` for indices `0..self.len`.
+            // - self.len is less than or equal to the length of the backing array.
+            // - The slice will live as long as `'_`.
+            &*slice_from_raw_parts(
+                self.array.as_ptr().cast::<T>(),
+                self.len,
+            )
+        }
+    }
+
+    pub const fn as_slice_mut(&mut self) -> &mut [T] {
+        unsafe {
+            // Safety: See `as_slice`.
+            &mut *slice_from_raw_parts_mut(
+                self.array.as_mut_ptr().cast::<T>(),
+                self.len,
+            )
+        }
     }
 
     pub const fn clone(&self) -> Self {

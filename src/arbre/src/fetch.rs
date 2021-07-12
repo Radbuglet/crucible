@@ -1,3 +1,4 @@
+use std::fmt;
 use std::ops::Deref;
 use crate::key::Key;
 use crate::vtable::{VTable, RawVTable};
@@ -13,20 +14,20 @@ pub trait Comp {
     type Root: ?Sized;
 }
 
-impl<T: ?Sized> Comp for T {
-    default type Root = dyn Obj;
-}
+// FIXME: Add blanket impl that doesn't run into opaque associated type issues.
+// impl<T: ?Sized> Comp for T {
+//     default type Root = dyn Obj;
+// }
 
 /// An _**internal**_ trait which performs each individual cast in the component root casting model. In
 /// this model, the root from which a component is fetched is upcasted to a `dyn Obj` and then later
-/// down-casted to its concrete form once `CompRef`'s full type is derived. The [RootCastTo] trait
+/// down-casted to its concrete form once [CompRef]'s full type is derived. The [RootCastTo] trait
 /// compliments this trait by defining whether such a round-trip is possible.
 ///
 /// All `Sized` types implementing `Obj` can be converted back and forth into `dyn Obj` but only the
 /// `dyn Obj` unsized type can be converted to the `dyn Obj` representation. This is because of
 /// limitations on  trait conversion: `&dyn Trait` references only contain `Trait`'s v-table, with
 /// no way to downcast it to other traits.
-#[doc(hidden)]
 pub trait DynObjConvert {
     /// Converts the object to `dyn Obj`.
     fn to_dyn(&self) -> &dyn Obj;
@@ -78,10 +79,9 @@ impl<T: Sized + Obj> DynObjConvert for T {
 /// capabilities *i.e.* a `dyn Obj` obtained from `Self` must be safely castable to `Target` through
 /// [from_dyn].
 ///
-#[doc(hidden)]
 pub unsafe trait RootCastTo<Target: ?Sized> {}
 
-unsafe impl<T: Sized> RootCastTo<T> for T {}  // Reflexive casts
+unsafe impl<T: ?Sized> RootCastTo<T> for T {}  // Reflexive static casts
 unsafe impl<T: Sized> RootCastTo<dyn Obj> for T {}  // Weakening casts
 
 /// A reference to a component within an [Obj] which includes the root [Obj] instance from which it
@@ -103,9 +103,9 @@ impl<'a, T: Comp> CompRef<'a, T> {
     ///
     /// This method only works on `Sized` or `dyn Obj` [Comp::Root] types. The type of the component
     /// must be `Sized` since [Comp] is not object safe.
-    pub fn new<T2>(root: &'a T2, comp: &'a T) -> Self
+    pub fn new<R: ?Sized>(root: &'a R, comp: &'a T) -> Self
     where
-        T2: RootCastTo<T::Root> + DynObjConvert
+        R: RootCastTo<T::Root> + DynObjConvert
     {
         Self {
             root: root.to_dyn(),
@@ -188,34 +188,19 @@ impl<T: ?Sized> Clone for CompRef<'_, T> {
     }
 }
 
-// === Object === //
-
-/// A utility trait to safely derive [Obj] implementations. [ObjDecl] is not object-safe so `dyn Obj`
-/// must be used to pass object references instead.
-///
-/// [ObjDecl] has two parts: `Root` and `TABLE`.
-///
-/// `Root` specifies the type of the root object from which components are fetched. Every component
-/// inside an object's V-Table must share the same or a lesser requirement for the type of `Root` as
-/// specified in their implementation of [Comp]. A `Root` type of `dyn Obj` in both [ObjDecl] and
-/// [Comp] means that the components can be fetched under any root. [Obj] is only derived on instances
-/// which are valid as their own root.
-///
-/// `TABLE` is a v-table mapping [Keys] to their pointer offset within the struct. See [VTable] for
-/// more details.
-pub trait ObjDecl: Sized {
-    type Root: ?Sized;
-    const TABLE: VTable<Self, Self::Root>;
-}
-
-unsafe impl<T: 'static + ObjDecl> Obj for T
-where
-    T::Root: RootCastTo<T>,
-{
-    fn table(&self) -> &'static RawVTable {
-        todo!()
+impl<T: ?Sized + fmt::Debug> fmt::Debug for CompRef<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.comp.fmt(f)
     }
 }
+
+impl<T: ?Sized + fmt::Display> fmt::Display for CompRef<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.comp.fmt(f)
+    }
+}
+
+// === Object === //
 
 /// An object-safe trait allowing the object to be queried for components using the [ObjExt] extension
 /// methods. This trait can be derived safely using the [ObjDecl] declarative trait. Out of the three
@@ -245,7 +230,45 @@ where
 // TODO: Consider allowing non-`'static` objects in the future.
 pub unsafe trait Obj: 'static {
     // TODO: Migrate to associated variable constants once available.
-    fn table(&self) -> &'static RawVTable;
+    fn table(&self) -> &RawVTable;
+}
+
+/// A utility trait to safely derive [Obj] implementations. [ObjDecl] is not object-safe so `dyn Obj`
+/// must be used to pass object references instead.
+///
+/// [ObjDecl] has two parts: `Root` and `TABLE`.
+///
+/// `Root` specifies the type of the root object from which components are fetched. Every component
+/// inside an object's V-Table must share the same or a lesser requirement for the type of `Root` as
+/// specified in their implementation of [Comp]. A `Root` type of `dyn Obj` in both [ObjDecl] and
+/// [Comp] means that the components can be fetched under any root. [Obj] is only derived on instances
+/// which are valid as their own root.
+///
+/// `TABLE` is a v-table mapping [Keys] to their pointer offset within the struct. See [VTable] for
+/// more details.
+pub trait ObjDecl: Sized {
+    type Root: ?Sized;
+    const TABLE: VTable<Self, Self::Root>;
+}
+
+impl<T: ObjDecl> Comp for T {
+    type Root = <T as ObjDecl>::Root;
+}
+
+/// An _**internal**_ trait used to derive [Obj] for all types implementing [ObjDecl].
+#[doc(hidden)]
+pub unsafe trait ObjConst: 'static {
+    const RAW_TABLE: RawVTable;
+}
+
+unsafe impl<T: 'static + ObjDecl + RootCastTo<T::Root>> ObjConst for T {
+    const RAW_TABLE: RawVTable = T::TABLE.build();
+}
+
+unsafe impl<T: ObjConst> Obj for T {
+    fn table(&self) -> &RawVTable {
+        &Self::RAW_TABLE
+    }
 }
 
 /// An extension trait for [Obj] providing querying methods. Users are free to derive this trait on
@@ -340,7 +363,7 @@ impl<A: ?Sized + Obj + DynObjConvert> ObjExt for A {
             .map(|entry| unsafe {
                 // Safety: We know from v-table's first invariant that this entry references a component
                 // of type `T` and that it can be borrowed for the lifetime of the struct.
-                let field: &'a T = &*entry.fetch_unchecked::<T>(ref_addr(self));
+                let field: &'a T = &*(entry.typed::<Self, T>().resolve_ref(self));
 
                 // Safety: We know from v-table's second invariant that the `dyn Obj` representation
                 // of the root can be down-casted into the requested root type.
