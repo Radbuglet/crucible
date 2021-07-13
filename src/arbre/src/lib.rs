@@ -5,9 +5,6 @@
 // So that function pointer variance works in const-fn
 #![feature(const_fn_fn_ptr_basics)]
 
-// The cornerstone of implementing `root` monomorphization on dynamically dispatched traits.
-#![feature(arbitrary_self_types)]
-
 // Makes macro declarations simpler
 #![feature(decl_macro)]
 
@@ -24,7 +21,6 @@
 
 // Simplifies the implementation of `ConstVec` and `RawVTable`.
 #![feature(const_maybe_uninit_assume_init)]
-#![feature(maybe_uninit_ref)]
 
 // Allows us to create slices to `ConstVec`'s contents.
 #![feature(const_slice_from_raw_parts)]

@@ -77,7 +77,7 @@ impl<S: Pointee<Metadata = ()>> Field<S, S> {
     }
 }
 
-impl<S: ?Sized, T: Pointee> Field<S, T> {
+impl<S: ?Sized, T: Sized + Pointee> Field<S, T> {
     pub const fn cast<T2>(self) -> Field<S, T2>
     where
         T2: ?Sized + Pointee,
@@ -117,6 +117,14 @@ impl<S: ?Sized, T: ?Sized + Pointee> Field<S, T> {
 
     pub const fn as_raw(self) -> RawField {
         RawField::new(self.offset, self.meta)
+    }
+
+    pub const fn subfield<T2: ?Sized + Pointee>(self, field: Field<T, T2>) -> Field<S, T2> {
+        Field {
+            container_ty: PhantomData,
+            offset: self.offset + field.offset,
+            meta: field.meta,
+        }
     }
 
     pub fn resolve_ptr(&self, parent: *const S) -> *const T {
@@ -163,103 +171,12 @@ impl<S: ?Sized, T: ?Sized + Pointee> Clone for Field<S, T> {
 
 // === V-Table === //
 
-// We avoid using enums to define the bucket type here, opting instead to write out the optimizations
-// manually because rustc doesn't seem to be capable of using their niche layouts to optimize
-// pattern matching.  https://godbolt.org/z/93GTWY1P4
-#[derive(Copy, Clone)]
-struct VTableBucket {
-    id: u64,
-    field: MaybeUninit<RawField>,
-}
-
-impl VTableBucket {
-    pub const EMPTY: Self = VTableBucket { id: 0, field: MaybeUninit::uninit() };
-
-    pub const fn full(key: RawKey, field: RawField) -> Self {
-        Self {
-            id: key.as_u64().get(),
-            field: MaybeUninit::new(field),
-        }
-    }
-
-    pub const fn matches(&self, key: RawKey) -> Option<RawField> {
-        if self.id == key.as_u64().get() {
-            Some (unsafe { self.field.assume_init() })
-        } else {
-            None
-        }
-    }
-}
-
-pub struct RawVTable {
-    buckets: [VTableBucket; TABLE_CAP],
-    mul: u64,
-}
-
-impl RawVTable {
-    pub const fn new(entries: &[(RawKey, RawField)]) -> Self {
-        // Generate table layout
-        #[derive(Copy, Clone)]
-        struct VirtualBucket {
-            mul: u64,
-            entry_idx: usize,
-        }
-
-        let mut mul = 0;
-        let mut virtual_table = [VirtualBucket { mul, entry_idx: 0 }; TABLE_CAP];
-
-        'gen: loop {
-            mul += 1;
-
-            let mut entry_idx = 0;
-            while entry_idx < entries.len() {
-                let bucket_idx = Self::get_index(entries[entry_idx].0.as_u64().get(), mul);
-                let bucket = &mut virtual_table[bucket_idx];
-                if bucket.mul == mul {
-                    continue 'gen;
-                }
-
-                bucket.entry_idx = entry_idx;
-                bucket.mul = mul;
-                entry_idx += 1;
-            }
-
-            break;
-        }
-
-        // Build table
-        let mut buckets = [VTableBucket::EMPTY; TABLE_CAP];
-        let mut bucket_idx = 0;
-        while bucket_idx < TABLE_CAP {
-            let bucket = &virtual_table[bucket_idx];
-
-            if bucket.mul == mul {
-                let (key, meta) = entries[bucket.entry_idx];
-                buckets[bucket_idx] = VTableBucket::full(key, meta);
-            }
-
-            bucket_idx += 1;
-        }
-
-        Self { buckets, mul }
-    }
-
-    const fn get_index(id: u64, mul: u64) -> usize {
-        ((id.wrapping_mul(mul)) % TABLE_CAP as u64) as usize
-    }
-
-    pub const fn get(&self, key: RawKey) -> Option<RawField> {
-        self.buckets[Self::get_index(key.as_u64().get(), self.mul)]
-            .matches(key)
-    }
-}
-
-// === Typed V-Table === //
+type VTableEntries = ConstVec<(RawKey, RawField), { MAX_COMPS }>;
 
 pub struct VTable<S: ?Sized, R: ?Sized> {
     struct_ty: PhantomInvariant<S>,
     root_ty: PhantomInvariant<R>,
-    entries: ConstVec<(RawKey, RawField), { MAX_COMPS }>,
+    entries: VTableEntries,
 }
 
 impl<S, R: ?Sized> VTable<S, R> {
@@ -357,6 +274,97 @@ impl<S, R: ?Sized> VTable<S, R> {
     }
 
     pub const fn build(&self) -> RawVTable {
-        RawVTable::new(self.entries.as_slice())
+        RawVTable::new(&self.entries)
+    }
+}
+
+// We avoid using enums to define the bucket type here, opting instead to write out the optimizations
+// manually because rustc doesn't seem to be capable of using their niche layouts to optimize
+// pattern matching.  https://godbolt.org/z/93GTWY1P4
+#[derive(Copy, Clone)]
+struct VTableBucket {
+    id: u64,
+    field: MaybeUninit<RawField>,
+}
+
+impl VTableBucket {
+    pub const EMPTY: Self = VTableBucket { id: 0, field: MaybeUninit::uninit() };
+
+    pub const fn full(key: RawKey, field: RawField) -> Self {
+        Self {
+            id: key.as_u64().get(),
+            field: MaybeUninit::new(field),
+        }
+    }
+
+    pub const fn matches(&self, key: RawKey) -> Option<RawField> {
+        if self.id == key.as_u64().get() {
+            Some (unsafe { self.field.assume_init() })
+        } else {
+            None
+        }
+    }
+}
+
+pub struct RawVTable {
+    buckets: [VTableBucket; TABLE_CAP],
+    mul: u64,
+}
+
+impl RawVTable {
+    const fn new(entries: &VTableEntries) -> Self {
+        // Generate table layout
+        #[derive(Copy, Clone)]
+        struct VirtualBucket {
+            mul: u64,
+            entry_idx: usize,
+        }
+
+        let mut mul = 0;
+        let mut virtual_table = [VirtualBucket { mul, entry_idx: 0 }; TABLE_CAP];
+
+        'gen: loop {
+            mul += 1;
+
+            let mut entry_idx = 0;
+            while entry_idx < entries.len() {
+                let bucket_idx = Self::get_index(entries.get(entry_idx).0.as_u64().get(), mul);
+                let bucket = &mut virtual_table[bucket_idx];
+                if bucket.mul == mul {
+                    continue 'gen;
+                }
+
+                bucket.entry_idx = entry_idx;
+                bucket.mul = mul;
+                entry_idx += 1;
+            }
+
+            break;
+        }
+
+        // Build table
+        let mut buckets = [VTableBucket::EMPTY; TABLE_CAP];
+        let mut bucket_idx = 0;
+        while bucket_idx < TABLE_CAP {
+            let bucket = &virtual_table[bucket_idx];
+
+            if bucket.mul == mul {
+                let (key, meta) = *entries.get(bucket.entry_idx);
+                buckets[bucket_idx] = VTableBucket::full(key, meta);
+            }
+
+            bucket_idx += 1;
+        }
+
+        Self { buckets, mul }
+    }
+
+    const fn get_index(id: u64, mul: u64) -> usize {
+        ((id.wrapping_mul(mul)) % TABLE_CAP as u64) as usize
+    }
+
+    pub const fn get(&self, key: RawKey) -> Option<RawField> {
+        self.buckets[Self::get_index(key.as_u64().get(), self.mul)]
+            .matches(key)
     }
 }
