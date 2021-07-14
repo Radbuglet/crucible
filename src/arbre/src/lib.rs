@@ -47,6 +47,9 @@
 // (we already have so many unstable features, what's the harm in adding a few more?)
 #![feature(option_result_unwrap_unchecked)]
 
+// To fix a weird code-gen issue in `AnyValue`.
+#![feature(transparent_unions)]
+
 // === Module declarations === //
 
 mod util;
@@ -56,11 +59,10 @@ pub mod vtable;
 
 // === Code-gen "tests" === //
 
-#[doc(hidden)]  // FIXME: Move to another crate
+#[doc(hidden)]  // TODO: Move to another crate
 pub mod code_gen_tests {
     use super::{
         fetch::*,
-        key::*,
         vtable::*,
     };
 
@@ -94,49 +96,23 @@ pub mod code_gen_tests {
         }
     }
 
-    // Assembled by `rustc 1.55.0-nightly (955b9c0d4 2021-07-12)`.
-    //
-    // Command used: `cargo clean && cargo rustc --release -- --emit asm`
-    //
-    // ```
-    // arbre::code_gen_tests::works_correctly::hfcdf57e61502df18:
-    // 	.p2align	4, 0x90
-    // .LBB19_1:
-    // 	jmp	.LBB19_1
-    // ```
-    pub fn works_correctly() {
-        const OFFSET: usize = Foo::RAW_TABLE
-            .get(RawKey::new::<dyn FooProxy>())
-            .offset();
-
-        if OFFSET == 0 {
-            loop {}
-        }
+    // Compiles properly as of `rustc 1.55.0-nightly (3e1c75c6e 2021-07-13)`
+    pub fn fetch_static_static(obj: &Foo) {
+        obj.fetch::<Foo>().do_something();
     }
 
-    // Assembled by `rustc 1.55.0-nightly (955b9c0d4 2021-07-12)`.
-    //
-    // Command used: `cargo clean && cargo rustc --release -- --emit asm`
-    //
-    // ```
-    // arbre::code_gen_tests::broken::h6b4b974813f39731:
-    // 	cmpq	$0, __unnamed_8+584(%rip)
-    // 	je	.LBB20_2
-    // 	retq
-    // 	.p2align	4, 0x90
-    //
-    // __unnamed_8:
-    //  .asciz	"...\000..."
-    //  ;            ^ + 584 bytes
-    // ```
-    pub fn broken() {
-        let offset = Foo::RAW_TABLE
-            .try_get(RawKey::new::<dyn FooProxy>())
-            .unwrap()
-            .offset();
+    // Compiles properly as of `rustc 1.55.0-nightly (3e1c75c6e 2021-07-13)`
+    pub fn fetch_static_dynamic(obj: &Foo) {
+        obj.fetch::<dyn FooProxy>().do_something();
+    }
 
-        if offset == 0 {
-            loop {}
-        }
+    // Compiles properly as of `rustc 1.55.0-nightly (3e1c75c6e 2021-07-13)` (still needs associated constants)
+    pub fn fetch_dynamic_static(obj: &dyn Obj) {
+        obj.fetch::<Foo>().do_something();
+    }
+
+    // Compiles properly as of `rustc 1.55.0-nightly (3e1c75c6e 2021-07-13)` (still needs associated constants)
+    pub fn fetch_dynamic_dynamic(obj: &dyn Obj) {
+        obj.fetch::<dyn FooProxy>().do_something();
     }
 }

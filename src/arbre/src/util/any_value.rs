@@ -13,7 +13,7 @@ use std::{mem, mem::ManuallyDrop};
 // We abuse a quirk in the Rust layout system where the unused portion of a union can accept any bit
 // pattern, including those imbued with pointer providence. This seems to be blessed by the Rust
 // developers because MaybeUninit works this way as well.
-#[repr(C)]
+#[repr(transparent)]
 pub union AnyValue<H> {
     zst: (),
     value: ManuallyDrop<H>,

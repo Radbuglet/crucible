@@ -366,18 +366,4 @@ impl<A: ?Sized + Obj + DynObjConvert> ObjExt for A {
                 CompRef::new_unsafe(self.to_dyn(), field)
             })
     }
-
-    // FIXME: Remove once `RawVTable::try_get` stops breaking code-gen optimizations
-    fn fetch_key<T: ?Sized>(&self, key: Key<T>) -> CompRef<T> {
-        let entry = self.table().get(key.raw());
-        unsafe {
-            // Safety: We know from v-table's first invariant that this entry references a component
-            // of type `T` and that it can be borrowed for the lifetime of the struct.
-            let field = entry.typed::<Self, T>().resolve_ref(self);
-
-            // Safety: We know from v-table's second invariant that the `dyn Obj` representation
-            // of the root can be down-casted into the requested root type.
-            CompRef::new_unsafe(self.to_dyn(), field)
-        }
-    }
 }
