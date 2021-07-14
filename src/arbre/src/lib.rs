@@ -60,6 +60,7 @@ pub mod vtable;
 pub mod code_gen_tests {
     use super::{
         fetch::*,
+        key::*,
         vtable::*,
     };
 
@@ -93,31 +94,49 @@ pub mod code_gen_tests {
         }
     }
 
-    // Assembled by `rustc 1.55.0-nightly (955b9c0d4 2021-07-12)`, inspected by `cargo-asm 0.1.16`.
+    // Assembled by `rustc 1.55.0-nightly (955b9c0d4 2021-07-12)`.
     //
-    // Command used: `cargo clean && cargo build --release && cargo asm arbre::code_gen_tests::works_correctly`
+    // Command used: `cargo clean && cargo rustc --release -- --emit asm`
     //
     // ```
-    // arbre::code_gen_tests::works_correctly:
-    //  je      .LBB19_1
-    //  ret
+    // arbre::code_gen_tests::works_correctly::hfcdf57e61502df18:
+    // 	.p2align	4, 0x90
     // .LBB19_1:
-    //  jmp     .LBB19_1
+    // 	jmp	.LBB19_1
     // ```
-    pub fn works_correctly(obj: &Foo) {
-        obj.fetch::<dyn FooProxy>().do_something();
+    pub fn works_correctly() {
+        const OFFSET: usize = Foo::RAW_TABLE
+            .get(RawKey::new::<dyn FooProxy>())
+            .offset();
+
+        if OFFSET == 0 {
+            loop {}
+        }
     }
 
-    // Assembled by `rustc 1.55.0-nightly (955b9c0d4 2021-07-12)`, inspected by `cargo-asm 0.1.16`.
+    // Assembled by `rustc 1.55.0-nightly (955b9c0d4 2021-07-12)`.
     //
-    // Command used: `cargo clean && cargo build --release && cargo asm arbre::code_gen_tests::broken`
+    // Command used: `cargo clean && cargo rustc --release -- --emit asm`
     //
     // ```
-    // arbre::code_gen_tests::broken:
-    //  add     rcx, qword, ptr, [rip, +, __unnamed_8+584]
-    //  rex64   jmp, qword, ptr, [rax, +, 24]
+    // arbre::code_gen_tests::broken::h6b4b974813f39731:
+    // 	cmpq	$0, __unnamed_8+584(%rip)
+    // 	je	.LBB20_2
+    // 	retq
+    // 	.p2align	4, 0x90
+    //
+    // __unnamed_8:
+    //  .asciz	"...\000..."
+    //  ;            ^ + 584 bytes
     // ```
-    pub fn broken(obj: &Foo) {
-        obj.try_fetch::<dyn FooProxy>().unwrap().do_something();
+    pub fn broken() {
+        let offset = Foo::RAW_TABLE
+            .try_get(RawKey::new::<dyn FooProxy>())
+            .unwrap()
+            .offset();
+
+        if offset == 0 {
+            loop {}
+        }
     }
 }
