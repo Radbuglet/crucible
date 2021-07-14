@@ -220,8 +220,7 @@ impl<S, R: ?Sized> VTable<S, R> {
         unsafe { self.expose_raw(key.raw(), field.as_raw()) };
     }
 
-    // FIXME: Make it work for exposing `dyn Trait` components.
-    pub const fn expose_key_unsized<K, T>(&mut self, key: Key<K>, field: Field<S, T>)
+    pub const fn expose_key_unsized<T, K>(&mut self, key: Key<K>, field: Field<S, T>)
     where
         K: ?Sized,
         T: Comp + Unsize<K>,
@@ -238,8 +237,7 @@ impl<S, R: ?Sized> VTable<S, R> {
         self.expose_key(Key::<T>::typed(), field);
     }
 
-    // FIXME: Make it work for exposing `dyn Trait` components.
-    pub const fn expose_unsized<K, T>(&mut self, field: Field<S, T>)
+    pub const fn expose_unsized<T, K>(&mut self, field: Field<S, T>)
     where
         K: ?Sized + 'static,
         T: Comp + Unsize<K>,
@@ -363,8 +361,25 @@ impl RawVTable {
         ((id.wrapping_mul(mul)) % TABLE_CAP as u64) as usize
     }
 
-    pub const fn get(&self, key: RawKey) -> Option<RawField> {
+    // Turns out that `Option::unwrap` does some magical things to the v-table's metadata because
+    // rustc can no longer inline it when we use wrap our data in an `Option`. The code works fine
+    // when we implement `unwrap` manually so this seems to be something specific to calls to external
+    // methods. Adding evidence to this hypothesis is the awful code-gen results I got while doing my
+    // tests in an external crate. FIXME: Make these optimizations apply more reliably.
+    pub const fn try_get(&self, key: RawKey) -> Option<RawField> {
         self.buckets[Self::get_index(key.as_u64().get(), self.mul)]
             .matches(key)
+    }
+
+    pub const fn get(&self, key: RawKey) -> RawField {
+        let bucket = &self.buckets[Self::get_index(key.as_u64().get(), self.mul)];
+        if bucket.id != key.as_u64().get() {
+            panic!("Failed to find field in v-table!");
+        }
+        unsafe { bucket.field.assume_init() }
+    }
+
+    pub const unsafe fn get_unchecked(&self, key: RawKey) -> RawField {
+        self.buckets[Self::get_index(key.as_u64().get(), self.mul)].field.assume_init()
     }
 }

@@ -53,3 +53,71 @@ mod util;
 pub mod fetch;
 pub mod key;
 pub mod vtable;
+
+// === Code-gen "tests" === //
+
+#[doc(hidden)]  // FIXME: Move to another crate
+pub mod code_gen_tests {
+    use super::{
+        fetch::*,
+        vtable::*,
+    };
+
+    pub struct Foo {
+        value: u32,
+    }
+
+    impl Comp for Foo {
+        type Root = dyn Obj;
+    }
+
+    impl ObjDecl for Foo {
+        type Root = dyn Obj;
+        const TABLE: VTable<Self, Self::Root> = {
+            let mut table = VTable::new();
+            table.expose(Field::identity());
+            table.expose_unsized::<Foo, dyn FooProxy>(Field::identity());
+            table
+        };
+    }
+
+    trait FooProxy {
+        fn do_something(&self);
+    }
+
+    impl FooProxy for Foo {
+        fn do_something(&self) {
+            if self.value == 0 {
+                loop {}
+            }
+        }
+    }
+
+    // Assembled by `rustc 1.55.0-nightly (955b9c0d4 2021-07-12)`, inspected by `cargo-asm 0.1.16`.
+    //
+    // Command used: `cargo clean && cargo build --release && cargo asm arbre::code_gen_tests::works_correctly`
+    //
+    // ```
+    // arbre::code_gen_tests::works_correctly:
+    //  je      .LBB19_1
+    //  ret
+    // .LBB19_1:
+    //  jmp     .LBB19_1
+    // ```
+    pub fn works_correctly(obj: &Foo) {
+        obj.fetch::<dyn FooProxy>().do_something();
+    }
+
+    // Assembled by `rustc 1.55.0-nightly (955b9c0d4 2021-07-12)`, inspected by `cargo-asm 0.1.16`.
+    //
+    // Command used: `cargo clean && cargo build --release && cargo asm arbre::code_gen_tests::broken`
+    //
+    // ```
+    // arbre::code_gen_tests::broken:
+    //  add     rcx, qword, ptr, [rip, +, __unnamed_8+584]
+    //  rex64   jmp, qword, ptr, [rax, +, 24]
+    // ```
+    pub fn broken(obj: &Foo) {
+        obj.try_fetch::<dyn FooProxy>().unwrap().do_something();
+    }
+}

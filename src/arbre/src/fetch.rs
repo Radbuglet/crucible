@@ -173,7 +173,7 @@ impl<'a, T: ?Sized> CompRef<'a, T> {
     }
 }
 
-impl<T: ?Sized + Comp> Deref for CompRef<'_, T> {
+impl<T: ?Sized> Deref for CompRef<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -249,10 +249,6 @@ pub unsafe trait Obj: 'static {
 pub trait ObjDecl: Sized {
     type Root: ?Sized;
     const TABLE: VTable<Self, Self::Root>;
-}
-
-impl<T: ObjDecl> Comp for T {
-    type Root = <T as ObjDecl>::Root;
 }
 
 /// An _**internal**_ trait used to derive [Obj] for all types implementing [ObjDecl].
@@ -358,16 +354,30 @@ pub trait ObjExt {
 }
 
 impl<A: ?Sized + Obj + DynObjConvert> ObjExt for A {
-    fn try_fetch_key<'a, T: ?Sized>(&'a self, key: Key<T>) -> Option<CompRef<'a, T>> {
-        self.table().get(key.raw())
+    fn try_fetch_key<T: ?Sized>(&self, key: Key<T>) -> Option<CompRef<T>> {
+        self.table().try_get(key.raw())
             .map(|entry| unsafe {
                 // Safety: We know from v-table's first invariant that this entry references a component
                 // of type `T` and that it can be borrowed for the lifetime of the struct.
-                let field: &'a T = &*(entry.typed::<Self, T>().resolve_ref(self));
+                let field = entry.typed::<Self, T>().resolve_ref(self);
 
                 // Safety: We know from v-table's second invariant that the `dyn Obj` representation
                 // of the root can be down-casted into the requested root type.
                 CompRef::new_unsafe(self.to_dyn(), field)
             })
+    }
+
+    // FIXME: Remove once `RawVTable::try_get` stops breaking code-gen optimizations
+    fn fetch_key<T: ?Sized>(&self, key: Key<T>) -> CompRef<T> {
+        let entry = self.table().get(key.raw());
+        unsafe {
+            // Safety: We know from v-table's first invariant that this entry references a component
+            // of type `T` and that it can be borrowed for the lifetime of the struct.
+            let field = entry.typed::<Self, T>().resolve_ref(self);
+
+            // Safety: We know from v-table's second invariant that the `dyn Obj` representation
+            // of the root can be down-casted into the requested root type.
+            CompRef::new_unsafe(self.to_dyn(), field)
+        }
     }
 }
