@@ -10,24 +10,15 @@ use std::{mem, mem::ManuallyDrop};
 /// `Copy`, `AnyObj` will also be `Copy`—even if the actual value doesn't implement `Copy`. These
 /// derivations are never unsafe on their own, but they may impact soundness proofs for later `get_xx`
 /// method calls.
-// We abuse a quirk in the Rust layout system where the unused portion of a union can accept any bit
-// pattern, including those imbued with pointer providence. This seems to be blessed by the Rust
-// developers because MaybeUninit works this way as well.
+// This union is repr(transparent) instead of repr(C) because of a very rare and oddly specific
+// codegen bug (https://github.com/rust-lang/rust/issues/87143).
 #[repr(transparent)]
 pub union AnyValue<H> {
+    // We abuse a quirk in the Rust layout system where the unused portion of a union can accept any bit
+    // pattern, including those imbued with pointer providence. This seems to be blessed by the Rust
+    // developers because MaybeUninit works this way as well.
     zst: (),
-    value: ManuallyDrop<H>,
-}
-
-/// Poor man's transmute that:
-/// - Doesn't check sizes at compile time.
-/// - Can be used in the CTFE.
-/// - Is super unsafe.
-const unsafe fn bad_transmute<A, B>(value: A) -> B {
-    #[repr(C)]
-    union Transmute<A, B> { a: ManuallyDrop<A>, b: ManuallyDrop<B> }
-
-    ManuallyDrop::into_inner(Transmute { a: ManuallyDrop::new(value) }.b)
+    _placeholder: ManuallyDrop<H>,
 }
 
 impl<H> AnyValue<H> {
@@ -49,15 +40,9 @@ impl<H> AnyValue<H> {
         }
 
         // === Construct object
-        // FIXME: Aneurysms (this would be less morally deficient if the CTFE supported `write`)
-
-        // We create an `AnyObj` with active variant `value`
-        let obj = AnyValue::<T> { value: ManuallyDrop::new(value) };
-
-        // Since the Rust Abstract Machine(TM) doesn't track union variants, there's an implicit coercion
-        // to the `zst` active variant. Thus, while transmuting from `T` to `H` may not be legal, transmuting
-        // from `AnyObj<T> { zst: () }` to `AnyObj<H> { zst: () }` should be.
-        unsafe { bad_transmute(obj) }
+        let mut obj = Self::empty();
+        unsafe { obj.as_mut_ptr::<T>().write(value) };
+        obj
     }
 
     pub const fn as_ptr<T>(&self) -> *const T {
@@ -76,7 +61,7 @@ impl<H> AnyValue<H> {
         &mut *self.as_mut_ptr::<T>()
     }
 
-    pub unsafe fn get<T>(self) -> T {
+    pub const unsafe fn get<T>(&self) -> T {
         self.as_ptr::<T>().read()
     }
 }

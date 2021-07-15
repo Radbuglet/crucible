@@ -81,7 +81,7 @@ impl<T: Sized + Obj> DynObjConvert for T {
 ///
 pub unsafe trait RootCastTo<Target: ?Sized> {}
 
-unsafe impl<T: ?Sized> RootCastTo<T> for T {}  // Reflexive static casts
+unsafe impl<T: ?Sized> RootCastTo<T> for T {}  // Reflexive casts
 unsafe impl<T: Sized> RootCastTo<dyn Obj> for T {}  // Weakening casts
 
 /// A reference to a component within an [Obj] which includes the root [Obj] instance from which it
@@ -354,7 +354,7 @@ pub trait ObjExt {
     /// Returns whether the object has a component associated with the singleton key obtained from
     /// the component type (`T`) itself.
     ///
-    /// See also: [has_ley], which looks for a component under an arbitrary user-supplied [Key].
+    /// See also: [has_key], which looks for a component under an arbitrary user-supplied [Key].
     #[inline(always)]
     fn has<T: ?Sized + 'static>(&self) -> bool {
         self.has_key(Key::<T>::typed())
@@ -362,6 +362,10 @@ pub trait ObjExt {
 }
 
 impl<A: ?Sized + Obj + DynObjConvert> ObjExt for A {
+    // `try_fetch_key` and all its ObjExt prototype derivatives explicitly request inlining since doing
+    // so seems to force rustc to perform LTO. We currently specify `inline(always)` on descendant
+    // methods because rustc seems to think they're too large to inline in this call site, even though
+    // they tend to compile down to something much smaller given context.
     #[inline(always)]
     fn try_fetch_key<T: ?Sized>(&self, key: Key<T>) -> Option<CompRef<T>> {
         self.table().try_get(key.raw())

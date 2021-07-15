@@ -1,5 +1,3 @@
-#![feature(const_mut_refs)]
-
 use arbre::{fetch::*, vtable::*};
 
 pub struct Foo {
@@ -12,12 +10,9 @@ impl Comp for Foo {
 
 impl ObjDecl for Foo {
     type Root = dyn Obj;
-    const TABLE: VTable<Self, Self::Root> = {
-        let mut table = VTable::new();
-        table.expose(Field::identity());
-        table.expose_unsized::<Foo, dyn FooProxy>(Field::identity());
-        table
-    };
+    const TABLE: VTable<Self, Self::Root> = VTableBuilder::new()
+        .expose(Field::identity())
+        .into_inner();
 }
 
 trait FooProxy {

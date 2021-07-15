@@ -29,23 +29,23 @@ impl RawField {
         }
     }
 
-    pub const fn subfield(&self, field: &Self) -> Self {
+    pub const fn subfield(self, field: Self) -> Self {
         Self {
             offset: self.offset + field.offset,
             meta: field.meta,
         }
     }
 
-    pub const fn offset(&self) -> usize {
+    pub const fn offset(self) -> usize {
         self.offset
     }
 
-    pub const unsafe fn meta<T: Copy>(&self) -> T {
-        *self.meta.get_ref::<T>()
+    pub const unsafe fn meta<T: Copy>(self) -> T {
+        self.meta.get::<T>()
     }
 
     #[inline(always)]
-    pub const unsafe fn typed<S: ?Sized, T: ?Sized + Pointee>(&self) -> Field<S, T> {
+    pub const unsafe fn typed<S: ?Sized, T: ?Sized + Pointee>(self) -> Field<S, T> {
         Field::new_raw(self.offset, self.meta::<T::Metadata>())
     }
 }
@@ -120,7 +120,7 @@ impl<S: ?Sized, T: ?Sized + Pointee> Field<S, T> {
         RawField::new(self.offset, self.meta)
     }
 
-    pub const fn subfield<T2: ?Sized + Pointee>(self, field: Field<T, T2>) -> Field<S, T2> {
+    pub const fn subfield<T2: ?Sized + Pointee>(&self, field: Field<T, T2>) -> Field<S, T2> {
         Field {
             container_ty: PhantomData,
             offset: self.offset + field.offset,
@@ -128,7 +128,7 @@ impl<S: ?Sized, T: ?Sized + Pointee> Field<S, T> {
         }
     }
 
-    pub fn resolve_ptr(&self, parent: *const S) -> *const T {
+    pub fn resolve_ptr(self, parent: *const S) -> *const T {
         unsafe {
             from_raw_parts(
                 parent.cast::<u8>()
@@ -139,7 +139,7 @@ impl<S: ?Sized, T: ?Sized + Pointee> Field<S, T> {
         }
     }
 
-    pub fn resolve_ptr_mut(&self, parent: *mut S) -> *mut T {
+    pub fn resolve_ptr_mut(self, parent: *mut S) -> *mut T {
         unsafe {
             from_raw_parts_mut(
                 parent.cast::<u8>()
@@ -151,11 +151,11 @@ impl<S: ?Sized, T: ?Sized + Pointee> Field<S, T> {
     }
 
     #[inline(always)]
-    pub fn resolve_ref<'a>(&self, parent: &'a S) -> &'a T {
+    pub fn resolve_ref(self, parent: &S) -> &T {
         unsafe { &*self.resolve_ptr(parent as *const S) }
     }
 
-    pub fn resolve_mut<'a>(&self, parent: &'a mut S) -> &'a mut T {
+    pub fn resolve_mut(self, parent: &mut S) -> &mut T {
         unsafe { &mut *self.resolve_ptr_mut(parent as *mut S) }
     }
 }
@@ -181,7 +181,7 @@ pub struct VTable<S: ?Sized, R: ?Sized> {
     entries: VTableEntries,
 }
 
-impl<S, R: ?Sized> VTable<S, R> {
+impl<S: ?Sized, R: ?Sized> VTable<S, R> {
     pub const fn new() -> Self {
         Self {
             struct_ty: PhantomData,
@@ -252,7 +252,7 @@ impl<S, R: ?Sized> VTable<S, R> {
         let mut index = 0;
         while index < other.entries.len() {
             let (key, subfield) = *other.entries.get(index);
-            let new_field = field.as_raw().subfield(&subfield);
+            let new_field = field.as_raw().subfield(subfield);
             unsafe { self.expose_raw(key, new_field) };
 
             index += 1;
@@ -277,6 +277,90 @@ impl<S, R: ?Sized> VTable<S, R> {
         RawVTable::new(&self.entries)
     }
 }
+
+pub struct VTableBuilder<S: ?Sized, R: ?Sized> {
+    inner: VTable<S, R>,
+}
+
+impl<S: ?Sized, R: ?Sized> VTableBuilder<S, R> {
+    pub const fn new() -> Self {
+        Self::from_table(VTable::new())
+    }
+
+    pub const fn from_table(inner: VTable<S, R>) -> Self {
+        Self { inner }
+    }
+
+    pub const fn into_inner(self) -> VTable<S, R> {
+        self.inner
+    }
+
+    pub const fn inner(&self) -> &VTable<S, R> {
+        &self.inner
+    }
+
+    pub const fn inner_mut(&mut self) -> &mut VTable<S, R> {
+        &mut self.inner
+    }
+
+    pub const fn build(&self) -> RawVTable {
+        self.inner.build()
+    }
+
+    pub const fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+
+    pub const fn expose_key<T>(mut self, key: Key<T>, field: Field<S, T>) -> Self
+    where
+        T: Comp,
+        R: RootCastTo<T::Root>,
+    {
+        self.inner.expose_key(key, field);
+        self
+    }
+
+    pub const fn expose_key_unsized<T, K>(mut self, key: Key<K>, field: Field<S, T>) -> Self
+    where
+        K: ?Sized,
+        T: Comp + Unsize<K>,
+        R: RootCastTo<T::Root>,
+    {
+        self.inner.expose_key_unsized(key, field);
+        self
+    }
+
+    pub const fn expose<T>(mut self, field: Field<S, T>) -> Self
+    where
+        T: 'static + Comp,
+        R: RootCastTo<T::Root>,
+    {
+        self.inner.expose(field);
+        self
+    }
+
+    pub const fn expose_unsized<T, K>(mut self, field: Field<S, T>) -> Self
+    where
+        K: ?Sized + 'static,
+        T: Comp + Unsize<K>,
+        R: RootCastTo<T::Root>,
+    {
+        self.inner.expose_unsized::<T, K>(field);
+        self
+    }
+
+    pub const fn extend<S2>(mut self, field: Field<S, S2>, other: VTable<S2, R>) -> Self {
+        self.inner.extend(field, other);
+        self
+    }
+
+    pub const fn without(mut self, key: RawKey) -> Self {
+        self.inner.without(key);
+        self
+    }
+}
+
+// === Raw V-Table ===
 
 // We avoid using enums to define the bucket type here, opting instead to write out the optimizations
 // manually because rustc doesn't seem to be capable of using their niche layouts to optimize
