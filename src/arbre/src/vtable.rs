@@ -44,6 +44,7 @@ impl RawField {
         *self.meta.get_ref::<T>()
     }
 
+    #[inline(always)]
     pub const unsafe fn typed<S: ?Sized, T: ?Sized + Pointee>(&self) -> Field<S, T> {
         Field::new_raw(self.offset, self.meta::<T::Metadata>())
     }
@@ -149,6 +150,7 @@ impl<S: ?Sized, T: ?Sized + Pointee> Field<S, T> {
         }
     }
 
+    #[inline(always)]
     pub fn resolve_ref<'a>(&self, parent: &'a S) -> &'a T {
         unsafe { &*self.resolve_ptr(parent as *const S) }
     }
@@ -295,6 +297,7 @@ impl VTableBucket {
         }
     }
 
+    #[inline(always)]
     pub const fn matches(&self, key: RawKey) -> Option<RawField> {
         if self.id == key.as_u64().get() {
             Some (unsafe { self.field.assume_init() })
@@ -357,10 +360,12 @@ impl RawVTable {
         Self { buckets, mul }
     }
 
+    #[inline(always)]
     const fn get_index(id: u64, mul: u64) -> usize {
         ((id.wrapping_mul(mul)) % TABLE_CAP as u64) as usize
     }
 
+    #[inline(always)]
     pub const fn try_get(&self, key: RawKey) -> Option<RawField> {
         self.buckets[Self::get_index(key.as_u64().get(), self.mul)]
             .matches(key)

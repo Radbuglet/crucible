@@ -147,6 +147,7 @@ impl<'a, T: ?Sized> CompRef<'a, T> {
     /// [CompRef] maintains that `root`'s type must be castable to `comp's` [Comp::Root] type. Cast
     /// validity is entirely dictated by an implementation of [RootCastTo].
     ///
+    #[inline(always)]
     pub unsafe fn new_unsafe(root: &'a dyn Obj, comp: &'a T) -> Self {
         Self { root, comp }
     }
@@ -281,6 +282,7 @@ pub trait ObjExt {
     /// Fetches a component based off the passed [Key], panicking if the component isn't present.
     ///
     /// See also: [fetch], which fetches a component from its singleton key.
+    #[inline(always)]
     fn fetch_key<T: ?Sized>(&self, key: Key<T>) -> CompRef<T> {
         self.try_fetch_key(key).unwrap()
     }
@@ -301,6 +303,7 @@ pub trait ObjExt {
     /// This method only really serves as a slightly more efficient version of [fetch_key], as the
     /// unreachable hint can allow the compiler to skip over the `is_none` check in `unwrap`. If
     /// these requirements are too hard to meet, [fetch_key] can be a much safer direct substitute.
+    #[inline(always)]
     unsafe fn fetch_key_unchecked<T: ?Sized>(&self, key: Key<T>) -> CompRef<T> {
         // Safety: provided by caller
         self.try_fetch_key(key).unwrap_unchecked()
@@ -309,6 +312,7 @@ pub trait ObjExt {
     /// Returns whether the object has a component under the passed [Key].
     ///
     /// See also: [has], which looks for a component under its singleton key.
+    #[inline(always)]
     fn has_key<T: ?Sized>(&self, key: Key<T>) -> bool {
         self.try_fetch_key(key).is_some()
     }
@@ -317,6 +321,7 @@ pub trait ObjExt {
     /// returning `None` if the component isn't present.
     ///
     /// See also: [try_fetch_key], which fetches a component from an arbitrary user-supplied [Key].
+    #[inline(always)]
     fn try_fetch<T: ?Sized + 'static>(&self) -> Option<CompRef<T>> {
         self.try_fetch_key(Key::<T>::typed())
     }
@@ -325,6 +330,7 @@ pub trait ObjExt {
     /// panicking if the component isn't present.
     ///
     /// See also: [fetch_key], which fetches a component from an arbitrary user-supplied [Key].
+    #[inline(always)]
     fn fetch<T: ?Sized + 'static>(&self) -> CompRef<T> {
         self.fetch_key(Key::<T>::typed())
     }
@@ -339,6 +345,7 @@ pub trait ObjExt {
     ///
     /// See the safety section in [fetch_key_unchecked].
     ///
+    #[inline(always)]
     unsafe fn fetch_unchecked<T: ?Sized + 'static>(&self) -> CompRef<T> {
         // Safety: provided by caller
         self.fetch_key_unchecked(Key::<T>::typed())
@@ -348,12 +355,14 @@ pub trait ObjExt {
     /// the component type (`T`) itself.
     ///
     /// See also: [has_ley], which looks for a component under an arbitrary user-supplied [Key].
+    #[inline(always)]
     fn has<T: ?Sized + 'static>(&self) -> bool {
         self.has_key(Key::<T>::typed())
     }
 }
 
 impl<A: ?Sized + Obj + DynObjConvert> ObjExt for A {
+    #[inline(always)]
     fn try_fetch_key<T: ?Sized>(&self, key: Key<T>) -> Option<CompRef<T>> {
         self.table().try_get(key.raw())
             .map(|entry| unsafe {

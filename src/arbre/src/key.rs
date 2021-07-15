@@ -20,6 +20,7 @@ impl RawKey {
         }
     }
 
+    #[inline(always)]
     pub(crate) const fn as_u64(self) -> NonZeroU64 {
         self.0
     }
