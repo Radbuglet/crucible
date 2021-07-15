@@ -41,6 +41,13 @@ name = "arbre"
 version = "0.1.0"
 
 [[package]]
+name = "arbre_codegen"
+version = "0.1.0"
+dependencies = [
+ "arbre",
+]
+
+[[package]]
 name = "arrayvec"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
