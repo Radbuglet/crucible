@@ -11,7 +11,8 @@ impl Comp for Foo {
 impl ObjDecl for Foo {
     type Root = dyn Obj;
     const TABLE: VTable<Self, Self::Root> = VTableBuilder::new()
-        .expose(Field::identity())
+        .expose(identity_field())
+        .expose_unsized::<_, dyn FooProxy>(identity_field())
         .into_inner();
 }
 

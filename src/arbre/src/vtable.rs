@@ -2,7 +2,7 @@ use std::marker::{PhantomData, Unsize};
 use std::mem::MaybeUninit;
 use std::ptr::{DynMetadata, Pointee, from_raw_parts, from_raw_parts_mut};
 
-use crate::fetch::{Comp, RootCastTo};
+use crate::fetch::{Comp, RootCastTo, ObjDecl};
 use crate::key::{RawKey, Key};
 use crate::util::{AnyValue, ConstVec, PhantomInvariant, unsize_meta};
 
@@ -46,7 +46,7 @@ impl RawField {
 
     #[inline(always)]
     pub const unsafe fn typed<S: ?Sized, T: ?Sized + Pointee>(self) -> Field<S, T> {
-        Field::new_raw(self.offset, self.meta::<T::Metadata>())
+        Field::new(self.offset, self.meta::<T::Metadata>())
     }
 }
 
@@ -54,6 +54,10 @@ pub struct Field<S: ?Sized, T: ?Sized + Pointee> {
     container_ty: PhantomInvariant<S>,
     offset: usize,
     meta: T::Metadata,
+}
+
+pub const fn identity_field<T: Pointee<Metadata = ()>>() -> Field<T, T> {
+    Field::identity()
 }
 
 pub macro get_field($struct:path, $field:ident) {
@@ -78,21 +82,14 @@ impl<S: Pointee<Metadata = ()>> Field<S, S> {
     }
 }
 
-impl<S: ?Sized, T: Sized + Pointee> Field<S, T> {
-    pub const fn cast<T2>(self) -> Field<S, T2>
-    where
-        T2: ?Sized + Pointee,
-        T: Unsize<T2>,
-    {
-        Field {
+impl<S: ?Sized, T: ?Sized + Pointee> Field<S, T> {
+    pub const unsafe fn new(offset: usize, meta: T::Metadata) -> Self {
+        Self {
             container_ty: PhantomData,
-            offset: self.offset,
-            meta: unsize_meta::<T, T2>()
+            offset, meta
         }
     }
-}
 
-impl<S: ?Sized, T: ?Sized + Pointee> Field<S, T> {
     pub const unsafe fn new_from_pointers(base: *const S, field: *const T) -> Self {
         Self {
             container_ty: PhantomData,
@@ -101,11 +98,8 @@ impl<S: ?Sized, T: ?Sized + Pointee> Field<S, T> {
         }
     }
 
-    pub const unsafe fn new_raw(offset: usize, meta: T::Metadata) -> Self {
-        Self {
-            container_ty: PhantomData,
-            offset, meta
-        }
+    pub const fn as_raw(self) -> RawField {
+        RawField::new(self.offset, self.meta)
     }
 
     pub const fn offset(self) -> usize {
@@ -116,15 +110,31 @@ impl<S: ?Sized, T: ?Sized + Pointee> Field<S, T> {
         self.meta
     }
 
-    pub const fn as_raw(self) -> RawField {
-        RawField::new(self.offset, self.meta)
-    }
-
     pub const fn subfield<T2: ?Sized + Pointee>(&self, field: Field<T, T2>) -> Field<S, T2> {
         Field {
             container_ty: PhantomData,
             offset: self.offset + field.offset,
             meta: field.meta,
+        }
+    }
+
+    pub const fn unsize<T2>(self) -> Field<S, T2>
+    where
+        T2: ?Sized + Pointee,
+        T: Sized + Unsize<T2>,
+    {
+        Field {
+            container_ty: PhantomData,
+            offset: self.offset,
+            meta: unsize_meta::<T, T2>()
+        }
+    }
+
+    pub const unsafe fn transmute<T2: Pointee<Metadata = T::Metadata>>(self) -> Field<S, T2> {
+        Field {
+            container_ty: PhantomData,
+            offset: self.offset,
+            meta: self.meta,
         }
     }
 
@@ -224,11 +234,11 @@ impl<S: ?Sized, R: ?Sized> VTable<S, R> {
 
     pub const fn expose_key_unsized<T, K>(&mut self, key: Key<K>, field: Field<S, T>)
     where
-        K: ?Sized,
         T: Comp + Unsize<K>,
+        K: ?Sized,
         R: RootCastTo<T::Root>,
     {
-        unsafe { self.expose_raw(key.raw(), field.cast::<K>().as_raw()) };
+        unsafe { self.expose_raw(key.raw(), field.unsize::<K>().as_raw()) };
     }
 
     pub const fn expose<T>(&mut self, field: Field<S, T>)
@@ -241,14 +251,19 @@ impl<S: ?Sized, R: ?Sized> VTable<S, R> {
 
     pub const fn expose_unsized<T, K>(&mut self, field: Field<S, T>)
     where
-        K: ?Sized + 'static,
         T: Comp + Unsize<K>,
+        K: ?Sized + 'static,
         R: RootCastTo<T::Root>,
     {
         self.expose_key_unsized(Key::<K>::typed(), field);
     }
 
-    pub const fn extend<S2>(&mut self, field: Field<S, S2>, other: VTable<S2, R>) {
+    pub const fn extend<S2, R2>(&mut self, field: Field<S, S2>, other: VTable<S2, R2>)
+    where
+        S2: ?Sized,
+        R2: ?Sized,
+        R: RootCastTo<R2>,
+    {
         let mut index = 0;
         while index < other.entries.len() {
             let (key, subfield) = *other.entries.get(index);
@@ -257,6 +272,13 @@ impl<S: ?Sized, R: ?Sized> VTable<S, R> {
 
             index += 1;
         }
+    }
+
+    pub const fn extend_default<S2: ObjDecl>(&mut self, field: Field<S, S2>)
+    where
+        R: RootCastTo<S2::Root>,
+    {
+        self.extend(field, S2::TABLE);
     }
 
     pub const fn without(&mut self, key: RawKey) {
@@ -322,8 +344,8 @@ impl<S: ?Sized, R: ?Sized> VTableBuilder<S, R> {
 
     pub const fn expose_key_unsized<T, K>(mut self, key: Key<K>, field: Field<S, T>) -> Self
     where
-        K: ?Sized,
         T: Comp + Unsize<K>,
+        K: ?Sized,
         R: RootCastTo<T::Root>,
     {
         self.inner.expose_key_unsized(key, field);
@@ -341,16 +363,29 @@ impl<S: ?Sized, R: ?Sized> VTableBuilder<S, R> {
 
     pub const fn expose_unsized<T, K>(mut self, field: Field<S, T>) -> Self
     where
-        K: ?Sized + 'static,
         T: Comp + Unsize<K>,
+        K: ?Sized + 'static,
         R: RootCastTo<T::Root>,
     {
         self.inner.expose_unsized::<T, K>(field);
         self
     }
 
-    pub const fn extend<S2>(mut self, field: Field<S, S2>, other: VTable<S2, R>) -> Self {
+    pub const fn extend<S2, R2>(mut self, field: Field<S, S2>, other: VTable<S2, R2>) -> Self
+    where
+        S2: ?Sized,
+        R2: ?Sized,
+        R: RootCastTo<R2>,
+    {
         self.inner.extend(field, other);
+        self
+    }
+
+    pub const fn extend_default<S2: ObjDecl>(mut self, field: Field<S, S2>) -> Self
+    where
+        R: RootCastTo<S2::Root>,
+    {
+        self.inner.extend_default(field);
         self
     }
 
