@@ -1,8 +1,8 @@
+use crate::util::PhantomInvariant;
 use std::hash;
 use std::intrinsics::type_id;
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
-use crate::util::PhantomInvariant;
 
 /// An untyped component identifier underlying [Key].
 // We assume that type IDs are non-zero because getting that exact ID is exceedingly unlikely and
@@ -13,7 +13,7 @@ pub struct RawKey(NonZeroU64);
 impl RawKey {
     pub const fn new<T: ?Sized + 'static>() -> Self {
         if let Some(id) = NonZeroU64::new(type_id::<T>()) {
-            Self (id)
+            Self(id)
         } else {
             panic!("RawKey had a TypeId of `0`, breaking `PerfectMap`'s invariants. This is \
                     exceedingly rare and a recompile should fix this once in a lifetime occurrence.");
@@ -27,6 +27,12 @@ impl RawKey {
 
     pub(crate) const fn const_eq(self, other: Self) -> bool {
         self.0.get() == other.0.get()
+    }
+}
+
+impl<T: ?Sized> From<Key<T>> for RawKey {
+    fn from(key: Key<T>) -> Self {
+        key.raw_id
     }
 }
 
@@ -69,12 +75,6 @@ impl<T: ?Sized> Key<T> {
 
     pub const fn raw(self) -> RawKey {
         self.raw_id
-    }
-}
-
-impl<T: ?Sized> Into<RawKey> for Key<T> {
-    fn into(self) -> RawKey {
-        self.raw()
     }
 }
 

@@ -1,5 +1,5 @@
 use std::marker::Unsize;
-use std::ptr::{Pointee, null};
+use std::ptr::{null, Pointee};
 
 pub const fn ref_addr<T: ?Sized>(ptr: &T) -> *const () {
     (ptr as *const T).to_raw_parts().0

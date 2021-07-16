@@ -1,8 +1,8 @@
+use crate::key::Key;
+use crate::util::ref_addr;
+use crate::vtable::{RawVTable, VTable};
 use std::fmt;
 use std::ops::Deref;
-use crate::key::Key;
-use crate::vtable::{VTable, RawVTable};
-use crate::util::ref_addr;
 
 // === Component === //
 
@@ -81,8 +81,8 @@ impl<T: Sized + Obj> DynObjConvert for T {
 ///
 pub unsafe trait RootCastTo<Target: ?Sized> {}
 
-unsafe impl<T: ?Sized> RootCastTo<T> for T {}  // Reflexive casts
-unsafe impl<T: Sized> RootCastTo<dyn Obj> for T {}  // Weakening casts
+unsafe impl<T: ?Sized> RootCastTo<T> for T {} // Reflexive casts
+unsafe impl<T: Sized> RootCastTo<dyn Obj> for T {} // Weakening casts
 
 /// A reference to a component within an [Obj] which includes the root [Obj] instance from which it
 /// was derived. The concrete type of the root is specified by the component's [Comp::Root] associated
@@ -105,16 +105,19 @@ impl<'a, T: Comp> CompRef<'a, T> {
     /// must be `Sized` since [Comp] is not object safe.
     pub fn new<R: ?Sized>(root: &'a R, comp: &'a T) -> Self
     where
-        R: RootCastTo<T::Root> + DynObjConvert
+        R: RootCastTo<T::Root> + DynObjConvert,
     {
         Self {
             root: root.to_dyn(),
-            comp
+            comp,
         }
     }
 }
 
-impl<'a, T: Comp> CompRef<'a, T> where T::Root: DynObjConvert {
+impl<'a, T: Comp> CompRef<'a, T>
+where
+    T::Root: DynObjConvert,
+{
     /// Fetches the [Obj] root under the type requested by the component's [Comp] implementation,
     /// which is `dyn Obj` by default. When `Comp::Root` is `Sized`, this reference is functionally
     /// equivalent to the reference returned by [root_raw], but the additional type information gained
@@ -185,7 +188,10 @@ impl<T: ?Sized> Deref for CompRef<'_, T> {
 impl<T: ?Sized> Copy for CompRef<'_, T> {}
 impl<T: ?Sized> Clone for CompRef<'_, T> {
     fn clone(&self) -> Self {
-        Self { root: self.root, comp: self.comp }
+        Self {
+            root: self.root,
+            comp: self.comp,
+        }
     }
 }
 
@@ -368,15 +374,14 @@ impl<A: ?Sized + Obj + DynObjConvert> ObjExt for A {
     // they tend to compile down to something much smaller given context.
     #[inline(always)]
     fn try_fetch_key<T: ?Sized>(&self, key: Key<T>) -> Option<CompRef<T>> {
-        self.table().try_get(key.raw())
-            .map(|entry| unsafe {
-                // Safety: We know from v-table's first invariant that this entry references a component
-                // of type `T` and that it can be borrowed for the lifetime of the struct.
-                let field = entry.typed::<Self, T>().resolve_ref(self);
+        self.table().try_get(key.raw()).map(|entry| unsafe {
+            // Safety: We know from v-table's first invariant that this entry references a component
+            // of type `T` and that it can be borrowed for the lifetime of the struct.
+            let field = entry.typed::<Self, T>().resolve_ref(self);
 
-                // Safety: We know from v-table's second invariant that the `dyn Obj` representation
-                // of the root can be down-casted into the requested root type.
-                CompRef::new_unsafe(self.to_dyn(), field)
-            })
+            // Safety: We know from v-table's second invariant that the `dyn Obj` representation
+            // of the root can be down-casted into the requested root type.
+            CompRef::new_unsafe(self.to_dyn(), field)
+        })
     }
 }

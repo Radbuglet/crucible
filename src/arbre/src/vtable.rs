@@ -1,10 +1,10 @@
 use std::marker::{PhantomData, Unsize};
 use std::mem::MaybeUninit;
-use std::ptr::{DynMetadata, Pointee, from_raw_parts, from_raw_parts_mut};
+use std::ptr::{from_raw_parts, from_raw_parts_mut, DynMetadata, Pointee};
 
-use crate::fetch::{Comp, RootCastTo, ObjDecl};
-use crate::key::{RawKey, Key};
-use crate::util::{AnyValue, ConstVec, PhantomInvariant, unsize_meta};
+use crate::fetch::{Comp, ObjDecl, RootCastTo};
+use crate::key::{Key, RawKey};
+use crate::util::{unsize_meta, AnyValue, ConstVec, PhantomInvariant};
 
 // TABLE_CAP must be a prime number or the randomization algorithm will be *extremely* ineffective.
 const TABLE_CAP: usize = 33;
@@ -86,7 +86,8 @@ impl<S: ?Sized, T: ?Sized + Pointee> Field<S, T> {
     pub const unsafe fn new(offset: usize, meta: T::Metadata) -> Self {
         Self {
             container_ty: PhantomData,
-            offset, meta
+            offset,
+            meta,
         }
     }
 
@@ -126,7 +127,7 @@ impl<S: ?Sized, T: ?Sized + Pointee> Field<S, T> {
         Field {
             container_ty: PhantomData,
             offset: self.offset,
-            meta: unsize_meta::<T, T2>()
+            meta: unsize_meta::<T, T2>(),
         }
     }
 
@@ -139,25 +140,11 @@ impl<S: ?Sized, T: ?Sized + Pointee> Field<S, T> {
     }
 
     pub fn resolve_ptr(self, parent: *const S) -> *const T {
-        unsafe {
-            from_raw_parts(
-                parent.cast::<u8>()
-                    .add(self.offset)
-                    .cast::<()>(),
-                self.meta,
-            )
-        }
+        unsafe { from_raw_parts(parent.cast::<u8>().add(self.offset).cast::<()>(), self.meta) }
     }
 
     pub fn resolve_ptr_mut(self, parent: *mut S) -> *mut T {
-        unsafe {
-            from_raw_parts_mut(
-                parent.cast::<u8>()
-                    .add(self.offset)
-                    .cast::<()>(),
-                self.meta,
-            )
-        }
+        unsafe { from_raw_parts_mut(parent.cast::<u8>().add(self.offset).cast::<()>(), self.meta) }
     }
 
     #[inline(always)]
@@ -205,7 +192,7 @@ impl<S: ?Sized, R: ?Sized> VTable<S, R> {
         while index < self.entries.len() {
             let (other_key, _) = self.entries.get(index);
             if key.const_eq(*other_key) {
-                return Some (index);
+                return Some(index);
             }
             index += 1;
         }
@@ -214,7 +201,7 @@ impl<S: ?Sized, R: ?Sized> VTable<S, R> {
 
     pub const unsafe fn expose_raw(&mut self, key: RawKey, field: RawField) {
         let entry = (key, field);
-        if let Some (replace_index) = self.find_entry(key) {
+        if let Some(replace_index) = self.find_entry(key) {
             *self.entries.get_mut(replace_index) = entry;
         } else {
             if !self.entries.try_push(entry) {
@@ -282,7 +269,7 @@ impl<S: ?Sized, R: ?Sized> VTable<S, R> {
     }
 
     pub const fn without(&mut self, key: RawKey) {
-        if let Some (index) = self.find_entry(key) {
+        if let Some(index) = self.find_entry(key) {
             self.entries.swap_remove(index);
         }
     }
@@ -330,7 +317,9 @@ impl<S: ?Sized, R: ?Sized> VTableBuilder<S, R> {
     }
 
     pub const fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 
     pub const fn expose_key<T>(mut self, key: Key<T>, field: Field<S, T>) -> Self
@@ -407,7 +396,10 @@ struct VTableBucket {
 }
 
 impl VTableBucket {
-    pub const EMPTY: Self = VTableBucket { id: 0, field: MaybeUninit::uninit() };
+    pub const EMPTY: Self = VTableBucket {
+        id: 0,
+        field: MaybeUninit::uninit(),
+    };
 
     pub const fn full(key: RawKey, field: RawField) -> Self {
         Self {
@@ -419,7 +411,7 @@ impl VTableBucket {
     #[inline(always)]
     pub const fn matches(&self, key: RawKey) -> Option<RawField> {
         if self.id == key.as_u64().get() {
-            Some (unsafe { self.field.assume_init() })
+            Some(unsafe { self.field.assume_init() })
         } else {
             None
         }
@@ -486,7 +478,6 @@ impl RawVTable {
 
     #[inline(always)]
     pub const fn try_get(&self, key: RawKey) -> Option<RawField> {
-        self.buckets[Self::get_index(key.as_u64().get(), self.mul)]
-            .matches(key)
+        self.buckets[Self::get_index(key.as_u64().get(), self.mul)].matches(key)
     }
 }
