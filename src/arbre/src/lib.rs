@@ -51,3 +51,11 @@ mod util;
 pub mod fetch;
 pub mod key;
 pub mod vtable;
+
+pub mod prelude {
+    pub use crate::{
+        fetch::{Obj, ObjExt, ObjDecl, CompRef},
+        key::{Key, new_key},
+    };
+}
+pub use prelude::*;
