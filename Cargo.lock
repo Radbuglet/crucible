@@ -39,12 +39,24 @@ dependencies = [
 [[package]]
 name = "arbre"
 version = "0.1.0"
+dependencies = [
+ "arbre_derive",
+]
 
 [[package]]
 name = "arbre_codegen"
 version = "0.1.0"
 dependencies = [
  "arbre",
+]
+
+[[package]]
+name = "arbre_derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

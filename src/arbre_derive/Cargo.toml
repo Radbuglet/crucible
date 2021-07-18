@@ -1,0 +1,12 @@
+[package]
+name = "arbre_derive"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+proc-macro2 = "1.0.27"
+syn = "1.0.73"
+quote = "1.0.9"
+
+[lib]
+proc-macro = true

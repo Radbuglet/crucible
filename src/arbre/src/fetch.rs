@@ -258,6 +258,9 @@ pub trait ObjDecl: Sized {
     const TABLE: VTable<Self, Self::Root>;
 }
 
+#[cfg(feature = "derive")]
+pub use arbre_derive::ObjDecl;
+
 /// An _**internal**_ trait used to derive [Obj] for all types implementing [ObjDecl].
 #[doc(hidden)]
 pub unsafe trait ObjConst: 'static {

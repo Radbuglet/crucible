@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
+arbre_derive = { path = "../arbre_derive", optional = true }
+
+[features]
+default = ["derive"]
+derive = ["arbre_derive"]
