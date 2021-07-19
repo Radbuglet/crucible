@@ -1,8 +1,16 @@
-use proc_macro::{TokenStream as RustTokenStream};
+#![feature(decl_macro)]
 
-#[proc_macro_derive(ObjDecl, attributes(root, extends, expose))]
-pub fn derive_obj_decl(_item: RustTokenStream) -> RustTokenStream {
-    todo!()
+use proc_macro::{TokenStream as RustTokenStream};
+use syn::{Error as SynError};
+
+mod util;
+mod obj_decl;
+
+#[proc_macro_derive(ObjDecl, attributes(root, expose, extends))]
+pub fn derive_obj_decl(item: RustTokenStream) -> RustTokenStream {
+    obj_decl::derive(item.into())
+        .unwrap_or_else(SynError::into_compile_error)
+        .into()
 }
 
 #[proc_macro_attribute]
