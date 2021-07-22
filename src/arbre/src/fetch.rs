@@ -2,7 +2,7 @@ use crate::key::Key;
 use crate::util::ref_addr;
 use crate::vtable::{RawVTable, VTable};
 use std::fmt;
-use std::ops::Deref;
+use std::ops::{Deref, CoerceUnsized};
 
 // === Component === //
 
@@ -207,6 +207,8 @@ impl<T: ?Sized + fmt::Display> fmt::Display for CompRef<'_, T> {
     }
 }
 
+impl<'a, T: ?Sized + Unsize<U>, U: ?Sized> CoerceUnsized<CompRef<'a, U>> for CompRef<'a, T> {}
+
 // === Object === //
 
 /// An object-safe trait allowing the object to be queried for components using the [ObjExt] extension
@@ -260,6 +262,7 @@ pub trait ObjDecl: Sized {
 
 #[cfg(feature = "derive")]
 pub use arbre_derive::ObjDecl;
+use std::marker::Unsize;
 
 /// An _**internal**_ trait used to derive [Obj] for all types implementing [ObjDecl].
 #[doc(hidden)]

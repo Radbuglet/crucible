@@ -1,19 +1,10 @@
-use arbre::{fetch::*, vtable::*};
+use arbre::prelude::*;
 
+#[derive(ObjDecl)]
+#[expose]
+#[expose(dyn FooProxy)]
 pub struct Foo {
     value: u32,
-}
-
-impl Comp for Foo {
-    type Root = dyn Obj;
-}
-
-impl ObjDecl for Foo {
-    type Root = dyn Obj;
-    const TABLE: VTable<Self, Self::Root> = VTableBuilder::new()
-        .expose(identity_field())
-        .expose_unsized::<_, dyn FooProxy>(identity_field())
-        .into_inner();
 }
 
 trait FooProxy {

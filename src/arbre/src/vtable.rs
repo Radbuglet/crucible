@@ -245,7 +245,7 @@ impl<S: ?Sized, R: ?Sized> VTable<S, R> {
         self.expose_key_unsized(Key::<K>::typed(), field);
     }
 
-    pub const fn extend<S2, R2>(&mut self, field: Field<S, S2>, other: VTable<S2, R2>)
+    pub const fn extend<S2, R2>(&mut self, field: Field<S, S2>, other: &VTable<S2, R2>)
     where
         S2: ?Sized,
         R2: ?Sized,
@@ -265,7 +265,7 @@ impl<S: ?Sized, R: ?Sized> VTable<S, R> {
     where
         R: RootCastTo<S2::Root>,
     {
-        self.extend(field, S2::TABLE);
+        self.extend(field, &S2::TABLE);
     }
 
     pub const fn without(&mut self, key: RawKey) {
@@ -360,7 +360,7 @@ impl<S: ?Sized, R: ?Sized> VTableBuilder<S, R> {
         self
     }
 
-    pub const fn extend<S2, R2>(mut self, field: Field<S, S2>, other: VTable<S2, R2>) -> Self
+    pub const fn extends<S2, R2>(mut self, field: Field<S, S2>, other: &VTable<S2, R2>) -> Self
     where
         S2: ?Sized,
         R2: ?Sized,
@@ -370,7 +370,7 @@ impl<S: ?Sized, R: ?Sized> VTableBuilder<S, R> {
         self
     }
 
-    pub const fn extend_default<S2: ObjDecl>(mut self, field: Field<S, S2>) -> Self
+    pub const fn extends_default<S2: ObjDecl>(mut self, field: Field<S, S2>) -> Self
     where
         R: RootCastTo<S2::Root>,
     {

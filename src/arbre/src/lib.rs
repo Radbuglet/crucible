@@ -40,6 +40,7 @@
 // For converting wide pointers to Sized pointers and vice-versa.
 #![feature(ptr_metadata)]
 #![feature(unsize)]
+#![feature(coerce_unsized)]
 
 // To implement `fetch_xx_unchecked` without `unchecked_unreachable` hints.
 // (we already have so many unstable features, what's the harm in adding a few more?)
