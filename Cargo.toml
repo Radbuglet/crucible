@@ -1,6 +1,5 @@
 [workspace]
 
 members = [
-    "src/arbre",
     "src/client",
 ]
