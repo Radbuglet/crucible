@@ -1,10 +1,8 @@
 [package]
-name = "crucible_client"
+name = "ash_libtest"
 version = "0.1.0"
 edition = "2018"
 
 [dependencies]
 ash = "0.32.1"
-cgmath = "0.18.0"
 memchr = "2.4.0"
-winit = "0.25.0"

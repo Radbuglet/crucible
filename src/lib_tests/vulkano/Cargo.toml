@@ -1,0 +1,9 @@
+[package]
+name = "vulkano_libtest"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+vulkano = "0.24.0"
+vulkano-win = "0.24.0"
+winit = "0.25.0"
