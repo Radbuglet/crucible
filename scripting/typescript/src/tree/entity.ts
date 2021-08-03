@@ -1,13 +1,16 @@
 import {Node} from "./node";
 import {IterableOrUnit, iterOrUnitToIter} from "../helpers/iterator";
 
-export interface IWriteKey<T> {  // `T` is contravariant
-    set(target: Entity, value: T): void;
-    remove(target: Entity): void;
+export interface IRawKey {
     getRaw(target: Entity): unknown;
 }
 
-export interface IReadKey<T> {  // `T` is covariant
+export interface IWriteKey<T> extends IRawKey {  // `T` is contravariant
+    set(target: Entity, value: T): void;
+    remove(target: Entity): void;
+}
+
+export interface IReadKey<T> extends IRawKey {  // `T` is covariant
     get(target: Entity): T | undefined;
 }
 
@@ -46,6 +49,16 @@ export class Key<T> implements IReadKey<T>, IWriteKey<T> {  // `T` is invariant
 export class Entity extends Node {
     // === Core accessors === //
 
+    add<T>(keys: IterableOrUnit<IWriteKey<T>>, comp: T) {
+        for (const key of iterOrUnitToIter(keys)) {
+            console.assert(
+                !this.has(key),
+                this, `: attempted to add() to the already-mapped key ${key.toString()}.`
+            );
+            key.set(this, comp);
+        }
+    }
+
     set<T>(keys: IterableOrUnit<IWriteKey<T>>, comp: T) {
         for (const key of iterOrUnitToIter(keys)) {
             key.set(this, comp);
@@ -68,11 +81,16 @@ export class Entity extends Node {
         return comp!;
     }
 
-    has(key: IReadKey<unknown>): boolean {
-        return this.tryGet(key) !== undefined;
+    has(key: IRawKey): boolean {
+        return key.getRaw(this) !== undefined;
     }
 
     // === Tree accessors === //
+
+    addNode<T extends Node>(keys: IterableOrUnit<IWriteKey<T>>, comp: T) {
+        comp.withParent(this);
+        this.add(keys, comp);
+    }
 
     setNode<T extends Node>(keys: IterableOrUnit<IWriteKey<T>>, comp: T) {
         comp.withParent(this);
@@ -85,7 +103,7 @@ export class Entity extends Node {
             if (comp instanceof Node) {
                 comp.orphan();
             } else {
-                console.warn(this, ": removeNode removed a component mapping to a non-node value.");
+                console.warn(this, ": removeNode removed a component mapping to the non-node value", comp);
             }
             key.remove(this);
         }

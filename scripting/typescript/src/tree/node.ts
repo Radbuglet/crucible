@@ -1,5 +1,3 @@
-// TODO: Implement notify, alive state, and ancestry changed signaling mechanisms
-
 import {Entity, IReadKey} from "./entity";
 
 export class Node {

@@ -1,17 +1,20 @@
-type IterableUnit<T> = (T & { [Symbol.iterator]?: undefined });
-export type IterableOrUnit<T> = IterableUnit<T> | Iterable<T>;
+/// A type that is *guaranteed* to be non-iterable.
+export type NonIterable<T> = (T & { [Symbol.iterator]?: undefined });
 
-export function unitToIter<T>(value: T): Iterable<T> {
-    return [value];
+/// A type that is either iterable or a non-iterable "unit" value.
+export type IterableOrUnit<T> = NonIterable<T> | Iterable<T>;
+
+export function unitToIter<T>(from: T): Iterable<T> {
+    return [from];
 }
 
-export function iterOrUnitToIter<T>(value: IterableOrUnit<T>): Iterable<T> {
-    return value[Symbol.iterator] !== undefined
+export function iterOrUnitToIter<T>(from: IterableOrUnit<T>): Iterable<T> {
+    return from[Symbol.iterator] !== undefined
         // Type safety: we already checked that `target[Symbol.iterator]` is not `undefined`. Through elimination, this
         // means that the right side of the union is the value's actual type.
-        ?  value as Iterable<T>
+        ?  from as Iterable<T>
 
         // Type safety: we already checked that `target[Symbol.iterator]` is `undefined`, meaning that the left side of
         // the union is the value's actual type.
-        : unitToIter(value as IterableUnit<T>);
+        : unitToIter(from as NonIterable<T>);
 }
