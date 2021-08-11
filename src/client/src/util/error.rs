@@ -1,18 +1,82 @@
-//! Helper methods for `std::error::Error`.
+//! Error reporting built of the Rust standard library [Error] trait.
 
 use std::error::Error;
+use std::fmt::{Display, Formatter, Result as FmtResult};
 
-pub type AnyResult<T> = Result<T, Box<dyn Error>>;
+pub type AnyResult<T> = anyhow::Result<T>;
+pub type AnyError = anyhow::Error;
 
-pub trait ResultExt<T, E> {
-    fn unwrap_pretty(self) -> T;
+pub trait ErrorFormatExt {
+	fn format_error(&self, include_backtrace: bool) -> FormattedError<Self>;
 }
 
-impl<T, E: Error> ResultExt<T, E> for Result<T, E> {
-    fn unwrap_pretty(self) -> T {
-        match self {
-            Ok(success) => success,
-            Err(error) => panic!("Unwrapped error: {}", error),
-        }
-    }
+impl<T: ?Sized + Error> ErrorFormatExt for T {
+	fn format_error(&self, include_backtrace: bool) -> FormattedError<Self> {
+		FormattedError {
+			target: self,
+			include_backtrace,
+		}
+	}
+}
+
+pub struct FormattedError<'a, T: ?Sized> {
+	target: &'a T,
+	include_backtrace: bool,
+}
+
+impl<T: ?Sized + Error> Display for FormattedError<'_, T> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		let target = self.target;
+
+		// Write context
+		writeln!(f, "Error: {}", target)?;
+
+		// Write cause chain
+		// (we iterate manually instead of using `anyhow::Chain` because it consumes a `&dyn Error`.
+		{
+			let mut cause_iter = target.source();
+			if cause_iter.is_some() {
+				writeln!(f, "\nCaused by:")?;
+			}
+
+			while let Some(cause) = cause_iter {
+				writeln!(f, "\t {}", cause)?;
+				cause_iter = cause.source();
+			}
+		}
+
+		// Potentially include backtrace
+		if self.include_backtrace {
+			if let Some(backtrace) = target.backtrace() {
+				writeln!(f, "\nBacktrace:")?;
+				writeln!(f, "{}", backtrace)?;
+			}
+		}
+
+		Ok(())
+	}
+}
+
+/// A version of [anyhow::Context] for [Result] only. Supports producing context from an error value.
+pub trait ResultContext<T, E> {
+	fn with_context_proc<C, F>(self, f: F) -> Result<T, AnyError>
+	where
+		C: Display + Send + Sync + 'static,
+		F: FnOnce(&E) -> C;
+}
+
+impl<T, E> ResultContext<T, E> for Result<T, E>
+where
+	E: Error + Send + Sync + 'static,
+{
+	fn with_context_proc<C, F>(self, f: F) -> Result<T, AnyError>
+	where
+		C: Display + Send + Sync + 'static,
+		F: FnOnce(&E) -> C,
+	{
+		self.map_err(|err| {
+			let ctx = f(&err);
+			AnyError::new(err).context(ctx)
+		})
+	}
 }

@@ -1,6 +1,7 @@
-#![allow(dead_code)] // This is a utils folder after all
+#![allow(dead_code)] // Utils folders are bound to have some unused code.
 
 pub mod error;
-pub mod erupt;
-pub use self::erupt::prelude as erupt_prelude;
 pub mod str;
+pub mod vk_util;
+
+pub use vk_util::prelude as vk_prelude;
