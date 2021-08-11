@@ -1,6 +1,5 @@
 [workspace]
 
 members = [
-    "src/lib_tests/ash",
-    "src/lib_tests/vulkano",
+    "src/client",
 ]

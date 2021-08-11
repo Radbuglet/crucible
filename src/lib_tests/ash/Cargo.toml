@@ -1,8 +1,0 @@
-[package]
-name = "ash_libtest"
-version = "0.1.0"
-edition = "2018"
-
-[dependencies]
-ash = "0.32.1"
-memchr = "2.4.0"
