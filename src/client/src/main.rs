@@ -2,7 +2,6 @@
 #![feature(decl_macro)]
 #![feature(never_type)]
 
-use crate::render::gfx::GfxManager;
 use crate::util::error::ErrorFormatExt;
 
 mod render;
@@ -15,6 +14,5 @@ fn main() {
 }
 
 fn main_inner() -> anyhow::Result<!> {
-	let gfx = GfxManager::new()?;
-	gfx.start();
+	todo!()
 }

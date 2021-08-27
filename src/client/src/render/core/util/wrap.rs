@@ -1,14 +1,9 @@
-use crate::util::str::strcmp;
-use prelude::*;
-use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::os::raw::c_char;
+//! Wrappers around Vulkan objects which cache their properties and provide some additional
+//! helper methods.
 
-pub mod prelude {
-	pub use erupt::{
-		utils as vk_ext, vk, DeviceLoader as VkDevice, EntryLoader as VkEntry,
-		InstanceLoader as VkInstance,
-	};
-}
+use crate::render::core::vk_prelude::*;
+use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::hash::Hash;
 
 #[derive(Copy, Clone)]
 pub struct VkVersion {
@@ -52,26 +47,36 @@ impl Display for VkVersion {
 	}
 }
 
-pub fn missing_set<'a, F, A, B>(
-	equals: &'a F,
-	set_a: &'a [A],
-	set_b: &'a [B],
-) -> impl Iterator<Item = &'a A> + 'a
-where
-	F: Fn(&'a A, &'a B) -> bool,
-{
-	set_a
-		.iter()
-		.filter(move |a| set_b.iter().find(move |b| equals(a, b)).is_none())
+pub trait VkHandleWrapper {
+	type Handle: Eq + Hash + Copy;
+
+	fn handle(&self) -> Self::Handle;
 }
 
-pub unsafe fn missing_extensions<'a>(
-	required: &'a [*const c_char],
-	present: &'a [vk::ExtensionProperties],
-) -> impl Iterator<Item = &'a *const c_char> {
-	missing_set::<_, *const c_char, vk::ExtensionProperties>(
-		&|a, b| strcmp(*a, b.extension_name.as_ptr()),
-		required,
-		present,
-	)
+// TODO: These are works-in-progress
+
+#[derive(Debug, Clone)]
+pub struct VkDevice {
+	pub device: vk::Device,
+}
+
+impl VkDevice {}
+
+impl VkHandleWrapper for VkDevice {
+	type Handle = vk::Device;
+
+	fn handle(&self) -> Self::Handle {
+		self.device
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct VkQueue {
+	pub queue: vk::Queue,
+	pub family: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct VkSurface {
+	pub surface: vk::SurfaceKHR,
 }

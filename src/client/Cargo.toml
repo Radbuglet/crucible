@@ -7,7 +7,6 @@ edition = "2018"
 anyhow = "1.0.42"
 cgmath = "0.18.0"
 erupt = "0.19.0"
-legion = "0.4.0"
 memchr = "2.4.0"
 winit = "0.25.0"
 

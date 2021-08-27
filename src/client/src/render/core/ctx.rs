@@ -1,47 +1,33 @@
+use crate::render::core::util::ffi::missing_extensions;
+use crate::render::core::util::wrap::VkVersion;
+use crate::render::core::vk_prelude::*;
 use crate::util::error::{AnyResult, ResultContext};
 use crate::util::str::*;
-use crate::util::vk_prelude::*;
-use crate::util::vk_util::{missing_extensions, VkVersion};
 use anyhow::Context;
-use winit::dpi::LogicalSize;
-use winit::event_loop::EventLoop;
-use winit::window::WindowBuilder;
+use winit::window::Window;
 
-/// The core Vulkan rendering monolith. Implements:
-///
-/// - Instance and device creation
-/// - Graphics queue acquisition and dispatch
-/// - Window management and rendering
-/// - The main loop
-/// - Asset management (shaders, pipelines)
-/// - Object management (allocation, automatic destruction)
-///
-/// Eventually, I'd like to split this up into several smaller resources and make detection logic
-/// less strongly tied to Crucible's requirements. However, designing such abstractions without real
-/// experience with the API is doomed to fail so I'm just going to sweep away all the ugly Vulkan
-/// logic under the `GfxManager` rug.
-pub struct GfxManager {
-	// Vulkan singletons
-	entry: VkEntry,
-	instance: VkInstance,
-	device: VkDevice,
+// TODO: Standardize allocator
+
+/// A fully initialized Vulkan context.
+pub struct VkContext {
+	pub entry: VkEntry,
+	pub instance: VkInstance,
+	pub device: VkDevice,
+	pub physical: vk::PhysicalDevice,
+	pub render_queue: Queue,
+	pub present_queue: Queue,
 }
 
-impl GfxManager {
-	// TODO: This might run into stack size constraints unless we box things.
-	pub fn new() -> AnyResult<Box<Self>> {
-		unsafe {
-			// Create main window.
-			// This will be used to query presentation support.
-			let event_loop = EventLoop::new();
-			let main_window = WindowBuilder::new()
-				.with_title("Crucible")
-				.with_inner_size(LogicalSize::new(1920, 1080))
-				.with_resizable(false)
-				.with_visible(false)
-				.build(&event_loop)
-				.context("Failed to create main window.")?;
+/// A Vulkan queue with its owning family index.
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct Queue {
+	pub queue: vk::Queue,
+	pub family: u32,
+}
 
+impl VkContext {
+	pub fn new(main_window: &Window) -> AnyResult<(Box<Self>, vk::SurfaceKHR)> {
+		unsafe {
 			// Load entry
 			let entry = VkEntry::new().context("Failed to fetch Vulkan loader.")?;
 
@@ -61,7 +47,7 @@ impl GfxManager {
 				// anyways and we don't want to duplicate work in the fast path.
 				let mut mandatory_exts = vec![vk::KHR_SURFACE_EXTENSION_NAME];
 				mandatory_exts.append(
-					&mut vk_ext::surface::enumerate_required_extensions(&main_window)
+					&mut vk_ext::surface::enumerate_required_extensions(main_window)
 						.result()
 						.context("Failed to fetch required surface creation extensions.")?,
 				);
@@ -130,12 +116,12 @@ impl GfxManager {
 
 			// Create main window's surface
 			// We need to do this here to allow us to query for specific physical device capabilities.
-			let surface = vk_ext::surface::create_surface(&instance, &main_window, None)
+			let surface = vk_ext::surface::create_surface(&instance, main_window, None)
 				.result()
 				.context("Failed to create surface (OOM?)")?;
 
 			// Find a suitable Vulkan implementation.
-			struct PhysicalInfo {
+			struct PhysicalCandidate {
 				physical: vk::PhysicalDevice,
 				props: vk::PhysicalDeviceProperties,
 				score: u32,
@@ -143,10 +129,14 @@ impl GfxManager {
 				present_queue_family: u32,
 			}
 
-			let physical = {
-				// Collect mandatory extensions.
-				let mandatory_exts = vec![];
+			impl PhysicalCandidate {
+				pub fn is_uniform(&self) -> bool {
+					self.render_queue_family == self.present_queue_family
+				}
+			}
 
+			let mandatory_exts = vec![];
+			let physical = {
 				// Filter all candidate implementations and annotate them with creation info.
 				let mut candidates = Vec::new();
 
@@ -258,7 +248,7 @@ impl GfxManager {
 						score
 					);
 
-					candidates.push(PhysicalInfo {
+					candidates.push(PhysicalCandidate {
 						physical,
 						props,
 						score,
@@ -282,148 +272,72 @@ impl GfxManager {
 				selected
 			};
 
-			// // Create swapchain
-			// let (swapchain, swapchain_images) = {
-			// 	// Identify valid usage
-			// 	let surface_tex_fmt = instance
-			// 		.get_physical_device_surface_formats_khr(physical, surface, None)
-			// 		.result()?[0];
-			//
-			// 	println!(
-			// 		"Using swapchain image configuration: {:?} in colorspace {:?}.",
-			// 		surface_tex_fmt.format, surface_tex_fmt.color_space
-			// 	);
-			//
-			// 	let surface_caps = instance
-			// 		.get_physical_device_surface_capabilities_khr(physical, surface)
-			// 		.result()?;
-			//
-			// 	let extent = surface_caps.current_extent;
-			// 	if extent.width == u32::MAX && extent.height == u32::MAX {
-			// 		panic!("Special value thingy"); // TODO: What?
-			// 	}
-			//
-			// 	println!("Current extent: {:?}", extent);
-			//
-			// 	let present_mode = instance
-			// 		.get_physical_device_surface_present_modes_khr(physical, surface, None)
-			// 		.result()?[0];
-			//
-			// 	println!("Present mode: {:?}", present_mode);
-			//
-			// 	let min_image_count = match present_mode {
-			// 		vk::PresentModeKHR::SHARED_DEMAND_REFRESH_KHR
-			// 		| vk::PresentModeKHR::SHARED_CONTINUOUS_REFRESH_KHR => 1,
-			// 		_ => surface_caps.min_image_count,
-			// 	};
-			//
-			// 	// Create swapchain
-			// 	let swapchain = device
-			// 		.create_swapchain_khr(
-			// 			&vk::SwapchainCreateInfoKHRBuilder::new()
-			// 				.surface(surface)
-			// 				.min_image_count(min_image_count)
-			// 				.image_format(surface_tex_fmt.format)
-			// 				.image_color_space(surface_tex_fmt.color_space)
-			// 				.image_extent(extent)
-			// 				.image_array_layers(1)
-			// 				.image_usage(vk::ImageUsageFlags::default())
-			// 				.image_sharing_mode(vk::SharingMode::EXCLUSIVE)
-			// 				.pre_transform(surface_caps.current_transform)
-			// 				.composite_alpha(vk::CompositeAlphaFlagBitsKHR::OPAQUE_KHR) // FIXME
-			// 				.present_mode(present_mode),
-			// 			None,
-			// 		)
-			// 		.result()?;
-			//
-			// 	// Collect images
-			// 	let images = device.get_swapchain_images_khr(swapchain, None).result()?;
-			//
-			// 	// Pack
-			// 	(swapchain, images)
-			// };
-			//
-			// // Transition swapchain image formats
-			// {
-			// 	let pool = device
-			// 		.create_command_pool(
-			// 			&vk::CommandPoolCreateInfoBuilder::new()
-			// 				.queue_family_index(present_queue_family),
-			// 			None,
-			// 		)
-			// 		.result()?;
-			//
-			// 	let command = device
-			// 		.allocate_command_buffers(
-			// 			&vk::CommandBufferAllocateInfoBuilder::new()
-			// 				.level(vk::CommandBufferLevel::PRIMARY)
-			// 				.command_pool(pool)
-			// 				.command_buffer_count(1),
-			// 		)
-			// 		.result()?[0];
-			//
-			// 	device
-			// 		.begin_command_buffer(command, &vk::CommandBufferBeginInfoBuilder::new())
-			// 		.result()?;
-			//
-			// 	for image in &swapchain_images {
-			// 		device.cmd_pipeline_barrier(
-			// 			command,
-			// 			/* source */ vk::PipelineStageFlags::TOP_OF_PIPE,
-			// 			/* dest   */ vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-			// 			/* flags  */ None,
-			// 			/* memory */ &[],
-			// 			/* buffer */ &[],
-			// 			/* image  */
-			// 			&[vk::ImageMemoryBarrierBuilder::new()
-			// 				.src_access_mask(vk::AccessFlags::MEMORY_READ) // TODO: What?
-			// 				.dst_access_mask(vk::AccessFlags::MEMORY_READ)
-			// 				.old_layout(vk::ImageLayout::UNDEFINED)
-			// 				.new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-			// 				.src_queue_family_index(present_queue_family)
-			// 				.dst_queue_family_index(present_queue_family)
-			// 				.image(*image)
-			// 				.subresource_range(
-			// 					vk::ImageSubresourceRangeBuilder::new()
-			// 						.aspect_mask(vk::ImageAspectFlags::COLOR)
-			// 						.base_mip_level(0)
-			// 						.level_count(vk::REMAINING_MIP_LEVELS)
-			// 						.base_array_layer(0)
-			// 						.layer_count(vk::REMAINING_ARRAY_LAYERS)
-			// 						.build(),
-			// 				)],
-			// 		);
-			// 	}
-			//
-			// 	device.end_command_buffer(command).result()?;
-			// 	device
-			// 		.queue_submit(
-			// 			present_queue,
-			// 			&[vk::SubmitInfoBuilder::new().command_buffers(&[command])],
-			// 			None,
-			// 		)
-			// 		.result()?;
-			// 	device.queue_wait_idle(present_queue).result()?;
-			// 	device.destroy_command_pool(Some(pool), None);
-			// }
-			//
-			// // Create present semaphores
-			// let image_ready = device
-			// 	.create_semaphore(&vk::SemaphoreCreateInfoBuilder::new(), None)
-			// 	.result()?;
-			//
-			// // Finish
-			// Ok(Box::new(Self {
-			// 	entry,
-			// 	instance,
-			// 	device,
-			// }))
+			// Create device and its queues
+			let (device, render_queue, present_queue) = {
+				// Collect queue create infos
+				let queue_create_infos = if physical.is_uniform() {
+					vec![vk::DeviceQueueCreateInfoBuilder::new()
+						.queue_family_index(physical.render_queue_family)
+						.queue_priorities(&[1.0])]
+				} else {
+					vec![
+						vk::DeviceQueueCreateInfoBuilder::new()
+							.queue_family_index(physical.render_queue_family)
+							.queue_priorities(&[1.0]),
+						vk::DeviceQueueCreateInfoBuilder::new()
+							.queue_family_index(physical.present_queue_family)
+							.queue_priorities(&[1.0]),
+					]
+				};
 
-			todo!()
+				// Create the device
+				let device = VkDevice::new(
+					&instance,
+					physical.physical,
+					&vk::DeviceCreateInfoBuilder::new()
+						.enabled_extension_names(&mandatory_exts)
+						.queue_create_infos(&queue_create_infos),
+					None,
+				)
+				.context("Failed to create logical device (OOM?)")?;
+
+				// Collect and wrap queues
+				let (render_queue, present_queue) = if physical.is_uniform() {
+					let queue = device.get_device_queue(physical.render_queue_family, 0);
+					(queue, queue)
+				} else {
+					(
+						device.get_device_queue(physical.render_queue_family, 0),
+						device.get_device_queue(physical.present_queue_family, 0),
+					)
+				};
+
+				// Return
+				(
+					device,
+					Queue {
+						queue: render_queue,
+						family: physical.render_queue_family,
+					},
+					Queue {
+						queue: present_queue,
+						family: physical.present_queue_family,
+					},
+				)
+			};
+
+			// Construct DeviceManager
+			Ok((
+				Box::new(Self {
+					entry,
+					instance,
+					device,
+					physical: physical.physical,
+					render_queue,
+					present_queue,
+				}),
+				surface,
+			))
 		}
-	}
-
-	pub fn start(self) -> ! {
-		todo!()
 	}
 }
