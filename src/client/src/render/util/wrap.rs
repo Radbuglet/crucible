@@ -1,7 +1,8 @@
 //! Wrappers around Vulkan objects which cache their properties and provide some additional
 //! helper methods.
 
-use crate::render::core::vk_prelude::*;
+use crate::render::core::VkContext;
+use crate::render::vk_prelude::*;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::hash::Hash;
 
@@ -53,30 +54,58 @@ pub trait VkHandleWrapper {
 	fn handle(&self) -> Self::Handle;
 }
 
-// TODO: These are works-in-progress
-
-#[derive(Debug, Clone)]
-pub struct VkDevice {
-	pub device: vk::Device,
-}
-
-impl VkDevice {}
-
-impl VkHandleWrapper for VkDevice {
-	type Handle = vk::Device;
-
-	fn handle(&self) -> Self::Handle {
-		self.device
-	}
-}
-
 #[derive(Debug, Clone)]
 pub struct VkQueue {
 	pub queue: vk::Queue,
 	pub family: u32,
 }
 
+impl VkHandleWrapper for VkQueue {
+	type Handle = vk::Queue;
+
+	fn handle(&self) -> Self::Handle {
+		self.queue
+	}
+}
+
 #[derive(Debug, Clone)]
 pub struct VkSurface {
 	pub surface: vk::SurfaceKHR,
+	pub caps: vk::SurfaceCapabilitiesKHR,
+	pub present_modes: Vec<vk::PresentModeKHR>,
+	pub formats: Vec<vk::SurfaceFormatKHR>,
+}
+
+impl VkSurface {
+	pub unsafe fn new(cx: &VkContext, surface: vk::SurfaceKHR) -> anyhow::Result<Self> {
+		let caps = cx
+			.instance
+			.get_physical_device_surface_capabilities_khr(cx.physical, surface)
+			.result()?;
+
+		let present_modes = cx
+			.instance
+			.get_physical_device_surface_present_modes_khr(cx.physical, surface, None)
+			.result()?;
+
+		let formats = cx
+			.instance
+			.get_physical_device_surface_formats_khr(cx.physical, surface, None)
+			.result()?;
+
+		Ok(Self {
+			surface,
+			caps,
+			present_modes,
+			formats,
+		})
+	}
+}
+
+impl VkHandleWrapper for VkSurface {
+	type Handle = vk::SurfaceKHR;
+
+	fn handle(&self) -> Self::Handle {
+		self.surface
+	}
 }

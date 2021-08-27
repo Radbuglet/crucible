@@ -5,3 +5,6 @@ target/
 # IDEs
 .idea/
 *.iml
+
+# MacOS
+.DS_Store

@@ -1,6 +1,6 @@
-use crate::render::core::util::ffi::missing_extensions;
-use crate::render::core::util::wrap::VkVersion;
-use crate::render::core::vk_prelude::*;
+use crate::render::util::ffi::missing_extensions;
+use crate::render::util::wrap::{VkQueue, VkVersion};
+use crate::render::vk_prelude::*;
 use crate::util::error::{AnyResult, ResultContext};
 use crate::util::str::*;
 use anyhow::Context;
@@ -14,15 +14,8 @@ pub struct VkContext {
 	pub instance: VkInstance,
 	pub device: VkDevice,
 	pub physical: vk::PhysicalDevice,
-	pub render_queue: Queue,
-	pub present_queue: Queue,
-}
-
-/// A Vulkan queue with its owning family index.
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct Queue {
-	pub queue: vk::Queue,
-	pub family: u32,
+	pub render_queue: VkQueue,
+	pub present_queue: VkQueue,
 }
 
 impl VkContext {
@@ -135,7 +128,7 @@ impl VkContext {
 				}
 			}
 
-			let mandatory_exts = vec![];
+			let mandatory_exts = vec![vk::KHR_SWAPCHAIN_EXTENSION_NAME];
 			let physical = {
 				// Filter all candidate implementations and annotate them with creation info.
 				let mut candidates = Vec::new();
@@ -315,11 +308,11 @@ impl VkContext {
 				// Return
 				(
 					device,
-					Queue {
+					VkQueue {
 						queue: render_queue,
 						family: physical.render_queue_family,
 					},
-					Queue {
+					VkQueue {
 						queue: present_queue,
 						family: physical.present_queue_family,
 					},

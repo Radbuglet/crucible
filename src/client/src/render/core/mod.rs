@@ -1,5 +1,4 @@
-pub mod util;
-pub use util::prelude as vk_prelude;
+// TODO: Object cleanup
 
 mod ctx;
 pub use ctx::*;

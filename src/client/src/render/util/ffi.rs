@@ -1,6 +1,9 @@
-use crate::render::core::vk_prelude::*;
+use crate::render::vk_prelude::*;
 use crate::util::str::strcmp;
+use cgmath::Vector2;
 use std::os::raw::c_char;
+
+pub const UNSPECIFIED_CURRENT_EXTENT: Vector2<u32> = Vector2::new(u32::MAX, u32::MAX);
 
 pub fn missing_set<'a, F, A, B>(
 	equals: &'a F,
