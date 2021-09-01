@@ -1,5 +1,7 @@
-#version 140
+#version 450
+
+layout(location = 0) out vec4 a_color;
 
 void main() {
-
+    a_color = vec4(1.0, 1.0, 0.1, 1.0);
 }

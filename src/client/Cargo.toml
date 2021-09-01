@@ -6,11 +6,10 @@ edition = "2018"
 [dependencies]
 anyhow = "1.0.42"
 cgmath = "0.18.0"
-erupt = "0.19.0"
-memchr = "2.4.0"
+futures = "0.3.17"
+wgpu = { version = "0.10.1", features = ["spirv"] }
 winit = "0.25.0"
 
 [build-dependencies]
 glob = "0.3.0"
 shaderc = "0.7.2"
-winit = "0.25.0"
