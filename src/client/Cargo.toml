@@ -6,7 +6,9 @@ edition = "2018"
 [dependencies]
 anyhow = "1.0.42"
 cgmath = "0.18.0"
+core = { path = "../core" }
 futures = "0.3.17"
+hecs = "0.6.4"
 wgpu = { version = "0.10.1", features = ["spirv"] }
 winit = "0.25.0"
 

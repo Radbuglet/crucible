@@ -3,5 +3,5 @@
 resolver = "2"
 members = [
     "src/client",
-    "src/soap",
+    "src/core",
 ]
