@@ -12,6 +12,14 @@ impl Bitmask64 {
 		Bitmask64(1u64 << bit)
 	}
 
+	fn has_zero(&self) -> bool {
+		*self != Self::FULL
+	}
+
+	fn has_one(&self) -> bool {
+		*self != Self::EMPTY
+	}
+
 	pub fn add(&mut self, other: Self) {
 		*self &= other;
 	}
@@ -21,13 +29,21 @@ impl Bitmask64 {
 	}
 
 	pub fn reserve_flag(&mut self) -> Option<usize> {
-		if *self == Bitmask64::FULL {
+		if self.has_one() {
 			let index = self.0.leading_ones() as usize;
 			self.add(Self::one_hot(index));
 			Some(index)
 		} else {
 			None
 		}
+	}
+
+	pub fn iter_zeros(&self) -> Bitmask64BitIter {
+		Bitmask64BitIter::new(!*self)
+	}
+
+	pub fn iter_ones(&self) -> Bitmask64BitIter {
+		Bitmask64BitIter::new(*self)
 	}
 
 	pub fn contains(&self, other: &Self) -> bool {
@@ -54,5 +70,30 @@ impl Not for Bitmask64 {
 
 	fn not(self) -> Self::Output {
 		Self(!self.0)
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct Bitmask64BitIter {
+	curr: Bitmask64,
+}
+
+impl Bitmask64BitIter {
+	pub fn new(mask: Bitmask64) -> Self {
+		Self { curr: mask }
+	}
+}
+
+impl Iterator for Bitmask64BitIter {
+	type Item = usize;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if self.curr.has_one() {
+			let next_one = self.curr.0.leading_zeros() as usize;
+			self.curr.remove(Bitmask64::one_hot(next_one));
+			Some(next_one)
+		} else {
+			None
+		}
 	}
 }

@@ -206,6 +206,4 @@ macro impl_tup($($ty:ident:$field:tt),*) {
 	}
 }
 
-// The unit tuple is purposefully excluded to simplify the macro. "(A)" is treated as "A" and requires
-// a trailing comma in e.g. "(A,)" to fix this behavior. However, "(,)" is invalid syntax.
 impl_tuples!(impl_tup);
