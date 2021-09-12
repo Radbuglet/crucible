@@ -1,14 +1,22 @@
+use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::hash::Hash;
-use std::ops::{BitAnd, BitAndAssign, Not};
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Not};
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Bitmask64(pub u64);
+
+impl Debug for Bitmask64 {
+	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		write!(f, "Bitmask64({:#064b})", self.0)
+	}
+}
 
 impl Bitmask64 {
 	pub const EMPTY: Self = Self(u64::MIN);
 	pub const FULL: Self = Self(u64::MAX);
 
 	pub fn one_hot(bit: usize) -> Self {
+		debug_assert!(bit < 64);
 		Bitmask64(1u64 << bit)
 	}
 
@@ -20,8 +28,12 @@ impl Bitmask64 {
 		*self != Self::EMPTY
 	}
 
+	pub fn is_set(&self, index: usize) -> bool {
+		(*self & Self::one_hot(index)).has_one()
+	}
+
 	pub fn add(&mut self, other: Self) {
-		*self &= other;
+		*self |= other;
 	}
 
 	pub fn remove(&mut self, other: Self) {
@@ -29,8 +41,8 @@ impl Bitmask64 {
 	}
 
 	pub fn reserve_flag(&mut self) -> Option<usize> {
-		if self.has_one() {
-			let index = self.0.leading_ones() as usize;
+		if self.has_zero() {
+			let index = self.0.trailing_ones() as usize;
 			self.add(Self::one_hot(index));
 			Some(index)
 		} else {
@@ -65,6 +77,20 @@ impl BitAndAssign for Bitmask64 {
 	}
 }
 
+impl BitOr for Bitmask64 {
+	type Output = Self;
+
+	fn bitor(self, rhs: Self) -> Self::Output {
+		Self(self.0 | rhs.0)
+	}
+}
+
+impl BitOrAssign for Bitmask64 {
+	fn bitor_assign(&mut self, rhs: Self) {
+		self.0 |= rhs.0;
+	}
+}
+
 impl Not for Bitmask64 {
 	type Output = Self;
 
@@ -89,7 +115,7 @@ impl Iterator for Bitmask64BitIter {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		if self.curr.has_one() {
-			let next_one = self.curr.0.leading_zeros() as usize;
+			let next_one = self.curr.0.trailing_zeros() as usize;
 			self.curr.remove(Bitmask64::one_hot(next_one));
 			Some(next_one)
 		} else {
