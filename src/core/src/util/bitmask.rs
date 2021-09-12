@@ -20,16 +20,24 @@ impl Bitmask64 {
 		Bitmask64(1u64 << bit)
 	}
 
-	fn has_zero(&self) -> bool {
-		*self != Self::FULL
+	pub fn is_empty(self) -> bool {
+		self == Self::EMPTY
 	}
 
-	fn has_one(&self) -> bool {
-		*self != Self::EMPTY
+	pub fn is_full(self) -> bool {
+		self == Self::FULL
 	}
 
-	pub fn is_set(&self, index: usize) -> bool {
-		(*self & Self::one_hot(index)).has_one()
+	fn has_zero(self) -> bool {
+		self != Self::FULL
+	}
+
+	fn has_one(self) -> bool {
+		self != Self::EMPTY
+	}
+
+	pub fn is_set(self, index: usize) -> bool {
+		(self & Self::one_hot(index)).has_one()
 	}
 
 	pub fn add(&mut self, other: Self) {
@@ -50,16 +58,20 @@ impl Bitmask64 {
 		}
 	}
 
-	pub fn iter_zeros(&self) -> Bitmask64BitIter {
-		Bitmask64BitIter::new(!*self)
+	pub fn contains(self, other: Self) -> bool {
+		(self & other).has_one()
 	}
 
-	pub fn iter_ones(&self) -> Bitmask64BitIter {
-		Bitmask64BitIter::new(*self)
+	pub fn is_superset_of(self, other: Self) -> bool {
+		self & other == other
 	}
 
-	pub fn contains(&self, other: &Self) -> bool {
-		self.0 & other.0 == other.0
+	pub fn iter_zeros(self) -> Bitmask64BitIter {
+		Bitmask64BitIter::new(!self)
+	}
+
+	pub fn iter_ones(self) -> Bitmask64BitIter {
+		Bitmask64BitIter::new(self)
 	}
 }
 

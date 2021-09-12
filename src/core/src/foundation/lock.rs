@@ -6,6 +6,7 @@ use crate::util::bitmask::Bitmask64;
 use crate::util::tuple::impl_tuples;
 use log::trace;
 use std::cell::UnsafeCell;
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -17,6 +18,8 @@ pub use self::internals::RwLockManager;
 
 #[doc(hidden)]
 pub use self::internals::RwMask;
+use crate::util::error::ResultExt;
+use std::error::Error;
 
 mod internals {
 	use crate::foundation::event::{EventPusher, EventPusherPoll};
@@ -139,7 +142,9 @@ mod internals {
 			// Cancel dependent requests
 			let removed = Bitmask64::one_hot(lock);
 			self.poll_locks_common(
-				&|req| req.deps.read.contains(&removed) || req.deps.write.contains(&removed),
+				&|req| {
+					req.deps.read.is_superset_of(removed) || req.deps.write.is_superset_of(removed)
+				},
 				RemoveWhereMode::Destroy,
 				ev_wakeup,
 			);
@@ -149,7 +154,7 @@ mod internals {
 
 		/// Returns whether we can acquire an entire set of locks atomically.
 		pub fn can_lock_mask(&self, mask: RwMask) -> bool {
-			self.available_locks.contains(&mask)
+			self.available_locks.is_superset_of(&mask)
 		}
 
 		/// Acquires a set of locks atomically, panicking in debug builds if any of the locks cannot
@@ -251,7 +256,7 @@ mod internals {
 		) {
 			let available_locks = self.available_locks;
 			self.poll_locks_common(
-				&|request| available_locks.contains(&request.deps),
+				&|request| available_locks.is_superset_of(&request.deps),
 				RemoveWhereMode::Finish,
 				ev_wakeup,
 			)
@@ -385,8 +390,33 @@ mod internals {
 			write: Bitmask64::FULL,
 		};
 
-		pub fn contains(&self, other: &Self) -> bool {
-			self.read.contains(&other.read) && self.write.contains(&other.write)
+		pub fn is_superset_of(&self, other: &Self) -> bool {
+			self.read.is_superset_of(other.read) && self.write.is_superset_of(other.write)
+		}
+
+		pub fn is_valid(&self) -> bool {
+			(self.read & self.write).is_empty()
+		}
+
+		pub fn checked_merge<I: IntoIterator<Item = Self>>(iter: I) -> Option<Self> {
+			let mut accum = Self::EMPTY;
+
+			for comp in iter {
+				// Ensure that we don't mutably borrow the same lock twice
+				if accum.write.contains(comp.write) {
+					return None;
+				}
+
+				accum |= comp;
+			}
+
+			// Ensure that the resulting mask doesn't mutably and immutably borrow a lock
+			// simultaneously.
+			if !accum.is_valid() {
+				return None;
+			}
+
+			Some(accum)
 		}
 	}
 
@@ -417,6 +447,28 @@ mod internals {
 
 // === Lock targets === //
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum MaskBuildError {
+	RwAliasing,
+	NonUniqueManager,
+}
+
+impl Error for MaskBuildError {}
+
+impl Display for MaskBuildError {
+	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		match self {
+			MaskBuildError::RwAliasing => write!(
+				f,
+				"cannot acquire a lock both mutably and immutably in the same target"
+			),
+			MaskBuildError::NonUniqueManager => {
+				write!(f, "lock targets must share the same RwLockManager")
+			}
+		}
+	}
+}
+
 #[doc(hidden)]
 pub unsafe trait LockTarget: Clone {
 	#[rustfmt::skip]  // rustfmt makes an ugly mess of GAT bounds.
@@ -433,9 +485,8 @@ pub unsafe trait LockTarget: Clone {
 	where
 		Self: 'l;
 
-	fn validate(&self);
 	fn manager(&self) -> &RwLockManager;
-	fn mask(&self) -> RwMask;
+	fn mask(&self) -> Result<RwMask, MaskBuildError>;
 }
 
 pub struct RwRef<'a, T: ?Sized>(pub &'a RwLock<T>);
@@ -468,19 +519,16 @@ unsafe impl<'a, T: ?Sized> LockTarget for RwRef<'a, T> {
 		&*self.0.value.get()
 	}
 
-	fn validate(&self) {
-		// No-op: single locks are always valid.
-	}
-
 	fn manager(&self) -> &RwLockManager {
 		&self.0.manager
 	}
 
-	fn mask(&self) -> RwMask {
-		RwMask {
+	fn mask(&self) -> Result<RwMask, MaskBuildError> {
+		// No need to validate this mask. It is guaranteed to be valid.
+		Ok(RwMask {
 			read: Bitmask64::one_hot(self.0.index),
 			write: Bitmask64::EMPTY,
-		}
+		})
 	}
 }
 
@@ -514,19 +562,16 @@ unsafe impl<'a, T: ?Sized> LockTarget for RwMut<'a, T> {
 		&mut *self.0.value.get()
 	}
 
-	fn validate(&self) {
-		// No-op: single locks are always valid.
-	}
-
 	fn manager(&self) -> &RwLockManager {
 		&self.0.manager
 	}
 
-	fn mask(&self) -> RwMask {
-		RwMask {
+	fn mask(&self) -> Result<RwMask, MaskBuildError> {
+		// No need to validate this mask. It is guaranteed to be valid.
+		Ok(RwMask {
 			read: Bitmask64::EMPTY,
 			write: Bitmask64::one_hot(self.0.index),
-		}
+		})
 	}
 }
 
@@ -543,20 +588,19 @@ macro impl_lock_target_tup($($ty:ident:$field:tt),*) {
 			($(self.$field.get_mut(),)*)
 		}
 
-		fn validate(&self) {
-			if $(self.0.manager() != self.$field.manager() ||)* false {
-				panic!("Locks within an atomic lock guard must share the same manager!");
-			}
-
-			// FIXME: Check for local lock collisions (this impacts soundness!!)
-		}
-
 		fn manager(&self) -> &RwLockManager {
 			self.0.manager()
 		}
 
-		fn mask(&self) -> RwMask {
-			$(self.$field.mask() | )* RwMask::EMPTY
+		fn mask(&self) -> Result<RwMask, MaskBuildError> {
+			// Validate managers
+			if $(self.0.manager() != self.$field.manager() ||)* false {
+				return Err(MaskBuildError::NonUniqueManager);
+			}
+
+			// Build mask, checking if it is valid.
+			RwMask::checked_merge([$(self.$field.mask()?,)*].iter().copied())
+				.ok_or(MaskBuildError::RwAliasing)
 		}
 	}
 }
@@ -641,8 +685,6 @@ enum FutureState {
 
 impl<T: LockTarget> RwLockFuture<T> {
 	pub fn new(targets: T) -> Self {
-		targets.validate();
-
 		Self {
 			state: FutureState::Idle,
 			targets,
@@ -659,7 +701,8 @@ impl<T: LockTarget> Future for RwLockFuture<T> {
 		match &self.state {
 			FutureState::Idle => {
 				let mut manager = self.targets.manager().inner();
-				let mask = self.targets.mask();
+				let mask = self.targets.mask().unwrap_pretty();
+
 				if manager.try_lock_mask(mask) {
 					drop(manager);
 					self.state = FutureState::Done;
@@ -728,9 +771,7 @@ impl<T: LockTarget> RwGuard<T> {
 	}
 
 	pub fn try_lock_now(targets: T) -> Option<Self> {
-		targets.validate();
-
-		let mask = targets.mask();
+		let mask = targets.mask().unwrap_pretty();
 		if targets.manager().inner().try_lock_mask(mask) {
 			Some(Self { mask, targets })
 		} else {

@@ -32,13 +32,15 @@ fn main() {
 				.await
 				.unwrap();
 
+			drop(guard_2);
+
 			println!("Guard 2 done. Waiting for guard 3...");
-			let guard_3 = RwGuard::lock_async((RwRef(&name), RwRef(&age)))
+			let guard_3 = RwGuard::lock_async((RwMut(&name), RwMut(&age)))
 				.await
 				.unwrap();
 
 			println!("Ready!");
-			println!("Name: {}", guard_2.get().0);
+			println!("Name: {}", guard_3.get().0);
 			println!("Age: {}", guard_3.get().1);
 		}
 	})
