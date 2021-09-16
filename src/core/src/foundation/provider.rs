@@ -1,7 +1,5 @@
-// TODO: Support nested providers
-// TODO: Support deferred init
-
 use crate::util::tuple::impl_tuples;
+use once_cell::sync::OnceCell;
 use std::any::{type_name, TypeId};
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
@@ -10,7 +8,7 @@ use std::ptr::NonNull;
 // === Core provider mechanisms === //
 
 pub trait Provider {
-	fn provide_raw<'comp>(&'comp self, out: CompOut<'_, 'comp>);
+	fn provide_raw<'comp>(&'comp self, out: &mut CompOut<'_, 'comp>);
 }
 
 #[repr(C)]
@@ -115,19 +113,6 @@ impl<'target, 'comp> CompOut<'target, 'comp> {
 	}
 
 	pub fn try_provide<T: ?Sized + 'static>(&mut self, comp: &'comp T) -> bool {
-		if self.is_written() {
-			return true;
-		}
-
-		if let Some(target) = self.target_mut::<T>() {
-			target.set(comp);
-			true
-		} else {
-			false
-		}
-	}
-
-	pub fn try_write<T: ?Sized + 'static>(&mut self, comp: &'comp T) -> bool {
 		if let Some(target) = self.target_mut::<T>() {
 			target.set(comp);
 			true
@@ -136,6 +121,30 @@ impl<'target, 'comp> CompOut<'target, 'comp> {
 		}
 	}
 }
+
+// This function is used so that we can ensure that `provider` implements [Provider].
+#[doc(hidden)]
+pub fn forward_macro_util<'comp, T: 'comp + ?Sized + Provider>(
+	out: &mut CompOut<'_, 'comp>,
+	provider: &'comp T,
+) {
+	provider.provide_raw(out)
+}
+
+pub macro try_provide($out:expr, $value:expr) {{
+	let out: &mut CompOut<'_, '_> = $out;
+	if out.try_provide($value) {
+		return;
+	}
+}}
+
+pub macro try_forward($out:expr, $handler:expr) {{
+	let out: &mut CompOut<'_, '_> = $out;
+	forward_macro_util(out, $handler);
+	if $out.is_written() {
+		return;
+	}
+}}
 
 // === Extension API === //
 
@@ -150,7 +159,7 @@ pub trait ProviderExt {
 impl<Target: ?Sized + Provider> ProviderExt for Target {
 	fn try_get<T: ?Sized + 'static>(&self) -> Option<&T> {
 		let mut out = CompOutTarget::<T>::new();
-		self.provide_raw(out.writer());
+		self.provide_raw(&mut out.writer());
 		out.get()
 	}
 
@@ -184,13 +193,25 @@ pub trait ProviderGetter<'obj>: Sized {
 	fn get<T: ?Sized + Provider>(obj: &'obj T) -> Self;
 }
 
-// === Tuple derivation === //
+// === Standard static providers === //
+
+#[derive(Default)]
+pub struct Component<T: ?Sized>(pub T);
+
+impl<T: ?Sized + 'static> Provider for Component<T> {
+	fn provide_raw<'comp>(&'comp self, out: &mut CompOut<'_, 'comp>) {
+		out.try_provide(&self.0);
+	}
+}
+
+#[derive(Default)]
+pub struct MultiProvider<T>(pub T);
 
 macro impl_tup($($ty:ident:$field:tt),*) {
 	#[allow(unused)]  // in case "out" goes unused
-	impl<$($ty: Sized + 'static),*> Provider for ($($ty,)*) {
-		fn provide_raw<'comp>(&'comp self, mut out: CompOut<'_, 'comp>) {
-			let _ = $(out.try_provide::<$ty>(&self.$field) ||)* false;
+	impl<$($ty: Provider),*> Provider for MultiProvider<($($ty,)*)> {
+		fn provide_raw<'comp>(&'comp self, out: &mut CompOut<'_, 'comp>) {
+			$(try_forward!(out, &self.0.$field);)*
 		}
 	}
 
@@ -207,3 +228,88 @@ macro impl_tup($($ty:ident:$field:tt),*) {
 }
 
 impl_tuples!(impl_tup);
+
+// === Lazy components === //
+
+pub trait LazyProviderExt {
+	fn try_init<T: 'static>(&self, value: T) -> bool;
+
+	fn init<T: 'static>(&self, value: T) {
+		let success = self.try_init(value);
+		assert!(
+			success,
+			"Cannot initialize {}: already initialized.",
+			type_name::<T>()
+		);
+	}
+
+	fn get_or_init<T: 'static, F: FnOnce() -> T>(&self, init: F) -> &T;
+}
+
+impl<Target: ?Sized + Provider> LazyProviderExt for Target {
+	fn try_init<T: 'static>(&self, value: T) -> bool {
+		self.get::<LazyComponent<T>>().try_init(value)
+	}
+
+	fn get_or_init<T: 'static, F: FnOnce() -> T>(&self, init: F) -> &T {
+		self.get::<LazyComponent<T>>().get_or_init(init)
+	}
+}
+
+pub struct LazyComponent<T> {
+	value: OnceCell<T>,
+}
+
+impl<T> Default for LazyComponent<T> {
+	fn default() -> Self {
+		Self {
+			value: OnceCell::new(),
+		}
+	}
+}
+
+impl<T> LazyComponent<T> {
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	pub fn try_init(&self, value: T) -> bool {
+		self.value.try_insert(value).is_ok()
+	}
+
+	pub fn init(&self, value: T) {
+		let success = self.try_init(value);
+		assert!(
+			success,
+			"Failed to initialize {}: value already initialized",
+			type_name::<Self>()
+		);
+	}
+
+	pub fn try_get(&self) -> Option<&T> {
+		self.value.get()
+	}
+
+	pub fn get(&self) -> &T {
+		self.try_get().unwrap()
+	}
+
+	pub fn get_or_init<F>(&self, init: F) -> &T
+	where
+		F: FnOnce() -> T,
+	{
+		self.value.get_or_try_init::<_, !>(|| Ok(init())).unwrap()
+	}
+}
+
+impl<T: 'static> Provider for LazyComponent<T> {
+	fn provide_raw<'comp>(&'comp self, out: &mut CompOut<'_, 'comp>) {
+		// Write lazy wrapper for init
+		try_provide!(out, self);
+
+		// Write inner value if available
+		if let Some(inner) = self.value.get() {
+			try_provide!(out, inner);
+		}
+	}
+}

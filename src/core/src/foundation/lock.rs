@@ -24,6 +24,7 @@ use std::error::Error;
 mod internals {
 	use crate::foundation::event::{EventPusher, EventPusherPoll};
 	use crate::util::bitmask::Bitmask64;
+	use crate::util::meta_enum::{enum_meta, EnumMeta, EnumMetaDiscriminantExt};
 	use log::trace;
 	use std::cell::UnsafeCell;
 	use std::ops::{BitOr, BitOrAssign, Deref, DerefMut};
@@ -127,8 +128,8 @@ mod internals {
 
 		/// Destroys a lock immediately, cancelling all requesting involving that lock. We push
 		/// requests to wake up the relevant requests to the provided [EventPusher] so that user code
-		/// can be invoked strictly after the [LockManagerInner] mutex has been released so as to avoid
-		/// deadlocks.
+		/// can be invoked after the [LockManagerInner] mutex has been released so as to avoid
+		/// deadlocks in the futures.
 		pub fn del_lock(
 			&mut self,
 			lock: usize,
@@ -154,6 +155,7 @@ mod internals {
 
 		/// Returns whether we can acquire an entire set of locks atomically.
 		pub fn can_lock_mask(&self, mask: RwMask) -> bool {
+			debug_assert!(mask.is_valid());
 			self.available_locks.is_superset_of(&mask)
 		}
 
@@ -195,6 +197,10 @@ mod internals {
 			}
 		}
 
+		/// Releases a set of locks atomically. There is no difference (beyond performance) between
+		/// releasing each acquired lock in one call versus locking them in several separate calls.
+		/// Users should call [poll_completed] once they are done unlocking locks so that blocked
+		/// requests can complete.
 		pub fn unlock_mask(&mut self, mask: RwMask) {
 			// Unlock read locks
 			// We have to update each lock mask entry independently because the mask state depends
@@ -222,25 +228,35 @@ mod internals {
 
 		// === Request tracking & polling === //
 
+		/// Registers a new atomic lock request into the unordered queue. The request will wait until
+		/// all dependent locks can be acquired at once. The request will only progress as [poll_completed]
+		/// gets called, meaning that users should try to lock the dependencies immediately before
+		/// registering a request. The request will terminate with a [Destroyed](LockRequestState::Destroyed)
+		/// state if any of the dependency locks are destroyed.
 		pub fn add_request(
 			&mut self,
 			dependencies: RwMask,
 			waker: Waker,
 		) -> Arc<LockRequestHandle> {
+			debug_assert!(dependencies.is_valid());
+
 			let state = Arc::new(LockRequestHandle::new(waker, self.requests.len()));
 			self.requests.push(LockRequest {
 				deps: dependencies,
 				state: state.clone(),
 			});
+
 			trace!(
 				"Manager {:p}: created new request for {:?} with handle {:p}",
 				self,
 				dependencies,
 				state
 			);
+
 			state
 		}
 
+		/// Cancels a request without waking it up or updating its state.
 		pub unsafe fn forget_request(&mut self, request: &LockRequestHandle) {
 			trace!(
 				"Manager {:p}: forgetting request with handle {:p}",
@@ -250,6 +266,10 @@ mod internals {
 			self.remove_request(request.get_index());
 		}
 
+		/// Polls for locks requests that can be atomically acquired, marking them as [Available](LockRequestState::Available)
+		/// and removing them from the queue. Completed lock requests are pushed to the provided
+		/// [EventPusher] so that external code can invoke wakers after the [LockManagerInner] mutex
+		/// has been released so as to avoid deadlocks within the futures.
 		pub fn poll_completed(
 			&mut self,
 			ev_wakeup: &mut impl EventPusher<Event = Arc<LockRequestHandle>>,
@@ -283,10 +303,7 @@ mod internals {
 					trace!("Manager {:p}: finalized request {:p}", self, request);
 
 					// Update the lock's polling state appropriately.
-					request.state.update_state(match mode {
-						RemoveWhereMode::Finish => LockRequestState::Available,
-						RemoveWhereMode::Destroy => LockRequestState::Destroyed,
-					});
+					request.state.update_state(*mode.meta());
 
 					// Update locks if we're supposed to apply them.
 					if mode == RemoveWhereMode::Finish {
@@ -313,14 +330,18 @@ mod internals {
 		}
 	}
 
-	#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-	enum RemoveWhereMode {
-		Finish = 0,
-		Destroy = 1,
+	enum_meta! {
+		#[derive(Debug)]
+		enum(LockRequestState) RemoveWhereMode {
+			Finish = LockRequestState::Available,
+			Destroy = LockRequestState::Destroyed,
+		}
 	}
 
+	/// A handle for a request. The handle must be unregistered manually by calling
+	/// [RwLockManagerInner::forget_request] on the owning manager.
 	pub struct LockRequestHandle {
-		// "index" is internally synchronized with "LockManagerInner".
+		// "index" is externally synchronized with "LockManagerInner".
 		index: UnsafeCell<usize>,
 		// We have to use atomic operations here because the future may be polled while the manager is
 		// updating the states.
@@ -334,7 +355,7 @@ mod internals {
 		fn new(waker: Waker, index: usize) -> Self {
 			Self {
 				index: UnsafeCell::new(index),
-				state: AtomicU8::new(LockRequestState::Pending as u8),
+				state: AtomicU8::new(LockRequestState::Pending.to_disc()),
 				waker,
 			}
 		}
@@ -348,17 +369,13 @@ mod internals {
 		}
 
 		fn update_state(&self, state: LockRequestState) {
-			// TODO: Is this ordering sufficient to make the changes visible to the future?
-			self.state.store(state as u8, Ordering::Relaxed);
+			// We don't care about flushing the `RwLockManager`'s state changes since they're already
+			// made visible to the consuming thread by the mutex.
+			self.state.store(state.to_disc(), Ordering::Relaxed);
 		}
 
 		pub fn state(&self) -> LockRequestState {
-			match self.state.load(Ordering::Relaxed) {
-				0 => LockRequestState::Available,
-				1 => LockRequestState::Destroyed,
-				2 => LockRequestState::Pending,
-				_ => panic!("Unknown PendingState discriminant!"),
-			}
+			LockRequestState::from_disc(self.state.load(Ordering::Relaxed))
 		}
 
 		pub fn waker(&self) -> &Waker {
@@ -366,11 +383,20 @@ mod internals {
 		}
 	}
 
-	#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-	pub enum LockRequestState {
-		Available = 0,
-		Destroyed = 1,
-		Pending = 2,
+	enum_meta! {
+		/// The state of a lock request.
+		#[derive(Debug)]
+		pub enum(u8) LockRequestState {
+			/// The lock request has completed successfully.
+			Available = 0,
+
+			/// One or more locks the request depended upon have been destroyed, rendering the request
+			/// impossible to fulfill.
+			Destroyed = 1,
+
+			/// The request is still waiting for dependency locks to become available.
+			Pending = 2,
+		}
 	}
 
 	#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

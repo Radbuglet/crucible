@@ -258,6 +258,7 @@ dependencies = [
  "hecs",
  "log",
  "num_cpus",
+ "once_cell",
 ]
 
 [[package]]
