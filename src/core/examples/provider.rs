@@ -1,6 +1,4 @@
-use core::foundation::provider::{
-	Component, LazyComponent, LazyProviderExt, MultiProvider, ProviderExt,
-};
+use core::foundation::provider::*;
 
 fn main() {
 	let engine = MultiProvider((

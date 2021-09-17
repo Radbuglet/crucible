@@ -1,4 +1,5 @@
 // TODO: Code review, clean up traces, document safety invariants
+// FIXME: Questionable multi-ref borrow in a single atomic (might be valid but very unintuitive)
 
 use self::internals::{wake_up_requests, LockRequestHandle, LockRequestState};
 use crate::foundation::event::EventPusherPoll;
@@ -473,6 +474,7 @@ mod internals {
 
 // === Lock targets === //
 
+#[doc(hidden)]
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum MaskBuildError {
 	RwAliasing,
@@ -633,7 +635,7 @@ macro impl_lock_target_tup($($ty:ident:$field:tt),*) {
 
 impl_tuples!(no_unit; impl_lock_target_tup);
 
-// === Public lock API === //
+// === RwLock === //
 
 pub struct RwLock<T: ?Sized> {
 	manager: RwLockManager,
@@ -657,6 +659,8 @@ impl<T> RwLock<T> {
 }
 
 impl<T: ?Sized> RwLock<T> {
+	// === Immediate locking === //
+
 	pub fn get_mut(&mut self) -> &mut T {
 		self.value.get_mut()
 	}
@@ -677,12 +681,22 @@ impl<T: ?Sized> RwLock<T> {
 		self.try_lock_ref_now().unwrap()
 	}
 
-	pub fn lock_mut_async(&self) -> RwLockFuture<RwMut<T>> {
+	// === Async locking === //
+
+	pub fn lock_mut_async_or_fail(&self) -> RwLockFuture<RwMut<T>> {
 		RwLockFuture::new(RwMut(self))
 	}
 
-	pub fn lock_ref_async(&self) -> RwLockFuture<RwRef<T>> {
+	pub async fn lock_mut_async(&self) -> RwGuardMut<'_, T> {
+		self.lock_mut_async_or_fail().await.unwrap_pretty()
+	}
+
+	pub fn lock_ref_async_or_fail(&self) -> RwLockFuture<RwRef<T>> {
 		RwLockFuture::new(RwRef(self))
+	}
+
+	pub async fn lock_ref_async(&self) -> RwGuardRef<'_, T> {
+		self.lock_ref_async_or_fail().await.unwrap_pretty()
 	}
 }
 
@@ -691,6 +705,23 @@ impl<T: ?Sized> Drop for RwLock<T> {
 		let mut wakeup = EventPusherPoll::new();
 		self.manager.inner().del_lock(self.index, &mut wakeup);
 		wake_up_requests(&mut wakeup);
+	}
+}
+
+// === RwLockFuture === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum RwAsyncLockError {
+	Destroyed,
+}
+
+impl Error for RwAsyncLockError {}
+
+impl Display for RwAsyncLockError {
+	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		match self {
+			Self::Destroyed => write!(f, "Dependency lock destroyed."),
+		}
 	}
 }
 
@@ -709,6 +740,8 @@ enum FutureState {
 	Done,
 }
 
+impl<T: LockTarget> Unpin for RwLockFuture<T> {}
+
 impl<T: LockTarget> RwLockFuture<T> {
 	pub fn new(targets: T) -> Self {
 		Self {
@@ -718,10 +751,8 @@ impl<T: LockTarget> RwLockFuture<T> {
 	}
 }
 
-impl<T: LockTarget> Unpin for RwLockFuture<T> {}
-
 impl<T: LockTarget> Future for RwLockFuture<T> {
-	type Output = Result<RwGuard<T>, ()>;
+	type Output = Result<RwGuard<T>, RwAsyncLockError>;
 
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		match &self.state {
@@ -764,7 +795,7 @@ impl<T: LockTarget> Future for RwLockFuture<T> {
 				LockRequestState::Destroyed => {
 					self.state = FutureState::Done;
 					trace!("RwLockFuture resolving asynchronously with error!");
-					Poll::Ready(Err(()))
+					Poll::Ready(Err(RwAsyncLockError::Destroyed))
 				}
 			},
 			FutureState::Done => {
@@ -783,6 +814,8 @@ impl<T: LockTarget> Drop for RwLockFuture<T> {
 	}
 }
 
+// === RwGuard === //
+
 pub type RwGuardMut<'a, T> = RwGuard<RwMut<'a, T>>;
 pub type RwGuardRef<'a, T> = RwGuard<RwRef<'a, T>>;
 
@@ -792,9 +825,7 @@ pub struct RwGuard<T: LockTarget> {
 }
 
 impl<T: LockTarget> RwGuard<T> {
-	pub fn lock_async(targets: T) -> RwLockFuture<T> {
-		RwLockFuture::new(targets)
-	}
+	// === Guard constructors === //
 
 	pub fn try_lock_now(targets: T) -> Option<Self> {
 		let mask = targets.mask().unwrap_pretty();
@@ -808,6 +839,16 @@ impl<T: LockTarget> RwGuard<T> {
 	pub fn lock_now(targets: T) -> Self {
 		Self::try_lock_now(targets).unwrap()
 	}
+
+	pub fn lock_async_or_fail(targets: T) -> RwLockFuture<T> {
+		RwLockFuture::new(targets)
+	}
+
+	pub async fn lock_async(targets: T) -> Self {
+		Self::lock_async_or_fail(targets).await.unwrap_pretty()
+	}
+
+	// === Fetching === //
 
 	pub fn get(&self) -> T::TargetRef<'_> {
 		unsafe { self.targets.get_ref() }

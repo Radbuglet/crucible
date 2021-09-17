@@ -1,4 +1,4 @@
-use core::foundation::lock::{RwGuard, RwLock, RwLockManager, RwMut, RwRef};
+use core::foundation::lock::*;
 use futures::executor::ThreadPool;
 use futures::task::SpawnExt;
 use std::sync::Arc;
@@ -28,16 +28,12 @@ fn main() {
 			drop(guard_1);
 
 			println!("Stage 2:");
-			let guard_2 = RwGuard::lock_async((RwRef(&name), RwRef(&age)))
-				.await
-				.unwrap();
+			let guard_2 = RwGuard::lock_async((RwRef(&name), RwRef(&age))).await;
 
 			drop(guard_2);
 
 			println!("Guard 2 done. Waiting for guard 3...");
-			let guard_3 = RwGuard::lock_async((RwMut(&name), RwMut(&age)))
-				.await
-				.unwrap();
+			let guard_3 = RwGuard::lock_async((RwMut(&name), RwMut(&age))).await;
 
 			println!("Ready!");
 			println!("Name: {}", guard_3.get().0);

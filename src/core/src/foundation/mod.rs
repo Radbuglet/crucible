@@ -16,17 +16,29 @@
 //!
 //! Because locks are coarse-grained and long-lived, simple callbacks are insufficient to handle
 //! event hooking, and users must typically defer event handling to fixed points in the execution
-//! pipeline. There are many ways to implement this, each with their own performance characteristics.
-//! To allow users to choose the exact dispatch mechanism, we provide the [EventPusher] trait
-//! alongside [various event pushing strategies](event_pushing).
+//! pipeline after the dependency locks have been released. There are many ways to implement this,
+//! each with their own performance characteristics. To allow users to choose the exact dispatch
+//! mechanism, we provide the [EventPusher] trait alongside [various event pushing strategies](event).
 //!
 //! Entities are handled by the [hecs] crate, with the [WorldWrapper] singleton handling deferred
 //! entity creation/deletion and component locking.
-
-pub use hecs;
 
 pub mod event;
 pub mod exec;
 pub mod lock;
 pub mod provider;
 pub mod world;
+
+pub mod prelude {
+	pub use super::{
+		event::{EventPusher, EventPusherImmediate, EventPusherPoll},
+		exec::{DynJoinFuture, Executor},
+		lock::{RwGuard, RwLock, RwLockManager, RwMut, RwRef},
+		provider::{
+			Component, LazyComponent, LazyProviderExt, MultiProvider, Provider, ProviderExt,
+		},
+		world::{WorldAccessor, WorldBorrow},
+	};
+}
+
+pub use prelude::*;

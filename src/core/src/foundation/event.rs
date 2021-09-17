@@ -11,7 +11,8 @@ pub trait EventPusher {
 }
 
 pub struct EventPusherImmediate<E, F> {
-	// For some reason, the FnMut trait argument types do not behave like associated types...
+	// For some reason, the FnMut trait argument types do not behave like associated types so we
+	// have to make the pusher generic over the event and the function.
 	// Variance: covariant
 	_ty: PhantomData<fn(E)>,
 	handler: F,
@@ -104,9 +105,3 @@ impl<'a, E> Iterator for EventPollDrain<'a, E> {
 		}
 	}
 }
-
-pub struct EventPusherTask {}
-
-pub struct EventPusherEntity {}
-
-pub struct EventPusherMultiplex {}
