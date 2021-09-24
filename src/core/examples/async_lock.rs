@@ -10,11 +10,11 @@ fn main() {
 
 	let rw_mgr = RwLockManager::new();
 	let name = Arc::new(RwLock::new(rw_mgr.clone(), "foo".to_string()));
-	let age = Arc::new(RwLock::new(rw_mgr.clone(), 42));
+	let age = Arc::new(RwLock::new(rw_mgr.clone(), 42u32));
 
 	// Test 1
 	let exec = ThreadPool::new().unwrap();
-	let guard = RwGuard::lock_now((RwRef(&name), RwMut(&age)));
+	let guard = RwGuard::<(&String, &u32)>::lock_now((&name, &age));
 
 	exec.spawn({
 		let name = name.clone();
@@ -28,12 +28,11 @@ fn main() {
 			drop(guard_1);
 
 			println!("Stage 2:");
-			let guard_2 = RwGuard::lock_async((RwRef(&name), RwRef(&age))).await;
-
+			let guard_2 = RwGuard::<(&mut String, &u32)>::lock_async((&name, &age)).await;
 			drop(guard_2);
 
 			println!("Guard 2 done. Waiting for guard 3...");
-			let guard_3 = RwGuard::lock_async((RwMut(&name), RwMut(&age))).await;
+			let guard_3 = RwGuard::<(&mut String, &mut u32)>::lock_async((&name, &age)).await;
 
 			println!("Ready!");
 			println!("Name: {}", guard_3.get().0);

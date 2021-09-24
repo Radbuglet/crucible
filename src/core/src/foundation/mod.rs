@@ -20,11 +20,11 @@
 //! each with their own performance characteristics. To allow users to choose the exact dispatch
 //! mechanism, we provide the [EventPusher] trait alongside [various event pushing strategies](event).
 //!
-//! Entities are handled by the [hecs] crate, with the [WorldWrapper] singleton handling deferred
-//! entity creation/deletion and component locking.
+//! Entities are handled by a simplistic parallel ECS implementation residing in [world].
 
 pub mod event;
 pub mod exec;
+pub mod ext;
 pub mod lock;
 pub mod provider;
 pub mod world;
@@ -33,11 +33,12 @@ pub mod prelude {
 	pub use super::{
 		event::{EventPusher, EventPusherImmediate, EventPusherPoll},
 		exec::{DynJoinFuture, Executor},
-		lock::{RwGuard, RwLock, RwLockManager, RwMut, RwRef},
+		ext::ProviderRwLockExt,
+		lock::{RwGuard, RwLock, RwLockManager},
 		provider::{
 			Component, LazyComponent, LazyProviderExt, MultiProvider, Provider, ProviderExt,
 		},
-		world::{WorldAccessor, WorldBorrow},
+		world::{Entity, MapStorage, World},
 	};
 }
 

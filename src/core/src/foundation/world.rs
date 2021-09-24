@@ -1,103 +1,130 @@
-use hecs::{DynamicBundle, Entity, World};
-use std::cell::{Ref, RefCell};
-use std::ops::Deref;
+//! A work-in-progress ECS.
+//! TODO: Stop leaking memory, make *much* more efficient
 
-// TODO: Multithreading, optimize action queue (e.g. through bumpalo or a bespoke unsized queue)
+use hibitset::{BitSet, BitSetLike};
+use std::collections::HashMap;
+use std::ops::{Index, IndexMut};
+
 #[derive(Default)]
-pub struct WorldAccessor {
-	world: RefCell<World>,
-	queue: RefCell<Vec<Action>>,
+pub struct World {
+	reserved: BitSet,
+	counter: u32,
+	generations: Vec<u32>,
 }
 
-impl WorldAccessor {
-	pub fn new(world: World) -> Self {
-		Self {
-			world: RefCell::new(world),
-			queue: Default::default(),
-		}
+impl World {
+	pub fn new() -> Self {
+		Default::default()
 	}
 
-	pub fn query(&self) -> WorldBorrow {
-		WorldBorrow {
-			wrapper: self,
-			world: Some(self.world.borrow()),
-		}
-	}
-
-	pub fn spawn(&self, bundle: impl 'static + DynamicBundle) -> Entity {
-		if let Ok(mut world) = self.world.try_borrow_mut() {
-			world.spawn(bundle)
-		} else {
-			let entity = self.world.borrow().reserve_entity();
-			self.insert(entity, bundle); // TODO: Don't queue empty bundles.
-			entity
-		}
-	}
-
-	pub fn insert(&self, entity: Entity, bundle: impl 'static + DynamicBundle) {
-		// TODO: Figure out insertion failure situation
-		if let Ok(mut world) = self.world.try_borrow_mut() {
-			let _ = world.insert(entity, bundle);
-		} else {
-			self.queue.borrow_mut().push(Action::Insert {
-				entity,
-				bundle: Box::new(Some(bundle)) as Box<dyn AnyBundle>,
-			})
-		}
-	}
-}
-
-pub struct WorldBorrow<'a> {
-	wrapper: &'a WorldAccessor,
-	world: Option<Ref<'a, World>>,
-}
-
-impl Deref for WorldBorrow<'_> {
-	type Target = World;
-
-	fn deref(&self) -> &Self::Target {
-		&*self.world.as_ref().unwrap()
-	}
-}
-
-impl Drop for WorldBorrow<'_> {
-	fn drop(&mut self) {
-		drop(self.world.take());
-		if let Ok(mut world) = self.wrapper.world.try_borrow_mut() {
-			for action in self.wrapper.queue.borrow_mut().drain(..) {
-				action.apply(&mut *world);
+	pub fn spawn(&mut self) -> Entity {
+		// Reserve an index and increment the generation
+		let idx = match (!(&self.reserved)).iter().next() {
+			Some(idx) if (idx as usize) < self.generations.len() => {
+				self.generations[idx as usize] += 1;
+				idx
 			}
+			_ => {
+				let alloc = self.counter;
+				self.counter = self
+					.counter
+					.checked_add(1)
+					.expect("Failed to allocate a new entity!");
+				self.generations.push(0);
+				alloc
+			}
+		};
+
+		// Mark slot as reserved and create
+		self.reserved.add(idx);
+		Entity {
+			idx,
+			gen: self.generations[idx as usize],
+		}
+	}
+
+	pub fn despawn(&mut self, entity: Entity) -> bool {
+		self.reserved.remove(entity.idx)
+	}
+
+	pub fn is_alive(&self, entity: Entity) -> bool {
+		self.generations[entity.idx as usize] == entity.gen
+	}
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct Entity {
+	idx: u32,
+	gen: u32,
+}
+
+pub struct MapStorage<T> {
+	map: HashMap<Entity, T>,
+}
+
+impl<T> Default for MapStorage<T> {
+	fn default() -> Self {
+		Self {
+			map: Default::default(),
 		}
 	}
 }
 
-enum Action {
-	Insert {
-		entity: Entity,
-		bundle: Box<dyn AnyBundle>,
-	},
-}
+impl<T> MapStorage<T> {
+	pub fn new() -> Self {
+		Self::default()
+	}
 
-impl Action {
-	pub fn apply(self, world: &mut World) {
-		match self {
-			Action::Insert { entity, mut bundle } => bundle.insert(entity, world),
-		}
+	pub fn insert(&mut self, entity: Entity, value: T) -> Option<T> {
+		self.map.insert(entity, value)
+	}
+
+	pub fn get(&self, entity: Entity) -> Option<&T> {
+		self.map.get(&entity)
+	}
+
+	pub fn get_mut(&mut self, entity: Entity) -> Option<&mut T> {
+		self.map.get_mut(&entity)
+	}
+
+	pub fn remove(&mut self, id: Entity) -> Option<T> {
+		self.map.remove(&id)
+	}
+
+	pub fn iter<'a>(&'a self, world: &'a World) -> impl Iterator<Item = (Entity, &T)> + 'a {
+		self.map.iter().filter_map(move |(k, v)| {
+			if world.is_alive(*k) {
+				Some((*k, v))
+			} else {
+				None
+			}
+		})
+	}
+
+	pub fn iter_mut<'a>(
+		&'a mut self,
+		world: &'a World,
+	) -> impl Iterator<Item = (Entity, &mut T)> + 'a {
+		self.map.iter_mut().filter_map(move |(k, v)| {
+			if world.is_alive(*k) {
+				Some((*k, v))
+			} else {
+				None
+			}
+		})
 	}
 }
 
-/// An object-safe wrapper around [DynamicBundle].
-trait AnyBundle {
-	fn spawn(&mut self, world: &mut World) -> Entity;
-	fn insert(&mut self, entity: Entity, world: &mut World);
+impl<T> Index<Entity> for MapStorage<T> {
+	type Output = T;
+
+	fn index(&self, index: Entity) -> &Self::Output {
+		self.get(index).unwrap()
+	}
 }
 
-impl<T: DynamicBundle> AnyBundle for Option<T> {
-	fn spawn(&mut self, world: &mut World) -> Entity {
-		world.spawn(self.take().unwrap())
-	}
-
-	fn insert(&mut self, entity: Entity, world: &mut World) {
-		let _ = world.insert(entity, self.take().unwrap());
+impl<T> IndexMut<Entity> for MapStorage<T> {
+	fn index_mut(&mut self, index: Entity) -> &mut Self::Output {
+		self.get_mut(index).unwrap()
 	}
 }

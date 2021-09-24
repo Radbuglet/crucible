@@ -10,50 +10,58 @@ pub struct GfxContext {
 }
 
 impl GfxContext {
-	pub fn new(window: Option<&Window>) -> anyhow::Result<(Self, Option<wgpu::Surface>)> {
-		block_on(async {
-			let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
-			let surface = window.map(|window| unsafe { instance.create_surface(window) });
+	pub async fn no_window() -> anyhow::Result<Self> {
+		Self::new(None).await.map(|(cx, _)| cx)
+	}
 
-			// Create a default adapter
-			// TODO: Allow users to request features
-			let adapter = instance
-				.request_adapter(&wgpu::RequestAdapterOptions {
-					// Ensure that the device supports the main window's presentation engine.
-					compatible_surface: surface.as_ref(),
-					// Prioritize external GPUs
-					power_preference: wgpu::PowerPreference::HighPerformance,
-				})
-				.await
-				.context("Failed to find a device adapter.")?;
+	pub async fn with_window(window: &Window) -> anyhow::Result<(Self, wgpu::Surface)> {
+		Self::new(Some(window))
+			.await
+			.map(|(cx, surface)| (cx, surface.unwrap()))
+	}
 
-			let info = adapter.get_info();
-			println!(
-				"Using backend {:?} and physical device {}",
-				info.backend, info.name
-			);
+	pub async fn new(window: Option<&Window>) -> anyhow::Result<(Self, Option<wgpu::Surface>)> {
+		let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
+		let surface = window.map(|window| unsafe { instance.create_surface(window) });
 
-			// Construct a logical device and fetch its queue(s).
-			let (device, queue) = adapter
-				.request_device(
-					&wgpu::DeviceDescriptor {
-						label: Some("Device"),
-						limits: Default::default(),
-						features: Default::default(),
-					},
-					None,
-				)
-				.await?;
+		// Create a default adapter
+		// TODO: Allow users to request features
+		let adapter = instance
+			.request_adapter(&wgpu::RequestAdapterOptions {
+				// Ensure that the device supports the main window's presentation engine.
+				compatible_surface: surface.as_ref(),
+				// Prioritize external GPUs
+				power_preference: wgpu::PowerPreference::HighPerformance,
+			})
+			.await
+			.context("Failed to find a device adapter.")?;
 
-			Ok((
-				Self {
-					instance,
-					adapter,
-					device,
-					queue,
+		let info = adapter.get_info();
+		println!(
+			"Using backend {:?} and physical device {}",
+			info.backend, info.name
+		);
+
+		// Construct a logical device and fetch its queue(s).
+		let (device, queue) = adapter
+			.request_device(
+				&wgpu::DeviceDescriptor {
+					label: Some("Device"),
+					limits: Default::default(),
+					features: Default::default(),
 				},
-				surface,
-			))
-		})
+				None,
+			)
+			.await?;
+
+		Ok((
+			Self {
+				instance,
+				adapter,
+				device,
+				queue,
+			},
+			surface,
+		))
 	}
 }

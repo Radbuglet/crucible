@@ -498,136 +498,77 @@ impl Display for MaskBuildError {
 }
 
 #[doc(hidden)]
-pub unsafe trait LockTarget: Clone {
-	#[rustfmt::skip]  // rustfmt makes an ugly mess of GAT bounds.
-	type TargetRef<'l> where Self: 'l;
+pub unsafe trait LockTarget {
+	type Deps: Clone;
 
-	#[rustfmt::skip]
-	type TargetMut<'l> where Self: 'l;
-
-	unsafe fn get_ref<'l>(&self) -> Self::TargetRef<'l>
-	where
-		Self: 'l;
-
-	unsafe fn get_mut<'l>(&self) -> Self::TargetMut<'l>
-	where
-		Self: 'l;
-
-	fn manager(&self) -> &RwLockManager;
-	fn mask(&self) -> Result<RwMask, MaskBuildError>;
+	unsafe fn get(deps: &Self::Deps) -> Self;
+	fn manager(deps: &Self::Deps) -> &RwLockManager;
+	fn mask(deps: &Self::Deps) -> Result<RwMask, MaskBuildError>;
 }
 
-pub struct RwRef<'a, T: ?Sized>(pub &'a RwLock<T>);
+unsafe impl<'a, T: ?Sized> LockTarget for &'a mut T {
+	type Deps = &'a RwLock<T>;
 
-impl<T: ?Sized> Copy for RwRef<'_, T> {}
-impl<T: ?Sized> Clone for RwRef<'_, T> {
-	fn clone(&self) -> Self {
-		Self(self.0)
-	}
-}
-
-unsafe impl<'a, T: ?Sized> LockTarget for RwRef<'a, T> {
-	#[rustfmt::skip] // rustfmt makes an ugly mess of GAT bounds.
-	type TargetRef<'l> where Self: 'l = &'l T;
-
-	#[rustfmt::skip]
-	type TargetMut<'l> where Self: 'l = &'l T;
-
-	unsafe fn get_ref<'l>(&self) -> Self::TargetRef<'l>
-	where
-		Self: 'l,
-	{
-		&*self.0.value.get()
+	unsafe fn get(deps: &Self::Deps) -> Self {
+		&mut *(deps.value.get())
 	}
 
-	unsafe fn get_mut<'l>(&self) -> Self::TargetMut<'l>
-	where
-		Self: 'l,
-	{
-		&*self.0.value.get()
+	fn manager(deps: &Self::Deps) -> &RwLockManager {
+		&deps.manager
 	}
 
-	fn manager(&self) -> &RwLockManager {
-		&self.0.manager
-	}
-
-	fn mask(&self) -> Result<RwMask, MaskBuildError> {
+	fn mask(deps: &Self::Deps) -> Result<RwMask, MaskBuildError> {
 		// No need to validate this mask. It is guaranteed to be valid.
 		Ok(RwMask {
-			read: Bitmask64::one_hot(self.0.index),
-			write: Bitmask64::EMPTY,
+			read: Bitmask64::EMPTY,
+			write: Bitmask64::one_hot(deps.index),
 		})
 	}
 }
 
-pub struct RwMut<'a, T: ?Sized>(pub &'a RwLock<T>);
+unsafe impl<'a, T: ?Sized> LockTarget for &'a T {
+	type Deps = &'a RwLock<T>;
 
-impl<T: ?Sized> Copy for RwMut<'_, T> {}
-impl<T: ?Sized> Clone for RwMut<'_, T> {
-	fn clone(&self) -> Self {
-		Self(self.0)
-	}
-}
-
-unsafe impl<'a, T: ?Sized> LockTarget for RwMut<'a, T> {
-	#[rustfmt::skip] // rustfmt makes an ugly mess of GAT bounds.
-	type TargetRef<'l> where Self: 'l, = &'l T;
-
-	#[rustfmt::skip]
-	type TargetMut<'l> where Self: 'l, = &'l mut T;
-
-	unsafe fn get_ref<'l>(&self) -> Self::TargetRef<'l>
-	where
-		Self: 'l,
-	{
-		&*self.0.value.get()
+	unsafe fn get(deps: &Self::Deps) -> Self {
+		&*(deps.value.get())
 	}
 
-	unsafe fn get_mut<'l>(&self) -> Self::TargetMut<'l>
-	where
-		Self: 'l,
-	{
-		&mut *self.0.value.get()
+	fn manager(deps: &Self::Deps) -> &RwLockManager {
+		&deps.manager
 	}
 
-	fn manager(&self) -> &RwLockManager {
-		&self.0.manager
-	}
-
-	fn mask(&self) -> Result<RwMask, MaskBuildError> {
+	fn mask(deps: &Self::Deps) -> Result<RwMask, MaskBuildError> {
 		// No need to validate this mask. It is guaranteed to be valid.
 		Ok(RwMask {
-			read: Bitmask64::EMPTY,
-			write: Bitmask64::one_hot(self.0.index),
+			read: Bitmask64::one_hot(deps.index),
+			write: Bitmask64::EMPTY,
 		})
 	}
 }
 
 macro impl_lock_target_tup($($ty:ident:$field:tt),*) {
 	unsafe impl<'a, $($ty: LockTarget),*> LockTarget for ($($ty,)*) {
-		type TargetRef<'l> where Self: 'l = ($($ty::TargetRef<'l>,)*);
-		type TargetMut<'l> where Self: 'l = ($($ty::TargetMut<'l>,)*);
+		type Deps = ($($ty::Deps,)*);
 
-		unsafe fn get_ref<'l>(&self) -> Self::TargetRef<'l> where Self: 'l {
-			($(self.$field.get_ref(),)*)
+		unsafe fn get(deps: &Self::Deps) -> Self {
+			($($ty::get(&deps.$field),)*)
 		}
 
-		unsafe fn get_mut<'l>(&self) -> Self::TargetMut<'l> where Self: 'l {
-			($(self.$field.get_mut(),)*)
+		#[allow(unreachable_code)]  // We do this intentionally.
+		fn manager(deps: &Self::Deps) -> &RwLockManager {
+			$(return $ty::manager(&deps.$field);)*  // Return the first manager
 		}
 
-		fn manager(&self) -> &RwLockManager {
-			self.0.manager()
-		}
-
-		fn mask(&self) -> Result<RwMask, MaskBuildError> {
+		fn mask(deps: &Self::Deps) -> Result<RwMask, MaskBuildError> {
 			// Validate managers
-			if $(self.0.manager() != self.$field.manager() ||)* false {
+			let manager = Self::manager(deps);
+
+			if $(manager != $ty::manager(&deps.$field) ||)* false {
 				return Err(MaskBuildError::NonUniqueManager);
 			}
 
 			// Build mask, checking if it is valid.
-			RwMask::checked_merge([$(self.$field.mask()?,)*].iter().copied())
+			RwMask::checked_merge([$($ty::mask(&deps.$field)?,)*].iter().copied())
 				.ok_or(MaskBuildError::RwAliasing)
 		}
 	}
@@ -666,11 +607,11 @@ impl<T: ?Sized> RwLock<T> {
 	}
 
 	pub fn try_lock_mut_now(&self) -> Option<RwGuardMut<T>> {
-		RwGuard::try_lock_now(RwMut(self))
+		RwGuard::try_lock_now(self)
 	}
 
 	pub fn try_lock_ref_now(&self) -> Option<RwGuardRef<T>> {
-		RwGuard::try_lock_now(RwRef(self))
+		RwGuard::try_lock_now(self)
 	}
 
 	pub fn lock_mut_now(&self) -> RwGuardMut<T> {
@@ -683,16 +624,16 @@ impl<T: ?Sized> RwLock<T> {
 
 	// === Async locking === //
 
-	pub fn lock_mut_async_or_fail(&self) -> RwLockFuture<RwMut<T>> {
-		RwLockFuture::new(RwMut(self))
+	pub fn lock_mut_async_or_fail(&self) -> RwLockFuture<&mut T> {
+		RwLockFuture::new(self)
 	}
 
 	pub async fn lock_mut_async(&self) -> RwGuardMut<'_, T> {
 		self.lock_mut_async_or_fail().await.unwrap_pretty()
 	}
 
-	pub fn lock_ref_async_or_fail(&self) -> RwLockFuture<RwRef<T>> {
-		RwLockFuture::new(RwRef(self))
+	pub fn lock_ref_async_or_fail(&self) -> RwLockFuture<&T> {
+		RwLockFuture::new(self)
 	}
 
 	pub async fn lock_ref_async(&self) -> RwGuardRef<'_, T> {
@@ -728,7 +669,7 @@ impl Display for RwAsyncLockError {
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct RwLockFuture<T: LockTarget> {
 	state: FutureState,
-	targets: T,
+	deps: T::Deps,
 }
 
 enum FutureState {
@@ -743,10 +684,10 @@ enum FutureState {
 impl<T: LockTarget> Unpin for RwLockFuture<T> {}
 
 impl<T: LockTarget> RwLockFuture<T> {
-	pub fn new(targets: T) -> Self {
+	pub fn new(deps: T::Deps) -> Self {
 		Self {
 			state: FutureState::Idle,
-			targets,
+			deps,
 		}
 	}
 }
@@ -757,8 +698,8 @@ impl<T: LockTarget> Future for RwLockFuture<T> {
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		match &self.state {
 			FutureState::Idle => {
-				let mut manager = self.targets.manager().inner();
-				let mask = self.targets.mask().unwrap_pretty();
+				let mut manager = T::manager(&self.deps).inner();
+				let mask = T::mask(&self.deps).unwrap_pretty();
 
 				if manager.try_lock_mask(mask) {
 					drop(manager);
@@ -767,7 +708,7 @@ impl<T: LockTarget> Future for RwLockFuture<T> {
 					trace!("RwLockFuture finished immediately from idle!");
 					Poll::Ready(Ok(RwGuard {
 						mask,
-						targets: self.targets.clone(),
+						deps: self.deps.clone(),
 					}))
 				} else {
 					trace!("RwLockFuture creating request from idle...");
@@ -789,7 +730,7 @@ impl<T: LockTarget> Future for RwLockFuture<T> {
 					trace!("RwLockFuture resolving asynchronously with success!");
 					Poll::Ready(Ok(RwGuard {
 						mask,
-						targets: self.targets.clone(),
+						deps: self.deps.clone(),
 					}))
 				}
 				LockRequestState::Destroyed => {
@@ -808,7 +749,7 @@ impl<T: LockTarget> Future for RwLockFuture<T> {
 impl<T: LockTarget> Drop for RwLockFuture<T> {
 	fn drop(&mut self) {
 		if let FutureState::Waiting { handle, .. } = &self.state {
-			let mut manager = self.targets.manager().inner();
+			let mut manager = T::manager(&self.deps).inner();
 			unsafe { manager.forget_request(handle) };
 		}
 	}
@@ -816,52 +757,48 @@ impl<T: LockTarget> Drop for RwLockFuture<T> {
 
 // === RwGuard === //
 
-pub type RwGuardMut<'a, T> = RwGuard<RwMut<'a, T>>;
-pub type RwGuardRef<'a, T> = RwGuard<RwRef<'a, T>>;
+pub type RwGuardMut<'a, T> = RwGuard<&'a mut T>;
+pub type RwGuardRef<'a, T> = RwGuard<&'a T>;
 
 pub struct RwGuard<T: LockTarget> {
 	mask: RwMask,
-	targets: T,
+	deps: T::Deps,
 }
 
 impl<T: LockTarget> RwGuard<T> {
 	// === Guard constructors === //
 
-	pub fn try_lock_now(targets: T) -> Option<Self> {
-		let mask = targets.mask().unwrap_pretty();
-		if targets.manager().inner().try_lock_mask(mask) {
-			Some(Self { mask, targets })
+	pub fn try_lock_now(deps: T::Deps) -> Option<Self> {
+		let mask = T::mask(&deps).unwrap_pretty();
+		if T::manager(&deps).inner().try_lock_mask(mask) {
+			Some(Self { mask, deps })
 		} else {
 			None
 		}
 	}
 
-	pub fn lock_now(targets: T) -> Self {
+	pub fn lock_now(targets: T::Deps) -> Self {
 		Self::try_lock_now(targets).unwrap()
 	}
 
-	pub fn lock_async_or_fail(targets: T) -> RwLockFuture<T> {
+	pub fn lock_async_or_fail(targets: T::Deps) -> RwLockFuture<T> {
 		RwLockFuture::new(targets)
 	}
 
-	pub async fn lock_async(targets: T) -> Self {
+	pub async fn lock_async(targets: T::Deps) -> Self {
 		Self::lock_async_or_fail(targets).await.unwrap_pretty()
 	}
 
 	// === Fetching === //
 
-	pub fn get(&self) -> T::TargetRef<'_> {
-		unsafe { self.targets.get_ref() }
-	}
-
-	pub fn get_mut(&mut self) -> T::TargetMut<'_> {
-		unsafe { self.targets.get_mut() }
+	pub fn get(&self) -> T {
+		unsafe { T::get(&self.deps) }
 	}
 }
 
 impl<T: LockTarget> Drop for RwGuard<T> {
 	fn drop(&mut self) {
-		let mut manager = self.targets.manager().inner();
+		let mut manager = T::manager(&self.deps).inner();
 
 		// Release acquired locks
 		manager.unlock_mask(self.mask);
