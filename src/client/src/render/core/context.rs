@@ -1,5 +1,4 @@
 use anyhow::Context;
-use futures::executor::block_on;
 use winit::window::Window;
 
 pub struct GfxContext {

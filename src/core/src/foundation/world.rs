@@ -1,5 +1,5 @@
 //! A work-in-progress ECS.
-//! TODO: Stop leaking memory, make *much* more efficient
+//! TODO: Stop leaking memory, make *much* more efficient, determine change semantics
 
 use hibitset::{BitSet, BitSetLike};
 use std::collections::HashMap;

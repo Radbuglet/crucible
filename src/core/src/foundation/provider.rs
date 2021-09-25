@@ -154,6 +154,7 @@ pub trait ProviderExt {
 	fn has<T: ?Sized + 'static>(&self) -> bool;
 	fn try_get_many<'a, T: ProviderGetter<'a>>(&'a self) -> Option<T>;
 	fn get_many<'a, T: ProviderGetter<'a>>(&'a self) -> T;
+	fn has_many<'a, T: ProviderGetter<'a>>(&'a self) -> bool;
 }
 
 impl<Target: ?Sized + Provider> ProviderExt for Target {
@@ -182,6 +183,10 @@ impl<Target: ?Sized + Provider> ProviderExt for Target {
 
 	fn get_many<'a, T: ProviderGetter<'a>>(&'a self) -> T {
 		T::get(self)
+	}
+
+	fn has_many<'a, T: ProviderGetter<'a>>(&'a self) -> bool {
+		self.try_get_many::<T>().is_some()
 	}
 }
 

@@ -8,7 +8,11 @@
 //! otherwise provides no architectural benefits over the userland object-oriented model.
 //!
 //! All subsystems, including special "core" singletons such as the executor and the world, are stored
-//! inside a [Provider]. Subsystems are accessed by their component type.
+//! inside a [Provider]. Subsystems are accessed by their component type. Providers are mainly used
+//! to facilitate passing the engine's state between threads and to simplify dependency tuple packing.
+//! Services should always attempt to request the most primitive version of a dependency reference
+//! (e.g. preferring a direct reference over an entire [RwLock] instance) so that lock lifetimes can
+//! be handled externally.
 //!
 //! Scheduling is done entirely through `async` functions executed by the engine's [Executor] with
 //! [RwLock] objects mediating resource access. Users can dynamically add futures to the [DynJoinFuture]
@@ -34,7 +38,7 @@ pub mod prelude {
 		event::{EventPusher, EventPusherImmediate, EventPusherPoll},
 		exec::{DynJoinFuture, Executor},
 		ext::ProviderRwLockExt,
-		lock::{RwGuard, RwLock, RwLockManager},
+		lock::{RwGuard, RwGuardMut, RwGuardRef, RwLock, RwLockManager},
 		provider::{
 			Component, LazyComponent, LazyProviderExt, MultiProvider, Provider, ProviderExt,
 		},

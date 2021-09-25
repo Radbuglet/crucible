@@ -3,154 +3,186 @@
 #![feature(never_type)]
 
 use crate::render::core::context::GfxContext;
-use crate::render::core::viewport::{Viewport, ViewportManager};
-use crate::util::winit::{WinitEvent, WinitEventBundle};
+use crate::render::core::run_loop::{start_run_loop, RunLoopEvent, RunLoopHandler};
+use crate::render::core::viewport::ViewportManager;
 use anyhow::Context;
 use core::foundation::prelude::*;
 use core::util::error::ErrorFormatExt;
 use futures::executor::block_on;
 use std::sync::Arc;
+use wgpu::SurfaceTexture;
 use winit::dpi::LogicalSize;
-use winit::event_loop::EventLoop;
+use winit::event::{DeviceEvent, DeviceId, WindowEvent};
+use winit::event_loop::{EventLoop, EventLoopWindowTarget};
 use winit::window::WindowBuilder;
 
 mod render;
 mod util;
 
 fn main() {
-	if let Err(err) = main_inner() {
+	if let Err(err) = block_on(main_inner()) {
 		eprintln!("{}", err.format_error(true));
 	}
 }
 
-fn main_inner() -> anyhow::Result<!> {
-	// Start up foundation
-	let engine = Arc::new(MultiProvider((
-		// Foundation
-		MultiProvider::<(
-			Component<RwLockManager>,
-			Component<Executor>,
-			LazyComponent<RwLock<World>>,
-		)>::default(),
-		// Core services
-		MultiProvider::<(
-			LazyComponent<GfxContext>,
-			LazyComponent<RwLock<ViewportManager>>,
-		)>::default(),
-	)));
+async fn main_inner() -> anyhow::Result<!> {
+	type Engine = Arc<
+		MultiProvider<(
+			// Foundational services
+			MultiProvider<(
+				Component<Executor>,
+				Component<RwLockManager>,
+				LazyComponent<RwLock<World>>,
+			)>,
+			// Graphics services
+			MultiProvider<(
+				LazyComponent<GfxContext>,
+				LazyComponent<RwLock<ViewportManager>>,
+			)>,
+		)>,
+	>;
 
-	engine.init_lock(World::default());
+	// Initialize foundational services
+	env_logger::init();
 
-	// Set up core rendering services
+	let engine = Engine::default();
+	let mut world = World::new();
+
+	// Startup graphics singleton and create the main window
 	let event_loop = EventLoop::new();
-	{
-		// Create window
+	let (gfx, mut vm) = {
 		let window = WindowBuilder::new()
 			.with_title("Crucible")
-			.with_inner_size(LogicalSize::new(1920, 1080))
 			.with_visible(false)
+			.with_inner_size(LogicalSize::new(1920, 1080))
 			.build(&event_loop)
 			.context("Failed to create main window.")?;
 
-		// Create gfx and surface
-		let (gfx, surface) = block_on(GfxContext::with_window(&window))?;
-		engine.init(gfx);
+		let (gfx, surface) = GfxContext::with_window(&window)
+			.await
+			.context("Failed to initialize wgpu!")?;
 
-		// Create VM and viewport
 		let mut vm = ViewportManager::new();
-		let entity = RwGuard::<&mut World>::lock_now(engine.get()).get().spawn();
+		let entity = world.spawn();
+		vm.register_pair(&gfx, entity, window, surface);
 
-		vm.register_pair(engine.get_many(), entity, window, surface);
-		engine.init_lock(vm);
-
-		entity
+		(gfx, vm)
 	};
 
 	// Create a second window
 	{
-		let entity = RwGuard::<&mut World>::lock_now(engine.get()).get().spawn();
+		let entity = world.spawn();
 		let window = WindowBuilder::new()
-			.with_title("Test window")
-			.with_inner_size(LogicalSize::new(200, 200))
+			.with_title("Sub window")
 			.with_visible(false)
+			.with_inner_size(LogicalSize::new(200, 200))
 			.build(&event_loop)
-			.context("Failed to create secondary window.")?;
+			.context("Failed to create sub-window!")?;
 
-		RwGuard::<&mut ViewportManager>::lock_now(engine.get())
-			.get()
-			.register(engine.get_many(), entity, window);
-		entity
-	};
-
-	// === Start engine ===
-	// Make all windows visible
-	{
-		let guard = RwGuard::<(&mut ViewportManager,)>::lock_now(engine.get_many());
-		let (vm,) = guard.get();
-		for ent in vm.get_entities() {
-			vm.get_viewport(ent).unwrap().window().set_visible(true);
-		}
+		vm.register(&gfx, entity, window);
 	}
 
-	// Bind event loop
-	event_loop.run(move |ev, proxy, flow| {
-		let bundle: WinitEventBundle = (&ev, proxy, flow);
+	// Setup engine
+	for e_win in vm.get_entities() {
+		vm.get_viewport(e_win).unwrap().window().set_visible(true);
+	}
 
-		// Handle core events
-		if let WinitEvent::MainEventsCleared = &ev {
-			let vm = engine.get_lock::<ViewportManager>().lock_ref_now();
-			for win_ent in vm.get().get_entities() {
-				vm.get()
-					.get_viewport(win_ent)
-					.unwrap()
-					.window()
-					.request_redraw();
-			}
+	engine.init_lock(world);
+	engine.init(gfx);
+	engine.init_lock(vm);
+
+	// Start
+	struct Handler;
+
+	impl RunLoopHandler for Handler {
+		type Engine = Engine;
+
+		fn tick(
+			&mut self,
+			_ev_pusher: &mut EventPusherPoll<RunLoopEvent>,
+			_engine: &Self::Engine,
+			_event_loop: &EventLoopWindowTarget<()>,
+			_vm_guard: RwGuardMut<ViewportManager>,
+		) {
+			log::trace!("Tick!");
 		}
 
-		// Handle redraws
-		{
-			// Fetch dependencies
-			let guard = RwGuard::<(&mut ViewportManager,)>::lock_now(engine.get_many());
+		fn draw(
+			&mut self,
+			_ev_pusher: &mut EventPusherPoll<RunLoopEvent>,
+			engine: &Self::Engine,
+			_event_loop: &EventLoopWindowTarget<()>,
+			_vm_guard: RwGuardMut<ViewportManager>,
+			_window: Entity,
+			frame: SurfaceTexture,
+		) {
 			let gfx: &GfxContext = engine.get();
-			let (vm,) = guard.get();
 
-			// Collect redraw requests
-			let mut on_redraw = EventPusherPoll::new();
-			vm.handle_ev((gfx,), bundle, &mut on_redraw);
+			let frame_view = frame
+				.texture
+				.create_view(&wgpu::TextureViewDescriptor::default());
 
-			// Handle
-			for (_, frame) in on_redraw.drain() {
-				let frame_view = frame
-					.texture
-					.create_view(&wgpu::TextureViewDescriptor::default());
-
-				let mut cb = gfx
-					.device
-					.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-						label: Some("main frame encoder"),
-					});
-
-				let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
-					label: None,
-					color_attachments: &[wgpu::RenderPassColorAttachment {
-						view: &frame_view,
-						resolve_target: None,
-						ops: wgpu::Operations {
-							load: wgpu::LoadOp::Clear(wgpu::Color {
-								r: 0.1,
-								g: 0.3,
-								b: 0.8,
-								a: 1.0,
-							}),
-							store: true,
-						},
-					}],
-					depth_stencil_attachment: None,
+			let mut cb = gfx
+				.device
+				.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+					label: Some("primary command encoder"),
 				});
-				drop(pass);
-				gfx.queue.submit([cb.finish()]);
+
+			let pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
+				label: None,
+				color_attachments: &[wgpu::RenderPassColorAttachment {
+					view: &frame_view,
+					ops: wgpu::Operations {
+						load: wgpu::LoadOp::Clear(wgpu::Color {
+							r: 0.2,
+							g: 0.4,
+							b: 0.8,
+							a: 1.0,
+						}),
+						store: true,
+					},
+					resolve_target: None,
+				}],
+				depth_stencil_attachment: None,
+			});
+
+			drop(pass);
+
+			gfx.queue.submit([cb.finish()]);
+		}
+
+		fn window_input(
+			&mut self,
+			ev_pusher: &mut EventPusherPoll<RunLoopEvent>,
+			_engine: &Self::Engine,
+			_event_loop: &EventLoopWindowTarget<()>,
+			vm_guard: RwGuardMut<ViewportManager>,
+			window: Entity,
+			event: &WindowEvent,
+		) {
+			let vm = vm_guard.get();
+			if let WindowEvent::CloseRequested = event {
+				vm.unregister(vm.get_viewport(window).unwrap().id());
+
+				if vm.get_entities().len() == 0 {
+					ev_pusher.push(RunLoopEvent::Shutdown);
+				}
 			}
 		}
-	})
+
+		fn device_input(
+			&mut self,
+			_ev_pusher: &mut EventPusherPoll<RunLoopEvent>,
+			_engine: &Self::Engine,
+			_event_loop: &EventLoopWindowTarget<()>,
+			_vm_guard: RwGuardMut<ViewportManager>,
+			_device_id: DeviceId,
+			_event: &DeviceEvent,
+		) {
+		}
+
+		fn goodbye(&mut self, _engine: &Self::Engine, _vm_guard: RwGuardMut<ViewportManager>) {}
+	}
+
+	start_run_loop(event_loop, engine, Handler);
 }
