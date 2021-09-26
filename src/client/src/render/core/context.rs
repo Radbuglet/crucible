@@ -36,9 +36,10 @@ impl GfxContext {
 			.context("Failed to find a device adapter.")?;
 
 		let info = adapter.get_info();
-		println!(
+		log::info!(
 			"Using backend {:?} and physical device {}",
-			info.backend, info.name
+			info.backend,
+			info.name,
 		);
 
 		// Construct a logical device and fetch its queue(s).
