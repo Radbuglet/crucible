@@ -1,4 +1,4 @@
-use core::foundation::provider::*;
+use crucible_core::foundation::provider::*;
 
 fn main() {
 	let engine = MultiProvider((

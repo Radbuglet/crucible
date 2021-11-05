@@ -1,18 +1,23 @@
 [package]
-name = "client"
+name = "crucible-client"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 anyhow = "1.0.42"
+bytemuck = { version = "1.7.2", features = ["derive"] }
 cgmath = "0.18.0"
-core = { path = "../core" }
+crucible-core = { path = "../core" }
+crucible-shared = { path = "../shared" }
 env_logger = "0.9.0"
 futures = "0.3.17"
 log = "0.4.14"
-wgpu = { version = "0.10.1", features = ["spirv"] }
+rand = "0.8.4"
+wgpu = { version = "0.11.0", features = ["spirv"] }
 winit = "0.25.0"
 
 [build-dependencies]
+anyhow = "1.0.42"
+crucible-core = { path = "../core" }
 glob = "0.3.0"
 shaderc = "0.7.2"

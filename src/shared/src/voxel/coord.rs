@@ -2,8 +2,12 @@
 //!
 //! "Oh boy, it *sure* is fun to manually delegate methods!" - A composition enthusiast
 
-use cgmath::{Vector3, Zero};
+// TODO: Document coordinate spaces.
+
+use cgmath::{num_traits::Signed, BaseNum, Vector3, Zero};
+use crucible_core::util::meta_enum::{enum_meta, EnumMeta};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::ops::{Deref, Neg};
 
 #[rustfmt::skip]
 use std::ops::{
@@ -152,8 +156,6 @@ def_coords! {
 		raw: raw,
 	},
 	definitions: {
-		// === Integer === //
-
 		#[derive(Hash, Eq)]
 		pub WorldPos(i64);
 
@@ -162,12 +164,6 @@ def_coords! {
 
 		#[derive(Hash, Eq)]
 		pub BlockPos(u8);
-
-		// === Floating point === //
-
-		pub WorldPosF(f64);
-		pub ChunkPosF(f64);
-		pub BlockPosF(f64);
 	}
 }
 
@@ -258,7 +254,194 @@ impl From<WorldPos> for BlockPos {
 	}
 }
 
-// TODO: Implement for floating-point versions
+// TODO: Floating-point world and block positions
+
+// === Block faces === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum Sign {
+	Positive,
+	Negative,
+}
+
+enum_meta! {
+	#[derive(Debug)]
+	pub enum(Axis3Meta) Axis3 {
+		X = Axis3Meta {
+			idx: 0,
+			ortho: [Axis3::Y, Axis3::Z],
+		},
+		Y = Axis3Meta {
+			idx: 1,
+			ortho: [Axis3::Z, Axis3::X],
+		},
+		Z = Axis3Meta {
+			idx: 2,
+			ortho: [Axis3::X, Axis3::Y],
+		}
+	}
+
+	#[derive(Debug)]
+	pub enum(BlockFaceMeta) BlockFace {
+		Px = BlockFaceMeta {
+			axis: Axis3::X,
+			sign: Sign::Positive,
+		},
+		Py = BlockFaceMeta {
+			axis: Axis3::Y,
+			sign: Sign::Positive,
+		},
+		Pz = BlockFaceMeta {
+			axis: Axis3::Z,
+			sign: Sign::Positive,
+		},
+		Nx = BlockFaceMeta {
+			axis: Axis3::X,
+			sign: Sign::Negative,
+		},
+		Ny = BlockFaceMeta {
+			axis: Axis3::Y,
+			sign: Sign::Negative,
+		},
+		Nz = BlockFaceMeta {
+			axis: Axis3::Z,
+			sign: Sign::Negative,
+		}
+	}
+}
+
+pub struct SignMeta {
+	pub unit: i32,
+}
+
+pub struct Axis3Meta {
+	/// The index of the axis in a [Vector3].
+	pub idx: usize,
+
+	/// Orthogonal axes sorted in CCW order assuming a viewing direction looking at the face from
+	/// its positive side.
+	pub ortho: [Axis3; 2],
+}
+
+pub struct BlockFaceMeta {
+	pub sign: Sign,
+	pub axis: Axis3,
+}
+
+impl Sign {
+	pub fn of<N: Signed>(other: N) -> Option<Self> {
+		match other {
+			v if v.is_positive() => Some(Sign::Positive),
+			v if v.is_negative() => Some(Sign::Negative),
+			_ => None,
+		}
+	}
+
+	pub fn of_poszero<N: Signed>(other: N) -> Self {
+		Self::of(other).unwrap_or(Sign::Positive)
+	}
+
+	pub fn unit<N: Signed>(self) -> N {
+		match self {
+			Sign::Positive => N::one(),
+			Sign::Negative => -N::one(),
+		}
+	}
+}
+
+impl Neg for Sign {
+	type Output = Self;
+
+	fn neg(self) -> Self::Output {
+		match self {
+			Sign::Positive => Sign::Negative,
+			Sign::Negative => Sign::Positive,
+		}
+	}
+}
+
+impl Axis3 {
+	pub fn unit<N: BaseNum>(self) -> Vector3<N> {
+		let mut vec = Vector3::zero();
+		vec[self.idx] = N::one();
+		vec
+	}
+
+	pub fn pos_face(self) -> BlockFace {
+		BlockFace::from(self, Sign::Positive)
+	}
+
+	pub fn neg_face(self) -> BlockFace {
+		BlockFace::from(self, Sign::Negative)
+	}
+}
+
+impl Deref for Axis3 {
+	type Target = Axis3Meta;
+
+	fn deref(&self) -> &Self::Target {
+		self.meta()
+	}
+}
+
+impl BlockFace {
+	pub fn from(axis: Axis3, sign: Sign) -> Self {
+		Self::values_iter()
+			.find_map(|(face, meta)| {
+				if meta.axis == axis && meta.sign == sign {
+					Some(face)
+				} else {
+					None
+				}
+			})
+			.unwrap()
+	}
+
+	pub fn unit<N>(self) -> Vector3<N>
+	where
+		N: BaseNum + Signed,
+	{
+		let BlockFaceMeta { axis, sign } = &*self;
+		axis.unit() * sign.unit()
+	}
+
+	pub fn ortho_ccw<N: BaseNum + Signed + Copy>(self) -> [Vector3<N>; 2] {
+		let (a, b) = match self.sign {
+			Sign::Positive => (0, 1),
+			Sign::Negative => (1, 0),
+		};
+
+		[
+			self.axis.ortho[a].pos_face().unit(),
+			self.axis.ortho[b].pos_face().unit(),
+		]
+	}
+
+	pub fn quad_ccw<N: BaseNum + Signed + Copy>(self) -> [Vector3<N>; 4] {
+		let corner = match self.sign {
+			Sign::Positive => self.axis.unit(),
+			Sign::Negative => Vector3::zero(),
+		};
+		let [a, b] = self.ortho_ccw();
+		[corner, corner + a, corner + a + b, corner + b]
+	}
+}
+
+impl Neg for BlockFace {
+	type Output = Self;
+
+	fn neg(self) -> Self::Output {
+		Self::from(self.axis, -self.sign)
+	}
+}
+
+impl Deref for BlockFace {
+	type Target = BlockFaceMeta;
+
+	fn deref(&self) -> &Self::Target {
+		self.meta()
+	}
+}
 
 // === Tests === //
 

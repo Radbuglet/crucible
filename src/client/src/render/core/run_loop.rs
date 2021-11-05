@@ -1,6 +1,6 @@
 use crate::render::core::context::GfxContext;
 use crate::render::core::viewport::ViewportManager;
-use core::foundation::prelude::*;
+use crucible_core::foundation::prelude::*;
 use std::ops::Deref;
 use winit::event::{DeviceEvent, DeviceId, Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget};
@@ -28,7 +28,7 @@ pub trait RunLoopHandler {
 		event_loop: &EventLoopWindowTarget<()>,
 		vm_guard: RwGuardMut<ViewportManager>,
 		window: Entity,
-		frame: wgpu::SurfaceTexture,
+		frame: &wgpu::SurfaceTexture,
 	);
 
 	fn window_input(
@@ -54,7 +54,7 @@ pub trait RunLoopHandler {
 	fn goodbye(&mut self, engine: &Self::Engine, vm_guard: RwGuardMut<ViewportManager>);
 }
 
-// TODO: Improve render scheduling
+// TODO: Improve scheduling
 pub fn start_run_loop<P, H>(event_loop: EventLoop<()>, engine: H::Engine, mut handler: H) -> !
 where
 	H: 'static + RunLoopHandler,
@@ -91,7 +91,8 @@ where
 
 					if let Some(frame) = viewport.redraw(gfx) {
 						log::trace!("Drawing to viewport {:?}", e_window);
-						handler.draw(&mut ev_pusher, &engine, proxy, vm_guard, e_window, frame);
+						handler.draw(&mut ev_pusher, &engine, proxy, vm_guard, e_window, &frame);
+						frame.present();
 					} else {
 						log::warn!("Failed to acquire frame to draw to viewport {:?}", e_window);
 					}

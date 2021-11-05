@@ -1,9 +1,12 @@
 use crate::render::core::context::GfxContext;
 use crate::util::vec_ext::VecConvert;
 use cgmath::{Vector2, Zero};
-use core::foundation::prelude::*;
+use crucible_core::foundation::prelude::*;
 use std::collections::HashMap;
 use winit::window::{Window, WindowId};
+
+// TODO: Handle swapchain formats dynamically.
+pub const SWAPCHAIN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 
 #[derive(Default)]
 pub struct ViewportManager {
@@ -85,7 +88,7 @@ impl Viewport {
 	pub fn new(gfx: &GfxContext, window: Window, surface: wgpu::Surface) -> Self {
 		let config = wgpu::SurfaceConfiguration {
 			present_mode: wgpu::PresentMode::Fifo,
-			format: wgpu::TextureFormat::Bgra8UnormSrgb,
+			format: SWAPCHAIN_FORMAT,
 			width: window.inner_size().width,
 			height: window.inner_size().height,
 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -102,19 +105,20 @@ impl Viewport {
 		// Attempt to get a new frame from the current swapchain
 		if self.window.inner_size().to_vec() == Vector2::new(self.config.width, self.config.height)
 		{
-			match self.surface.get_current_frame() {
+			match self.surface.get_current_texture() {
 				// Desired outcome
-				Ok(wgpu::SurfaceFrame {
-					suboptimal: false,
-					output,
-				}) => return Some(output),
+				Ok(
+					output @ wgpu::SurfaceTexture {
+						suboptimal: false, ..
+					},
+				) => return Some(output),
 
 				// Unrecoverable
 				Err(wgpu::SurfaceError::Timeout) => return None,
 				Err(wgpu::SurfaceError::OutOfMemory) => return None,
 
 				// Try re-create
-				Ok(wgpu::SurfaceFrame {
+				Ok(wgpu::SurfaceTexture {
 					suboptimal: true, ..
 				}) => (),
 				Err(wgpu::SurfaceError::Outdated) => (),
@@ -123,7 +127,7 @@ impl Viewport {
 		}
 
 		// Re-create and try again
-		log::trace!("Recreating surface {:?}", self.surface);
+		log::info!("Recreating surface {:?}", self.surface);
 		let size = self.window.inner_size().to_vec();
 		if size.is_zero() {
 			return None;
@@ -133,10 +137,7 @@ impl Viewport {
 		self.surface.configure(&gfx.device, &self.config);
 
 		// Second attempt
-		self.surface
-			.get_current_frame()
-			.ok()
-			.map(|frame| frame.output)
+		self.surface.get_current_texture().ok()
 	}
 
 	pub fn id(&self) -> WindowId {

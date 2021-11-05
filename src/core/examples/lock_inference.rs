@@ -1,4 +1,4 @@
-use core::foundation::prelude::*;
+use crucible_core::foundation::prelude::*;
 
 fn main() {
 	let engine = MultiProvider::<(

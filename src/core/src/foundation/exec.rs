@@ -1,3 +1,4 @@
+use crate::util::error::AnyResult;
 use anyhow::Context;
 use futures::executor::ThreadPool;
 use futures::task::SpawnExt;
@@ -5,11 +6,9 @@ use num_cpus::get as get_cpu_count;
 use std::future::Future;
 use std::time::Duration;
 
-// === Executor === //
-
 pub struct Executor {
 	core_pool: ThreadPool,
-	blocking_keepalive: Duration,
+	_blocking_keepalive: Duration,
 }
 
 impl Default for Executor {
@@ -19,7 +18,7 @@ impl Default for Executor {
 }
 
 impl Executor {
-	pub fn new(config: ExecutorConfig) -> anyhow::Result<Self> {
+	pub fn new(config: ExecutorConfig) -> AnyResult<Self> {
 		let blocking_keepalive = config.blocking_keepalive;
 		let core_pool = {
 			let mut builder = ThreadPool::builder();
@@ -38,10 +37,11 @@ impl Executor {
 
 		Ok(Self {
 			core_pool,
-			blocking_keepalive,
+			_blocking_keepalive: blocking_keepalive,
 		})
 	}
 
+	// TODO: Make lifetimes more precise and powerful to encourage batch execution (e.g. spawning one task per entity)
 	pub fn spawn_core<T>(&self, fut: T) -> impl Future<Output = T::Output>
 	where
 		T: 'static + Send + Future,
@@ -80,7 +80,3 @@ impl Default for ExecutorConfig {
 		}
 	}
 }
-
-// === Misc futures === //
-
-pub struct DynJoinFuture {}

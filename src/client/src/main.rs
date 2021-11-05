@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 #![feature(backtrace)]
 #![feature(decl_macro)]
 #![feature(never_type)]
@@ -5,9 +6,10 @@
 use crate::render::core::context::GfxContext;
 use crate::render::core::run_loop::{start_run_loop, RunLoopEvent, RunLoopHandler};
 use crate::render::core::viewport::ViewportManager;
+use crate::render::voxel::blocks::VoxelRenderer;
 use anyhow::Context;
-use core::foundation::prelude::*;
-use core::util::error::ErrorFormatExt;
+use crucible_core::foundation::prelude::*;
+use crucible_core::util::error::{AnyResult, ErrorFormatExt};
 use futures::executor::block_on;
 use std::sync::Arc;
 use wgpu::SurfaceTexture;
@@ -34,10 +36,11 @@ type Engine = Arc<
 		// Graphics services
 		LazyComponent<GfxContext>,
 		LazyComponent<RwLock<ViewportManager>>,
+		LazyComponent<RwLock<VoxelRenderer>>,
 	)>,
 >;
 
-async fn main_inner() -> anyhow::Result<!> {
+async fn main_inner() -> AnyResult<!> {
 	// Initialize foundational services
 	env_logger::init();
 
@@ -53,12 +56,13 @@ async fn main_inner() -> anyhow::Result<!> {
 		let window = WindowBuilder::new()
 			.with_title("Crucible")
 			.with_visible(false)
-			.with_inner_size(LogicalSize::new(1920, 1080))
+			.with_inner_size(LogicalSize::new(500, 500))
+			.with_resizable(false)
 			.build(&event_loop)
 			.context("Failed to create main window.")?;
 
 		log::info!("Initializing wgpu context");
-		let (gfx, surface) = GfxContext::with_window(&window)
+		let (gfx, surface) = GfxContext::with_window(&window, wgpu::Features::POLYGON_MODE_LINE)
 			.await
 			.context("Failed to initialize wgpu!")?;
 
@@ -70,6 +74,9 @@ async fn main_inner() -> anyhow::Result<!> {
 	};
 	log::info!("Done initializing graphics subsystem!");
 
+	// Setup voxel services
+	let voxel = VoxelRenderer::new(&gfx)?;
+
 	// Setup engine
 	for e_win in vm.get_entities() {
 		vm.get_viewport(e_win).unwrap().window().set_visible(true);
@@ -78,6 +85,7 @@ async fn main_inner() -> anyhow::Result<!> {
 	engine.init_lock(world);
 	engine.init(gfx);
 	engine.init_lock(vm);
+	engine.init_lock(voxel);
 
 	// Start
 	log::info!("Starting run loop!");
@@ -106,21 +114,23 @@ impl RunLoopHandler for Handler {
 		_event_loop: &EventLoopWindowTarget<()>,
 		_vm_guard: RwGuardMut<ViewportManager>,
 		_window: Entity,
-		frame: SurfaceTexture,
+		frame: &SurfaceTexture,
 	) {
+		// Lock services
+		let voxel = RwGuardRef::<VoxelRenderer>::lock_now(engine.get());
 		let gfx: &GfxContext = engine.get();
 
-		let frame_view = frame
-			.texture
-			.create_view(&wgpu::TextureViewDescriptor::default());
+		// Create view
+		let frame_view = frame.texture.create_view(&Default::default());
 
+		// Construct command buffer
 		let mut cb = gfx
 			.device
 			.create_command_encoder(&wgpu::CommandEncoderDescriptor {
 				label: Some("primary command encoder"),
 			});
 
-		let pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
+		let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
 			label: None,
 			color_attachments: &[wgpu::RenderPassColorAttachment {
 				view: &frame_view,
@@ -138,8 +148,8 @@ impl RunLoopHandler for Handler {
 			depth_stencil_attachment: None,
 		});
 
+		voxel.get().render(&gfx, &mut pass);
 		drop(pass);
-
 		gfx.queue.submit([cb.finish()]);
 	}
 

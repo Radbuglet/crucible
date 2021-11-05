@@ -40,7 +40,9 @@ impl<T: ?Sized + Error> Display for FormattedError<'_, T> {
 			}
 
 			while let Some(cause) = cause_iter {
-				writeln!(f, "\t {}", cause)?;
+				for line in cause.to_string().lines() {
+					writeln!(f, "\t{}", line)?;
+				}
 				cause_iter = cause.source();
 			}
 		}

@@ -1,4 +1,4 @@
-use core::foundation::lock::*;
+use crucible_core::foundation::lock::*;
 use futures::executor::ThreadPool;
 use futures::task::SpawnExt;
 use std::sync::Arc;

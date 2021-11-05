@@ -1,5 +1,6 @@
 //! Utilities to marshall between Vector types.
 
+use crate::util::pod_ext::Vec3PodAdapter;
 use cgmath::{Vector1, Vector2, Vector3, Vector4};
 use winit::dpi::{LogicalSize, PhysicalSize};
 
@@ -20,7 +21,7 @@ impl<O: VecConvert> VecConvertExt for O {
 	}
 }
 
-// VectorN <-> VectorN (allows blind into without having to worry about identity conversions)
+// VectorN <-> VectorN (allows blind `into` without having to worry about no-op special case)
 macro vec_convert_n($target:ident) {
 	impl<T> VecConvert for $target<T> {
 		type Vector = $target<T>;
@@ -63,5 +64,18 @@ impl<T> VecConvert for PhysicalSize<T> {
 
 	fn from_vec(vec: Self::Vector) -> Self {
 		PhysicalSize::new(vec.x, vec.y)
+	}
+}
+
+// Pod <-> Vector3
+impl<T> VecConvert for Vec3PodAdapter<T> {
+	type Vector = Vector3<T>;
+
+	fn to_vec(self) -> Self::Vector {
+		self.0
+	}
+
+	fn from_vec(vec: Self::Vector) -> Self {
+		Self(vec)
 	}
 }
