@@ -1,4 +1,4 @@
-use crate::render::core::context::GfxContext;
+use crate::engine::context::GfxContext;
 use crate::util::vec_ext::VecConvert;
 use cgmath::{Vector2, Zero};
 use crucible_core::foundation::prelude::*;
@@ -11,7 +11,7 @@ pub const SWAPCHAIN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unor
 #[derive(Default)]
 pub struct ViewportManager {
 	windows: HashMap<WindowId, Entity>,
-	viewports: MapStorage<Viewport>,
+	viewports: Storage<Viewport>,
 }
 
 impl ViewportManager {
@@ -19,15 +19,16 @@ impl ViewportManager {
 		Default::default()
 	}
 
-	pub fn register(&mut self, gfx: &GfxContext, entity: Entity, window: Window) {
+	pub fn register(&mut self, world: &World, gfx: &GfxContext, entity: Entity, window: Window) {
 		let surface = unsafe { gfx.instance.create_surface(&window) };
-		self.register_pair(gfx, entity, window, surface);
+		self.register_pair(world, gfx, entity, window, surface);
 	}
 
-	/// Registers a viewport for the `window` and its `surface` and attaches it to the provided
+	/// Constructs a viewport from the given `window` and `surface` and attaches it to the provided
 	/// `entity`.
 	pub fn register_pair(
 		&mut self,
+		world: &World,
 		gfx: &GfxContext,
 		entity: Entity,
 		window: Window,
@@ -35,9 +36,10 @@ impl ViewportManager {
 	) {
 		let win_id = window.id();
 
-		let old_viewport = self
-			.viewports
-			.insert(entity, Viewport::new(gfx, window, surface));
+		let old_viewport =
+			self.viewports
+				.insert(world, entity, Viewport::new(gfx, window, surface));
+
 		let old_window = self.windows.insert(win_id, entity);
 
 		debug_assert!(
@@ -63,12 +65,12 @@ impl ViewportManager {
 
 	/// Gets a viewport for a given `Entity`.
 	pub fn get_viewport(&self, id: Entity) -> Option<&Viewport> {
-		self.viewports.get(id)
+		self.viewports.try_get_raw(id)
 	}
 
 	/// Gets a viewport for a given `Entity`.
 	pub fn get_viewport_mut(&mut self, id: Entity) -> Option<&mut Viewport> {
-		self.viewports.get_mut(id)
+		self.viewports.try_get_mut_raw(id)
 	}
 
 	/// Unregisters a viewport with a given `WindowId`.
@@ -146,5 +148,10 @@ impl Viewport {
 
 	pub fn window(&self) -> &Window {
 		&self.window
+	}
+
+	pub fn aspect(&self) -> f32 {
+		let size = self.window.inner_size();
+		size.width as f32 / size.height as f32
 	}
 }

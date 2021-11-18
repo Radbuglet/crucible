@@ -29,8 +29,6 @@
 //! Entities are handled by a simplistic parallel ECS implementation residing in [world]. Unlike most
 //! ECS frameworks, monoliths are encouraged to encapsulate component storages and only expose safe
 //! operations to the outside world.
-//!
-//! TODO: Summarize the client's architecture to give a better example of the design pattern described above
 
 pub mod event;
 pub mod exec;
@@ -44,11 +42,12 @@ pub mod prelude {
 		event::{EventPusher, EventPusherImmediate, EventPusherPoll},
 		exec::Executor,
 		ext::ProviderRwLockExt,
-		lock::{RwGuard, RwGuardMut, RwGuardRef, RwLock, RwLockManager},
+		lock::{lock_many_now, RwGuard, RwGuardMut, RwGuardRef, RwLock, RwLockManager},
 		provider::{
-			Component, LazyComponent, LazyProviderExt, MultiProvider, Provider, ProviderExt,
+			get_many, Component, LazyComponent, LazyProviderExt, MultiProvider, Provider,
+			ProviderExt,
 		},
-		world::{Entity, MapStorage, World},
+		world::{Entity, Storage, World},
 	};
 }
 

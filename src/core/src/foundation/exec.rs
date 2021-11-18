@@ -41,7 +41,6 @@ impl Executor {
 		})
 	}
 
-	// TODO: Make lifetimes more precise and powerful to encourage batch execution (e.g. spawning one task per entity)
 	pub fn spawn_core<T>(&self, fut: T) -> impl Future<Output = T::Output>
 	where
 		T: 'static + Send + Future,

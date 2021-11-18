@@ -361,6 +361,8 @@ impl Neg for Sign {
 }
 
 impl Axis3 {
+	pub const COUNT: usize = 3;
+
 	pub fn unit<N: BaseNum>(self) -> Vector3<N> {
 		let mut vec = Vector3::zero();
 		vec[self.idx] = N::one();
@@ -385,6 +387,12 @@ impl Deref for Axis3 {
 }
 
 impl BlockFace {
+	pub const COUNT: usize = 6;
+
+	pub fn marshall_shader(self) -> u32 {
+		self as u32
+	}
+
 	pub fn from(axis: Axis3, sign: Sign) -> Self {
 		Self::values_iter()
 			.find_map(|(face, meta)| {

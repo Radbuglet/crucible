@@ -1,12 +1,12 @@
-use crate::render::core::context::GfxContext;
-use crate::render::core::viewport::ViewportManager;
+use crate::engine::context::GfxContext;
+use crate::engine::viewport::ViewportManager;
 use crucible_core::foundation::prelude::*;
 use std::ops::Deref;
 use winit::event::{DeviceEvent, DeviceId, Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget};
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum RunLoopEvent {
+pub enum RunLoopCommand {
 	Shutdown,
 }
 
@@ -15,7 +15,7 @@ pub trait RunLoopHandler {
 
 	fn tick(
 		&mut self,
-		ev_pusher: &mut EventPusherPoll<RunLoopEvent>,
+		ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
 		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		vm_guard: RwGuardMut<ViewportManager>,
@@ -23,7 +23,7 @@ pub trait RunLoopHandler {
 
 	fn draw(
 		&mut self,
-		ev_pusher: &mut EventPusherPoll<RunLoopEvent>,
+		ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
 		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		vm_guard: RwGuardMut<ViewportManager>,
@@ -33,7 +33,7 @@ pub trait RunLoopHandler {
 
 	fn window_input(
 		&mut self,
-		ev_pusher: &mut EventPusherPoll<RunLoopEvent>,
+		ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
 		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		vm_guard: RwGuardMut<ViewportManager>,
@@ -43,7 +43,7 @@ pub trait RunLoopHandler {
 
 	fn device_input(
 		&mut self,
-		ev_pusher: &mut EventPusherPoll<RunLoopEvent>,
+		ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
 		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		vm_guard: RwGuardMut<ViewportManager>,
@@ -55,16 +55,28 @@ pub trait RunLoopHandler {
 }
 
 // TODO: Improve scheduling
+// FIXME: Zero-sized windows break everything!
 pub fn start_run_loop<P, H>(event_loop: EventLoop<()>, engine: H::Engine, mut handler: H) -> !
 where
 	H: 'static + RunLoopHandler,
-	H::Engine: Deref<Target = P>,
+	H::Engine: Deref<Target = P> + Send + Clone,
 	P: Provider,
 {
 	debug_assert!(
 		engine.has_many::<(&GfxContext, &RwLock<ViewportManager>)>(),
 		"`start_run_loop` requires a `GfxContext` and an `RwLock<ViewportManager>`!"
 	);
+
+	// TODO: Really improve scheduling!
+	// ^ We should be able to formalize how many in-flight frames are allowed and make sure that all
+	// map requests can be resolved immediately once the user is asked to render.
+	{
+		let engine = engine.clone();
+		std::thread::spawn(move || loop {
+			let gfx: &GfxContext = engine.get();
+			gfx.device.poll(wgpu::Maintain::Wait);
+		});
+	}
 
 	event_loop.run(move |event, proxy, flow| {
 		// Get dependencies
@@ -106,7 +118,8 @@ where
 			}
 			Event::LoopDestroyed => {
 				handler.goodbye(&engine, vm_guard);
-				println!("Goodbye!");
+				log::info!("Goodbye!");
+				return;
 			}
 			_ => {}
 		}
@@ -114,7 +127,7 @@ where
 		// Handle user events
 		for ev in ev_pusher.drain() {
 			match ev {
-				RunLoopEvent::Shutdown => {
+				RunLoopCommand::Shutdown => {
 					log::info!("Shutdown requested.");
 					*flow = ControlFlow::Exit;
 				}

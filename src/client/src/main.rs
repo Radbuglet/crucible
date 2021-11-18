@@ -3,26 +3,29 @@
 #![feature(decl_macro)]
 #![feature(never_type)]
 
-use crate::render::core::context::GfxContext;
-use crate::render::core::run_loop::{start_run_loop, RunLoopEvent, RunLoopHandler};
-use crate::render::core::viewport::ViewportManager;
-use crate::render::voxel::blocks::VoxelRenderer;
+use crate::engine::context::GfxContext;
+use crate::engine::run_loop::{start_run_loop, RunLoopCommand, RunLoopHandler};
+use crate::engine::util::camera::{GfxCameraManager, PerspectiveCamera};
+use crate::engine::util::uniform::UniformManager;
+use crate::engine::viewport::ViewportManager;
+use crate::voxel::render::VoxelRenderer;
 use anyhow::Context;
+use cgmath::Vector3;
 use crucible_core::foundation::prelude::*;
 use crucible_core::util::error::{AnyResult, ErrorFormatExt};
 use futures::executor::block_on;
 use std::sync::Arc;
-use wgpu::SurfaceTexture;
 use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::{EventLoop, EventLoopWindowTarget};
 use winit::window::WindowBuilder;
 
-mod render;
-mod util;
+pub mod engine;
+pub mod util;
+pub mod voxel;
 
 fn main() {
-	if let Err(err) = block_on(main_inner()) {
+	if let Err(err) = main_inner() {
 		eprintln!("{}", err.format_error(true));
 	}
 }
@@ -35,12 +38,14 @@ type Engine = Arc<
 		LazyComponent<RwLock<World>>,
 		// Graphics services
 		LazyComponent<GfxContext>,
+		LazyComponent<GfxCameraManager>,
+		LazyComponent<RwLock<UniformManager>>,
 		LazyComponent<RwLock<ViewportManager>>,
 		LazyComponent<RwLock<VoxelRenderer>>,
 	)>,
 >;
 
-async fn main_inner() -> AnyResult<!> {
+fn main_inner() -> AnyResult<!> {
 	// Initialize foundational services
 	env_logger::init();
 
@@ -56,26 +61,35 @@ async fn main_inner() -> AnyResult<!> {
 		let window = WindowBuilder::new()
 			.with_title("Crucible")
 			.with_visible(false)
-			.with_inner_size(LogicalSize::new(500, 500))
-			.with_resizable(false)
+			.with_inner_size(LogicalSize::new(1000, 1000))
 			.build(&event_loop)
 			.context("Failed to create main window.")?;
 
 		log::info!("Initializing wgpu context");
-		let (gfx, surface) = GfxContext::with_window(&window, wgpu::Features::POLYGON_MODE_LINE)
-			.await
-			.context("Failed to initialize wgpu!")?;
+		let (gfx, surface) = block_on(GfxContext::with_window(
+			&window,
+			wgpu::Features::POLYGON_MODE_LINE,
+		))
+		.context("Failed to initialize wgpu!")?;
 
 		let mut vm = ViewportManager::new();
 		let entity = world.spawn();
-		vm.register_pair(&gfx, entity, window, surface);
+		vm.register_pair(&world, &gfx, entity, window, surface);
 
 		(gfx, vm)
 	};
 	log::info!("Done initializing graphics subsystem!");
 
 	// Setup voxel services
-	let voxel = VoxelRenderer::new(&gfx)?;
+	let uniform = UniformManager::new(
+		&gfx,
+		Some("uniform manager"),
+		wgpu::BufferUsages::UNIFORM,
+		1024,
+	);
+
+	let camera = GfxCameraManager::new(&gfx);
+	let voxel = VoxelRenderer::new(&gfx, &camera);
 
 	// Setup engine
 	for e_win in vm.get_entities() {
@@ -83,9 +97,11 @@ async fn main_inner() -> AnyResult<!> {
 	}
 
 	engine.init_lock(world);
+	engine.init_lock(uniform);
 	engine.init(gfx);
 	engine.init_lock(vm);
 	engine.init_lock(voxel);
+	engine.init(camera);
 
 	// Start
 	log::info!("Starting run loop!");
@@ -99,7 +115,7 @@ impl RunLoopHandler for Handler {
 
 	fn tick(
 		&mut self,
-		_ev_pusher: &mut EventPusherPoll<RunLoopEvent>,
+		_ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
 		_engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
 		_vm_guard: RwGuardMut<ViewportManager>,
@@ -109,16 +125,40 @@ impl RunLoopHandler for Handler {
 
 	fn draw(
 		&mut self,
-		_ev_pusher: &mut EventPusherPoll<RunLoopEvent>,
+		_ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
 		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
-		_vm_guard: RwGuardMut<ViewportManager>,
-		_window: Entity,
-		frame: &SurfaceTexture,
+		vm_guard: RwGuardMut<ViewportManager>,
+		window: Entity,
+		frame: &wgpu::SurfaceTexture,
 	) {
 		// Lock services
-		let voxel = RwGuardRef::<VoxelRenderer>::lock_now(engine.get());
-		let gfx: &GfxContext = engine.get();
+		get_many!(&**engine, gfx: &GfxContext, gfx_camera: &GfxCameraManager);
+		lock_many_now!(
+			engine.get_many() => _guard,
+			uniform: &mut UniformManager,
+			voxel: &mut VoxelRenderer,
+		);
+
+		// Construct uniforms
+		match block_on(uniform.begin_frame()) {
+			Ok(_) => {}
+			Err(err) => {
+				log::warn!("Failed to begin frame {}", err);
+				return;
+			}
+		}
+
+		let viewport = vm_guard.get().get_viewport(window).unwrap();
+		let camera = PerspectiveCamera {
+			position: Vector3::new(0., 1., 10.),
+			..Default::default()
+		};
+
+		let camera_group =
+			gfx_camera.upload_view(gfx, uniform, camera.get_view_matrix(viewport.aspect()));
+
+		uniform.end_frame();
 
 		// Create view
 		let frame_view = frame.texture.create_view(&Default::default());
@@ -148,14 +188,14 @@ impl RunLoopHandler for Handler {
 			depth_stencil_attachment: None,
 		});
 
-		voxel.get().render(&gfx, &mut pass);
+		voxel.render(&camera_group, &mut pass);
 		drop(pass);
 		gfx.queue.submit([cb.finish()]);
 	}
 
 	fn window_input(
 		&mut self,
-		ev_pusher: &mut EventPusherPoll<RunLoopEvent>,
+		ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
 		_engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
 		vm_guard: RwGuardMut<ViewportManager>,
@@ -167,14 +207,14 @@ impl RunLoopHandler for Handler {
 			vm.unregister(vm.get_viewport(window).unwrap().id());
 
 			if vm.get_entities().len() == 0 {
-				ev_pusher.push(RunLoopEvent::Shutdown);
+				ev_pusher.push(RunLoopCommand::Shutdown);
 			}
 		}
 	}
 
 	fn device_input(
 		&mut self,
-		_ev_pusher: &mut EventPusherPoll<RunLoopEvent>,
+		_ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
 		_engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
 		_vm_guard: RwGuardMut<ViewportManager>,

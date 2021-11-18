@@ -198,6 +198,10 @@ pub trait ProviderGetter<'obj>: Sized {
 	fn get<T: ?Sized + Provider>(obj: &'obj T) -> Self;
 }
 
+pub macro get_many($target:expr, $($name:ident: $ty:ty),+$(,)?) {
+	let ($($name,)*) = ProviderExt::get_many::<($($ty,)*)>($target);
+}
+
 // === Standard static providers === //
 
 #[derive(Default)]

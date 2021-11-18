@@ -1,6 +1,3 @@
-// TODO: Code review, clean up traces, document safety invariants
-// FIXME: Questionable multi-ref borrow in a single atomic (might be valid but very unintuitive)
-
 use self::internals::{wake_up_requests, LockRequestHandle, LockRequestState};
 use crate::foundation::event::EventPusherPoll;
 use crate::util::bitmask::Bitmask64;
@@ -808,4 +805,9 @@ impl<T: LockTarget> Drop for RwGuard<T> {
 		manager.poll_completed(&mut wakeup);
 		wake_up_requests(&mut wakeup);
 	}
+}
+
+pub macro lock_many_now($target:expr => $guard:ident, $($comp:ident : $ty:ty),+$(,)?) {
+	let $guard = RwGuard::<($($ty,)*)>::lock_now($target);
+	let ($($comp,)*) = $guard.get();
 }
