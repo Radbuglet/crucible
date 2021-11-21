@@ -1,10 +1,14 @@
 #![allow(dead_code)]
 #![feature(backtrace)]
 #![feature(decl_macro)]
+#![feature(duration_constants)]
 #![feature(never_type)]
 
 use crate::engine::context::GfxContext;
-use crate::engine::run_loop::{start_run_loop, RunLoopCommand, RunLoopHandler};
+use crate::engine::input::InputTracker;
+use crate::engine::run_loop::{
+	start_run_loop, DepGuard, RunLoopCommand, RunLoopHandler, RunLoopStatTracker,
+};
 use crate::engine::util::camera::{GfxCameraManager, PerspectiveCamera};
 use crate::engine::util::uniform::UniformManager;
 use crate::engine::viewport::ViewportManager;
@@ -16,7 +20,7 @@ use crucible_core::util::error::{AnyResult, ErrorFormatExt};
 use futures::executor::block_on;
 use std::sync::Arc;
 use winit::dpi::LogicalSize;
-use winit::event::{DeviceEvent, DeviceId, WindowEvent};
+use winit::event::{DeviceEvent, DeviceId, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{EventLoop, EventLoopWindowTarget};
 use winit::window::WindowBuilder;
 
@@ -35,15 +39,23 @@ type Engine = Arc<
 		// Foundational services
 		Component<Executor>,
 		Component<RwLockManager>,
-		LazyComponent<RwLock<World>>,
-		// Graphics services
+		RwLockComponent<World>,
+		// Core engine services
 		LazyComponent<GfxContext>,
+		RwLockComponent<ViewportManager>,
+		RwLockComponent<InputTracker>,
+		RwLockComponent<UniformManager>,
 		LazyComponent<GfxCameraManager>,
-		LazyComponent<RwLock<UniformManager>>,
-		LazyComponent<RwLock<ViewportManager>>,
-		LazyComponent<RwLock<VoxelRenderer>>,
+		RwLockComponent<RunLoopStatTracker>,
+		// Game services
+		RwLockComponent<VoxelRenderer>,
+		RwLockComponent<GameState>,
 	)>,
 >;
+
+struct GameState {
+	camera: PerspectiveCamera,
+}
 
 fn main_inner() -> AnyResult<!> {
 	// Initialize foundational services
@@ -62,6 +74,7 @@ fn main_inner() -> AnyResult<!> {
 			.with_title("Crucible")
 			.with_visible(false)
 			.with_inner_size(LogicalSize::new(1000, 1000))
+			.with_min_inner_size(LogicalSize::new(100, 100))
 			.build(&event_loop)
 			.context("Failed to create main window.")?;
 
@@ -80,7 +93,8 @@ fn main_inner() -> AnyResult<!> {
 	};
 	log::info!("Done initializing graphics subsystem!");
 
-	// Setup voxel services
+	// Setup core engine services
+	let input = InputTracker::new();
 	let uniform = UniformManager::new(
 		&gfx,
 		Some("uniform manager"),
@@ -89,21 +103,31 @@ fn main_inner() -> AnyResult<!> {
 	);
 
 	let camera = GfxCameraManager::new(&gfx);
+
+	// Setup voxels
 	let voxel = VoxelRenderer::new(&gfx, &camera);
 
-	// Setup engine
+	// Start engine
 	for e_win in vm.get_entities() {
 		vm.get_viewport(e_win).unwrap().window().set_visible(true);
 	}
 
 	engine.init_lock(world);
 	engine.init_lock(uniform);
+	engine.init_lock(input);
 	engine.init(gfx);
 	engine.init_lock(vm);
 	engine.init_lock(voxel);
 	engine.init(camera);
 
-	// Start
+	engine.init_lock(GameState {
+		camera: PerspectiveCamera {
+			position: Vector3::new(0., 1., 10.),
+			..Default::default()
+		},
+	});
+	engine.init_lock(RunLoopStatTracker::start(120));
+
 	log::info!("Starting run loop!");
 	start_run_loop(event_loop, engine, Handler);
 }
@@ -116,11 +140,37 @@ impl RunLoopHandler for Handler {
 	fn tick(
 		&mut self,
 		_ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
-		_engine: &Self::Engine,
+		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
-		_vm_guard: RwGuardMut<ViewportManager>,
+		dep_guard: DepGuard,
 	) {
-		log::trace!("Tick!");
+		// Lock services
+		let (wm, stats) = dep_guard.get();
+		lock_many_now!(
+			engine.get_many() => _guard,
+			input: &mut InputTracker,
+			state: &mut GameState,
+		);
+
+		// Process inputs
+		if input.key(VirtualKeyCode::Space).state() {
+			state.camera.position += Vector3::new(0.0, 1.0, 0.0);
+		}
+
+		if input.key(VirtualKeyCode::LShift).state() {
+			state.camera.position -= Vector3::new(0.0, 1.0, 0.0);
+		}
+
+		// Update title
+		let title = format!("Crucible - TPS: {}", stats.tps().unwrap_or(0));
+		for entity in wm.get_entities() {
+			wm.get_viewport(entity)
+				.unwrap()
+				.window()
+				.set_title(title.as_str());
+		}
+
+		input.end_tick();
 	}
 
 	fn draw(
@@ -128,16 +178,18 @@ impl RunLoopHandler for Handler {
 		_ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
 		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
-		vm_guard: RwGuardMut<ViewportManager>,
+		dep_guard: DepGuard,
 		window: Entity,
 		frame: &wgpu::SurfaceTexture,
 	) {
 		// Lock services
+		let (vm, _) = dep_guard.get();
 		get_many!(&**engine, gfx: &GfxContext, gfx_camera: &GfxCameraManager);
 		lock_many_now!(
 			engine.get_many() => _guard,
 			uniform: &mut UniformManager,
 			voxel: &mut VoxelRenderer,
+			state: &GameState,
 		);
 
 		// Construct uniforms
@@ -149,14 +201,12 @@ impl RunLoopHandler for Handler {
 			}
 		}
 
-		let viewport = vm_guard.get().get_viewport(window).unwrap();
-		let camera = PerspectiveCamera {
-			position: Vector3::new(0., 1., 10.),
-			..Default::default()
-		};
-
-		let camera_group =
-			gfx_camera.upload_view(gfx, uniform, camera.get_view_matrix(viewport.aspect()));
+		let viewport = vm.get_viewport(window).unwrap();
+		let camera_group = gfx_camera.upload_view(
+			gfx,
+			uniform,
+			state.camera.get_view_matrix(viewport.aspect()),
+		);
 
 		uniform.end_frame();
 
@@ -196,13 +246,23 @@ impl RunLoopHandler for Handler {
 	fn window_input(
 		&mut self,
 		ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
-		_engine: &Self::Engine,
+		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
-		vm_guard: RwGuardMut<ViewportManager>,
+		dep_guard: DepGuard,
 		window: Entity,
 		event: &WindowEvent,
 	) {
-		let vm = vm_guard.get();
+		// Lock services
+		let (vm, _) = dep_guard.get();
+
+		// Track inputs
+		engine
+			.get_lock::<InputTracker>()
+			.lock_mut_now()
+			.get()
+			.handle_window_event(event);
+
+		// Handle windowing events
 		if let WindowEvent::CloseRequested = event {
 			vm.unregister(vm.get_viewport(window).unwrap().id());
 
@@ -215,13 +275,19 @@ impl RunLoopHandler for Handler {
 	fn device_input(
 		&mut self,
 		_ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
-		_engine: &Self::Engine,
+		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
-		_vm_guard: RwGuardMut<ViewportManager>,
-		_device_id: DeviceId,
-		_event: &DeviceEvent,
+		_dep_guard: DepGuard,
+		device_id: DeviceId,
+		event: &DeviceEvent,
 	) {
+		// Track inputs
+		engine
+			.get_lock::<InputTracker>()
+			.lock_mut_now()
+			.get()
+			.handle_device_event(device_id, event);
 	}
 
-	fn goodbye(&mut self, _engine: &Self::Engine, _vm_guard: RwGuardMut<ViewportManager>) {}
+	fn goodbye(&mut self, _engine: &Self::Engine, _dep_guard: DepGuard) {}
 }

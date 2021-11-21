@@ -1,6 +1,6 @@
 use crate::engine::context::GfxContext;
 use crate::util::vec_ext::VecConvert;
-use cgmath::{Vector2, Zero};
+use cgmath::Vector2;
 use crucible_core::foundation::prelude::*;
 use std::collections::HashMap;
 use winit::window::{Window, WindowId};
@@ -104,9 +104,15 @@ impl Viewport {
 	}
 
 	pub fn redraw(&mut self, gfx: &GfxContext) -> Option<wgpu::SurfaceTexture> {
+		let size = self.window.inner_size().to_vec();
+
+		// We should never attempt to render to a zero-sized window.
+		if !has_valid_size(size) {
+			return None;
+		}
+
 		// Attempt to get a new frame from the current swapchain
-		if self.window.inner_size().to_vec() == Vector2::new(self.config.width, self.config.height)
-		{
+		if size == Vector2::new(self.config.width, self.config.height) {
 			match self.surface.get_current_texture() {
 				// Desired outcome
 				Ok(
@@ -130,10 +136,6 @@ impl Viewport {
 
 		// Re-create and try again
 		log::info!("Recreating surface {:?}", self.surface);
-		let size = self.window.inner_size().to_vec();
-		if size.is_zero() {
-			return None;
-		}
 		self.config.width = size.x;
 		self.config.height = size.y;
 		self.surface.configure(&gfx.device, &self.config);
@@ -151,7 +153,15 @@ impl Viewport {
 	}
 
 	pub fn aspect(&self) -> f32 {
-		let size = self.window.inner_size();
-		size.width as f32 / size.height as f32
+		let size = self.window.inner_size().to_vec();
+		if has_valid_size(size) {
+			size.x as f32 / size.y as f32
+		} else {
+			1.
+		}
 	}
+}
+
+fn has_valid_size<T: cgmath::BaseNum>(size: Vector2<T>) -> bool {
+	size.x != T::zero() && size.y != T::zero()
 }

@@ -1,4 +1,8 @@
-use crate::foundation::{LazyProviderExt, Provider, ProviderExt, RwLock, RwLockManager};
+use crate::foundation::{
+	LazyComponent, LazyProviderExt, Provider, ProviderExt, RwLock, RwLockManager,
+};
+
+pub type RwLockComponent<T> = LazyComponent<RwLock<T>>;
 
 pub trait ProviderRwLockExt: Provider {
 	fn init_lock<T: 'static>(&self, value: T);

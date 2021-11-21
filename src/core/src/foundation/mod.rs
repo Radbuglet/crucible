@@ -41,7 +41,7 @@ pub mod prelude {
 	pub use super::{
 		event::{EventPusher, EventPusherImmediate, EventPusherPoll},
 		exec::Executor,
-		ext::ProviderRwLockExt,
+		ext::{ProviderRwLockExt, RwLockComponent},
 		lock::{lock_many_now, RwGuard, RwGuardMut, RwGuardRef, RwLock, RwLockManager},
 		provider::{
 			get_many, Component, LazyComponent, LazyProviderExt, MultiProvider, Provider,
