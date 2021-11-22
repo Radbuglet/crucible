@@ -12,11 +12,11 @@ pub trait VecConvert {
 }
 
 pub trait VecConvertExt: VecConvert {
-	fn into<T: VecConvert<Vector = Self::Vector>>(self) -> T;
+	fn convert_vec<T: VecConvert<Vector = Self::Vector>>(self) -> T;
 }
 
 impl<O: VecConvert> VecConvertExt for O {
-	fn into<T: VecConvert<Vector = Self::Vector>>(self) -> T {
+	fn convert_vec<T: VecConvert<Vector = Self::Vector>>(self) -> T {
 		T::from_vec(self.to_vec())
 	}
 }
@@ -77,5 +77,22 @@ impl<T> VecConvert for Vec3PodAdapter<T> {
 
 	fn from_vec(vec: Self::Vector) -> Self {
 		Self(vec)
+	}
+}
+
+// wgpu::Extent3 <-> Vector3
+impl VecConvert for wgpu::Extent3d {
+	type Vector = Vector3<u32>;
+
+	fn to_vec(self) -> Self::Vector {
+		Vector3::new(self.width, self.height, self.depth_or_array_layers)
+	}
+
+	fn from_vec(vec: Self::Vector) -> Self {
+		wgpu::Extent3d {
+			width: vec.x,
+			height: vec.y,
+			depth_or_array_layers: vec.z,
+		}
 	}
 }

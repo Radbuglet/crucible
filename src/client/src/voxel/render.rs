@@ -74,17 +74,16 @@ impl VoxelRenderer {
 					front_face: wgpu::FrontFace::Ccw, // OpenGL tradition
 					cull_mode: None,
 					clamp_depth: false,
-					polygon_mode: wgpu::PolygonMode::Line,
+					polygon_mode: wgpu::PolygonMode::Fill,
 					conservative: false,
 				},
-				depth_stencil: None,
-				/*Some(wgpu::DepthStencilState {
+				depth_stencil: Some(wgpu::DepthStencilState {
 					format: DEPTH_TEXTURE_FORMAT,
 					depth_write_enabled: true,
 					depth_compare: wgpu::CompareFunction::Less,
 					stencil: Default::default(),
 					bias: Default::default(),
-				})*/
+				}),
 				multisample: wgpu::MultisampleState {
 					count: 1,
 					mask: !0,

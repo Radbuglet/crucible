@@ -12,16 +12,17 @@ use crate::engine::run_loop::{
 use crate::engine::util::camera::{GfxCameraManager, PerspectiveCamera};
 use crate::engine::util::uniform::UniformManager;
 use crate::engine::viewport::ViewportManager;
-use crate::voxel::render::VoxelRenderer;
+use crate::util::vec_ext::VecConvert;
+use crate::voxel::render::{VoxelRenderer, DEPTH_TEXTURE_FORMAT};
 use anyhow::Context;
-use cgmath::{Deg, InnerSpace, Matrix3, Rad, Vector3, Zero};
+use cgmath::{Deg, InnerSpace, Matrix3, Rad, Vector2, Vector3, Zero};
 use crucible_core::foundation::prelude::*;
 use crucible_core::util::error::{AnyResult, ErrorFormatExt};
 use futures::executor::block_on;
 use std::f32::consts::PI;
 use std::sync::Arc;
 use winit::dpi::LogicalSize;
-use winit::event::{DeviceEvent, DeviceId, VirtualKeyCode, WindowEvent};
+use winit::event::{DeviceEvent, DeviceId, MouseButton, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{EventLoop, EventLoopWindowTarget};
 use winit::window::WindowBuilder;
 
@@ -56,6 +57,30 @@ type Engine = Arc<
 
 struct GameState {
 	camera: PerspectiveCamera,
+	depth: Storage<DepthAttachment>,
+	is_active: bool,
+	main_window: Entity,
+}
+
+struct DepthAttachment {
+	texture: wgpu::Texture,
+	size: Vector2<u32>,
+}
+
+fn create_depth_texture(gfx: &GfxContext, size: Vector2<u32>) -> wgpu::Texture {
+	gfx.device.create_texture(&wgpu::TextureDescriptor {
+		label: Some("depth texture"),
+		size: wgpu::Extent3d {
+			width: size.x,
+			height: size.y,
+			depth_or_array_layers: 1,
+		},
+		mip_level_count: 1,
+		sample_count: 1,
+		dimension: wgpu::TextureDimension::D2,
+		format: DEPTH_TEXTURE_FORMAT,
+		usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+	})
 }
 
 fn main_inner() -> AnyResult<!> {
@@ -69,18 +94,15 @@ fn main_inner() -> AnyResult<!> {
 	log::info!("Initializing graphics subsystem...");
 	log::info!("Creating EventLoop");
 	let event_loop = EventLoop::new();
-	let (gfx, vm) = {
+	let (gfx, main_window, vm) = {
 		log::info!("Creating main window");
 		let window = WindowBuilder::new()
 			.with_title("Crucible")
 			.with_visible(false)
-			.with_inner_size(LogicalSize::new(1000, 1000))
+			.with_inner_size(LogicalSize::new(1920, 1080))
 			.with_min_inner_size(LogicalSize::new(100, 100))
 			.build(&event_loop)
 			.context("Failed to create main window.")?;
-
-		window.set_cursor_grab(true)?;
-		window.set_cursor_visible(false);
 
 		log::info!("Initializing wgpu context");
 		let (gfx, surface) = block_on(GfxContext::with_window(
@@ -93,7 +115,7 @@ fn main_inner() -> AnyResult<!> {
 		let entity = world.spawn();
 		vm.register_pair(&world, &gfx, entity, window, surface);
 
-		(gfx, vm)
+		(gfx, entity, vm)
 	};
 	log::info!("Done initializing graphics subsystem!");
 
@@ -112,8 +134,14 @@ fn main_inner() -> AnyResult<!> {
 	let voxel = VoxelRenderer::new(&gfx, &camera);
 
 	// Start engine
+	let mut depth = Storage::new();
 	for e_win in vm.get_entities() {
-		vm.get_viewport(e_win).unwrap().window().set_visible(true);
+		let viewport = vm.get_viewport(e_win).unwrap();
+		viewport.window().set_visible(true);
+
+		let size = viewport.window().inner_size().to_vec();
+		let texture = create_depth_texture(&gfx, size);
+		depth.insert(&world, e_win, DepthAttachment { texture, size });
 	}
 
 	engine.init_lock(world);
@@ -129,6 +157,9 @@ fn main_inner() -> AnyResult<!> {
 			position: Vector3::new(0., 1., 10.),
 			..Default::default()
 		},
+		depth,
+		is_active: false,
+		main_window,
 	});
 	engine.init_lock(RunLoopStatTracker::start(60));
 
@@ -158,6 +189,30 @@ impl RunLoopHandler for Handler {
 
 		// Process inputs
 		{
+			let mut is_active_dirty = false;
+
+			if input.button(MouseButton::Left).recently_pressed() {
+				state.is_active = true;
+				is_active_dirty = true;
+			}
+
+			if input.key(VirtualKeyCode::Escape).recently_pressed() {
+				if state.is_active {
+					state.is_active = false;
+					is_active_dirty = true;
+				} else {
+					ev_pusher.push(RunLoopCommand::Shutdown);
+				}
+			}
+
+			if is_active_dirty {
+				let window = wm.get_viewport(state.main_window).unwrap().window();
+				let _ = window.set_cursor_grab(state.is_active);
+				window.set_cursor_visible(!state.is_active);
+			}
+		}
+
+		if state.is_active {
 			let camera = &mut state.camera;
 
 			// Calculate heading
@@ -224,11 +279,6 @@ impl RunLoopHandler for Handler {
 			viewport.window().set_title(title.as_str());
 		}
 
-		// Handle debug commands
-		if input.key(VirtualKeyCode::Escape).recently_pressed() {
-			ev_pusher.push(RunLoopCommand::Shutdown);
-		}
-
 		input.end_tick();
 	}
 
@@ -248,7 +298,8 @@ impl RunLoopHandler for Handler {
 			engine.get_many() => _guard,
 			uniform: &mut UniformManager,
 			voxel: &mut VoxelRenderer,
-			state: &GameState,
+			state: &mut GameState,
+			world: &World,
 		);
 
 		// Construct uniforms
@@ -270,6 +321,15 @@ impl RunLoopHandler for Handler {
 		uniform.end_frame();
 
 		// Create view
+		let depth = state.depth.get_mut(world, window);
+		{
+			let current_depth_size = viewport.window().inner_size().to_vec();
+			if depth.size != current_depth_size {
+				depth.texture = create_depth_texture(gfx, current_depth_size);
+				depth.size = current_depth_size;
+			}
+		}
+		let depth_view = depth.texture.create_view(&Default::default());
 		let frame_view = frame.texture.create_view(&Default::default());
 
 		// Construct command buffer
@@ -294,7 +354,14 @@ impl RunLoopHandler for Handler {
 				},
 				resolve_target: None,
 			}],
-			depth_stencil_attachment: None,
+			depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+				view: &depth_view,
+				depth_ops: Some(wgpu::Operations {
+					load: wgpu::LoadOp::Clear(1.),
+					store: true,
+				}),
+				stencil_ops: None,
+			}),
 		});
 
 		voxel.render(&camera_group, &mut pass);
