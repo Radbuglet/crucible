@@ -90,10 +90,14 @@ impl Default for PerspectiveCamera {
 }
 
 impl PerspectiveCamera {
-	pub fn get_view_matrix(&self, aspect: f32) -> Matrix4<f32> {
-		let world = Matrix4::from_translation(self.position)
+	pub fn get_world(&self) -> Matrix4<f32> {
+		Matrix4::from_translation(self.position)
+			* Matrix4::from_angle_y(self.yaw)
 			* Matrix4::from_angle_x(self.pitch)
-			* Matrix4::from_angle_y(self.yaw);
+	}
+
+	pub fn get_view_matrix(&self, aspect: f32) -> Matrix4<f32> {
+		let world = self.get_world();
 
 		let (near, far) = self.clipping;
 		let proj = perspective(self.fov, aspect, near, far);

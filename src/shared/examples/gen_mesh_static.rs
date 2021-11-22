@@ -13,7 +13,7 @@ fn main() {
 		print_vec(a);
 		print_vec(b);
 		print_vec(d);
-		print_vec(a);
+		print_vec(b);
 		print_vec(c);
 		print_vec(d);
 		println!()

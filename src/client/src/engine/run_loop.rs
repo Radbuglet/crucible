@@ -108,7 +108,17 @@ where
 					stats.end_tick();
 				}
 
-				*flow = ControlFlow::WaitUntil(stats.next_tick());
+				let now = Instant::now();
+				if let Some(until) = stats.next_tick().checked_duration_since(now) {
+					// TODO: Determine sleep overhead at runtime.
+					// Take 1/3rd of the wait time.
+					let until = until / 3;
+
+					// It the wait is above 4ms, perform it.
+					if until > Duration::from_millis(4) {
+						*flow = ControlFlow::WaitUntil(now + until);
+					}
+				}
 			}
 			// Redraw request handling
 			Event::RedrawRequested(window_id) => {
@@ -218,27 +228,17 @@ impl RunLoopStatTracker {
 		}
 	}
 
-	pub fn end_tick(&mut self) -> Option<Duration> {
+	pub fn end_tick(&mut self) {
 		let now = Instant::now();
 		self.accum_mspt += now - self.last_tick_start;
-		self.until_next_tick_inner(now)
 	}
 
 	pub fn next_tick(&self) -> Instant {
 		self.last_tick_start + self.tick_wait_period
 	}
 
-	fn until_next_tick_inner(&self, now: Instant) -> Option<Duration> {
-		let next_tick = self.next_tick();
-		if now > next_tick {
-			None // We're late
-		} else {
-			Some(next_tick - now)
-		}
-	}
-
 	pub fn until_next_tick(&self) -> Option<Duration> {
-		self.until_next_tick_inner(Instant::now())
+		self.next_tick().checked_duration_since(Instant::now())
 	}
 
 	pub fn last_tick_start(&self) -> Instant {
@@ -251,6 +251,10 @@ impl RunLoopStatTracker {
 
 	pub fn delta(&self) -> Option<Duration> {
 		self.stat_delta
+	}
+
+	pub fn delta_secs(&self) -> f32 {
+		self.delta().map_or(1., |time| time.as_secs_f32())
 	}
 
 	pub fn tps(&self) -> Option<u32> {

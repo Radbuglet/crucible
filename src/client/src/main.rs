@@ -14,10 +14,11 @@ use crate::engine::util::uniform::UniformManager;
 use crate::engine::viewport::ViewportManager;
 use crate::voxel::render::VoxelRenderer;
 use anyhow::Context;
-use cgmath::Vector3;
+use cgmath::{Deg, InnerSpace, Matrix3, Rad, Vector3, Zero};
 use crucible_core::foundation::prelude::*;
 use crucible_core::util::error::{AnyResult, ErrorFormatExt};
 use futures::executor::block_on;
+use std::f32::consts::PI;
 use std::sync::Arc;
 use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, DeviceId, VirtualKeyCode, WindowEvent};
@@ -78,6 +79,9 @@ fn main_inner() -> AnyResult<!> {
 			.build(&event_loop)
 			.context("Failed to create main window.")?;
 
+		window.set_cursor_grab(true)?;
+		window.set_cursor_visible(false);
+
 		log::info!("Initializing wgpu context");
 		let (gfx, surface) = block_on(GfxContext::with_window(
 			&window,
@@ -126,7 +130,7 @@ fn main_inner() -> AnyResult<!> {
 			..Default::default()
 		},
 	});
-	engine.init_lock(RunLoopStatTracker::start(120));
+	engine.init_lock(RunLoopStatTracker::start(60));
 
 	log::info!("Starting run loop!");
 	start_run_loop(event_loop, engine, Handler);
@@ -139,7 +143,7 @@ impl RunLoopHandler for Handler {
 
 	fn tick(
 		&mut self,
-		_ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
+		ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
 		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -153,21 +157,76 @@ impl RunLoopHandler for Handler {
 		);
 
 		// Process inputs
-		if input.key(VirtualKeyCode::Space).state() {
-			state.camera.position += Vector3::new(0.0, 1.0, 0.0);
-		}
+		{
+			let camera = &mut state.camera;
 
-		if input.key(VirtualKeyCode::LShift).state() {
-			state.camera.position -= Vector3::new(0.0, 1.0, 0.0);
+			// Calculate heading
+			let mut heading = Vector3::zero();
+
+			if input.key(VirtualKeyCode::W).state() {
+				heading -= Vector3::unit_z();
+			}
+
+			if input.key(VirtualKeyCode::S).state() {
+				heading += Vector3::unit_z();
+			}
+
+			if input.key(VirtualKeyCode::D).state() {
+				heading += Vector3::unit_x();
+			}
+
+			if input.key(VirtualKeyCode::A).state() {
+				heading -= Vector3::unit_x();
+			}
+
+			if input.key(VirtualKeyCode::Q).state() {
+				heading -= Vector3::unit_y();
+			}
+
+			if input.key(VirtualKeyCode::E).state() {
+				heading += Vector3::unit_y();
+			}
+
+			let heading = if heading.is_zero() {
+				heading
+			} else {
+				heading.normalize()
+			};
+
+			let speed = if input.key(VirtualKeyCode::LShift).state() {
+				5.
+			} else {
+				20.
+			};
+
+			// Rotate camera
+			let rel = -input.mouse_delta() * 0.4;
+			camera.yaw += Deg(rel.x as _).into();
+			camera.yaw %= Deg(360.).into();
+			camera.pitch += Deg(rel.y as _).into();
+			camera.pitch = Rad(camera.pitch.0.clamp(-PI / 2., PI / 2.));
+
+			// Move camera laterally
+			let camera_mat = camera.get_world();
+			let basis_mat = Matrix3::from_cols(
+				camera_mat.x.truncate(),
+				camera_mat.y.truncate(),
+				camera_mat.z.truncate(),
+			);
+			camera.position += basis_mat * heading * stats.delta_secs() * speed;
 		}
 
 		// Update title
 		let title = format!("Crucible - TPS: {}", stats.tps().unwrap_or(0));
 		for entity in wm.get_entities() {
-			wm.get_viewport(entity)
-				.unwrap()
-				.window()
-				.set_title(title.as_str());
+			let viewport = wm.get_viewport(entity).unwrap();
+
+			viewport.window().set_title(title.as_str());
+		}
+
+		// Handle debug commands
+		if input.key(VirtualKeyCode::Escape).recently_pressed() {
+			ev_pusher.push(RunLoopCommand::Shutdown);
 		}
 
 		input.end_tick();
