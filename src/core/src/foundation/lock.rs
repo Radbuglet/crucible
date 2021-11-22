@@ -22,7 +22,7 @@ use std::error::Error;
 mod internals {
 	use crate::foundation::event::{EventPusher, EventPusherPoll};
 	use crate::util::bitmask::Bitmask64;
-	use crate::util::meta_enum::{enum_meta, EnumMeta, EnumMetaDiscriminantExt};
+	use crate::util::meta_enum::{enum_meta, EnumMeta};
 	use log::trace;
 	use std::cell::UnsafeCell;
 	use std::ops::{BitOr, BitOrAssign, Deref, DerefMut};
@@ -353,7 +353,7 @@ mod internals {
 		fn new(waker: Waker, index: usize) -> Self {
 			Self {
 				index: UnsafeCell::new(index),
-				state: AtomicU8::new(LockRequestState::Pending.to_disc()),
+				state: AtomicU8::new(LockRequestState::Pending.index() as u8),
 				waker,
 			}
 		}
@@ -369,11 +369,11 @@ mod internals {
 		fn update_state(&self, state: LockRequestState) {
 			// We don't care about flushing the `RwLockManager`'s state changes since they're already
 			// made visible to the consuming thread by the mutex.
-			self.state.store(state.to_disc(), Ordering::Relaxed);
+			self.state.store(state.index() as u8, Ordering::Relaxed);
 		}
 
 		pub fn state(&self) -> LockRequestState {
-			LockRequestState::from_disc(self.state.load(Ordering::Relaxed))
+			LockRequestState::from_index(self.state.load(Ordering::Relaxed) as usize)
 		}
 
 		pub fn waker(&self) -> &Waker {

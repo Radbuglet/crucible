@@ -5,12 +5,12 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.42"
-bytemuck = { version = "1.7.2", features = ["derive"] }
 cgmath = "0.18.0"
 crucible-core = { path = "../core" }
 crucible-shared = { path = "../shared" }
 env_logger = "0.9.0"
 futures = "0.3.17"
+glsl-layout = { version = "0.4.0", features = ["cgmath"] }
 log = "0.4.14"
 rand = "0.8.4"
 wgpu = { version = "0.11.0", features = ["spirv"] }

@@ -1,5 +1,5 @@
 use crate::engine::context::GfxContext;
-use crate::util::vec_ext::VecConvert;
+use crate::engine::util::vec_ext::VecConvert;
 use cgmath::Vector2;
 use crucible_core::foundation::prelude::*;
 use std::collections::HashMap;

@@ -268,15 +268,15 @@ enum_meta! {
 	#[derive(Debug)]
 	pub enum(Axis3Meta) Axis3 {
 		X = Axis3Meta {
-			idx: 0,
+			vec_idx: 0,
 			ortho: [Axis3::Y, Axis3::Z],
 		},
 		Y = Axis3Meta {
-			idx: 1,
+			vec_idx: 1,
 			ortho: [Axis3::Z, Axis3::X],
 		},
 		Z = Axis3Meta {
-			idx: 2,
+			vec_idx: 2,
 			ortho: [Axis3::X, Axis3::Y],
 		}
 	}
@@ -286,37 +286,39 @@ enum_meta! {
 		Px = BlockFaceMeta {
 			axis: Axis3::X,
 			sign: Sign::Positive,
+			inverse: BlockFace::Nx,
 		},
 		Py = BlockFaceMeta {
 			axis: Axis3::Y,
 			sign: Sign::Positive,
+			inverse: BlockFace::Ny,
 		},
 		Pz = BlockFaceMeta {
 			axis: Axis3::Z,
 			sign: Sign::Positive,
+			inverse: BlockFace::Nz,
 		},
 		Nx = BlockFaceMeta {
 			axis: Axis3::X,
 			sign: Sign::Negative,
+			inverse: BlockFace::Px,
 		},
 		Ny = BlockFaceMeta {
 			axis: Axis3::Y,
 			sign: Sign::Negative,
+			inverse: BlockFace::Py,
 		},
 		Nz = BlockFaceMeta {
 			axis: Axis3::Z,
 			sign: Sign::Negative,
+			inverse: BlockFace::Pz,
 		}
 	}
 }
 
-pub struct SignMeta {
-	pub unit: i32,
-}
-
 pub struct Axis3Meta {
 	/// The index of the axis in a [Vector3].
-	pub idx: usize,
+	pub vec_idx: usize,
 
 	/// Orthogonal axes sorted in CCW order assuming a viewing direction looking at the face from
 	/// its positive side.
@@ -326,6 +328,7 @@ pub struct Axis3Meta {
 pub struct BlockFaceMeta {
 	pub sign: Sign,
 	pub axis: Axis3,
+	pub inverse: BlockFace,
 }
 
 impl Sign {
@@ -365,7 +368,7 @@ impl Axis3 {
 
 	pub fn unit<N: BaseNum>(self) -> Vector3<N> {
 		let mut vec = Vector3::zero();
-		vec[self.idx] = N::one();
+		vec[self.vec_idx] = N::one();
 		vec
 	}
 
@@ -409,7 +412,7 @@ impl BlockFace {
 	where
 		N: BaseNum + Signed,
 	{
-		let BlockFaceMeta { axis, sign } = &*self;
+		let BlockFaceMeta { axis, sign, .. } = &*self;
 		axis.unit() * sign.unit()
 	}
 

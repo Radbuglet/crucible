@@ -134,26 +134,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c59e7af012c713f529e7a3ee57ce9b31ddd858d4b512923602f74608b009631"
 
 [[package]]
-name = "bytemuck"
-version = "1.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72957246c41db82b8ef88a5486143830adeb8227ef9837740bdec67724cf2c5b"
-dependencies = [
- "bytemuck_derive",
-]
-
-[[package]]
-name = "bytemuck_derive"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e215f8c2f9f79cb53c8335e687ffd07d5bfcb6fe5fc80723762d0be46e7cc54"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "byteorder"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -414,13 +394,13 @@ name = "crucible-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bytemuck",
  "cgmath",
  "crucible-core",
  "crucible-shared",
  "env_logger",
  "futures",
  "glob",
+ "glsl-layout",
  "log",
  "rand",
  "shaderc",
@@ -714,6 +694,27 @@ dependencies = [
  "slotmap",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "glsl-layout"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2228ade20ecb9150f8ab5cad6e152c2988b180ff04e9c1fb7c32830cb6f67627"
+dependencies = [
+ "cgmath",
+ "glsl-layout-derive",
+]
+
+[[package]]
+name = "glsl-layout-derive"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b870f33b0cec52fd0347c09722c2f9a85e9a4e9aa5c0453e75dedc12bde7ddb8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -3,10 +3,14 @@ use crucible_core::util::error::AnyResult;
 use winit::window::Window;
 
 pub struct GfxContext {
+	// Singletons
 	pub instance: wgpu::Instance,
 	pub adapter: wgpu::Adapter,
 	pub device: wgpu::Device,
 	pub queue: wgpu::Queue,
+	// Caches
+	pub limits: wgpu::Limits,
+	pub features: wgpu::Features,
 }
 
 impl GfxContext {
@@ -63,12 +67,17 @@ impl GfxContext {
 			)
 			.await?;
 
+		let limits = device.limits();
+		let features = device.features();
+
 		Ok((
 			Self {
 				instance,
 				adapter,
 				device,
 				queue,
+				limits,
+				features,
 			},
 			surface,
 		))

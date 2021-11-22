@@ -1,12 +1,11 @@
 use crate::engine::context::GfxContext;
 use crate::engine::util::camera::GfxCameraManager;
+use crate::engine::util::gpu_align_ext::convert_slice;
 use crate::engine::viewport::SWAPCHAIN_FORMAT;
-use crate::util::pod_ext::Vec3PodAdapter;
-use crate::util::vec_ext::VecConvert;
-use bytemuck::{cast_slice, Pod, Zeroable};
 use cgmath::Vector3;
 use crucible_core::util::meta_enum::EnumMeta;
 use crucible_shared::voxel::coord::BlockFace;
+use glsl_layout::{uint, vec3, Uniform};
 use std::mem::size_of;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 
@@ -14,11 +13,10 @@ use wgpu::util::{BufferInitDescriptor, DeviceExt};
 
 pub const DEPTH_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-#[derive(Debug, Pod, Zeroable, Copy, Clone)]
-#[repr(C)]
+#[derive(Debug, Uniform, Copy, Clone)]
 struct VoxelFaceInstance {
-	pos: Vec3PodAdapter<f32>,
-	face: u32,
+	pos: vec3,
+	face: uint,
 }
 
 // === Rendering subsystem === //
@@ -72,7 +70,7 @@ impl VoxelRenderer {
 					topology: wgpu::PrimitiveTopology::TriangleList,
 					strip_index_format: None,
 					front_face: wgpu::FrontFace::Ccw, // OpenGL tradition
-					cull_mode: None,
+					cull_mode: Some(wgpu::Face::Back),
 					clamp_depth: false,
 					polygon_mode: wgpu::PolygonMode::Fill,
 					conservative: false,
@@ -108,7 +106,7 @@ impl VoxelRenderer {
 			for x in 1..5 {
 				for (face, _) in BlockFace::values() {
 					faces.push(VoxelFaceInstance {
-						pos: VecConvert::from_vec(Vector3::new(x as f32, 0., 0.)),
+						pos: Vector3::new(x as f32, 0., 0.).into(),
 						face: *face as u32,
 					})
 				}
@@ -117,7 +115,7 @@ impl VoxelRenderer {
 			for y in 0..5 {
 				for (face, _) in BlockFace::values() {
 					faces.push(VoxelFaceInstance {
-						pos: VecConvert::from_vec(Vector3::new(0., y as f32, 0.)),
+						pos: Vector3::new(0., y as f32, 0.).into(),
 						face: *face as u32,
 					})
 				}
@@ -130,7 +128,7 @@ impl VoxelRenderer {
 		let mesh = gfx.device.create_buffer_init(&BufferInitDescriptor {
 			label: Some("voxel mesh"),
 			usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-			contents: cast_slice(mesh.as_slice()),
+			contents: convert_slice(&*mesh).as_slice(),
 		});
 
 		Self { pipeline, mesh }

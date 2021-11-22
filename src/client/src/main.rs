@@ -11,8 +11,8 @@ use crate::engine::run_loop::{
 };
 use crate::engine::util::camera::{GfxCameraManager, PerspectiveCamera};
 use crate::engine::util::uniform::UniformManager;
+use crate::engine::util::vec_ext::VecConvert;
 use crate::engine::viewport::ViewportManager;
-use crate::util::vec_ext::VecConvert;
 use crate::voxel::render::{VoxelRenderer, DEPTH_TEXTURE_FORMAT};
 use anyhow::Context;
 use cgmath::{Deg, InnerSpace, Matrix3, Rad, Vector2, Vector3, Zero};
@@ -27,7 +27,6 @@ use winit::event_loop::{EventLoop, EventLoopWindowTarget};
 use winit::window::WindowBuilder;
 
 pub mod engine;
-pub mod util;
 pub mod voxel;
 
 fn main() {
@@ -255,7 +254,7 @@ impl RunLoopHandler for Handler {
 			};
 
 			// Rotate camera
-			let rel = -input.mouse_delta() * 0.4;
+			let rel = -input.mouse_delta() * 0.3;
 			camera.yaw += Deg(rel.x as _).into();
 			camera.yaw %= Deg(360.).into();
 			camera.pitch += Deg(rel.y as _).into();

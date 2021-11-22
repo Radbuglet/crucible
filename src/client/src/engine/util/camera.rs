@@ -2,14 +2,13 @@
 
 use crate::engine::context::GfxContext;
 use crate::engine::util::uniform::UniformManager;
-use crate::util::pod_ext::Mat4PodAdapter;
-use bytemuck::{bytes_of, Pod, Zeroable};
 use cgmath::{perspective, Deg, Matrix4, Rad, Transform, Vector3, Zero};
+use glsl_layout::{mat4, Uniform};
 
-#[derive(Debug, Pod, Zeroable, Copy, Clone)]
+#[derive(Debug, Uniform, Copy, Clone)]
 #[repr(C)]
 struct CameraUniform {
-	proj: Mat4PodAdapter<f32>,
+	proj: mat4,
 }
 
 #[derive(Debug)]
@@ -52,9 +51,7 @@ impl GfxCameraManager {
 		uniform: &mut UniformManager,
 		view: Matrix4<f32>,
 	) -> wgpu::BindGroup {
-		let entry = uniform.push(bytes_of(&CameraUniform {
-			proj: Mat4PodAdapter(view),
-		}));
+		let entry = uniform.push(gfx, &(CameraUniform { proj: view.into() }.std140()));
 
 		gfx.device.create_bind_group(&wgpu::BindGroupDescriptor {
 			label: Some("camera uniform group"),
