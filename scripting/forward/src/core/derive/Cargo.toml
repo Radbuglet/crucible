@@ -1,0 +1,13 @@
+[package]
+name = "lyptic-core-derive"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+anyhow = "1.0.49"
+proc-macro2 = "1.0.32"
+syn = { version = "1.0.82", features = ["full"] }
+quote = "1.0.10"
