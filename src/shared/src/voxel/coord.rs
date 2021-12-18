@@ -246,6 +246,22 @@ impl BlockPos {
 			&& Self::RANGE.contains(&self.raw.y)
 			&& Self::RANGE.contains(&self.raw.z)
 	}
+
+	pub fn to_index(self) -> usize {
+		let raw = self.raw.cast::<u32>().unwrap();
+		(raw.x + raw.y * CHUNK_EDGE + raw.z * CHUNK_EDGE * CHUNK_EDGE) as usize
+	}
+
+	pub fn from_index(index: usize) -> Self {
+		let mut index = index as u32;
+		let x = (index % CHUNK_EDGE) as u8;
+		index /= CHUNK_EDGE;
+		let y = (index % CHUNK_EDGE) as u8;
+		index /= CHUNK_EDGE;
+		let z = (index % CHUNK_EDGE) as u8;
+
+		Vector3::new(x, y, z).into()
+	}
 }
 
 impl From<WorldPos> for BlockPos {

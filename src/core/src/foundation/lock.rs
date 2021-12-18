@@ -575,6 +575,8 @@ impl_tuples!(no_unit; impl_lock_target_tup);
 
 // === RwLock === //
 
+// TODO: Partial release, integrate better with Providers.
+
 pub struct RwLock<T: ?Sized> {
 	manager: RwLockManager,
 	index: usize,

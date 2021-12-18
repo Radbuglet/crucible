@@ -2,12 +2,14 @@ use crate::engine::context::GfxContext;
 use crate::engine::util::camera::GfxCameraManager;
 use crate::engine::util::gpu_align_ext::convert_slice;
 use crate::engine::viewport::SWAPCHAIN_FORMAT;
-use cgmath::Vector3;
+use crate::voxel::data::VoxelWorld;
+use crucible_core::foundation::{Entity, Storage, World};
 use crucible_core::util::meta_enum::EnumMeta;
-use crucible_shared::voxel::coord::BlockFace;
+use crucible_shared::voxel::coord::{BlockFace, WorldPos};
 use glsl_layout::{uint, vec3, Uniform};
+use std::collections::VecDeque;
 use std::mem::size_of;
-use wgpu::util::{BufferInitDescriptor, DeviceExt};
+use wgpu::util::DeviceExt;
 
 // === Internals === //
 
@@ -23,24 +25,26 @@ struct VoxelFaceInstance {
 
 pub struct VoxelRenderer {
 	pipeline: wgpu::RenderPipeline,
-	mesh: wgpu::Buffer,
+	meshes: Storage<ChunkEntry>,
+	dirty: VecDeque<Entity>,
+}
+
+struct ChunkEntry {
+	buffer: wgpu::Buffer,
+	count: u32,
+	dirty: bool,
 }
 
 impl VoxelRenderer {
 	pub fn new(gfx: &GfxContext, camera: &GfxCameraManager) -> Self {
-		// Build pipeline
-		log::info!("Building voxel shading pipeline...");
-		log::info!("Loading voxel vertex shader...");
 		let shader_vert = gfx
 			.device
 			.create_shader_module(&wgpu::include_spirv!("shader/block.vert.spv"));
 
-		log::info!("Loading voxel fragment shader...");
 		let shader_frag = gfx
 			.device
 			.create_shader_module(&wgpu::include_spirv!("shader/block.frag.spv"));
 
-		log::info!("Creating pipeline...");
 		let pipeline_layout = gfx
 			.device
 			.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -97,47 +101,104 @@ impl VoxelRenderer {
 					}],
 				}),
 			});
-		log::info!("Done!");
 
-		// Generate mesh
-		let mesh = {
-			let mut faces = Vec::new();
-
-			for x in 1..5 {
-				for (face, _) in BlockFace::values() {
-					faces.push(VoxelFaceInstance {
-						pos: Vector3::new(x as f32, 0., 0.).into(),
-						face: *face as u32,
-					})
-				}
-			}
-
-			for y in 0..5 {
-				for (face, _) in BlockFace::values() {
-					faces.push(VoxelFaceInstance {
-						pos: Vector3::new(0., y as f32, 0.).into(),
-						face: *face as u32,
-					})
-				}
-			}
-
-			faces
-		};
-
-		// Allocate mesh
-		let mesh = gfx.device.create_buffer_init(&BufferInitDescriptor {
-			label: Some("voxel mesh"),
-			usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-			contents: convert_slice(&*mesh).as_slice(),
-		});
-
-		Self { pipeline, mesh }
+		Self {
+			pipeline,
+			meshes: Storage::new(),
+			dirty: VecDeque::new(),
+		}
 	}
 
-	pub fn render<'a>(&'a self, cam_group: &'a wgpu::BindGroup, pass: &mut wgpu::RenderPass<'a>) {
+	pub fn mark_dirty(&mut self, world: &World, chunk: Entity) {
+		if let Some(mesh) = self.meshes.try_get_mut(world, chunk) {
+			mesh.dirty = true;
+		}
+
+		self.dirty.push_back(chunk);
+	}
+
+	pub fn update_dirty(&mut self, world: &World, voxels: &VoxelWorld, gfx: &GfxContext) {
+		let mut mesh_faces = Vec::new();
+
+		for dirty in self.dirty.drain(..) {
+			match voxels.get_chunk(world, dirty) {
+				Some(chunk) => {
+					// Ensure we're not re-meshing an already-updated chunk.
+					let mesh = self.meshes.try_get_mut(world, dirty);
+					match mesh {
+						Some(ChunkEntry { dirty: false, .. }) => continue,
+						_ => {}
+					}
+
+					// Fill up the mesh
+					mesh_faces.clear();
+					for (pos, block) in chunk.blocks() {
+						if block != 0 {
+							for face in BlockFace::variants() {
+								mesh_faces.push(VoxelFaceInstance {
+									pos: WorldPos::from_parts(chunk.pos(), pos)
+										.raw
+										.cast::<f32>()
+										.unwrap()
+										.into(),
+									face: face.marshall_shader(),
+								});
+							}
+						}
+					}
+
+					// Upload mesh to buffer
+					match mesh {
+						Some(entry) => {
+							gfx.queue.write_buffer(
+								&entry.buffer,
+								0,
+								convert_slice(&mesh_faces).as_slice(),
+							);
+							entry.count = mesh_faces.len() as u32;
+							entry.dirty = false;
+						}
+						None => {
+							let buffer =
+								gfx.device
+									.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+										label: Some(format!("Chunk {:?} mesh", dirty).as_str()),
+										usage: wgpu::BufferUsages::VERTEX
+											| wgpu::BufferUsages::COPY_DST,
+										contents: convert_slice(&mesh_faces).as_slice(),
+									});
+
+							self.meshes.insert(
+								world,
+								dirty,
+								ChunkEntry {
+									buffer,
+									count: mesh_faces.len() as u32,
+									dirty: false,
+								},
+							);
+						}
+					}
+				}
+				None => {
+					self.meshes.remove(dirty);
+				}
+			}
+		}
+	}
+
+	pub fn render<'a>(
+		&'a self,
+		world: &'a World,
+		cam_group: &'a wgpu::BindGroup,
+		pass: &mut wgpu::RenderPass<'a>,
+	) {
 		pass.set_pipeline(&self.pipeline);
 		pass.set_bind_group(0, cam_group, &[]);
-		pass.set_vertex_buffer(0, self.mesh.slice(..));
-		pass.draw(0..6, 0..(6 * 9));
+
+		for (_, mesh) in self.meshes.iter(world) {
+			pass.set_vertex_buffer(0, mesh.buffer.slice(..));
+			pass.draw(0..6, 0..mesh.count);
+		}
 	}
 }

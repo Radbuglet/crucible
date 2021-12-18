@@ -13,11 +13,13 @@ use crate::engine::util::camera::{GfxCameraManager, PerspectiveCamera};
 use crate::engine::util::uniform::UniformManager;
 use crate::engine::util::vec_ext::VecConvert;
 use crate::engine::viewport::ViewportManager;
+use crate::voxel::data::VoxelWorld;
 use crate::voxel::render::{VoxelRenderer, DEPTH_TEXTURE_FORMAT};
 use anyhow::Context;
 use cgmath::{Deg, InnerSpace, Matrix3, Rad, Vector2, Vector3, Zero};
 use crucible_core::foundation::prelude::*;
 use crucible_core::util::error::{AnyResult, ErrorFormatExt};
+use crucible_shared::voxel::coord::ChunkPos;
 use futures::executor::block_on;
 use std::f32::consts::PI;
 use std::sync::Arc;
@@ -130,7 +132,14 @@ fn main_inner() -> AnyResult<!> {
 	let camera = GfxCameraManager::new(&gfx);
 
 	// Setup voxels
-	let voxel = VoxelRenderer::new(&gfx, &camera);
+	let mut voxel_data = VoxelWorld::new();
+	let voxel_render = VoxelRenderer::new(&gfx, &camera);
+
+	let chunk_1 = world.spawn();
+	let chunk_2 = world.spawn();
+
+	voxel_data.add(&world, ChunkPos::new(0, 0, 0), chunk_1);
+	voxel_data.add(&world, ChunkPos::new(0, 1, 0), chunk_2);
 
 	// Start engine
 	let mut depth = Storage::new();
@@ -148,7 +157,7 @@ fn main_inner() -> AnyResult<!> {
 	engine.init_lock(input);
 	engine.init(gfx);
 	engine.init_lock(vm);
-	engine.init_lock(voxel);
+	engine.init_lock(voxel_render);
 	engine.init(camera);
 
 	engine.init_lock(GameState {
@@ -363,7 +372,7 @@ impl RunLoopHandler for Handler {
 			}),
 		});
 
-		voxel.render(&camera_group, &mut pass);
+		voxel.render(&world, &camera_group, &mut pass);
 		drop(pass);
 		gfx.queue.submit([cb.finish()]);
 	}

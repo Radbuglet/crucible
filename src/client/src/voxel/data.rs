@@ -1,6 +1,6 @@
 use crucible_core::foundation::prelude::*;
 use crucible_core::util::meta_enum::EnumMeta;
-use crucible_shared::voxel::coord::{BlockFace, ChunkPos, CHUNK_VOLUME};
+use crucible_shared::voxel::coord::{BlockFace, BlockPos, ChunkPos, CHUNK_VOLUME};
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -29,7 +29,7 @@ impl VoxelWorld {
 
 		for face in BlockFace::variants() {
 			let neighbor_pos = pos + face.unit();
-			if let Some((neighbor, neighbor_handle)) = self.get_chunk_mut(world, neighbor_pos) {
+			if let Some((neighbor, neighbor_handle)) = self.get_chunk_mut_at(world, neighbor_pos) {
 				handle.neighbors[face.index()] = Some(neighbor);
 				neighbor_handle.neighbors[face.inverse.index()] = Some(entity);
 			}
@@ -57,14 +57,14 @@ impl VoxelWorld {
 		&self.chunk_store
 	}
 
-	pub fn get_chunk(&self, world: &World, pos: ChunkPos) -> Option<(Entity, &VoxelChunk)> {
+	pub fn get_chunk_at(&self, world: &World, pos: ChunkPos) -> Option<(Entity, &VoxelChunk)> {
 		self.pos_map
 			.get(&pos)
 			.copied()
 			.and_then(|entity| Some((entity, self.chunk_store.try_get(world, entity)?)))
 	}
 
-	pub fn get_chunk_mut(
+	pub fn get_chunk_mut_at(
 		&mut self,
 		world: &World,
 		pos: ChunkPos,
@@ -74,8 +74,13 @@ impl VoxelWorld {
 			.copied()
 			.and_then(|entity| Some((entity, self.chunk_store.try_get_mut(world, entity)?)))
 	}
+
+	pub fn get_chunk(&self, world: &World, id: Entity) -> Option<&VoxelChunk> {
+		self.chunk_store.try_get(world, id)
+	}
 }
 
+#[derive(Debug)]
 pub struct VoxelChunk {
 	pos: ChunkPos,
 	neighbors: [Option<Entity>; BlockFace::COUNT],
@@ -89,5 +94,21 @@ impl VoxelChunk {
 			neighbors: Default::default(),
 			data: [0; CHUNK_VOLUME as usize],
 		}
+	}
+
+	pub fn pos(&self) -> ChunkPos {
+		self.pos
+	}
+
+	pub fn get_block(&self, pos: BlockPos) -> u16 {
+		self.data[pos.to_index()]
+	}
+
+	pub fn blocks(&self) -> impl Iterator<Item = (BlockPos, u16)> + '_ {
+		self.data
+			.iter()
+			.copied()
+			.enumerate()
+			.map(|(index, data)| (BlockPos::from_index(index), data))
 	}
 }

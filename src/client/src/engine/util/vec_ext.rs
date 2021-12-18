@@ -3,18 +3,11 @@
 use cgmath::{Vector1, Vector2, Vector3, Vector4};
 use winit::dpi::{LogicalSize, PhysicalSize};
 
-pub trait VecConvert {
+pub trait VecConvert: Sized {
 	type Vector;
 
 	fn to_vec(self) -> Self::Vector;
 	fn from_vec(vec: Self::Vector) -> Self;
-}
-
-pub trait VecConvertExt: VecConvert {
-	fn convert_vec<T: VecConvert<Vector = Self::Vector>>(self) -> T;
-}
-
-impl<O: VecConvert> VecConvertExt for O {
 	fn convert_vec<T: VecConvert<Vector = Self::Vector>>(self) -> T {
 		T::from_vec(self.to_vec())
 	}
@@ -80,5 +73,20 @@ impl VecConvert for wgpu::Extent3d {
 			height: vec.y,
 			depth_or_array_layers: vec.z,
 		}
+	}
+}
+
+// glsl_layout::vec3 <-> Vector3
+
+impl VecConvert for glsl_layout::vec3 {
+	type Vector = Vector3<f32>;
+
+	fn to_vec(self) -> Self::Vector {
+		let comps: &[f32; 3] = self.as_ref();
+		Vector3::new(comps[0], comps[1], comps[2])
+	}
+
+	fn from_vec(vec: Self::Vector) -> Self {
+		vec.into()
 	}
 }
