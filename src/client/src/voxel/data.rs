@@ -75,8 +75,13 @@ impl VoxelWorld {
 			.and_then(|entity| Some((entity, self.chunk_store.try_get_mut(world, entity)?)))
 	}
 
+	// TODO: We can greatly simplify this API with storage wrappers.
 	pub fn get_chunk(&self, world: &World, id: Entity) -> Option<&VoxelChunk> {
 		self.chunk_store.try_get(world, id)
+	}
+
+	pub fn get_chunk_mut(&mut self, world: &World, id: Entity) -> Option<&mut VoxelChunk> {
+		self.chunk_store.try_get_mut(world, id)
 	}
 }
 
@@ -102,6 +107,10 @@ impl VoxelChunk {
 
 	pub fn get_block(&self, pos: BlockPos) -> u16 {
 		self.data[pos.to_index()]
+	}
+
+	pub fn set_block(&mut self, pos: BlockPos, data: u16) {
+		self.data[pos.to_index()] = data;
 	}
 
 	pub fn blocks(&self) -> impl Iterator<Item = (BlockPos, u16)> + '_ {

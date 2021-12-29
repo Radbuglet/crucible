@@ -1,6 +1,7 @@
 use crate::engine::context::GfxContext;
 use crate::engine::viewport::ViewportManager;
 use crucible_core::foundation::prelude::*;
+use std::collections::VecDeque;
 use std::ops::Deref;
 use std::time::{Duration, Instant};
 use winit::event::{DeviceEvent, DeviceId, Event, WindowEvent};
@@ -20,7 +21,7 @@ pub trait RunLoopHandler {
 
 	fn tick(
 		&mut self,
-		ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
+		ev_pusher: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -28,7 +29,7 @@ pub trait RunLoopHandler {
 
 	fn draw(
 		&mut self,
-		ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
+		ev_pusher: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -38,7 +39,7 @@ pub trait RunLoopHandler {
 
 	fn window_input(
 		&mut self,
-		ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
+		ev_pusher: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -48,7 +49,7 @@ pub trait RunLoopHandler {
 
 	fn device_input(
 		&mut self,
-		ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
+		ev_pusher: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -90,7 +91,7 @@ where
 		);
 
 		// Process event
-		let mut ev_pusher = EventPusherPoll::new();
+		let mut ev_pusher = VecDeque::new();
 		match &event {
 			// Loop idle handling
 			Event::MainEventsCleared => {
@@ -159,7 +160,7 @@ where
 		}
 
 		// Handle user events
-		for ev in ev_pusher.drain() {
+		for ev in ev_pusher.drain(..) {
 			match ev {
 				RunLoopCommand::Shutdown => {
 					log::info!("Shutdown requested.");

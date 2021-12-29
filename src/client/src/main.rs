@@ -19,10 +19,12 @@ use anyhow::Context;
 use cgmath::{Deg, InnerSpace, Matrix3, Rad, Vector2, Vector3, Zero};
 use crucible_core::foundation::prelude::*;
 use crucible_core::util::error::{AnyResult, ErrorFormatExt};
-use crucible_shared::voxel::coord::ChunkPos;
+use crucible_shared::voxel::coord::{BlockPos, ChunkPos};
 use futures::executor::block_on;
+use std::collections::VecDeque;
 use std::f32::consts::PI;
 use std::sync::Arc;
+use std::time::Duration;
 use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, DeviceId, MouseButton, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{EventLoop, EventLoopWindowTarget};
@@ -51,6 +53,7 @@ type Engine = Arc<
 		LazyComponent<GfxCameraManager>,
 		RwLockComponent<RunLoopStatTracker>,
 		// Game services
+		RwLockComponent<VoxelWorld>,
 		RwLockComponent<VoxelRenderer>,
 		RwLockComponent<GameState>,
 	)>,
@@ -133,13 +136,27 @@ fn main_inner() -> AnyResult<!> {
 
 	// Setup voxels
 	let mut voxel_data = VoxelWorld::new();
-	let voxel_render = VoxelRenderer::new(&gfx, &camera);
+	let mut voxel_render = VoxelRenderer::new(&gfx, &camera);
 
-	let chunk_1 = world.spawn();
-	let chunk_2 = world.spawn();
+	for x in 0..4 {
+		for y in 0..4 {
+			for z in 0..4 {
+				let ent_chunk = world.spawn();
 
-	voxel_data.add(&world, ChunkPos::new(0, 0, 0), chunk_1);
-	voxel_data.add(&world, ChunkPos::new(0, 1, 0), chunk_2);
+				// Setup chunk data
+				voxel_data.add(&world, ChunkPos::new(x, y, z), ent_chunk);
+
+				let data = voxel_data.get_chunk_mut(&world, ent_chunk).unwrap();
+				data.set_block(BlockPos::new(0, 0, 0), 1);
+				data.set_block(BlockPos::new(1, 0, 0), 1);
+				data.set_block(BlockPos::new(0, 1, 0), 1);
+				data.set_block(BlockPos::new(0, 0, 1), 1);
+
+				// Mesh chunk
+				voxel_render.mark_dirty(&world, ent_chunk);
+			}
+		}
+	}
 
 	// Start engine
 	let mut depth = Storage::new();
@@ -157,6 +174,7 @@ fn main_inner() -> AnyResult<!> {
 	engine.init_lock(input);
 	engine.init(gfx);
 	engine.init_lock(vm);
+	engine.init_lock(voxel_data);
 	engine.init_lock(voxel_render);
 	engine.init(camera);
 
@@ -182,18 +200,26 @@ impl RunLoopHandler for Handler {
 
 	fn tick(
 		&mut self,
-		ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
+		ev_pusher: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
 	) {
 		// Lock services
 		let (wm, stats) = dep_guard.get();
+
+		get_many!(&**engine, gfx: &GfxContext);
 		lock_many_now!(
 			engine.get_many() => _guard,
+			world: &World,
 			input: &mut InputTracker,
 			state: &mut GameState,
+			voxel_data: &VoxelWorld,
+			voxel_render: &mut VoxelRenderer,
 		);
+
+		// Update chunks
+		voxel_render.update_dirty(world, voxel_data, gfx, Duration::from_millis(5));
 
 		// Process inputs
 		{
@@ -292,7 +318,7 @@ impl RunLoopHandler for Handler {
 
 	fn draw(
 		&mut self,
-		_ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
+		_ev_pusher: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -379,7 +405,7 @@ impl RunLoopHandler for Handler {
 
 	fn window_input(
 		&mut self,
-		ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
+		ev_pusher: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -408,7 +434,7 @@ impl RunLoopHandler for Handler {
 
 	fn device_input(
 		&mut self,
-		_ev_pusher: &mut EventPusherPoll<RunLoopCommand>,
+		_ev_pusher: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
 		_dep_guard: DepGuard,

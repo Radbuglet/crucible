@@ -9,6 +9,7 @@ use crucible_shared::voxel::coord::{BlockFace, WorldPos};
 use glsl_layout::{uint, vec3, Uniform};
 use std::collections::VecDeque;
 use std::mem::size_of;
+use std::time::{Duration, Instant};
 use wgpu::util::DeviceExt;
 
 // === Internals === //
@@ -29,6 +30,7 @@ pub struct VoxelRenderer {
 	dirty: VecDeque<Entity>,
 }
 
+#[derive(Debug)]
 struct ChunkEntry {
 	buffer: wgpu::Buffer,
 	count: u32,
@@ -117,10 +119,22 @@ impl VoxelRenderer {
 		self.dirty.push_back(chunk);
 	}
 
-	pub fn update_dirty(&mut self, world: &World, voxels: &VoxelWorld, gfx: &GfxContext) {
+	pub fn update_dirty(
+		&mut self,
+		world: &World,
+		voxels: &VoxelWorld,
+		gfx: &GfxContext,
+		max_duration: Duration,
+	) {
 		let mut mesh_faces = Vec::new();
+		let start = Instant::now();
 
-		for dirty in self.dirty.drain(..) {
+		loop {
+			let dirty = match self.dirty.pop_front() {
+				Some(dirty) => dirty,
+				None => break,
+			};
+
 			match voxels.get_chunk(world, dirty) {
 				Some(chunk) => {
 					// Ensure we're not re-meshing an already-updated chunk.
@@ -183,6 +197,10 @@ impl VoxelRenderer {
 				None => {
 					self.meshes.remove(dirty);
 				}
+			}
+
+			if start.elapsed() > max_duration {
+				break;
 			}
 		}
 	}

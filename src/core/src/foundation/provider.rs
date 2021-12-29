@@ -1,4 +1,4 @@
-// TODO: Allow users to fetch mutable references.
+// TODO: Allow users to fetch mutable references; implement splitting; integrate with locking system
 
 use crate::util::tuple::impl_tuples;
 use once_cell::sync::OnceCell;

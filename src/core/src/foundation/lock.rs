@@ -1,9 +1,12 @@
 use self::internals::{wake_up_requests, LockRequestHandle, LockRequestState};
-use crate::foundation::event::EventPusherPoll;
+
 use crate::util::bitmask::Bitmask64;
+use crate::util::error::ResultExt;
 use crate::util::tuple::impl_tuples;
 use log::trace;
 use std::cell::UnsafeCell;
+use std::collections::VecDeque;
+use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::future::Future;
 use std::pin::Pin;
@@ -12,19 +15,19 @@ use std::task::{Context, Poll};
 
 // === Lock management === //
 
+#[doc(hidden)]
 pub use self::internals::RwLockManager;
 
 #[doc(hidden)]
 pub use self::internals::RwMask;
-use crate::util::error::ResultExt;
-use std::error::Error;
 
 mod internals {
-	use crate::foundation::event::{EventPusher, EventPusherPoll};
+	use crate::foundation::event::EventPusher;
 	use crate::util::bitmask::Bitmask64;
 	use crate::util::meta_enum::{enum_meta, EnumMeta};
 	use log::trace;
 	use std::cell::UnsafeCell;
+	use std::collections::VecDeque;
 	use std::ops::{BitOr, BitOrAssign, Deref, DerefMut};
 	use std::sync::atomic::{AtomicU8, Ordering};
 	use std::sync::{Arc, Mutex};
@@ -462,8 +465,8 @@ mod internals {
 		}
 	}
 
-	pub fn wake_up_requests(requests: &mut EventPusherPoll<Arc<LockRequestHandle>>) {
-		for request in requests.drain() {
+	pub fn wake_up_requests(requests: &mut VecDeque<Arc<LockRequestHandle>>) {
+		for request in requests.drain(..) {
 			request.waker().wake_by_ref();
 		}
 	}
@@ -642,7 +645,7 @@ impl<T: ?Sized> RwLock<T> {
 
 impl<T: ?Sized> Drop for RwLock<T> {
 	fn drop(&mut self) {
-		let mut wakeup = EventPusherPoll::new();
+		let mut wakeup = VecDeque::new();
 		self.manager.inner().del_lock(self.index, &mut wakeup);
 		wake_up_requests(&mut wakeup);
 	}
@@ -803,7 +806,7 @@ impl<T: LockTarget> Drop for RwGuard<T> {
 		manager.unlock_mask(self.mask);
 
 		// Poll for new lock requests
-		let mut wakeup = EventPusherPoll::new();
+		let mut wakeup = VecDeque::new();
 		manager.poll_completed(&mut wakeup);
 		wake_up_requests(&mut wakeup);
 	}

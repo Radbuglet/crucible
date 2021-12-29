@@ -1,14 +1,25 @@
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 
+// === Core === //
+
 pub trait EventPusher {
 	type Event;
 
 	fn push(&mut self, event: Self::Event);
+
+	// TODO: Reduce required iterator lifetime.
 	fn push_iter<I: IntoIterator<Item = Self::Event>>(&mut self, iter: I)
 	where
-		<I as IntoIterator>::IntoIter: 'static; // TODO: Reduce required iterator lifetime.
+		<I as IntoIterator>::IntoIter: 'static,
+	{
+		for elem in iter.into_iter() {
+			self.push(elem);
+		}
+	}
 }
+
+// === Immediate === //
 
 pub struct EventPusherImmediate<E, F> {
 	// For some reason, the FnMut trait argument types do not behave like associated types so we
@@ -35,148 +46,100 @@ impl<E, F: FnMut(E)> EventPusher for EventPusherImmediate<E, F> {
 	fn push(&mut self, event: Self::Event) {
 		(self.handler)(event);
 	}
+}
 
-	fn push_iter<I: IntoIterator<Item = Self::Event>>(&mut self, iter: I) {
-		for event in iter {
-			(self.handler)(event);
-		}
+// === Deque === //
+
+impl<E> EventPusher for VecDeque<E> {
+	type Event = E;
+
+	fn push(&mut self, event: Self::Event) {
+		self.push_back(event);
 	}
 }
 
-pub struct EventPusherPoll<E> {
-	queue: VecDeque<E>,
+// === Callback Poll === //
+
+pub struct EventPusherCallback<E, X> {
+	queue: VecDeque<PollEntry<E, X>>,
 }
 
-impl<E> EventPusherPoll<E> {
+enum PollEntry<E, X> {
+	Entry(E),
+	Iter(Box<dyn PollCallback<X>>),
+}
+
+impl<E, X> EventPusherCallback<E, X>
+where
+	X: FnMut(E) -> bool,
+{
 	pub fn new() -> Self {
 		Self {
 			queue: VecDeque::new(),
 		}
 	}
 
-	pub fn drain(&mut self) -> EventPollDrain<E> {
-		EventPollDrain { target: self }
-	}
-}
-
-impl<E> EventPusher for EventPusherPoll<E> {
-	type Event = E;
-
-	fn push(&mut self, event: Self::Event) {
-		self.queue.push_back(event);
-	}
-
-	fn push_iter<I: IntoIterator<Item = Self::Event>>(&mut self, iter: I)
-	where
-		<I as IntoIterator>::IntoIter: 'static,
-	{
-		for ev in iter {
-			self.push(ev);
+	pub fn handle(&mut self, mut exec: X) -> bool {
+		loop {
+			match self.queue.pop_front() {
+				Some(PollEntry::Entry(entry)) => {
+					if !exec(entry) {
+						return false;
+					}
+				}
+				Some(PollEntry::Iter(mut iter)) => {
+					if !iter.run(&mut exec) {
+						self.queue.push_front(PollEntry::Iter(iter));
+						return false;
+					}
+				}
+				None => return true,
+			}
 		}
 	}
 }
 
-pub struct EventPollDrain<'a, E> {
-	target: &'a mut EventPusherPoll<E>,
-}
+impl<E, X> EventPusher for EventPusherCallback<E, X>
+where
+	X: FnMut(E) -> bool,
+{
+	type Event = E;
 
-impl<'a, E> Iterator for EventPollDrain<'a, E> {
-	type Item = E;
+	fn push(&mut self, event: Self::Event) {
+		self.queue.push_back(PollEntry::Entry(event));
+	}
 
-	fn next(&mut self) -> Option<Self::Item> {
-		self.target.queue.pop_front()
+	fn push_iter<I>(&mut self, iter: I)
+	where
+		I: IntoIterator<Item = E>,
+		<I as IntoIterator>::IntoIter: 'static,
+	{
+		self.queue
+			.push_back(PollEntry::Iter(Box::new(PollIterCallback {
+				iter: iter.into_iter(),
+			}) as Box<dyn PollCallback<X>>));
 	}
 }
 
-// pub struct EventPusherPoll<E, X> {
-// 	//_ty: PhantomData<fn(X) -> X>,
-// 	queue: VecDeque<PollEntry<E, X>>,
-// }
-//
-// impl<E, X> EventPusherPoll<E, X>
-// where
-// 	X: FnMut(&mut E) -> bool,
-// {
-// 	pub fn new() -> Self {
-// 		Self {
-// 			//_ty: PhantomData,
-// 			queue: VecDeque::new(),
-// 		}
-// 	}
-//
-// 	pub fn handle(&mut self, mut exec: X) -> bool {
-// 		loop {
-// 			match self.queue.front_mut() {
-// 				Some(PollEntry::Entry(entry)) => {
-// 					if !exec(entry) {
-// 						return false;
-// 					}
-// 				}
-// 				Some(PollEntry::Iter(iter)) => {
-// 					if !iter.run(&mut exec) {
-// 						return false;
-// 					}
-// 				}
-// 				None => return true,
-// 			}
-// 			self.queue.pop_front();
-// 		}
-// 	}
-// }
-//
-// enum PollEntry<E, X> {
-// 	Entry(E),
-// 	Iter(Box<dyn PollIter<Elem = E, Handler = X>>),
-// }
-//
-// trait PollIter {
-// 	type Elem;
-// 	type Handler: FnMut(Self::Elem) -> bool;
-//
-// 	fn run(&mut self, handler: &mut Self::Handler) -> bool;
-// }
-//
-// struct PollIterGeneric<I, X> {
-// 	_ty: PhantomData<fn(X) -> X>,
-// 	iter: I,
-// }
-//
-// impl<I, X> PollIter for PollIterGeneric<I, X>
-// where
-// 	I: Iterator,
-// 	X: FnMut(&mut I::Item) -> bool,
-// {
-// 	type Elem = I::Item;
-// 	type Handler = X;
-//
-// 	fn run(&mut self, handler: &mut Self::Handler) -> bool {
-// 		while let Some(next) = self.iter.next() {
-// 			if !handler(next) {
-// 				return false;
-// 			}
-// 		}
-// 		true
-// 	}
-// }
-//
-// impl<E, X> EventPusher for EventPusherPoll<E, X>
-// where
-// 	X: FnMut(&mut E) -> bool,
-// {
-// 	type Event = E;
-//
-// 	fn push(&mut self, event: Self::Event) {
-// 		self.queue.push_back(PollEntry::Entry(event));
-// 	}
-//
-// 	fn push_iter<I: IntoIterator<Item = Self::Event>>(&mut self, iter: I)
-// 	where
-// 		<I as IntoIterator>::IntoIter: 'static,
-// 	{
-// 		self.queue
-// 			.push_back(PollEntry::Iter(Box::new(PollIterGeneric {
-// 				_ty: PhantomData,
-// 				iter,
-// 			}) as Box<_>));
-// 	}
-// }
+trait PollCallback<H> {
+	fn run(&mut self, handler: &mut H) -> bool;
+}
+
+struct PollIterCallback<I> {
+	iter: I,
+}
+
+impl<I, X> PollCallback<X> for PollIterCallback<I>
+where
+	I: Iterator,
+	X: FnMut(I::Item) -> bool,
+{
+	fn run(&mut self, handler: &mut X) -> bool {
+		while let Some(next) = self.iter.next() {
+			if !handler(next) {
+				return false;
+			}
+		}
+		true
+	}
+}
