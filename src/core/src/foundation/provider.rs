@@ -1,5 +1,4 @@
-// TODO: Allow users to fetch mutable references; implement splitting; integrate with locking system
-
+use crate::foundation::{RwLock, RwLockManager};
 use crate::util::tuple::impl_tuples;
 use once_cell::sync::OnceCell;
 use std::any::{type_name, TypeId};
@@ -322,5 +321,24 @@ impl<T: 'static> Provider for LazyComponent<T> {
 		if let Some(inner) = self.value.get() {
 			try_provide!(out, inner);
 		}
+	}
+}
+
+// === Integration with RwLocks === //
+
+pub type RwLockComponent<T> = LazyComponent<RwLock<T>>;
+
+pub trait ProviderRwLockExt: Provider {
+	fn init_lock<T: 'static>(&self, value: T);
+	fn get_lock<T: 'static>(&self) -> &RwLock<T>;
+}
+
+impl<Target: ?Sized + Provider> ProviderRwLockExt for Target {
+	fn init_lock<T: 'static>(&self, value: T) {
+		self.init(RwLock::new(self.get::<RwLockManager>().clone(), value))
+	}
+
+	fn get_lock<T: 'static>(&self) -> &RwLock<T> {
+		self.get::<RwLock<T>>()
 	}
 }

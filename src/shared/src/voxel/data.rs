@@ -1,6 +1,6 @@
+use crate::voxel::coord::{BlockFace, BlockPos, ChunkPos, CHUNK_VOLUME};
 use crucible_core::foundation::prelude::*;
 use crucible_core::util::meta_enum::EnumMeta;
-use crucible_shared::voxel::coord::{BlockFace, BlockPos, ChunkPos, CHUNK_VOLUME};
 use std::collections::HashMap;
 
 #[derive(Default)]

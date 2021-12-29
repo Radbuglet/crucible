@@ -3,15 +3,14 @@ use std::marker::PhantomData;
 
 // === Core === //
 
-pub trait EventPusher {
+pub trait EventPusher<'i> {
 	type Event;
 
 	fn push(&mut self, event: Self::Event);
 
-	// TODO: Reduce required iterator lifetime.
 	fn push_iter<I: IntoIterator<Item = Self::Event>>(&mut self, iter: I)
 	where
-		<I as IntoIterator>::IntoIter: 'static,
+		<I as IntoIterator>::IntoIter: 'i,
 	{
 		for elem in iter.into_iter() {
 			self.push(elem);
@@ -40,7 +39,7 @@ impl<E, F: FnMut(E)> EventPusherImmediate<E, F> {
 	}
 }
 
-impl<E, F: FnMut(E)> EventPusher for EventPusherImmediate<E, F> {
+impl<'i, E, F: FnMut(E)> EventPusher<'i> for EventPusherImmediate<E, F> {
 	type Event = E;
 
 	fn push(&mut self, event: Self::Event) {
@@ -50,7 +49,7 @@ impl<E, F: FnMut(E)> EventPusher for EventPusherImmediate<E, F> {
 
 // === Deque === //
 
-impl<E> EventPusher for VecDeque<E> {
+impl<'i, E> EventPusher<'i> for VecDeque<E> {
 	type Event = E;
 
 	fn push(&mut self, event: Self::Event) {
@@ -60,16 +59,16 @@ impl<E> EventPusher for VecDeque<E> {
 
 // === Callback Poll === //
 
-pub struct EventPusherCallback<E, X> {
-	queue: VecDeque<PollEntry<E, X>>,
+pub struct EventPusherCallback<'i, E, X> {
+	queue: VecDeque<PollEntry<'i, E, X>>,
 }
 
-enum PollEntry<E, X> {
+enum PollEntry<'i, E, X> {
 	Entry(E),
-	Iter(Box<dyn PollCallback<X>>),
+	Iter(Box<dyn PollCallback<X> + 'i>),
 }
 
-impl<E, X> EventPusherCallback<E, X>
+impl<'i, E, X> EventPusherCallback<'i, E, X>
 where
 	X: FnMut(E) -> bool,
 {
@@ -99,7 +98,7 @@ where
 	}
 }
 
-impl<E, X> EventPusher for EventPusherCallback<E, X>
+impl<'i, E, X> EventPusher<'i> for EventPusherCallback<'i, E, X>
 where
 	X: FnMut(E) -> bool,
 {
@@ -112,7 +111,7 @@ where
 	fn push_iter<I>(&mut self, iter: I)
 	where
 		I: IntoIterator<Item = E>,
-		<I as IntoIterator>::IntoIter: 'static,
+		<I as IntoIterator>::IntoIter: 'i,
 	{
 		self.queue
 			.push_back(PollEntry::Iter(Box::new(PollIterCallback {

@@ -131,10 +131,10 @@ mod internals {
 		/// requests to wake up the relevant requests to the provided [EventPusher] so that user code
 		/// can be invoked after the [LockManagerInner] mutex has been released so as to avoid
 		/// deadlocks in the futures.
-		pub fn del_lock(
+		pub fn del_lock<'a>(
 			&mut self,
 			lock: usize,
-			ev_wakeup: &mut impl EventPusher<Event = Arc<LockRequestHandle>>,
+			ev_wakeup: &mut impl EventPusher<'a, Event = Arc<LockRequestHandle>>,
 		) {
 			trace!("Manager {:p}: destroying lock with index {}", self, lock);
 
@@ -271,9 +271,9 @@ mod internals {
 		/// and removing them from the queue. Completed lock requests are pushed to the provided
 		/// [EventPusher] so that external code can invoke wakers after the [LockManagerInner] mutex
 		/// has been released so as to avoid deadlocks within the futures.
-		pub fn poll_completed(
+		pub fn poll_completed<'a>(
 			&mut self,
-			ev_wakeup: &mut impl EventPusher<Event = Arc<LockRequestHandle>>,
+			ev_wakeup: &mut impl EventPusher<'a, Event = Arc<LockRequestHandle>>,
 		) {
 			let available_locks = self.available_locks;
 			self.poll_locks_common(
@@ -285,11 +285,11 @@ mod internals {
 
 		// === Internal utils === //
 
-		fn poll_locks_common<F: Fn(&LockRequest) -> bool>(
+		fn poll_locks_common<'a, F: Fn(&LockRequest) -> bool>(
 			&mut self,
 			is_applicable: &F,
 			mode: RemoveWhereMode,
-			on_removed: &mut impl EventPusher<Event = Arc<LockRequestHandle>>,
+			on_removed: &mut impl EventPusher<'a, Event = Arc<LockRequestHandle>>,
 		) {
 			trace!(
 				"Manager {:p}: polling for requests under mode {:?}",
@@ -577,8 +577,6 @@ macro impl_lock_target_tup($($ty:ident:$field:tt),*) {
 impl_tuples!(no_unit; impl_lock_target_tup);
 
 // === RwLock === //
-
-// TODO: Partial release, integrate better with Providers.
 
 pub struct RwLock<T: ?Sized> {
 	manager: RwLockManager,
