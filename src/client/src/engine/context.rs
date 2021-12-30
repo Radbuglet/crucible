@@ -27,7 +27,6 @@ impl GfxContext {
 			.map(|(cx, surface)| (cx, surface.unwrap()))
 	}
 
-	// TODO: Prioritize adapters and devices which work best with the requested features & limits.
 	pub async fn new(
 		window: Option<&Window>,
 		features: wgpu::Features,

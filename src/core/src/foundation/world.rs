@@ -112,8 +112,6 @@ impl Entity {
 
 // === Storages === //
 
-// TODO: We should probably implement a more efficient storage mechanism
-
 pub struct Storage<T> {
 	map: RawTable<(Entity, T)>,
 }
@@ -153,7 +151,6 @@ impl<T> Storage<T> {
 			// The key isn't yet mapped to anything. We have to insert a new entry.
 
 			// Try a simple insertion
-			// TODO: We should augment the internal implementation s.t. it treats dead entities as tomb-stoned.
 			// ^ although honestly, it's probably more worthwhile to make an ECS-specific weak map
 			// implementation than to retrofit a general purpose hash table. We might even want to
 			// make an archetype system.

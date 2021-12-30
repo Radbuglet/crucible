@@ -2,8 +2,6 @@
 //!
 //! "Oh boy, it *sure* is fun to manually delegate methods!" - A composition enthusiast
 
-// TODO: Document coordinate spaces.
-
 use cgmath::{num_traits::Signed, BaseNum, Vector3, Zero};
 use crucible_core::util::meta_enum::{enum_meta, EnumMeta};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
@@ -269,8 +267,6 @@ impl From<WorldPos> for BlockPos {
 		pos.block()
 	}
 }
-
-// TODO: Floating-point world and block positions
 
 // === Block faces === //
 

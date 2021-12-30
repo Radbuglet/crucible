@@ -66,7 +66,6 @@ impl GfxCameraManager {
 
 #[derive(Debug, Clone)]
 pub struct PerspectiveCamera {
-	// TODO: Generalize spatial objects and Angle3Ds
 	pub position: Vector3<f32>,
 	pub pitch: Rad<f32>,
 	pub yaw: Rad<f32>,

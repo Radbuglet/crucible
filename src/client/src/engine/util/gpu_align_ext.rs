@@ -1,5 +1,3 @@
-// TODO: Replace with a GPU-stream abstraction; move to an alternative GPU struct layout library
-
 use glsl_layout::{Std140, Uniform};
 use std::mem;
 

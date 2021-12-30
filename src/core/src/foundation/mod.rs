@@ -50,11 +50,10 @@
 //! to take out several mutable references to distinct object entries simultaneously. This is handled
 //! by the notion of an [Accessor], which formalizes the idea of an object which maps distinct keys
 //! to distinct object references. Both [Provider]s and [Storage]s are examples of this. [Accessor]s
-//! are useful because they can be wrapped by various external no-alias proof mechanisms (e.g. storage
-//! splitting, static multi-fetch, runtime tracking, sorted index proofs, etc), allowing users
-//! implementing the trait to benefit from a variety of mutability mechanisms without having to
+//! are useful because they can be wrapped by various external borrow check proof mechanisms (e.g.
+//! storage splitting, static multi-fetch, runtime tracking, sorted index proofs, etc), allowing
+//! users implementing the trait to benefit from a variety of mutability mechanisms without having to
 //! implement them themselves.
-//! TODO: ^ This needs to actually be implemented.
 //!
 //! Scheduling in this model is handled through `async` functions. The details of this system are
 //! still being decided.
@@ -86,16 +85,7 @@ pub mod provider;
 pub mod world;
 
 pub mod prelude {
-	pub use super::{
-		event::{EventPusher, EventPusherCallback, EventPusherImmediate},
-		exec::Executor,
-		lock::{lock_many_now, RwGuard, RwGuardMut, RwGuardRef, RwLock, RwLockManager},
-		provider::{
-			get_many, Component, LazyComponent, LazyProviderExt, MultiProvider, Provider,
-			ProviderExt, ProviderRwLockExt, RwLockComponent,
-		},
-		world::{Entity, Storage, World},
-	};
+	pub use super::{event::*, exec::*, lock::*, provider::*, world::*};
 }
 
 pub use prelude::*;

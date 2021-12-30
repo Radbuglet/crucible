@@ -75,7 +75,6 @@ impl VoxelWorld {
 			.and_then(|entity| Some((entity, self.chunk_store.try_get_mut(world, entity)?)))
 	}
 
-	// TODO: We can greatly simplify this API with storage wrappers.
 	pub fn get_chunk(&self, world: &World, id: Entity) -> Option<&VoxelChunk> {
 		self.chunk_store.try_get(world, id)
 	}

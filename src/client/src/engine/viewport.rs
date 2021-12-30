@@ -5,7 +5,6 @@ use crucible_core::foundation::prelude::*;
 use std::collections::HashMap;
 use winit::window::{Window, WindowId};
 
-// TODO: Handle swapchain formats dynamically.
 pub const SWAPCHAIN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 
 #[derive(Default)]

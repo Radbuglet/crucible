@@ -3,8 +3,6 @@ use crate::engine::util::gpu_align_ext::align_up;
 use glsl_layout::Std140;
 use std::mem::{align_of, swap};
 
-// TODO: We can probably use wgpu's internal staging pool alongside update_buffer to implement this.
-// ^ we should still implement a dedicated frame resource system, though.
 pub struct UniformManager {
 	head: usize,
 	buffer_a: wgpu::Buffer,
