@@ -80,7 +80,7 @@ impl Default for PerspectiveCamera {
 			pitch: Rad(0.),
 			yaw: Rad(0.),
 			fov: Deg(90.).into(),
-			clipping: (0.1, 200.),
+			clipping: (0.1, 500.),
 		}
 	}
 }

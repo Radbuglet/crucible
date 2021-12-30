@@ -138,9 +138,9 @@ fn main_inner() -> AnyResult<!> {
 	let mut voxel_data = VoxelWorld::new();
 	let mut voxel_render = VoxelRenderer::new(&gfx, &camera);
 
-	for x in 0..4 {
-		for y in 0..4 {
-			for z in 0..4 {
+	for x in 0..32 {
+		for y in 0..16 {
+			for z in 0..32 {
 				let ent_chunk = world.spawn();
 
 				// Setup chunk data
@@ -219,7 +219,7 @@ impl RunLoopHandler for Handler {
 		);
 
 		// Update chunks
-		voxel_render.update_dirty(world, voxel_data, gfx, Duration::from_millis(5));
+		voxel_render.update_dirty(world, voxel_data, gfx, Duration::from_millis(10));
 
 		// Process inputs
 		{
@@ -285,7 +285,7 @@ impl RunLoopHandler for Handler {
 			let speed = if input.key(VirtualKeyCode::LShift).state() {
 				5.
 			} else {
-				20.
+				50.
 			};
 
 			// Rotate camera
@@ -340,7 +340,7 @@ impl RunLoopHandler for Handler {
 		match block_on(uniform.begin_frame()) {
 			Ok(_) => {}
 			Err(err) => {
-				log::warn!("Failed to begin frame {}", err);
+				log::warn!("Failed to begin frame (uniform) {}", err);
 				return;
 			}
 		}
