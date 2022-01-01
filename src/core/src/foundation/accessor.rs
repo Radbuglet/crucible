@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 // === Core traits === //
@@ -13,7 +14,22 @@ use std::ptr::NonNull;
 ///
 /// ## Safety
 ///
-/// TODO
+/// 1. *In a safe context*, a mutable reference to an `Accessor` implies that all underlying elements
+///    can be assumed to be unborrowed. This rule is typically enforced by forcing the `Accessor` to
+///    live as long as the mutable borrow to its underlying target. The terminology of a "safe context"
+///    is present because this rule will likely be violated internally by wrappers around `Accessors`.
+///    However, so long as a safe context never gets a mutable reference to these "dirty" `Accessors`,
+///    this safety invariant will not be considered broken.
+/// 2. If two indices are reported to be equal through [Eq], the returned pointers are guaranteed not
+///    to alias. TODO: Replace with TrustedEq and TrustedOrd traits.
+/// 3. So long as the virtual aliasing rules described by this safety section are followed properly,
+///    returned pointers must be valid to promote. Note that because `Accessors` take immutable
+///    references to themselves, promoting to a mutable reference may cause undefined behavior unless
+///    the target exhibits proper interior mutability with [UnsafeCell](std::cell::UnsafeCell) (or its
+///    derivatives) or stores a mutable raw pointer to the underlying target where it does not
+///    conflict with any existing immutable references.
+///
+/// TODO: Preserve iterators; how do we make OOB pointers more ergonomic?
 ///
 pub unsafe trait Accessor {
 	type Index: Debug + Copy + Eq;
@@ -23,8 +39,18 @@ pub unsafe trait Accessor {
 }
 
 /// A raw reference type that can be promoted into either its mutable or immutable form.
+///
+/// ## Safety
+///
+/// [PointerLike]s carry no safety guarantees about promotion validity by themselves, and their
+/// semantics must typically be augmented by some external contract. However, when a contract specifies
+/// that "promotion is legal" with a specified lifetime, the produced reference must be safe to use,
+/// even in safe contexts. This means that returned reference lifetimes must be properly bounded.
 #[rustfmt::skip]
 pub trait PointerLike {
+	// `Self: 'a` provides a concise (albeit overly-conservative) way of ensuring that the pointee
+	// lives as long as the lifetime since objects can only live as long as the lifetimes of their
+	// generic parameters.
 	type AsRef<'a> where Self: 'a;
 	type AsMut<'a> where Self: 'a;
 
@@ -32,7 +58,7 @@ pub trait PointerLike {
 	unsafe fn promote_mut<'a>(self) -> Self::AsMut<'a>;
 }
 
-// === Core AccessedElem impls === //
+// === Core PointerLike impls === //
 
 #[rustfmt::skip]
 impl<T: PointerLike> PointerLike for Option<T> {
@@ -64,12 +90,36 @@ impl<T: ?Sized> PointerLike for NonNull<T> {
 
 // === Core Accessor impls === //
 
-unsafe impl<T> Accessor for [T] {
+#[derive(Debug)]
+pub struct SliceAccessor<'a, T> {
+	_ty: PhantomData<&'a ()>,
+	root: *mut T,
+	len: usize,
+}
+
+unsafe impl<'a, T: Send> Send for SliceAccessor<'a, T> {}
+unsafe impl<'a, T: Sync> Sync for SliceAccessor<'a, T> {}
+
+impl<'a, T> From<&'a mut [T]> for SliceAccessor<'a, T> {
+	fn from(slice: &'a mut [T]) -> Self {
+		Self {
+			_ty: PhantomData,
+			root: slice.as_mut_ptr(),
+			len: slice.len(),
+		}
+	}
+}
+
+unsafe impl<'a, T> Accessor for SliceAccessor<'a, T> {
 	type Index = usize;
 	type Ptr = Option<NonNull<T>>;
 
 	fn get_raw(&self, index: Self::Index) -> Self::Ptr {
-		self.get(index).map(|ref_| NonNull::from(ref_))
+		if index < self.len {
+			Some(unsafe { NonNull::new_unchecked(self.root.add(index)) })
+		} else {
+			None
+		}
 	}
 }
 
@@ -165,42 +215,20 @@ pub struct AccessorSplitter<'a, A: ?Sized + Accessor> {
 	is_right: bool,
 }
 
-// FIXME: This impl isn't actually safe because we don't have mut access to `target`.
 unsafe impl<'a, A> Accessor for AccessorSplitter<'a, A>
 where
 	A: Accessor,
 	A::Index: Ord,
 {
 	type Index = A::Index;
-	type Ptr = A::Ptr;
+	type Ptr = Option<A::Ptr>;
 
 	fn get_raw(&self, index: Self::Index) -> Self::Ptr {
-		// Validate index
 		match (self.is_right, index.cmp(&self.mid)) {
-			(false, Ordering::Less | Ordering::Equal) => {}
-			(true, Ordering::Greater) => {}
-			_ => match self.is_right {
-				false => panic!(
-					"Out of bounds access on left splitter. ({:?} > {:?})",
-					index, self.mid
-				),
-				true => panic!(
-					"Out of bounds access on right splitter. ({:?} <= {:?})",
-					index, self.mid
-				),
-			},
+			(false, Ordering::Less | Ordering::Equal) | (true, Ordering::Greater) => {
+				Some(self.target.get_raw(index))
+			}
+			_ => None,
 		}
-
-		// Produce pointer
-		self.target.get_raw(index)
 	}
-}
-
-#[test]
-fn foo() {
-	let mut foo = vec![1, 4, 5, 3, 2];
-	println!(
-		"{:?}",
-		(&mut *foo).get_ordered_mut([1, 2, 3]).collect::<Vec<_>>()
-	);
 }

@@ -109,6 +109,7 @@
 //! [crew]: https://github.com/Radbuglet/crew/
 //! [ecs]: https://en.wikipedia.org/wiki/Entity_component_system
 
+pub mod accessor;
 pub mod event;
 pub mod exec;
 pub mod lock;
@@ -116,7 +117,7 @@ pub mod provider;
 pub mod world;
 
 pub mod prelude {
-	pub use super::{event::*, exec::*, lock::*, provider::*, world::*};
+	pub use super::{accessor::*, event::*, exec::*, lock::*, provider::*, world::*};
 }
 
 pub use prelude::*;
