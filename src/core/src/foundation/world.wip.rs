@@ -14,7 +14,7 @@ use smallvec::SmallVec;
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
 use std::ptr::NonNull;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 /// The maximum number of components which can be attached to an entity without triggering the slow
 /// path.
@@ -26,24 +26,30 @@ pub const MAX_IDEAL_ARCHETYPES: usize = 16;
 
 // === World === //
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct World {
 	inner: Arc<WorldInner>,
 }
+
+pub struct WorldMut<'a> {}
+
+pub struct WorldRef<'a> {}
 
 #[derive(Debug)]
 struct WorldInner {
 	// A free-list of [EntitySlot]s, which allow users to map an [Entity] to its slot in its
 	// containing archetype and to check that it's even still alive.
 	entities: FreeList<EntitySlot>,
+
+	// A monotonically increasing archetype ID generator.
+	// See [ContainedBy.archetype_id] for details on usage.
+	arch_id_gen: NonZeroU64,
 }
 
 #[derive(Debug)]
 struct EntitySlot {
 	// The entity's generation, used to determine whether an entity is still alive.
 	gen: NonZeroU64,
-
-	archetype_id: u64,
 
 	// The archetype block containing this entity.
 	block: NonNull<BlockHeader>,
@@ -65,10 +71,6 @@ pub struct Storage<T> {
 
 	// The [World] this storage exists in.
 	world: World,
-
-	// The unique ID of the `storage` within the world. This is necessary to find the rank of an
-	// entity's corresponding component within an archetype.
-	id: NonZeroU64,
 
 	// A universally-ordered list of archetypes containing this [Storage]. Dead archetypes are
 	// cleaned up while walking this list.

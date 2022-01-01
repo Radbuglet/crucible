@@ -5,7 +5,7 @@ use crate::engine::util::gpu_align_ext::convert_slice;
 use crate::engine::viewport::SWAPCHAIN_FORMAT;
 use crucible_core::foundation::{Entity, Storage, World};
 use crucible_core::util::meta_enum::EnumMeta;
-use crucible_shared::voxel::coord::{BlockFace, WorldPos};
+use crucible_shared::voxel::coord::{BlockFace, BlockPos, WorldPos};
 use crucible_shared::voxel::data::VoxelWorld;
 use futures::executor::block_on;
 use glsl_layout::{uint, vec3, Uniform};
@@ -139,14 +139,28 @@ impl VoxelRenderer {
 					for (pos, block) in chunk.blocks() {
 						if block != 0 {
 							for face in BlockFace::variants() {
-								mesh_faces.push(VoxelFaceInstance {
-									pos: WorldPos::from_parts(chunk.pos(), pos)
-										.raw
-										.cast::<f32>()
-										.unwrap()
-										.into(),
-									face: face.marshall_shader(),
-								});
+								let neighbor_pos = (pos.raw.cast::<i8>().unwrap()
+									+ face.unit::<i8>())
+								.cast::<u8>();
+
+								let make_face = match neighbor_pos {
+									Some(pos) => {
+										let pos = BlockPos::from(pos);
+										!pos.is_valid() || chunk.get_block(pos) == 0
+									}
+									_ => true,
+								};
+
+								if make_face {
+									mesh_faces.push(VoxelFaceInstance {
+										pos: WorldPos::from_parts(chunk.pos(), pos)
+											.raw
+											.cast::<f32>()
+											.unwrap()
+											.into(),
+										face: face.marshall_shader(),
+									});
+								}
 							}
 						}
 					}
@@ -181,7 +195,7 @@ impl VoxelRenderer {
 
 		pass.set_vertex_buffer(0, self.mesh.buffer().slice(..));
 		pass.draw(0..6, 0..(face_count as u32));
-		println!(
+		log::info!(
 			"Rendering {} face(s) belonging to {} chunk(s).",
 			face_count,
 			self.mesh.len_entries()

@@ -18,7 +18,8 @@ use anyhow::Context;
 use cgmath::{Deg, InnerSpace, Matrix3, Rad, Vector2, Vector3, Zero};
 use crucible_core::foundation::prelude::*;
 use crucible_core::util::error::{AnyResult, ErrorFormatExt};
-use crucible_shared::voxel::coord::{BlockPos, ChunkPos};
+use crucible_core::util::meta_enum::EnumMeta;
+use crucible_shared::voxel::coord::{Axis3, BlockPos, ChunkPos};
 use crucible_shared::voxel::data::VoxelWorld;
 use futures::executor::block_on;
 use std::collections::VecDeque;
@@ -144,13 +145,21 @@ fn main_inner() -> AnyResult<!> {
 				let ent_chunk = world.spawn();
 
 				// Setup chunk data
-				voxel_data.add(&world, ChunkPos::new(x, y, z), ent_chunk);
+				let chunk_pos = ChunkPos::new(x, y, z);
+				voxel_data.add(&world, chunk_pos, ent_chunk);
 
 				let data = voxel_data.get_chunk_mut(&world, ent_chunk).unwrap();
 				data.set_block(BlockPos::new(0, 0, 0), 1);
-				data.set_block(BlockPos::new(1, 0, 0), 1);
-				data.set_block(BlockPos::new(0, 1, 0), 1);
-				data.set_block(BlockPos::new(0, 0, 1), 1);
+
+				for (axis, _) in Axis3::values_iter() {
+					if chunk_pos.raw[axis.vec_idx] == Vector3::new(31, 15, 31)[axis.vec_idx] {
+						continue;
+					}
+
+					for d in 1..16 {
+						data.set_block(BlockPos::new(0, 0, 0) + (axis.unit() * d), 1);
+					}
+				}
 
 				// Mesh chunk
 				voxel_render.mark_dirty(&world, ent_chunk);
@@ -379,9 +388,9 @@ impl RunLoopHandler for Handler {
 				view: &frame_view,
 				ops: wgpu::Operations {
 					load: wgpu::LoadOp::Clear(wgpu::Color {
-						r: 0.2,
-						g: 0.4,
-						b: 0.8,
+						r: 1.0,
+						g: 1.0,
+						b: 1.0,
 						a: 1.0,
 					}),
 					store: true,

@@ -14,7 +14,7 @@ impl ContigMesh {
 	pub fn new(gfx: &GfxContext) -> Self {
 		let buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("memory allocator at home"),
-			size: 16_000_000, // Casual 16mb heap. Don't worry about it.
+			size: 64_000_000, // Casual 64mb heap. Don't worry about it.
 			usage: wgpu::BufferUsages::MAP_WRITE
 				| wgpu::BufferUsages::MAP_READ
 				| wgpu::BufferUsages::VERTEX,
@@ -43,14 +43,19 @@ impl ContigMesh {
 			self.remove(world, entity);
 		}
 
-		// Get mapped buffer
-		let mut mapped = self.buffer.slice(..).get_mapped_range_mut();
-
 		// Determine the range of affected bytes
 		let write_range = self.len..(self.len.checked_add(data.len()).unwrap());
 
-		// Modify the buffer
-		mapped[write_range.clone()].copy_from_slice(data);
+		if !write_range.is_empty() {
+			// Get mapped buffer
+			let mut mapped = self
+				.buffer
+				.slice((write_range.start as u64)..(write_range.end as u64))
+				.get_mapped_range_mut();
+
+			// Modify the buffer
+			mapped.copy_from_slice(data);
+		}
 
 		// Update length
 		self.len += data.len();
