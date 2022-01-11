@@ -1,8 +1,8 @@
 use crate::engine::context::GfxContext;
-use crate::engine::util::gpu_align_ext::align_up;
-use glsl_layout::Std140;
-use std::mem::{align_of, swap};
+use crucible_core::util::pointer::align_up;
+use std::mem::swap;
 
+#[derive(Debug)]
 pub struct UniformManager {
 	head: usize,
 	buffer_a: wgpu::Buffer,
@@ -69,7 +69,6 @@ impl UniformManager {
 	}
 
 	pub async fn begin_frame(&mut self) -> Result<(), wgpu::BufferAsyncError> {
-		// Validate call early on to catch bugs.
 		#[cfg(debug_assertions)]
 		{
 			debug_assert!(!self.is_mapped);
@@ -84,7 +83,6 @@ impl UniformManager {
 	}
 
 	pub fn end_frame(&mut self) {
-		// Validate call early on to catch bugs.
 		#[cfg(debug_assertions)]
 		{
 			debug_assert!(self.is_mapped);
@@ -95,14 +93,12 @@ impl UniformManager {
 		swap(&mut self.buffer_a, &mut self.buffer_b);
 	}
 
-	pub fn push<P: Std140>(&mut self, gfx: &GfxContext, object: &P) -> wgpu::BufferBinding {
-		// Fetch bytes
-		let bytes = object.as_raw();
-
+	// TODO: Immediate mode writer
+	pub fn push(&mut self, gfx: &GfxContext, align: usize, bytes: &[u8]) -> wgpu::BufferBinding {
 		// Align head
 		let head = align_up(
 			self.head,
-			(gfx.limits.min_uniform_buffer_offset_alignment as usize).max(align_of::<P>()),
+			(gfx.limits.min_uniform_buffer_offset_alignment as usize).max(align),
 		);
 		debug_assert!(head < self.cap as usize);
 

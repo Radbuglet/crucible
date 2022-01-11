@@ -1,14 +1,17 @@
 //! Contains utilities for uploading camera data to the GPU and creating view matrices.
 
 use crate::engine::context::GfxContext;
+use crate::engine::util::std140::Std140;
 use crate::engine::util::uniform::UniformManager;
 use cgmath::{perspective, Deg, Matrix4, Rad, Transform, Vector3, Zero};
-use glsl_layout::{mat4, Uniform};
+use crucible_core::util::pod::{align_of_pod, bytes_of_pod, pod_struct, PodWriter};
+use crucible_core::util::wrapper::Wrapper;
 
-#[derive(Debug, Uniform, Copy, Clone)]
-#[repr(C)]
-struct CameraUniform {
-	proj: mat4,
+pod_struct! {
+	#[derive(Debug, Copy, Clone)]
+	fixed struct CameraUniform {
+		proj: Matrix4<f32> [Std140],
+	}
 }
 
 #[derive(Debug)]
@@ -51,7 +54,11 @@ impl GfxCameraManager {
 		uniform: &mut UniformManager,
 		view: Matrix4<f32>,
 	) -> wgpu::BindGroup {
-		let entry = uniform.push(gfx, &(CameraUniform { proj: view.into() }.std140()));
+		let entry = uniform.push(
+			gfx,
+			align_of_pod::<CameraUniform>(),
+			&bytes_of_pod(&CameraUniform { proj: view }),
+		);
 
 		gfx.device.create_bind_group(&wgpu::BindGroupDescriptor {
 			label: Some("camera uniform group"),

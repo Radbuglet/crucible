@@ -307,7 +307,6 @@ dependencies = [
  "env_logger",
  "futures",
  "glob",
- "glsl-layout",
  "log",
  "shaderc",
  "wgpu",
@@ -585,27 +584,6 @@ dependencies = [
  "slotmap",
  "wasm-bindgen",
  "web-sys",
-]
-
-[[package]]
-name = "glsl-layout"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2228ade20ecb9150f8ab5cad6e152c2988b180ff04e9c1fb7c32830cb6f67627"
-dependencies = [
- "cgmath",
- "glsl-layout-derive",
-]
-
-[[package]]
-name = "glsl-layout-derive"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b870f33b0cec52fd0347c09722c2f9a85e9a4e9aa5c0453e75dedc12bde7ddb8"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

@@ -1,32 +1,34 @@
 use crate::engine::context::GfxContext;
 use crate::engine::util::camera::GfxCameraManager;
 use crate::engine::util::contig_mesh::ContigMesh;
-use crate::engine::util::gpu_align_ext::convert_slice;
+use crate::engine::util::std140::Std140;
 use crate::engine::viewport::SWAPCHAIN_FORMAT;
+use cgmath::Vector3;
 use crucible_core::foundation::{Entity, Storage, World};
 use crucible_core::util::meta_enum::EnumMeta;
+use crucible_core::util::pod::{pod_struct, size_of_pod, PodWriter, VecWriter};
 use crucible_shared::voxel::coord::{BlockFace, BlockPos, WorldPos};
 use crucible_shared::voxel::data::VoxelWorld;
 use futures::executor::block_on;
-use glsl_layout::{uint, vec3, Uniform};
-use std::mem::size_of;
 use std::time::{Duration, Instant};
 
 // === Internals === //
 
 pub const DEPTH_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-#[derive(Debug, Uniform, Copy, Clone)]
-struct VoxelFaceInstance {
-	pos: vec3,
-	face: uint,
+pod_struct! {
+	#[derive(Debug, Copy, Clone)]
+	fixed struct VoxelFaceInstance {
+		pos: Vector3<f32> [Std140],
+		face: u32 [Std140],
+	}
 }
 
 // === Rendering subsystem === //
 
 pub struct VoxelRenderer {
 	pipeline: wgpu::RenderPipeline,
-	pub mesh: ContigMesh,
+	mesh: ContigMesh,
 	dirty: Storage<()>,
 }
 
@@ -59,7 +61,7 @@ impl VoxelRenderer {
 					buffers: &[
 						// Vertex buffer (index 0)
 						wgpu::VertexBufferLayout {
-							array_stride: size_of::<VoxelFaceInstance>() as wgpu::BufferAddress,
+							array_stride: size_of_pod::<VoxelFaceInstance>() as wgpu::BufferAddress,
 							step_mode: wgpu::VertexStepMode::Instance,
 							attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Uint32],
 						},
@@ -118,7 +120,7 @@ impl VoxelRenderer {
 		_gfx: &GfxContext,
 		max_duration: Duration,
 	) {
-		let mut mesh_faces = Vec::new();
+		let mut mesh_data = VecWriter::new();
 		let start = Instant::now();
 
 		// Map buffer
@@ -136,7 +138,7 @@ impl VoxelRenderer {
 			match voxels.get_chunk(world, dirty) {
 				Some(chunk) => {
 					// Fill up the mesh
-					mesh_faces.clear();
+					mesh_data.reset();
 					for (pos, block) in chunk.blocks() {
 						if block != 0 {
 							for face in BlockFace::variants() {
@@ -153,12 +155,12 @@ impl VoxelRenderer {
 								};
 
 								if make_face {
-									mesh_faces.push(VoxelFaceInstance {
+									mesh_data.write(&VoxelFaceInstance {
+										// TODO: Improve large position handling
 										pos: WorldPos::from_parts(chunk.pos(), pos)
 											.raw
 											.cast::<f32>()
-											.unwrap()
-											.into(),
+											.unwrap(),
 										face: face.marshall_shader(),
 									});
 								}
@@ -167,8 +169,7 @@ impl VoxelRenderer {
 					}
 
 					// Update mesh
-					self.mesh
-						.add(world, dirty, convert_slice(&*mesh_faces).as_slice());
+					self.mesh.add(world, dirty, mesh_data.bytes());
 				}
 				None => self.mesh.remove(world, dirty),
 			}
@@ -191,9 +192,7 @@ impl VoxelRenderer {
 		pass.set_pipeline(&self.pipeline);
 		pass.set_bind_group(0, cam_group, &[]);
 
-		let face_count =
-			self.mesh.len_bytes() / std::mem::size_of::<<VoxelFaceInstance as Uniform>::Std140>();
-
+		let face_count = self.mesh.len_bytes() / size_of_pod::<VoxelFaceInstance>();
 		pass.set_vertex_buffer(0, self.mesh.buffer().slice(..));
 		pass.draw(0..6, 0..(face_count as u32));
 		log::info!(

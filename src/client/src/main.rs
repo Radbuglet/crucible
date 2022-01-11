@@ -104,8 +104,8 @@ fn main_inner() -> AnyResult<!> {
 		let window = WindowBuilder::new()
 			.with_title("Crucible")
 			.with_visible(false)
-			.with_inner_size(LogicalSize::new(1920, 1080))
-			.with_min_inner_size(LogicalSize::new(100, 100))
+			.with_inner_size(LogicalSize::new(1920_i32, 1080_i32))
+			.with_min_inner_size(LogicalSize::new(100_i32, 100_i32))
 			.build(&event_loop)
 			.context("Failed to create main window.")?;
 

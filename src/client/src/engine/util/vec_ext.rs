@@ -75,18 +75,3 @@ impl VecConvert for wgpu::Extent3d {
 		}
 	}
 }
-
-// glsl_layout::vec3 <-> Vector3
-
-impl VecConvert for glsl_layout::vec3 {
-	type Vector = Vector3<f32>;
-
-	fn to_vec(self) -> Self::Vector {
-		let comps: &[f32; 3] = self.as_ref();
-		Vector3::new(comps[0], comps[1], comps[2])
-	}
-
-	fn from_vec(vec: Self::Vector) -> Self {
-		vec.into()
-	}
-}

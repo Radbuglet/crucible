@@ -4,23 +4,23 @@
 //!
 //! Crucible's architecture is largely impacted by one central constraint: the borrow checker. In
 //! order for the borrow checker to provide useful results, users are only capable of borrowing an
-//! object mutably (without resorting to heavyweight synchronization primitives such as
-//! `Arc<Mutex<...>>`) once. In Rust, application state forms a strict tree where objects needing
-//! mutation can never contain back-references to their ancestors. This means that, once an object
-//! begins mutating its state, it cannot be mutated by outside actors without giving them explicit
-//! permission.
+//! object mutably once. In Rust, application state forms a strict tree where objects needing
+//! mutation can never contain back-references to their ancestors (without resorting to heavyweight
+//! runtime-tracked shared mutability objects such as `Arc<Mutex<...>>`). Because of these limitations,
+//! this means that, once an object begins mutating its state, it cannot be mutated by outside actors
+//! without giving them explicit permission to do so.
 //!
 //! > <u>An Aside:</u>
 //! > These semantics are quite similar to the semantics a functional programmer would have to deal
 //! > with when implementing a game in a pure language. Game engines in functional programs take the
 //! > form of map functions which map a given object and its inputs to that object's state on the
-//! > next frame. The constraints the programmer has to deal with are similar. Functions cannot
-//! > mutate a given object unless their ancestor takes that mutation result into account (i.e.
-//! > permits the function to perform the mutation). Thus, while functional programmers can
-//! > technically contain as many back-references as they wish, these back-references will only
-//! > contain immutable snapshots of the previous frame's state.
+//! > next frame. The constraints of this technique are similar: functions cannot mutate a given
+//! > object unless their ancestor takes that mutation result into account (i.e. permits the function
+//! > to perform the mutation). Thus, while functional programmers can technically contain as many
+//! > back-references as they wish, these back-references will only contain immutable snapshots of
+//! > the previous frame's state.
 //!
-//! A primitive way of handling these constraints is the [Entity Component System](ecs) (ECS) pattern.
+//! A common way of handling these constraints is the [Entity Component System](ecs) (ECS) pattern.
 //! Users define a pipeline of "systems" which mutate every object independently (usually filtered
 //! by the entities' intersection of components), with a command queue allowing each entity to
 //! request modifications to siblings which may be observed later in the pipeline.
@@ -37,7 +37,7 @@
 //! ## Overview
 //!
 //! Instead of differentiating between systems and their components, Crucible once again unifies
-//! behavior and state into reusable objects. Objects, however, do not describe the full state of a
+//! behavior and state into reusable *objects*. Objects, however, do not describe the full state of a
 //! "logical entity". Instead, they describe a single independent component of it, and an arbitrary
 //! number of objects can reason about a given logical entity without interfering with one another.
 //!
@@ -48,11 +48,11 @@
 //! including within a component stored in a storage—and there can be multiple storages mapping
 //! entities to the same component type, allowing users to define natural hierarchies.
 //!
-//! Thus, the basic unit in Crucible is the object. Objects are reusable units which provide one
-//! aspect of a larger logical entity. They can be naturally nested without any change to their design
-//! and can fully encapsulate their state using the same encapsulation methods as used in object-oriented
-//! programming. They also obviate the need for resources (global state used to coordinate systems
-//! in the ECS pattern).
+//! In summary, the basic unit in Crucible is the object. Objects are reusable units which provide
+//! one aspect of a larger logical entity. They can be naturally nested without any change to their
+//! design and can fully encapsulate their state using the same encapsulation methods as used in
+//! object-oriented programming. They also obviate the need for resources (global state used to
+//! coordinate systems in the ECS pattern).
 //!
 //! Like in an ECS, objects can take in other sibling objects (so long as they don't store
 //! back-references). They can also produce arbitrary events which may be handled by a variety of
@@ -96,8 +96,8 @@
 //! pattern. One of the most major limitations of Crucible's architecture is that it is largely
 //! impossible to construct a direct reference to a component instance without some form of heap
 //! indirection. This may, in some designs, make accessing deeply nested objects more expensive than
-//! necessary. Unfortunately, this problem is inherent to borrow-checker friendly Rust code as
-//! storing multiple forward references also violates Rust's strict object tree structure.
+//! otherwise necessary. Unfortunately, this problem is inherent to borrow-checker friendly Rust code
+//! as storing multiple forward references violates Rust's strict object tree structure.
 //!
 //! On the other hand, this strict object tree structure can introduce many incredibly useful
 //! properties to Rust code that do not exist in traditional object-oriented programs. Knowing that

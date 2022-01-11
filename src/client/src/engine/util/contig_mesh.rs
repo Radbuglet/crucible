@@ -37,6 +37,7 @@ impl ContigMesh {
 		self.buffer.unmap();
 	}
 
+	// TODO: Immediate mode writer
 	pub fn add(&mut self, world: &World, entity: Entity, data: &[u8]) {
 		// Remove any existing entries so we can replace it.
 		if self.ranges.try_get(world, entity).is_some() {
