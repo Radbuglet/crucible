@@ -22,7 +22,7 @@ pub use self::internals::RwLockManager;
 pub use self::internals::RwMask;
 
 mod internals {
-	use crate::foundation::event::EventPusher;
+	use crate::foundation::event::EventTarget;
 	use crate::util::bitmask::Bitmask64;
 	use crate::util::meta_enum::{enum_meta, EnumMeta};
 	use log::trace;
@@ -128,13 +128,13 @@ mod internals {
 		}
 
 		/// Destroys a lock immediately, cancelling all requesting involving that lock. We push
-		/// requests to wake up the relevant requests to the provided [EventPusher] so that user code
+		/// requests to wake up the relevant requests to the provided [EventTarget] so that user code
 		/// can be invoked after the [LockManagerInner] mutex has been released so as to avoid
 		/// deadlocks in the futures.
 		pub fn del_lock<'a>(
 			&mut self,
 			lock: usize,
-			ev_wakeup: &mut impl EventPusher<'a, Event = Arc<LockRequestHandle>>,
+			ev_wakeup: &mut impl EventTarget<'a, Arc<LockRequestHandle>>,
 		) {
 			trace!("Manager {:p}: destroying lock with index {}", self, lock);
 
@@ -269,11 +269,11 @@ mod internals {
 
 		/// Polls for locks requests that can be atomically acquired, marking them as [Available](LockRequestState::Available)
 		/// and removing them from the queue. Completed lock requests are pushed to the provided
-		/// [EventPusher] so that external code can invoke wakers after the [LockManagerInner] mutex
+		/// [EventTarget] so that external code can invoke wakers after the [LockManagerInner] mutex
 		/// has been released so as to avoid deadlocks within the futures.
 		pub fn poll_completed<'a>(
 			&mut self,
-			ev_wakeup: &mut impl EventPusher<'a, Event = Arc<LockRequestHandle>>,
+			ev_wakeup: &mut impl EventTarget<'a, Arc<LockRequestHandle>>,
 		) {
 			let available_locks = self.available_locks;
 			self.poll_locks_common(
@@ -289,7 +289,7 @@ mod internals {
 			&mut self,
 			is_applicable: &F,
 			mode: RemoveWhereMode,
-			on_removed: &mut impl EventPusher<'a, Event = Arc<LockRequestHandle>>,
+			on_removed: &mut impl EventTarget<'a, Arc<LockRequestHandle>>,
 		) {
 			trace!(
 				"Manager {:p}: polling for requests under mode {:?}",
@@ -313,7 +313,7 @@ mod internals {
 					}
 
 					// Notify the removal event, which will probably queue up a waker dispatch.
-					on_removed.push(self.remove_request(index).state);
+					on_removed.fire(self.remove_request(index).state);
 				} else {
 					index += 1;
 				}

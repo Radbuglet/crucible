@@ -2,12 +2,11 @@
 
 ## Basic
 
-- [ ] **Clean up:** Remove unnecessary nightly features; upgrade underlying toolchain before we foot-gun.
 - [ ] **Foundations:** Implement `Accessors`
 - [ ] **General:** Integrate `Accessors` into `VoxelData`, `ViewportManager`, `Storages`, and `Providers`
 - [ ] **Foundations:** Make `RwGuards` into `Providers` to simplify external guard decomposition
 - [ ] **Foundations:** Finish implementing archetypal ECS
-- [ ] **Foundations:** Implement `EventPushers`: ECS-style tagging, multithreaded `VecDequeue` pusher, `SmallVec` pusher, `Array` pusher, `EventBus`, and `Multiplexer`
+- [ ] **Foundations:** Implement ECS-style tagging `EventTarget`, multithreaded `VecDequeue`, and fixed size `Array`.
 - [ ] **Client:** Clean up main loop
 - [ ] **Client:** Implement a custom (non-UB) std140 system
 - [ ] **Client:** Make a more robust frame resource system

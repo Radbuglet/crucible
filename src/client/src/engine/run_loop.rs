@@ -21,7 +21,7 @@ pub trait RunLoopHandler {
 
 	fn tick(
 		&mut self,
-		ev_pusher: &mut VecDeque<RunLoopCommand>,
+		on_loop_ev: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -29,7 +29,7 @@ pub trait RunLoopHandler {
 
 	fn draw(
 		&mut self,
-		ev_pusher: &mut VecDeque<RunLoopCommand>,
+		on_loop_ev: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -39,7 +39,7 @@ pub trait RunLoopHandler {
 
 	fn window_input(
 		&mut self,
-		ev_pusher: &mut VecDeque<RunLoopCommand>,
+		on_loop_ev: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -49,7 +49,7 @@ pub trait RunLoopHandler {
 
 	fn device_input(
 		&mut self,
-		ev_pusher: &mut VecDeque<RunLoopCommand>,
+		on_loop_ev: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -91,7 +91,7 @@ where
 		);
 
 		// Process event
-		let mut ev_pusher = VecDeque::new();
+		let mut on_loop_ev = VecDeque::new();
 		match &event {
 			// Loop idle handling
 			Event::MainEventsCleared => {
@@ -99,7 +99,7 @@ where
 					stats.begin_tick();
 
 					// Update
-					handler.tick(&mut ev_pusher, &engine, proxy, dep_guard);
+					handler.tick(&mut on_loop_ev, &engine, proxy, dep_guard);
 
 					// Render
 					for e_window in vm.get_entities() {
@@ -129,7 +129,7 @@ where
 
 					if let Some(frame) = viewport.redraw(gfx) {
 						log::trace!("Drawing to viewport {:?}", e_window);
-						handler.draw(&mut ev_pusher, &engine, proxy, dep_guard, e_window, &frame);
+						handler.draw(&mut on_loop_ev, &engine, proxy, dep_guard, e_window, &frame);
 						frame.present();
 					}
 				}
@@ -139,7 +139,7 @@ where
 				let e_window = vm.get_entity(*window_id);
 				if let Some(e_window) = e_window {
 					handler.window_input(
-						&mut ev_pusher,
+						&mut on_loop_ev,
 						&engine,
 						proxy,
 						dep_guard,
@@ -149,7 +149,14 @@ where
 				}
 			}
 			Event::DeviceEvent { device_id, event } => {
-				handler.device_input(&mut ev_pusher, &engine, proxy, dep_guard, *device_id, event);
+				handler.device_input(
+					&mut on_loop_ev,
+					&engine,
+					proxy,
+					dep_guard,
+					*device_id,
+					event,
+				);
 			}
 			Event::LoopDestroyed => {
 				handler.goodbye(&engine, dep_guard);
@@ -160,7 +167,7 @@ where
 		}
 
 		// Handle user events
-		for ev in ev_pusher.drain(..) {
+		for ev in on_loop_ev.drain(..) {
 			match ev {
 				RunLoopCommand::Shutdown => {
 					log::info!("Shutdown requested.");

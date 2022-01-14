@@ -1,65 +1,40 @@
 use std::collections::VecDeque;
-use std::marker::PhantomData;
 
 // === Core === //
 
-pub trait EventPusher<'i> {
-	type Event;
+pub trait EventTarget<'i, E> {
+	fn fire(&mut self, event: E);
 
-	fn push(&mut self, event: Self::Event);
-
-	fn push_iter<I: IntoIterator<Item = Self::Event>>(&mut self, iter: I)
+	fn fire_iter<I: IntoIterator<Item = E>>(&mut self, iter: I)
 	where
 		<I as IntoIterator>::IntoIter: 'i,
 	{
 		for elem in iter.into_iter() {
-			self.push(elem);
+			self.fire(elem);
 		}
 	}
 }
 
-// === Immediate === //
+// === Integrations === //
 
-pub struct EventPusherImmediate<E, F> {
-	// For some reason, the FnMut trait argument types do not behave like associated types so we
-	// have to make the pusher generic over the event and the function.
-	// Variance: covariant
-	_ty: PhantomData<fn(E)>,
-	handler: F,
-}
-
-// We add the F binding here, despite it not being strictly necessary, to allow users to construct
-// unused `EventPusherImmediate` instances without having to fully qualify the event type.
-impl<E, F: FnMut(E)> EventPusherImmediate<E, F> {
-	pub fn new(handler: F) -> Self {
-		Self {
-			_ty: PhantomData,
-			handler,
-		}
+impl<'i, E, O> EventTarget<'i, E> for O
+where
+	O: FnMut(E),
+{
+	fn fire(&mut self, event: E) {
+		self(event)
 	}
 }
 
-impl<'i, E, F: FnMut(E)> EventPusher<'i> for EventPusherImmediate<E, F> {
-	type Event = E;
-
-	fn push(&mut self, event: Self::Event) {
-		(self.handler)(event);
-	}
-}
-
-// === Deque === //
-
-impl<'i, E> EventPusher<'i> for VecDeque<E> {
-	type Event = E;
-
-	fn push(&mut self, event: Self::Event) {
+impl<'i, E> EventTarget<'i, E> for VecDeque<E> {
+	fn fire(&mut self, event: E) {
 		self.push_back(event);
 	}
 }
 
 // === Callback Poll === //
 
-pub struct EventPusherCallback<'i, E, X> {
+pub struct EventTargetCallback<'i, E, X> {
 	queue: VecDeque<PollEntry<'i, E, X>>,
 }
 
@@ -68,7 +43,7 @@ enum PollEntry<'i, E, X> {
 	Iter(Box<dyn PollCallback<X> + 'i>),
 }
 
-impl<'i, E, X> EventPusherCallback<'i, E, X>
+impl<'i, E, X> EventTargetCallback<'i, E, X>
 where
 	X: FnMut(E) -> bool,
 {
@@ -98,17 +73,15 @@ where
 	}
 }
 
-impl<'i, E, X> EventPusher<'i> for EventPusherCallback<'i, E, X>
+impl<'i, E, X> EventTarget<'i, E> for EventTargetCallback<'i, E, X>
 where
 	X: FnMut(E) -> bool,
 {
-	type Event = E;
-
-	fn push(&mut self, event: Self::Event) {
+	fn fire(&mut self, event: E) {
 		self.queue.push_back(PollEntry::Entry(event));
 	}
 
-	fn push_iter<I>(&mut self, iter: I)
+	fn fire_iter<I>(&mut self, iter: I)
 	where
 		I: IntoIterator<Item = E>,
 		<I as IntoIterator>::IntoIter: 'i,

@@ -1,4 +1,3 @@
-use crate::util::pointer::{extend_mut, extend_ref};
 use hashbrown::raw::{RawIter, RawTable};
 use std::hash::Hash;
 use std::mem::replace;
@@ -359,43 +358,5 @@ impl<'a, T> Iterator for StorageIterEntryMut<'a, T> {
 			}
 		}
 		None
-	}
-}
-
-// === Queries === //
-
-pub trait Query<'a> {
-	type Comp;
-	type IntoIter: Iterator<Item = (Entity, Self::Comp)>;
-
-	fn query(self, world: &'a World) -> Self::IntoIter;
-	unsafe fn try_get_single_raw(&mut self, entity: Entity) -> Option<Self::Comp>;
-}
-
-impl<'r, T> Query<'r> for &'r Storage<T> {
-	type Comp = &'r T;
-	type IntoIter = StorageIterEntryRef<'r, T>;
-
-	fn query(self, world: &'r World) -> Self::IntoIter {
-		self.iter(world)
-	}
-
-	unsafe fn try_get_single_raw(&mut self, entity: Entity) -> Option<Self::Comp> {
-		self.try_get_raw(entity)
-			.map(|comp| unsafe { extend_ref(comp) })
-	}
-}
-
-impl<'r, T> Query<'r> for &'r mut Storage<T> {
-	type Comp = &'r mut T;
-	type IntoIter = StorageIterEntryMut<'r, T>;
-
-	fn query(self, world: &'r World) -> Self::IntoIter {
-		self.iter_mut(world)
-	}
-
-	unsafe fn try_get_single_raw(&mut self, entity: Entity) -> Option<Self::Comp> {
-		self.try_get_mut_raw(entity)
-			.map(|comp| unsafe { extend_mut(comp) })
 	}
 }

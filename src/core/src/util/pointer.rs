@@ -1,13 +1,5 @@
 use std::alloc::Layout;
 
-pub unsafe fn extend_ref<'src, 'target, T: ?Sized>(obj: &'src T) -> &'target T {
-	&*(obj as *const T)
-}
-
-pub unsafe fn extend_mut<'src, 'target, T: ?Sized>(obj: &'src mut T) -> &'target mut T {
-	&mut *(obj as *mut T)
-}
-
 pub fn align_down(addr: usize, align: usize) -> usize {
 	assert!(align.is_power_of_two());
 	addr & !(align - 1)

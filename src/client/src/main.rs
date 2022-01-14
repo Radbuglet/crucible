@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-#![feature(backtrace)]
 #![feature(decl_macro)]
 #![feature(duration_constants)]
 #![feature(never_type)]
@@ -209,7 +208,7 @@ impl RunLoopHandler for Handler {
 
 	fn tick(
 		&mut self,
-		ev_pusher: &mut VecDeque<RunLoopCommand>,
+		on_loop_ev: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -244,7 +243,7 @@ impl RunLoopHandler for Handler {
 					state.is_active = false;
 					is_active_dirty = true;
 				} else {
-					ev_pusher.push(RunLoopCommand::Shutdown);
+					on_loop_ev.fire(RunLoopCommand::Shutdown);
 				}
 			}
 
@@ -327,7 +326,7 @@ impl RunLoopHandler for Handler {
 
 	fn draw(
 		&mut self,
-		_ev_pusher: &mut VecDeque<RunLoopCommand>,
+		_on_loop_ev: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -414,7 +413,7 @@ impl RunLoopHandler for Handler {
 
 	fn window_input(
 		&mut self,
-		ev_pusher: &mut VecDeque<RunLoopCommand>,
+		on_loop_ev: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
@@ -436,14 +435,14 @@ impl RunLoopHandler for Handler {
 			vm.unregister(vm.get_viewport(window).unwrap().id());
 
 			if vm.get_entities().len() == 0 {
-				ev_pusher.push(RunLoopCommand::Shutdown);
+				on_loop_ev.fire(RunLoopCommand::Shutdown);
 			}
 		}
 	}
 
 	fn device_input(
 		&mut self,
-		_ev_pusher: &mut VecDeque<RunLoopCommand>,
+		_on_loop_ev: &mut VecDeque<RunLoopCommand>,
 		engine: &Self::Engine,
 		_event_loop: &EventLoopWindowTarget<()>,
 		_dep_guard: DepGuard,
