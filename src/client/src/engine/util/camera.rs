@@ -59,7 +59,6 @@ impl GfxCameraManager {
 		view: Matrix4<f32>,
 	) -> wgpu::BindGroup {
 		let entry = uniform.push(
-			gfx,
 			align_of_pod::<CameraUniform>(),
 			&bytes_of_pod(&CameraUniform { proj: view }),
 		);

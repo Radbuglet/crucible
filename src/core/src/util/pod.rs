@@ -6,7 +6,6 @@ use std::alloc::Layout;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::mem::MaybeUninit;
-use std::thread::panicking;
 
 // === Core Writer === //
 
@@ -258,7 +257,7 @@ unsafe impl<'a, O: ?Sized + PodWriter> PodWriter for PodSubWriter<'a, O> {
 impl<'a, O: ?Sized + PodWriter> Drop for PodSubWriter<'a, O> {
 	fn drop(&mut self) {
 		#[cfg(debug_assertions)]
-		if !panicking() {
+		if !std::thread::panicking() {
 			debug_assert_eq!(
 				self.remaining, 0,
 				"PodSubWriter failed to write complete object: missing {} byte(s).",
@@ -327,6 +326,12 @@ unsafe impl PodWriter for VecWriter {
 pub struct ArrayWriter<'a> {
 	pub bytes: &'a mut [u8],
 	pub head: usize,
+}
+
+impl<'a> ArrayWriter<'a> {
+	pub fn new(bytes: &'a mut [u8]) -> Self {
+		Self { bytes, head: 0 }
+	}
 }
 
 unsafe impl PodWriter for ArrayWriter<'_> {

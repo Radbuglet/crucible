@@ -1,5 +1,6 @@
 pub mod bitmask;
 pub mod error;
+pub mod format;
 pub mod free_list;
 pub mod meta_enum;
 pub mod pod;

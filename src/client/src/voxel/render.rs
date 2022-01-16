@@ -5,11 +5,11 @@ use crate::engine::util::std140::Std140;
 use crate::engine::viewport::{DEPTH_TEXTURE_FORMAT, SWAPCHAIN_FORMAT};
 use cgmath::Vector3;
 use crucible_core::foundation::{Entity, Storage, World};
+use crucible_core::util::format::FormatMs;
 use crucible_core::util::meta_enum::EnumMeta;
 use crucible_core::util::pod::{pod_struct, size_of_pod, PodWriter, VecWriter};
 use crucible_shared::voxel::coord::{BlockFace, BlockPos, WorldPos};
 use crucible_shared::voxel::data::VoxelWorld;
-use futures::executor::block_on;
 use std::time::{Duration, Instant};
 
 // === Internals === //
@@ -111,7 +111,7 @@ impl VoxelRenderer {
 		self.dirty.insert(world, chunk, ());
 	}
 
-	pub fn update_dirty(
+	pub async fn update_dirty(
 		&mut self,
 		world: &World,
 		voxels: &VoxelWorld,
@@ -121,10 +121,8 @@ impl VoxelRenderer {
 		let mut mesh_data = VecWriter::new();
 		let start = Instant::now();
 
-		// Map buffer
-		block_on(self.mesh.begin_updating()).unwrap();
-
 		// Update meshes
+		let mut updated = 0;
 		loop {
 			let dirty = match self.dirty.iter(world).next() {
 				Some(mesh) => mesh.entity_id(),
@@ -167,10 +165,12 @@ impl VoxelRenderer {
 					}
 
 					// Update mesh
-					self.mesh.add(world, dirty, mesh_data.bytes());
+					self.mesh.add(world, dirty, mesh_data.bytes()).await;
 				}
-				None => self.mesh.remove(world, dirty),
+				None => self.mesh.remove(world, dirty).await,
 			}
+
+			updated += 1;
 
 			if start.elapsed() > max_duration {
 				break;
@@ -179,6 +179,11 @@ impl VoxelRenderer {
 
 		// Unmap buffer
 		self.mesh.end_updating();
+		log::info!(
+			"Updated {} chunk mesh(es) in {}.",
+			updated,
+			FormatMs(start.elapsed())
+		);
 	}
 
 	pub fn render<'a>(

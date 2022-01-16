@@ -1,13 +1,18 @@
 use crate::engine::context::GfxContext;
 use crucible_core::foundation::prelude::*;
-use std::ops::Range;
-use wgpu::MapMode;
+use std::fmt::{Display, Formatter};
 
 pub struct ContigMesh {
 	buffer: wgpu::Buffer,
-	ranges: Storage<Range<usize>>,
-	entities: Vec<Entity>,
+	is_mapped: bool,
+	mirror: Vec<MeshEntry>,
 	len: usize,
+}
+
+#[derive(Copy, Clone)]
+struct MeshEntry {
+	entity: Entity,
+	size: usize,
 }
 
 impl ContigMesh {
@@ -23,26 +28,38 @@ impl ContigMesh {
 
 		Self {
 			buffer,
-			ranges: Storage::new(),
-			entities: Vec::new(),
+			is_mapped: false,
+			mirror: Vec::new(),
 			len: 0,
 		}
 	}
 
-	pub async fn begin_updating(&mut self) -> Result<(), wgpu::BufferAsyncError> {
-		self.buffer.slice(..).map_async(MapMode::Write).await
+	pub async fn ensure_mapped(&mut self) {
+		if !self.is_mapped {
+			self.buffer
+				.slice(..)
+				.map_async(wgpu::MapMode::Write)
+				.await
+				.unwrap();
+			self.is_mapped = true;
+		}
 	}
 
 	pub fn end_updating(&mut self) {
-		self.buffer.unmap();
+		if self.is_mapped {
+			self.buffer.unmap();
+			self.is_mapped = false;
+		}
 	}
 
-	// TODO: Immediate mode writer
-	pub fn add(&mut self, world: &World, entity: Entity, data: &[u8]) {
+	pub async fn add(&mut self, world: &World, entity: Entity, data: &[u8]) {
 		// Remove any existing entries so we can replace it.
-		if self.ranges.try_get(world, entity).is_some() {
-			self.remove(world, entity);
-		}
+		let _ = self.try_remove(world, entity);
+
+		// Lazily map the buffer. This ensures that we don't have to create multiple instances of the
+		// same buffer (wasting space) or block on frames where mesh data is not being updated (wasting
+		// time and limiting FPS).
+		self.ensure_mapped().await;
 
 		// Determine the range of affected bytes
 		let write_range = self.len..(self.len.checked_add(data.len()).unwrap());
@@ -62,27 +79,56 @@ impl ContigMesh {
 		self.len += data.len();
 
 		// Update mirror
-		self.ranges.insert(world, entity, write_range);
-		self.entities.push(entity);
+		self.mirror.push(MeshEntry {
+			entity,
+			size: data.len(),
+		});
 	}
 
-	pub fn remove(&mut self, _world: &World, _entity: Entity) {
-		todo!()
+	pub async fn try_remove(
+		&mut self,
+		_world: &World,
+		entity: Entity,
+	) -> Result<(), MissingEntityError> {
+		// Scan for target entity and update mirror
+		let mut offset = 0;
+		let mut entry_size = None;
+		self.mirror.retain(|entry| {
+			// TODO: Cleanup dead entries while we're at it.
 
-		// // Get mapped buffer
-		// let mut mapped = self.buffer.slice(..).get_mapped_range_mut();
-		//
-		// // Determine the range of affected bytes
-		// let write_range = *self.ranges.get(world, entry);
-		//
-		// // Modify the buffer
-		// mapped.copy_within(write_range.end..self.len, write_range.start);
-		//
-		// // Update length
-		// self.len -= write_range.len();
-		//
-		// //
-		//
+			// We can only remove one element.
+			if entry_size.is_some() {
+				return true;
+			}
+
+			// Are we at the target?
+			if entity == entry.entity {
+				entry_size = Some(entry.size);
+				return false;
+			}
+
+			// Otherwise, sum offset and preserve
+			offset += entry.size;
+			true
+		});
+
+		let entry_size = entry_size.ok_or(MissingEntityError)?;
+
+		// Lazily map the buffer. See reasoning for why we do this in [Self::add].
+		self.ensure_mapped().await;
+
+		// Get mapped buffer
+		let mut mapped = self.buffer.slice(..).get_mapped_range_mut();
+
+		// Modify the buffer
+		mapped.copy_within((offset + entry_size)..self.len, offset);
+		self.len -= entry_size;
+
+		Ok(())
+	}
+
+	pub async fn remove(&mut self, world: &World, entity: Entity) {
+		self.try_remove(world, entity).await.unwrap()
 	}
 
 	pub fn len_bytes(&self) -> usize {
@@ -90,10 +136,22 @@ impl ContigMesh {
 	}
 
 	pub fn len_entries(&self) -> usize {
-		self.entities.len()
+		self.mirror.len()
 	}
 
 	pub fn buffer(&self) -> &wgpu::Buffer {
 		&self.buffer
+	}
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MissingEntityError;
+
+impl Display for MissingEntityError {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"attempted to remove a mesh entry from an entity which did not exist"
+		)
 	}
 }

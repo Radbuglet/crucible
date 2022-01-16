@@ -14,6 +14,7 @@ use anyhow::Context;
 use cgmath::Vector3;
 use crucible_core::foundation::prelude::*;
 use crucible_core::util::error::AnyResult;
+use crucible_core::util::format::FormatMs;
 use crucible_core::util::meta_enum::EnumMeta;
 use crucible_shared::voxel::coord::{Axis3, BlockPos, ChunkPos};
 use crucible_shared::voxel::data::VoxelWorld;
@@ -21,7 +22,6 @@ use futures::executor::block_on;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
-use wgpu::SurfaceTexture;
 use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, DeviceId, MouseButton, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{EventLoop, EventLoopWindowTarget};
@@ -88,7 +88,7 @@ impl Engine {
 		log::info!("Done initializing graphics subsystem!");
 
 		// Setup core engine services
-		let run_stats = RunLoopStatTracker::start(60);
+		let run_stats = RunLoopStatTracker::start(u32::MAX);
 		let input = InputTracker::new();
 		let uniform = UniformManager::new(
 			&gfx,
@@ -100,6 +100,7 @@ impl Engine {
 		let camera_mgr = GfxCameraManager::new(&gfx);
 
 		// Setup voxels
+		log::info!("Building world data...");
 		let mut voxel_data = VoxelWorld::new();
 		let mut voxel_render = VoxelRenderer::new(&gfx, &camera_mgr);
 
@@ -130,6 +131,7 @@ impl Engine {
 				}
 			}
 		}
+		log::info!("Done building world data.");
 
 		// Create game state
 		let mut vm_depth = DepthTextureManager::new();
@@ -202,7 +204,7 @@ impl RunLoopHandler for Arc<Engine> {
 		);
 
 		// Update chunks
-		voxel_render.update_dirty(world, voxel_data, gfx, Duration::from_millis(10));
+		block_on(voxel_render.update_dirty(world, voxel_data, gfx, Duration::from_millis(10)));
 
 		// Process inputs
 		{
@@ -238,7 +240,11 @@ impl RunLoopHandler for Arc<Engine> {
 		}
 
 		// Update title
-		let title = format!("Crucible - TPS: {}", run_stats.tps().unwrap_or(0));
+		let title = format!(
+			"Crucible - TPS: {} - MSPT: {}",
+			run_stats.tps().unwrap_or(0),
+			FormatMs(run_stats.mspt().unwrap_or(Duration::ZERO)),
+		);
 		for entity in wm.get_entities() {
 			let viewport = wm.get_viewport(entity).unwrap();
 
@@ -254,7 +260,7 @@ impl RunLoopHandler for Arc<Engine> {
 		_event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
 		window: Entity,
-		frame: &SurfaceTexture,
+		frame: &wgpu::SurfaceTexture,
 	) {
 		// Lock services
 		let (vm, _) = dep_guard.get();
@@ -270,14 +276,6 @@ impl RunLoopHandler for Arc<Engine> {
 		);
 
 		// Construct uniforms
-		match block_on(uniform.begin_frame()) {
-			Ok(_) => {}
-			Err(err) => {
-				log::warn!("Failed to begin frame (uniform) {}", err);
-				return;
-			}
-		}
-
 		let viewport = vm.get_viewport(window).unwrap();
 		let camera_group = camera_mgr.upload_view(
 			gfx,
@@ -285,7 +283,7 @@ impl RunLoopHandler for Arc<Engine> {
 			state.camera.get_view_matrix(viewport.aspect()),
 		);
 
-		uniform.end_frame();
+		uniform.flush(gfx);
 
 		// Create view
 		let depth_view = vm_depth.present(world, gfx, viewport);
