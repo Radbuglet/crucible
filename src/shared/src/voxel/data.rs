@@ -29,9 +29,9 @@ impl VoxelWorld {
 
 		for face in BlockFace::variants() {
 			let neighbor_pos = pos + face.unit();
-			if let Some((neighbor, neighbor_handle)) = self.get_chunk_mut_at(world, neighbor_pos) {
-				handle.neighbors[face.index()] = Some(neighbor);
-				neighbor_handle.neighbors[face.inverse.index()] = Some(entity);
+			if let Some(mut neighbor) = self.get_chunk_mut_at(world, neighbor_pos) {
+				handle.neighbors[face.index()] = Some(neighbor.entity());
+				neighbor.neighbors[face.inverse.index()] = Some(neighbor.entity());
 			}
 		}
 
@@ -43,11 +43,11 @@ impl VoxelWorld {
 		if let Some(chunk) = self.pos_map.remove(&pos) {
 			let handle = self.chunk_store.remove(chunk).unwrap();
 			for face in BlockFace::variants() {
-				let neighbor_handle = handle.neighbors[face.index()]
+				let neighbor = handle.neighbors[face.index()]
 					.and_then(|neighbor| self.chunk_store.try_get_mut(world, neighbor));
 
-				if let Some(neighbor_handle) = neighbor_handle {
-					neighbor_handle.neighbors[face.inverse.index()] = None;
+				if let Some(mut neighbor) = neighbor {
+					neighbor.neighbors[face.inverse.index()] = None;
 				}
 			}
 		}
@@ -57,29 +57,33 @@ impl VoxelWorld {
 		&self.chunk_store
 	}
 
-	pub fn get_chunk_at(&self, world: &World, pos: ChunkPos) -> Option<(Entity, &VoxelChunk)> {
+	pub fn get_chunk_at(&self, world: &World, pos: ChunkPos) -> Option<ComponentPair<VoxelChunk>> {
 		self.pos_map
 			.get(&pos)
 			.copied()
-			.and_then(|entity| Some((entity, self.chunk_store.try_get(world, entity)?)))
+			.and_then(|entity| self.chunk_store.try_get(world, entity))
 	}
 
 	pub fn get_chunk_mut_at(
 		&mut self,
 		world: &World,
 		pos: ChunkPos,
-	) -> Option<(Entity, &mut VoxelChunk)> {
+	) -> Option<ComponentPairMut<VoxelChunk>> {
 		self.pos_map
 			.get(&pos)
 			.copied()
-			.and_then(|entity| Some((entity, self.chunk_store.try_get_mut(world, entity)?)))
+			.and_then(|entity| self.chunk_store.try_get_mut(world, entity))
 	}
 
-	pub fn get_chunk(&self, world: &World, id: Entity) -> Option<&VoxelChunk> {
+	pub fn get_chunk(&self, world: &World, id: Entity) -> Option<ComponentPair<VoxelChunk>> {
 		self.chunk_store.try_get(world, id)
 	}
 
-	pub fn get_chunk_mut(&mut self, world: &World, id: Entity) -> Option<&mut VoxelChunk> {
+	pub fn get_chunk_mut(
+		&mut self,
+		world: &World,
+		id: Entity,
+	) -> Option<ComponentPairMut<VoxelChunk>> {
 		self.chunk_store.try_get_mut(world, id)
 	}
 }

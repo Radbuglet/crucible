@@ -1,11 +1,15 @@
 //! Contains utilities for uploading camera data to the GPU and creating view matrices.
 
 use crate::engine::context::GfxContext;
+use crate::engine::input::InputTracker;
+use crate::engine::run_loop::RunLoopStatTracker;
 use crate::engine::util::std140::Std140;
 use crate::engine::util::uniform::UniformManager;
-use cgmath::{perspective, Deg, Matrix4, Rad, Transform, Vector3, Zero};
+use cgmath::{perspective, Deg, InnerSpace, Matrix3, Matrix4, Rad, Transform, Vector3, Zero};
 use crucible_core::util::pod::{align_of_pod, bytes_of_pod, pod_struct, PodWriter};
 use crucible_core::util::wrapper::Wrapper;
+use std::f32::consts::PI;
+use winit::event::VirtualKeyCode;
 
 pod_struct! {
 	#[derive(Debug, Copy, Clone)]
@@ -107,4 +111,65 @@ impl PerspectiveCamera {
 
 		proj * world.inverse_transform().unwrap()
 	}
+}
+
+pub fn update_camera_free_cam(
+	camera: &mut PerspectiveCamera,
+	input: &InputTracker,
+	run_stats: &RunLoopStatTracker,
+) {
+	// Calculate heading
+	let mut heading = Vector3::zero();
+
+	if input.key(VirtualKeyCode::W).state() {
+		heading -= Vector3::unit_z();
+	}
+
+	if input.key(VirtualKeyCode::S).state() {
+		heading += Vector3::unit_z();
+	}
+
+	if input.key(VirtualKeyCode::D).state() {
+		heading += Vector3::unit_x();
+	}
+
+	if input.key(VirtualKeyCode::A).state() {
+		heading -= Vector3::unit_x();
+	}
+
+	if input.key(VirtualKeyCode::Q).state() {
+		heading -= Vector3::unit_y();
+	}
+
+	if input.key(VirtualKeyCode::E).state() {
+		heading += Vector3::unit_y();
+	}
+
+	let heading = if heading.is_zero() {
+		heading
+	} else {
+		heading.normalize()
+	};
+
+	let speed = if input.key(VirtualKeyCode::LShift).state() {
+		5.
+	} else {
+		50.
+	};
+
+	// Rotate camera
+	let rel = -input.mouse_delta() * 0.3;
+	camera.yaw += Deg(rel.x as _).into();
+	camera.yaw %= Deg(360.).into();
+	camera.pitch += Deg(rel.y as _).into();
+	camera.pitch = Rad(camera.pitch.0.clamp(-PI / 2., PI / 2.));
+
+	// Move camera laterally
+	let camera_mat = camera.get_world();
+	let basis_mat = Matrix3::from_cols(
+		camera_mat.x.truncate(),
+		camera_mat.y.truncate(),
+		camera_mat.z.truncate(),
+	);
+	camera.position += basis_mat * heading * run_stats.delta_secs() * speed;
 }

@@ -147,6 +147,31 @@ pub macro try_forward($out:expr, $handler:expr) {{
 	}
 }}
 
+pub macro provider_struct($(
+	$(#[$item_attr:meta])*
+	$vis:vis struct $struct_name:ident {
+		$(
+			$(#[$field_attr:meta])*
+			$field_name:ident: $field_ty:ty
+		),*
+		$(,)?
+	}
+)*) {$(
+	$(#[$item_attr])*
+	$vis struct $struct_name {
+		$(
+			$(#[$field_attr])*
+			$field_name: $field_ty
+		),*
+	}
+
+	impl Provider for $struct_name {
+		fn provide_raw<'comp>(&'comp self, out: &mut CompOut<'_, 'comp>) {
+			$( try_provide!(out, &self.$field_name); )*
+		}
+	}
+)*}
+
 // === Extension API === //
 
 pub trait ProviderExt {

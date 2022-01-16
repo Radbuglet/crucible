@@ -17,20 +17,16 @@ pub enum RunLoopCommand {
 pub type DepGuard<'a> = RwGuard<(&'a mut ViewportManager, &'a mut RunLoopStatTracker)>;
 
 pub trait RunLoopHandler {
-	type Engine;
-
 	fn tick(
-		&mut self,
+		&self,
 		on_loop_ev: &mut VecDeque<RunLoopCommand>,
-		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
 	);
 
 	fn draw(
-		&mut self,
+		&self,
 		on_loop_ev: &mut VecDeque<RunLoopCommand>,
-		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
 		window: Entity,
@@ -38,9 +34,8 @@ pub trait RunLoopHandler {
 	);
 
 	fn window_input(
-		&mut self,
+		&self,
 		on_loop_ev: &mut VecDeque<RunLoopCommand>,
-		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
 		window: Entity,
@@ -48,23 +43,21 @@ pub trait RunLoopHandler {
 	);
 
 	fn device_input(
-		&mut self,
+		&self,
 		on_loop_ev: &mut VecDeque<RunLoopCommand>,
-		engine: &Self::Engine,
 		event_loop: &EventLoopWindowTarget<()>,
 		dep_guard: DepGuard,
 		device_id: DeviceId,
 		event: &DeviceEvent,
 	);
 
-	fn goodbye(&mut self, engine: &Self::Engine, dep_guard: DepGuard);
+	fn goodbye(&self, dep_guard: DepGuard);
 }
 
-pub fn start_run_loop<P, H>(event_loop: EventLoop<()>, engine: H::Engine, mut handler: H) -> !
+pub fn start_run_loop<S>(event_loop: EventLoop<()>, engine: S) -> !
 where
-	H: 'static + RunLoopHandler,
-	H::Engine: Deref<Target = P> + Send + Clone,
-	P: Provider,
+	S: 'static + Send + Clone + Deref + RunLoopHandler,
+	S::Target: Provider,
 {
 	debug_assert!(
 		engine.has_many::<(&GfxContext, &RwLock<RunLoopStatTracker>, &RwLock<ViewportManager>)>(),
@@ -99,7 +92,7 @@ where
 					stats.begin_tick();
 
 					// Update
-					handler.tick(&mut on_loop_ev, &engine, proxy, dep_guard);
+					engine.tick(&mut on_loop_ev, proxy, dep_guard);
 
 					// Render
 					for e_window in vm.get_entities() {
@@ -125,11 +118,11 @@ where
 			Event::RedrawRequested(window_id) => {
 				let e_window = vm.get_entity(*window_id);
 				if let Some(e_window) = e_window {
-					let viewport = vm.get_viewport_mut(e_window).unwrap();
+					let mut viewport = vm.get_viewport_mut(e_window).unwrap();
 
 					if let Some(frame) = viewport.redraw(gfx) {
 						log::trace!("Drawing to viewport {:?}", e_window);
-						handler.draw(&mut on_loop_ev, &engine, proxy, dep_guard, e_window, &frame);
+						engine.draw(&mut on_loop_ev, proxy, dep_guard, e_window, &frame);
 						frame.present();
 					}
 				}
@@ -138,28 +131,14 @@ where
 			Event::WindowEvent { window_id, event } => {
 				let e_window = vm.get_entity(*window_id);
 				if let Some(e_window) = e_window {
-					handler.window_input(
-						&mut on_loop_ev,
-						&engine,
-						proxy,
-						dep_guard,
-						e_window,
-						event,
-					);
+					engine.window_input(&mut on_loop_ev, proxy, dep_guard, e_window, event);
 				}
 			}
 			Event::DeviceEvent { device_id, event } => {
-				handler.device_input(
-					&mut on_loop_ev,
-					&engine,
-					proxy,
-					dep_guard,
-					*device_id,
-					event,
-				);
+				engine.device_input(&mut on_loop_ev, proxy, dep_guard, *device_id, event);
 			}
 			Event::LoopDestroyed => {
-				handler.goodbye(&engine, dep_guard);
+				engine.goodbye(dep_guard);
 				log::info!("Goodbye!");
 				return;
 			}

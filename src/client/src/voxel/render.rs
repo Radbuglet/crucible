@@ -2,7 +2,7 @@ use crate::engine::context::GfxContext;
 use crate::engine::util::camera::GfxCameraManager;
 use crate::engine::util::contig_mesh::ContigMesh;
 use crate::engine::util::std140::Std140;
-use crate::engine::viewport::SWAPCHAIN_FORMAT;
+use crate::engine::viewport::{DEPTH_TEXTURE_FORMAT, SWAPCHAIN_FORMAT};
 use cgmath::Vector3;
 use crucible_core::foundation::{Entity, Storage, World};
 use crucible_core::util::meta_enum::EnumMeta;
@@ -13,8 +13,6 @@ use futures::executor::block_on;
 use std::time::{Duration, Instant};
 
 // === Internals === //
-
-pub const DEPTH_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 pod_struct! {
 	#[derive(Debug, Copy, Clone)]
@@ -129,7 +127,7 @@ impl VoxelRenderer {
 		// Update meshes
 		loop {
 			let dirty = match self.dirty.iter(world).next() {
-				Some((entity, _)) => entity,
+				Some(mesh) => mesh.entity_id(),
 				None => break,
 			};
 

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use winit::window::{Window, WindowId};
 
 pub const SWAPCHAIN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
+pub const DEPTH_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 #[derive(Default)]
 pub struct ViewportManager {
@@ -58,17 +59,17 @@ impl ViewportManager {
 	}
 
 	/// Gets all registered viewport entities.
-	pub fn get_entities(&self) -> impl ExactSizeIterator + Iterator<Item = Entity> + '_ {
+	pub fn get_entities(&self) -> impl Iterator<Item = Entity> + ExactSizeIterator + '_ {
 		self.windows.values().copied()
 	}
 
 	/// Gets a viewport for a given `Entity`.
-	pub fn get_viewport(&self, id: Entity) -> Option<&Viewport> {
+	pub fn get_viewport(&self, id: Entity) -> Option<ComponentPair<Viewport>> {
 		self.viewports.try_get_raw(id)
 	}
 
 	/// Gets a viewport for a given `Entity`.
-	pub fn get_viewport_mut(&mut self, id: Entity) -> Option<&mut Viewport> {
+	pub fn get_viewport_mut(&mut self, id: Entity) -> Option<ComponentPairMut<Viewport>> {
 		self.viewports.try_get_mut_raw(id)
 	}
 
@@ -79,6 +80,7 @@ impl ViewportManager {
 	}
 }
 
+#[derive(Debug)]
 pub struct Viewport {
 	window: Window,
 	surface: wgpu::Surface,
@@ -161,6 +163,86 @@ impl Viewport {
 	}
 }
 
-fn has_valid_size<T: cgmath::BaseNum>(size: Vector2<T>) -> bool {
+pub fn has_valid_size<T: cgmath::BaseNum>(size: Vector2<T>) -> bool {
 	size.x != T::zero() && size.y != T::zero()
+}
+
+#[derive(Default)]
+pub struct DepthTextureManager {
+	attachments: Storage<DepthAttachment>,
+}
+
+impl DepthTextureManager {
+	pub fn new() -> Self {
+		Default::default()
+	}
+
+	pub fn register(&mut self, world: &World, gfx: &GfxContext, viewport: ComponentPair<Viewport>) {
+		self.attachments.insert(
+			world,
+			viewport.entity_id(),
+			DepthAttachment::new(gfx, viewport.component()),
+		);
+	}
+
+	pub fn unregister(&mut self, id: Entity) {
+		self.attachments
+			.remove(id)
+			.expect("Failed to unregister DepthTextureManager.");
+	}
+
+	pub fn present(
+		&mut self,
+		world: &World,
+		gfx: &GfxContext,
+		viewport: ComponentPair<Viewport>,
+	) -> wgpu::TextureView {
+		self.attachments
+			.get_mut(world, viewport.entity_id())
+			.present(gfx, viewport.component())
+	}
+}
+
+struct DepthAttachment {
+	texture: wgpu::Texture,
+	size: Vector2<u32>,
+}
+
+impl DepthAttachment {
+	pub fn new(gfx: &GfxContext, viewport: &Viewport) -> Self {
+		let size = viewport.window().inner_size().to_vec();
+		let texture = gfx.device.create_texture(&wgpu::TextureDescriptor {
+			label: Some("depth texture"),
+			size: wgpu::Extent3d {
+				width: size.x,
+				height: size.y,
+				depth_or_array_layers: 1,
+			},
+			mip_level_count: 1,
+			sample_count: 1,
+			dimension: wgpu::TextureDimension::D2,
+			format: DEPTH_TEXTURE_FORMAT,
+			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+		});
+		Self { texture, size }
+	}
+
+	pub fn texture(&self) -> &wgpu::Texture {
+		&self.texture
+	}
+
+	pub fn size(&self) -> Vector2<u32> {
+		self.size
+	}
+
+	pub fn present(&mut self, gfx: &GfxContext, viewport: &Viewport) -> wgpu::TextureView {
+		// Handle resizes
+		let curr_size = viewport.window().inner_size().to_vec();
+		if self.size != curr_size {
+			*self = DepthAttachment::new(gfx, viewport);
+		}
+
+		// Create view
+		self.texture.create_view(&Default::default())
+	}
 }

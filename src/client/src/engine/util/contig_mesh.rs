@@ -1,4 +1,4 @@
-use crate::GfxContext;
+use crate::engine::context::GfxContext;
 use crucible_core::foundation::prelude::*;
 use std::ops::Range;
 use wgpu::MapMode;
