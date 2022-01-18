@@ -87,14 +87,6 @@
 //! Event targets (and other abstract dispatch mechanisms such as a `SceneManager` and the client's
 //! `MainLoop`) may not know exactly what their consumers will require. Crucible fixes this by defining
 //! the notion of a [Provider], a form of [Accessor] which maps object *types* to object references.
-//! Providers act as a form of glue for the rest of the dispatch tree.
-//!
-//! As a logistical detail, multithreaded execution scheduling is handled through the [Executor],
-//! which schedules lightweight `async` tasks on a given number of threads (typically having one for
-//! every CPU core). Crucible also provides a large number of `async`-friendly synchronization
-//! primitives. Crucible implements an async-friendly [RwLock] where multiple locks can be acquired
-//! *atomically* through an [RwGuard]. Crucible also implements a background task system where
-//! certain long-running tasks may be paused if higher priority events require processing.
 //!
 //! ## Tradeoffs with Object-Oriented Programming
 //!
@@ -117,13 +109,12 @@
 
 pub mod accessor;
 pub mod event;
-pub mod exec;
 pub mod lock;
 pub mod provider;
 pub mod world;
 
 pub mod prelude {
-	pub use super::{accessor::*, event::*, exec::*, lock::*, provider::*, world::*};
+	pub use super::{event::*, lock::*, provider::*, world::*};
 }
 
 pub use prelude::*;

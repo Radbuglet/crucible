@@ -30,7 +30,6 @@ use winit::window::WindowBuilder;
 provider_struct! {
 	pub struct Engine {
 		// Foundational services
-		executor: Executor,
 		rw_mgr: RwLockManager,
 		world: RwLock<World>,
 
@@ -55,7 +54,6 @@ impl Engine {
 		// Initialize foundational services
 		env_logger::init();
 
-		let executor = Executor::default();
 		let mut world = World::default();
 
 		// Startup graphics singleton and create the main window
@@ -166,7 +164,6 @@ impl Engine {
 		// Start run loop
 		log::info!("Starting run loop!");
 		let engine = Arc::new(Self {
-			executor,
 			rw_mgr,
 			world,
 			gfx,

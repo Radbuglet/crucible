@@ -1,41 +1,96 @@
+use std::cell::UnsafeCell;
 use std::cmp::Ordering;
-use std::fmt::Debug;
+use std::error::Error;
+use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
 // === Core traits === //
 
 /// An `Accessor` represents an object which maps indices to distinct values in a one-to-one fashion.
 /// A vector mapping indices to elements or a hash map mapping keys to values are examples of an
-/// `Accessor`. `Accessors` return [AnyRef] references, a type of reference which can be unsafely
-/// promoted to either a mutable or immutable reference. Wrappers and extension methods can use the
-/// one-to-one property of the map alongside [AnyRef] promotion to implement mechanisms to provide
+/// `Accessor`. `Accessors` return [PointerLike] objects, which allows users to unsafely promote the
+/// pointee to either a mutable or immutable reference. Wrappers and extension methods can use the
+/// one-to-one property of the map alongside [PointerLike] promotion to implement mechanisms to provide
 /// mutable references to several distinct values in the [Accessor] at once.
+///
+/// ## Avoiding Wrapper Chains
+///
+/// To avoid cascades of `Option<Option<Option<NonNull<T>>>>` when wrapping `Accessors` with out-of-
+/// bounds reporting, all accessors have the ability to return an `OobError` type implementing the
+/// standard library's [Error] trait. Implementors of this trait are recommended to keep error
+/// conditions to the `Err` variant of the result, preferring *e.g.* `Err(FirstWrapperError::Parent(
+/// SecondWrapperError))` over `Ok(Err(SecondWrapperError))` to make pointer wrapping always exactly
+/// one step.
+///
+/// While many wrappers return the underlying pointer/reference type directly, some may want to use
+/// smart pointers to implement more advanced borrow checking. This, however, runs the risk of making
+/// it difficult to access the inner value. To avoid this, `Accessors` also specify a `Self::Value`
+/// type, and all references to that value produced by `Self::Ptr` must implement `Deref<Target = Value>`
+/// (and `DerefMut` if they're a mutable reference. This has the added benefit of making it easy to
+/// accept an abstract `Accessor` where `Value = T` and use the references directly without knowing
+/// the underlying target type).
+///
+/// ## Derived Implementations
+///
+/// Both mutable and immutable references to [Accessor]s also implement [Accessor].
 ///
 /// ## Safety
 ///
-/// 1. *In a safe context*, a mutable reference to an `Accessor` implies that all underlying elements
-///    can be assumed to be unborrowed. This rule is typically enforced by forcing the `Accessor` to
-///    live as long as the mutable borrow to its underlying target. The terminology of a "safe context"
-///    is present because this rule will likely be violated internally by wrappers around `Accessors`.
-///    However, so long as a safe context never gets a mutable reference to these "dirty" `Accessors`,
-///    this safety invariant will not be considered broken.
-/// 2. If two indices are reported to be equal through [Eq], the returned pointers are guaranteed not
+/// For a given object `T` implementing the `Accessor` trait, the following can be assumed about the
+/// instance:
+
+/// 1. If two indices are reported to be equal through [Eq], the returned pointers are guaranteed not
 ///    to alias. TODO: Replace with TrustedEq and TrustedOrd traits.
-/// 3. So long as the virtual aliasing rules described by this safety section are followed properly,
-///    returned pointers must be valid to promote. Note that because `Accessors` take immutable
-///    references to themselves, promoting to a mutable reference may cause undefined behavior unless
-///    the target exhibits proper interior mutability with [UnsafeCell](std::cell::UnsafeCell) (or its
-///    derivatives) or stores a mutable raw pointer to the underlying target where it does not
-///    conflict with any existing immutable references.
+/// 2. So long as the virtual aliasing rules described by this safety section are followed properly,
+///    returned pointers will be valid to promote for at most the lifetime of the **owned** instance
+///    `T`. Note that this implicitly means that owning a `T` reference (`&'a T`) will limit promotion
+///    lifetimes to the lifetime of that reference (`'a`), not the lifetime of `T`.
 ///
-/// TODO: Preserve iterators; how do we make OOB pointers more ergonomic?
+/// As a note to implementors, because `Accessors` take immutable references to themselves, promoting
+/// to a mutable reference may cause undefined behavior unless the target exhibits proper interior
+/// mutability with [UnsafeCell](std::cell::UnsafeCell) (or its derivatives) or stores a mutable raw
+/// pointer to the underlying target such that it does not conflict with any existing references.
 ///
+/// Also note that this trait makes no guarantees about outstanding borrows for any given instance.
+/// Even when holding ownership of `T`, one cannot assume that an external actor has not already
+/// borrowed the contents of a derived instance (remember, `&T: Accessor`). Such guarantees must be
+/// made by external actors.
 pub unsafe trait Accessor {
 	type Index: Debug + Copy + Eq;
-	type Ptr: PointerLike;
+	type Value: ?Sized;
 
-	fn get_raw(&self, index: Self::Index) -> Self::Ptr;
+	type Ptr: PointerLike;
+	type OobError: Error;
+
+	fn try_get_raw(&self, index: Self::Index) -> Result<Self::Ptr, Self::OobError>;
+
+	fn get_raw(&self, index: Self::Index) -> Self::Ptr {
+		self.try_get_raw(index).unwrap()
+	}
+}
+
+unsafe impl<'a, T: Accessor> Accessor for &'a T {
+	type Index = T::Index;
+	type Value = T::Value;
+	type Ptr = T::Ptr;
+	type OobError = T::OobError;
+
+	fn try_get_raw(&self, index: Self::Index) -> Result<Self::Ptr, T::OobError> {
+		(**self).try_get_raw(index)
+	}
+}
+
+unsafe impl<'a, T: Accessor> Accessor for &'a mut T {
+	type Index = T::Index;
+	type Value = T::Value;
+	type Ptr = T::Ptr;
+	type OobError = T::OobError;
+
+	fn try_get_raw(&self, index: Self::Index) -> Result<Self::Ptr, T::OobError> {
+		(**self).try_get_raw(index)
+	}
 }
 
 /// A raw reference type that can be promoted into either its mutable or immutable form.
@@ -45,14 +100,20 @@ pub unsafe trait Accessor {
 /// [PointerLike]s carry no safety guarantees about promotion validity by themselves, and their
 /// semantics must typically be augmented by some external contract. However, when a contract specifies
 /// that "promotion is legal" with a specified lifetime, the produced reference must be safe to use,
-/// even in safe contexts. This means that returned reference lifetimes must be properly bounded.
+/// even in safe contexts. This means that returned reference lifetimes must be properly bounded to
+/// the abilities of the returned reference.
 #[rustfmt::skip]
 pub trait PointerLike {
+	type Value: ?Sized;
+
 	// `Self: 'a` provides a concise (albeit overly-conservative) way of ensuring that the pointee
 	// lives as long as the lifetime since objects can only live as long as the lifetimes of their
 	// generic parameters.
-	type AsRef<'a> where Self: 'a;
-	type AsMut<'a> where Self: 'a;
+	#[rustfmt::skip]
+	type AsRef<'a>: Deref<Target = Self::Value> where Self: 'a;
+
+	#[rustfmt::skip]
+	type AsMut<'a>: Deref<Target = Self::Value> + DerefMut where Self: 'a;
 
 	unsafe fn promote_ref<'a>(self) -> Self::AsRef<'a>;
 	unsafe fn promote_mut<'a>(self) -> Self::AsMut<'a>;
@@ -61,21 +122,9 @@ pub trait PointerLike {
 // === Core PointerLike impls === //
 
 #[rustfmt::skip]
-impl<T: PointerLike> PointerLike for Option<T> {
-	type AsRef<'a> where Self: 'a = Option<T::AsRef<'a>>;
-	type AsMut<'a> where Self: 'a = Option<T::AsMut<'a>>;
-
-	unsafe fn promote_ref<'a>(self) -> Self::AsRef<'a> {
-		self.map(|inner| inner.promote_ref())
-	}
-
-	unsafe fn promote_mut<'a>(self) -> Self::AsMut<'a> {
-		self.map(|inner| inner.promote_mut())
-	}
-}
-
-#[rustfmt::skip]
 impl<T: ?Sized> PointerLike for NonNull<T> {
+	type Value = T;
+
 	type AsRef<'a> where Self: 'a = &'a T;
 	type AsMut<'a> where Self: 'a = &'a mut T;
 
@@ -85,6 +134,22 @@ impl<T: ?Sized> PointerLike for NonNull<T> {
 
 	unsafe fn promote_mut<'a>(mut self) -> Self::AsMut<'a> {
 		self.as_mut()
+	}
+}
+
+#[rustfmt::skip]
+impl<'r, T: ?Sized> PointerLike for &'r UnsafeCell<T> {
+	type Value = T;
+
+	type AsRef<'a> where Self: 'a = &'a T;
+	type AsMut<'a> where Self: 'a = &'a mut T;
+
+	unsafe fn promote_ref<'a>(self) -> Self::AsRef<'a> {
+		&*self.get()
+	}
+
+	unsafe fn promote_mut<'a>(self) -> Self::AsMut<'a> {
+		&mut *self.get()
 	}
 }
 
@@ -112,30 +177,65 @@ impl<'a, T> From<&'a mut [T]> for SliceAccessor<'a, T> {
 
 unsafe impl<'a, T> Accessor for SliceAccessor<'a, T> {
 	type Index = usize;
-	type Ptr = Option<NonNull<T>>;
+	type Value = T;
+	type Ptr = NonNull<T>;
+	type OobError = SliceOobError;
 
-	fn get_raw(&self, index: Self::Index) -> Self::Ptr {
+	fn try_get_raw(&self, index: Self::Index) -> Result<Self::Ptr, Self::OobError> {
 		if index < self.len {
-			Some(unsafe { NonNull::new_unchecked(self.root.add(index)) })
+			Ok(unsafe { NonNull::new_unchecked(self.root.add(index)) })
 		} else {
-			None
+			Err(SliceOobError {
+				index,
+				length: self.len,
+			})
 		}
+	}
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct SliceOobError {
+	pub index: usize,
+	pub length: usize,
+}
+
+impl Error for SliceOobError {}
+
+impl Display for SliceOobError {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"index {} lies out of bounds of the array (array length: {}).",
+			self.index, self.length
+		)
 	}
 }
 
 // === Extensions and wrappers === //
 
+pub type PtrOf<T> = <T as Accessor>::Ptr;
+pub type RefOf<'a, T> = <PtrOf<T> as PointerLike>::AsRef<'a>;
+pub type MutOf<'a, T> = <PtrOf<T> as PointerLike>::AsMut<'a>;
+
 pub trait SingleBorrowAccessorExt: Accessor {
-	fn get_ref(&self, index: Self::Index) -> <Self::Ptr as PointerLike>::AsRef<'_> {
-		unsafe { self.get_raw(index).promote_ref() }
+	fn try_get_ref(&self, index: Self::Index) -> Result<RefOf<'_, Self>, Self::OobError> {
+		unsafe { Ok(self.try_get_raw(index)?.promote_ref()) }
 	}
 
-	fn get_mut(&mut self, index: Self::Index) -> <Self::Ptr as PointerLike>::AsMut<'_> {
-		unsafe { self.get_raw(index).promote_mut() }
+	fn get_ref(&self, index: Self::Index) -> RefOf<'_, Self> {
+		self.try_get_ref(index).unwrap()
+	}
+
+	fn try_get_mut(&mut self, index: Self::Index) -> Result<MutOf<'_, Self>, Self::OobError> {
+		unsafe { Ok(self.try_get_raw(index)?.promote_mut()) }
+	}
+
+	fn get_mut(&mut self, index: Self::Index) -> MutOf<'_, Self> {
+		self.try_get_mut(index).unwrap()
 	}
 }
 
-impl<T: ?Sized + Accessor> SingleBorrowAccessorExt for T {}
+impl<T: Accessor> SingleBorrowAccessorExt for T {}
 
 pub trait OrderedAccessorExt: Accessor
 where
@@ -159,12 +259,12 @@ where
 		(
 			AccessorSplitter {
 				target: self,
-				is_right: false,
+				side: SplitterSide::Left,
 				mid,
 			},
 			AccessorSplitter {
 				target: self,
-				is_right: true,
+				side: SplitterSide::Right,
 				mid,
 			},
 		)
@@ -212,7 +312,13 @@ where
 pub struct AccessorSplitter<'a, A: ?Sized + Accessor> {
 	target: &'a A,
 	mid: A::Index,
-	is_right: bool,
+	side: SplitterSide,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum SplitterSide {
+	Left,
+	Right,
 }
 
 unsafe impl<'a, A> Accessor for AccessorSplitter<'a, A>
@@ -221,14 +327,83 @@ where
 	A::Index: Ord,
 {
 	type Index = A::Index;
-	type Ptr = Option<A::Ptr>;
+	type Value = A::Value;
+	type Ptr = A::Ptr;
+	type OobError = SplitterOobError<A>;
 
-	fn get_raw(&self, index: Self::Index) -> Self::Ptr {
-		match (self.is_right, index.cmp(&self.mid)) {
-			(false, Ordering::Less | Ordering::Equal) | (true, Ordering::Greater) => {
-				Some(self.target.get_raw(index))
-			}
-			_ => None,
+	fn try_get_raw(&self, index: Self::Index) -> Result<Self::Ptr, Self::OobError> {
+		match (self.side, index.cmp(&self.mid)) {
+			(SplitterSide::Left, Ordering::Less | Ordering::Equal)
+			| (SplitterSide::Right, Ordering::Greater) => Ok(self
+				.target
+				.try_get_raw(index)
+				.map_err(SplitterOobError::Parent)?),
+			_ => Err(SplitterOobError::SplitOob {
+				index,
+				mid: self.mid,
+				side: self.side,
+			}),
+		}
+	}
+}
+
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+pub enum SplitterOobError<A: Accessor> {
+	SplitOob {
+		index: A::Index,
+		mid: A::Index,
+		side: SplitterSide,
+	},
+	Parent(A::OobError),
+}
+
+impl<A: Accessor> Error for SplitterOobError<A> where A::OobError: Error {}
+
+impl<A: Accessor> Display for SplitterOobError<A>
+where
+	A::OobError: Display,
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		match self {
+			SplitterOobError::SplitOob {
+				index,
+				mid,
+				side: SplitterSide::Left,
+			} => write!(
+				f,
+				"index {:?} lies out of bounds of the left splitter range (mid {:?} < index {:?}).",
+				index, mid, index
+			),
+			SplitterOobError::SplitOob {
+				index,
+				mid,
+				side: SplitterSide::Right,
+			} => write!(
+				f,
+				"index {:?} lies out of bounds of the right splitter range (index {:?} <= mid {:?}).",
+				index, index, mid
+			),
+			SplitterOobError::Parent(parent) => Display::fmt(parent, f),
+		}
+	}
+}
+
+impl<A: Accessor> Debug for SplitterOobError<A>
+where
+	A::OobError: Debug,
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		match self {
+			SplitterOobError::SplitOob { index, mid, side } => f
+				.debug_struct("SplitterOobError::SplitOob")
+				.field("index", index)
+				.field("mid", mid)
+				.field("side", side)
+				.finish(),
+			SplitterOobError::Parent(parent) => f
+				.debug_tuple("SplitterOobError::Parent")
+				.field(parent)
+				.finish(),
 		}
 	}
 }
