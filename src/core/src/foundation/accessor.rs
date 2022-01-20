@@ -125,7 +125,7 @@ impl<T> MaybeBorrowed<T> {
 	}
 }
 
-// TODO: This could be replaced with the blanket `SafeDeref` impl on `Accessors` once that's defined.
+// TODO: This could be replaced with the blanket `Accessor` impl on `SafeDeref` once that's defined.
 unsafe impl<T: Accessor> Accessor for MaybeBorrowed<T> {
 	type Index = T::Index;
 	type Value = T::Value;
@@ -137,17 +137,14 @@ unsafe impl<T: Accessor> Accessor for MaybeBorrowed<T> {
 	}
 }
 
+// TODO: Specify once stabilized.
+// impl<T> !AssertUnborrowed for MaybeBorrowed<T> {}
+
 impl<T> Deref for MaybeBorrowed<T> {
 	type Target = T;
 
 	fn deref(&self) -> &Self::Target {
 		&self.0
-	}
-}
-
-impl<T> DerefMut for MaybeBorrowed<T> {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.0
 	}
 }
 
@@ -157,8 +154,7 @@ impl<T> DerefMut for MaybeBorrowed<T> {
 /// ## Derived Implementations
 ///
 /// Mutable references to objects implementing `AssertUnborrowed` also implement this trait. This is
-/// sound because mutable references ensure that the `assert_unborrowed` method of the underlying
-/// object cannot be called.
+/// sound because only one instance returned by `assert_unborrowed` may exist at a given time.
 ///
 /// ## Safety
 ///
