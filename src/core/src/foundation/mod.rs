@@ -59,6 +59,10 @@
 //! cannot be stored within the object instance) and serve more as contextual dependencies than as
 //! links to other objects in a graph. To handle actual cross-references, one must use an [Entity] ID.
 //!
+//! Sometimes, outside users may need to access a child object mediating a subsystem of its parent but
+//! may not be trusted with properly providing all the correct context to its methods. Users are
+//! encouraged to ["curry"](currying) this context using context objects.
+//!
 //! This complicates things when trying to manipulate components which are not direct descendants of
 //! the current object. If the target object is the descendant of a sibling being passed directly
 //! to the calling object, the caller can simply resolve the target object from that sibling. However,
@@ -77,12 +81,18 @@
 //! Others, still, may want to only iterate over affected branches of the logical entity tree using
 //! the [EventTargetPathQueue] event target.
 //!
+//! The targets of an signal dispatcher may also implement the `EventTarget` trait. Users can use
+//! the [dyn_event_target] macro to derive reflection traits on top of the `EventTarget` implementations
+//! for use with plugin-style event busses.
+//!
 //! Sometimes, it may not possible to prove that two objects are siblings at compile time. This
 //! happens most frequently when accessing the components of an injective map (e.g. a `Storage` or a
 //! `Vec`) at runtime. To fix this, Crucible provides the notion of an [Accessor], a trait for
 //! injective maps where non-equal keys are guaranteed to produce two non-aliasing references.
 //! Accessors can then be wrapped by [various borrow checking wrappers](accessor) to generically
-//! introduce temporary forms of runtime borrow checking.
+//! introduce temporary forms of runtime borrow checking. Because most wrappers apply to both immutable
+//! and semi-mutable accessors in the same manner, accessors may also reduce the boilerplate needed
+//! to provide access methods for all combinations of mutability.
 //!
 //! Event targets (and other abstract dispatch mechanisms such as a `SceneManager` and the client's
 //! `MainLoop`) may not know exactly what their consumers will require. Crucible fixes this by defining
@@ -105,6 +115,7 @@
 //! scripting language being made for Crucible—somewhat fixes this with an explicit input system).
 //!
 //! [crew]: https://github.com/Radbuglet/crew/
+//! [currying]: https://en.wikipedia.org/wiki/Currying
 //! [ecs]: https://en.wikipedia.org/wiki/Entity_component_system
 
 pub mod accessor;
@@ -114,7 +125,7 @@ pub mod provider;
 pub mod world;
 
 pub mod prelude {
-	pub use super::{event::*, lock::*, provider::*, world::*};
+	pub use super::{accessor::*, event::*, lock::*, provider::*, world::*};
 }
 
 pub use prelude::*;

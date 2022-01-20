@@ -2,12 +2,12 @@
 
 ## Core
 
-- [ ] **Foundations:** Implement `Accessors`
+- [ ] **Foundations:** Implement `Accessors` and document them
 - [ ] **General:** Integrate `Accessors` into `VoxelData`, `ViewportManager`, `Storages`, and `Providers`
 - [ ] **Foundations:** Make `RwGuards` into `Providers` to simplify external guard decomposition
 - [ ] **Foundations:** Finish implementing archetypal ECS
 - [ ] **Foundations:** Implement ECS-style tagging `EventTarget`, multithreaded `VecDequeue`, fixed size `Array`, and event target reflection/multiplexing for plugin event busses.
-- [ ] **Foundations:** Somehow make contextual binding less of a chore (`VoxelWorld`, for instance, needs context binding to ensure that outside users will appropriately signal mesh updates to the renderer)
+- [ ] **Foundations:** Document dependency currying, maybe automate it with forwarders (or an `impl_curried!` macro).
 
 ## Basic
 

@@ -1,5 +1,5 @@
 use crate::foundation::{RwLock, RwLockManager};
-use crate::util::tuple::impl_tuples;
+use crate::util::macro_util::impl_tuples;
 use once_cell::sync::OnceCell;
 use std::any::{type_name, TypeId};
 use std::marker::PhantomData;

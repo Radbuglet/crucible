@@ -1,8 +1,7 @@
 use self::internals::{wake_up_requests, LockRequestHandle, LockRequestState};
-
 use crate::util::bitmask::Bitmask64;
 use crate::util::error::ResultExt;
-use crate::util::tuple::impl_tuples;
+use crate::util::macro_util::impl_tuples;
 use log::trace;
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
