@@ -29,8 +29,8 @@ pub trait PointerLike {
 	#[rustfmt::skip]
 	type AsMut<'a>: Deref<Target = Self::Value> + DerefMut where Self: 'a;
 
-	unsafe fn promote_ref<'a>(self) -> Self::AsRef<'a>;
-	unsafe fn promote_mut<'a>(self) -> Self::AsMut<'a>;
+	unsafe fn promote_ref<'a>(self) -> Self::AsRef<'a> where Self: 'a;
+	unsafe fn promote_mut<'a>(self) -> Self::AsMut<'a> where Self: 'a;
 }
 
 #[rustfmt::skip]
@@ -40,11 +40,17 @@ impl<T: ?Sized> PointerLike for NonNull<T> {
 	type AsRef<'a> where Self: 'a = &'a T;
 	type AsMut<'a> where Self: 'a = &'a mut T;
 
-	unsafe fn promote_ref<'a>(self) -> Self::AsRef<'a> {
+	unsafe fn promote_ref<'a>(self) -> Self::AsRef<'a>
+	where
+		Self: 'a,
+	{
 		self.as_ref()
 	}
 
-	unsafe fn promote_mut<'a>(mut self) -> Self::AsMut<'a> {
+	unsafe fn promote_mut<'a>(mut self) -> Self::AsMut<'a>
+	where
+		Self: 'a,
+	{
 		self.as_mut()
 	}
 }
@@ -56,11 +62,17 @@ impl<'r, T: ?Sized> PointerLike for &'r UnsafeCell<T> {
 	type AsRef<'a> where Self: 'a = &'a T;
 	type AsMut<'a> where Self: 'a = &'a mut T;
 
-	unsafe fn promote_ref<'a>(self) -> Self::AsRef<'a> {
+	unsafe fn promote_ref<'a>(self) -> Self::AsRef<'a>
+	where
+		Self: 'a,
+	{
 		&*self.get()
 	}
 
-	unsafe fn promote_mut<'a>(self) -> Self::AsMut<'a> {
+	unsafe fn promote_mut<'a>(self) -> Self::AsMut<'a>
+	where
+		Self: 'a,
+	{
 		&mut *self.get()
 	}
 }
@@ -130,6 +142,10 @@ impl<T: ?Sized, P: ?Sized> DerefMut for Promise<T, P> {
 
 // === Accessors === //
 
+pub type PtrOf<T> = <T as Accessor>::Ptr;
+pub type RefOf<'a, T> = <PtrOf<T> as PointerLike>::AsRef<'a>;
+pub type MutOf<'a, T> = <PtrOf<T> as PointerLike>::AsMut<'a>;
+
 /// An `Accessor` represents an object which maps indices to distinct value pointers in a one-to-one
 /// fashion. A vector mapping indices to elements or a hash map mapping keys to values are examples
 /// of an `Accessor`. `Accessors` return [PointerLike] objects, which allows users to unsafely promote
@@ -189,6 +205,20 @@ impl<A: ?Sized + Accessor, T: ?Sized + Deref<Target = A>> Accessor for T {
 	}
 }
 
+pub trait AsAccessor<'a> {
+	type Accessor: Accessor;
+
+	fn as_accessor(&'a self) -> PromiseImmutable<Self::Accessor>;
+}
+
+pub trait AsAccessorMut<'a> {
+	type Accessor: Accessor;
+
+	fn as_accessor_mut(&'a mut self) -> PromiseUnborrowed<Self::Accessor>;
+}
+
+// === Accessor promises === //
+
 pub type PromiseUnborrowed<T> = Promise<T, dyn PromisesUnborrowed>;
 
 pub type PromiseImmutable<T> = Promise<T, dyn PromisesImmutable>;
@@ -236,20 +266,7 @@ impl<S: PromisesInjective> PromisesInjective for S {}
 impl<S: PromisesImmutable> PromisesImmutable for S {}
 impl<S: PromisesUnborrowed> PromisesUnborrowed for S {}
 
-// TODO: Derive for T: Accessor
-pub trait AsAccessor<'a> {
-	type Accessor: Accessor;
-
-	fn as_accessor(&'a self) -> PromiseImmutable<Self::Accessor>;
-}
-
-pub trait AsAccessorMut<'a> {
-	type Accessor: Accessor;
-
-	fn as_accessor_mut(&'a mut self) -> PromiseUnborrowed<Self::Accessor>;
-}
-
-// === Core Accessor impls === //
+// === Core Accessors === //
 
 impl<'a, T: 'a> AsAccessor<'a> for [T] {
 	type Accessor = SliceRefAccessor<'a, T>;
@@ -339,11 +356,7 @@ impl Display for SliceOobError {
 	}
 }
 
-// === Extensions and wrappers === //
-
-pub type PtrOf<T> = <T as Accessor>::Ptr;
-pub type RefOf<'a, T> = <PtrOf<T> as PointerLike>::AsRef<'a>;
-pub type MutOf<'a, T> = <PtrOf<T> as PointerLike>::AsMut<'a>;
+// === Direct access extensions === //
 
 pub trait RefAccessorExt: Accessor {
 	fn try_get_ref(&self, index: Self::Index) -> Result<RefOf<'_, Self>, Self::OobError>;
@@ -372,6 +385,8 @@ impl<T: ?Sized + Accessor, P: ?Sized + PromisesUnborrowed> MutAccessorExt for Pr
 		unsafe { Ok(self.unwrap_mut().try_get_raw(index)?.promote_mut()) }
 	}
 }
+
+// === Ordered accessor querying === //
 
 #[derive(Debug)]
 pub struct OrderedAccessorIter<'a, A: ?Sized + Accessor, I> {
@@ -420,6 +435,8 @@ where
 		Some(unsafe { self.accessor.get_raw(index).promote_mut::<'a>() })
 	}
 }
+
+// === Accessor splitters === //
 
 #[derive(Debug)]
 pub struct AccessorSplitter<'a, A: ?Sized + Accessor> {
@@ -522,5 +539,7 @@ where
 		}
 	}
 }
+
+// === Accessor maps === //
 
 // TODO: Map accessors

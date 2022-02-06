@@ -99,6 +99,7 @@ where
 						vm.get_viewport(e_window).unwrap().window().request_redraw();
 					}
 
+					// FIXME: This only tracks update durations.
 					stats.end_tick();
 				}
 

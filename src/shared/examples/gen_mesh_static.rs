@@ -16,7 +16,7 @@ fn main() {
 		print_vec(b);
 		print_vec(c);
 		print_vec(d);
-		println!()
+		println!();
 	}
 }
 

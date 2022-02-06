@@ -39,7 +39,7 @@ impl VoxelWorld {
 		replaced
 	}
 
-	pub fn remove_pos(&mut self, world: &World, pos: ChunkPos) {
+	pub fn remove_at(&mut self, world: &World, pos: ChunkPos) {
 		if let Some(chunk) = self.pos_map.remove(&pos) {
 			let handle = self.chunk_store.remove(chunk).unwrap();
 			for face in BlockFace::variants() {
