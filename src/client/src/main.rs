@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![feature(build_hasher_simple_hash_one)]
 #![feature(decl_macro)]
 #![feature(duration_constants)]
 #![feature(never_type)]

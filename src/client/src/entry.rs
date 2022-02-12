@@ -19,6 +19,7 @@ use crucible_core::util::meta_enum::EnumMeta;
 use crucible_shared::voxel::coord::{Axis3, BlockPos, ChunkPos};
 use crucible_shared::voxel::data::VoxelWorld;
 use futures::executor::block_on;
+use rand::random;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
@@ -102,9 +103,11 @@ impl Engine {
 		let mut voxel_data = VoxelWorld::new();
 		let mut voxel_render = VoxelRenderer::new(&gfx, &camera_mgr);
 
-		for x in 0..32 {
-			for y in 0..16 {
-				for z in 0..32 {
+		let multi_cube_dim = Vector3::new(8, 8, 8);
+
+		for x in 0..=multi_cube_dim.x {
+			for y in 0..=multi_cube_dim.x {
+				for z in 0..=multi_cube_dim.x {
 					let ent_chunk = world.spawn();
 
 					// Setup chunk data
@@ -114,13 +117,28 @@ impl Engine {
 					let mut data = voxel_data.get_chunk_mut(&world, ent_chunk).unwrap();
 					data.set_block(BlockPos::new(0, 0, 0), 1);
 
+					let mut is_complete = true;
+
 					for (axis, _) in Axis3::values_iter() {
-						if chunk_pos.raw[axis.vec_idx] == Vector3::new(31, 15, 31)[axis.vec_idx] {
+						if chunk_pos.raw[axis.vec_idx] == multi_cube_dim[axis.vec_idx] {
+							is_complete = false;
 							continue;
 						}
 
 						for d in 1..16 {
 							data.set_block(BlockPos::new(0, 0, 0) + (axis.unit() * d), 1);
+						}
+					}
+
+					if is_complete && random::<bool>() {
+						for b_x in 1..16 {
+							for b_y in 1..16 {
+								for b_z in 1..16 {
+									if random::<bool>() {
+										data.set_block(BlockPos::new(b_x, b_y, b_z), 1);
+									}
+								}
+							}
 						}
 					}
 

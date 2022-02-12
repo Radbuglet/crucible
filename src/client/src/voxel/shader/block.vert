@@ -10,7 +10,7 @@ layout(binding = 0) uniform CameraUniform {
 } u_cam;
 
 //> Varyings
-layout(location = 0) out float v_dist;
+layout(location = 0) out vec2 v_tex_uv;
 
 //> Static data
 const float s_near = 0.1;
@@ -68,13 +68,19 @@ const vec3 s_mesh[36] = vec3[36](
     vec3(1, 0, 0)
 );
 
+const vec2 s_mesh_uv[6] = vec2[6](
+    vec2(0, 0),
+    vec2(0, 1),
+    vec2(1, 0),
+
+    vec2(0, 1),
+    vec2(1, 1),
+    vec2(1, 0)
+);
+
 //> Logic
 void main() {
     vec4 vertex_pos = vec4(i_pos + s_mesh[gl_VertexIndex + i_face * 6], 1.0);
+    v_tex_uv = s_mesh_uv[gl_VertexIndex];
     gl_Position = u_cam.view * vertex_pos;
-
-    // Calculate depth
-    float depth_ndc = gl_Position.z / gl_Position.w;
-    float depth_real = 2.0 * s_near * s_far / (s_far + s_near - depth_ndc * (s_far - s_near));
-    v_dist = depth_real / s_far;
 }
