@@ -14,7 +14,7 @@ pub enum RunLoopCommand {
 	Shutdown,
 }
 
-pub type DepGuard<'a> = RwGuard<(&'a mut ViewportManager, &'a mut RunLoopStatTracker)>;
+pub type DepGuard<'a> = RwGuard<(&'a mut ViewportManager, &'a mut RunLoopTiming)>;
 
 pub trait RunLoopHandler {
 	fn tick(
@@ -60,7 +60,7 @@ where
 	S::Target: Provider,
 {
 	debug_assert!(
-		engine.has_many::<(&GfxContext, &RwLock<RunLoopStatTracker>, &RwLock<ViewportManager>)>(),
+		engine.has_many::<(&GfxContext, &RwLock<RunLoopTiming>, &RwLock<ViewportManager>)>(),
 		"`start_run_loop` requires a `GfxContext`, an `RwLock<RunLoopStatTracker>`, and an `RwLock<ViewportManager>`!"
 	);
 
@@ -80,7 +80,7 @@ where
 		lock_many_now!(
 			engine.get_many() => dep_guard,
 			vm: &mut ViewportManager,
-			stats: &mut RunLoopStatTracker,
+			timings: &mut RunLoopTiming,
 		);
 
 		// Process event
@@ -88,23 +88,20 @@ where
 		match &event {
 			// Loop idle handling
 			Event::MainEventsCleared => {
-				if stats.until_next_tick().is_none() {
-					stats.begin_tick();
-
+				if timings.until_next_tick().is_none() {
 					// Update
+					timings.begin_tick();
 					engine.tick(&mut on_loop_ev, proxy, dep_guard);
+					timings.end_tick();
 
 					// Render
 					for e_window in vm.get_entities() {
 						vm.get_viewport(e_window).unwrap().window().request_redraw();
 					}
-
-					// FIXME: This only tracks update durations.
-					stats.end_tick();
 				}
 
 				let now = Instant::now();
-				if let Some(until) = stats.next_tick().checked_duration_since(now) {
+				if let Some(until) = timings.next_tick().checked_duration_since(now) {
 					// TODO: Determine sleep overhead at runtime.
 					// Take 1/3rd of the wait time.
 					let until = until / 3;
@@ -123,7 +120,9 @@ where
 
 					if let Some(frame) = viewport.redraw(gfx) {
 						log::trace!("Drawing to viewport {:?}", e_window);
+						timings.render.begin_period();
 						engine.draw(&mut on_loop_ev, proxy, dep_guard, e_window, &frame);
+						timings.render.end_period();
 						frame.present();
 					}
 				}
@@ -161,11 +160,112 @@ where
 // === Stat tracking === //
 
 #[derive(Debug, Clone)]
-pub struct RunLoopStatTracker {
+pub struct RunLoopTiming {
 	// Config
 	max_tps: u32,
 	tick_wait_period: Duration,
 
+	// Trackers
+	pub update: RunLoopEventTracker,
+	pub render: RunLoopEventTracker,
+}
+
+impl RunLoopTiming {
+	pub fn start(max_tps: u32) -> Self {
+		Self {
+			max_tps,
+			tick_wait_period: Self::tps_to_wait_period(max_tps),
+
+			update: RunLoopEventTracker::start(),
+			render: RunLoopEventTracker::start(),
+		}
+	}
+
+	//> Fps limiting
+	pub fn set_max_tps(&mut self, max_tps: u32) {
+		self.max_tps = max_tps;
+		self.tick_wait_period = Self::tps_to_wait_period(max_tps);
+	}
+
+	pub fn max_tps(&self) -> u32 {
+		self.max_tps
+	}
+
+	pub fn next_tick(&self) -> Instant {
+		self.last_tick() + self.tick_wait_period
+	}
+
+	pub fn until_next_tick(&self) -> Option<Duration> {
+		self.next_tick().checked_duration_since(Instant::now())
+	}
+
+	fn tps_to_wait_period(tps: u32) -> Duration {
+		if tps == 0 {
+			Duration::ZERO
+		} else {
+			Duration::from_secs_f32(1. / tps as f32)
+		}
+	}
+
+	//> Update forwards
+	pub fn begin_tick(&mut self) {
+		self.update.begin_period();
+	}
+
+	pub fn end_tick(&mut self) {
+		self.update.begin_period();
+	}
+
+	pub fn delta(&self) -> Option<Duration> {
+		self.update.delta()
+	}
+
+	pub fn delta_secs(&self) -> f32 {
+		self.update.delta_secs()
+	}
+
+	pub fn tps(&self) -> Option<u32> {
+		self.update.tps()
+	}
+
+	pub fn mspt(&self) -> Option<Duration> {
+		self.update.mspt()
+	}
+
+	pub fn last_tick(&self) -> Instant {
+		self.update.last_period_start()
+	}
+
+	//> Render methods
+	pub fn begin_frame(&mut self) {
+		self.render.begin_period();
+	}
+
+	pub fn end_frame(&mut self) {
+		self.render.begin_period();
+	}
+
+	pub fn fps(&self) -> Option<u32> {
+		self.render.tps()
+	}
+
+	pub fn mspf(&self) -> Option<Duration> {
+		self.render.mspt()
+	}
+
+	//> General
+	pub fn last_second(&self) -> Instant {
+		self.update.last_sec()
+	}
+
+	pub fn reset(&mut self) {
+		self.update.reset();
+		self.render.reset();
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct RunLoopEventTracker {
 	// Period tracking
 	last_tick_start: Instant,
 	last_sec: Instant,
@@ -178,12 +278,10 @@ pub struct RunLoopStatTracker {
 	stat_mspt: Option<Duration>,
 }
 
-impl RunLoopStatTracker {
-	pub fn start(max_tps: u32) -> Self {
+impl RunLoopEventTracker {
+	pub fn start() -> Self {
 		let now = Instant::now();
 		Self {
-			max_tps,
-			tick_wait_period: Self::tps_to_wait_period(max_tps),
 			last_tick_start: now,
 			last_sec: now,
 			accum_tps: 0,
@@ -194,7 +292,7 @@ impl RunLoopStatTracker {
 		}
 	}
 
-	pub fn begin_tick(&mut self) {
+	pub fn begin_period(&mut self) {
 		// Update delta
 		let now = Instant::now();
 		self.stat_delta = Some(now - self.last_tick_start);
@@ -216,20 +314,12 @@ impl RunLoopStatTracker {
 		}
 	}
 
-	pub fn end_tick(&mut self) {
+	pub fn end_period(&mut self) {
 		let now = Instant::now();
 		self.accum_mspt += now - self.last_tick_start;
 	}
 
-	pub fn next_tick(&self) -> Instant {
-		self.last_tick_start + self.tick_wait_period
-	}
-
-	pub fn until_next_tick(&self) -> Option<Duration> {
-		self.next_tick().checked_duration_since(Instant::now())
-	}
-
-	pub fn last_tick_start(&self) -> Instant {
+	pub fn last_period_start(&self) -> Instant {
 		self.last_tick_start
 	}
 
@@ -253,24 +343,7 @@ impl RunLoopStatTracker {
 		self.stat_mspt
 	}
 
-	pub fn set_max_tps(&mut self, max_tps: u32) {
-		self.max_tps = max_tps;
-		self.tick_wait_period = Self::tps_to_wait_period(max_tps);
-	}
-
-	pub fn max_tps(&self) -> u32 {
-		self.max_tps
-	}
-
 	pub fn reset(&mut self) {
-		*self = Self::start(self.max_tps);
-	}
-
-	fn tps_to_wait_period(tps: u32) -> Duration {
-		if tps == 0 {
-			Duration::ZERO
-		} else {
-			Duration::from_secs_f32(1. / tps as f32)
-		}
+		*self = Self::start();
 	}
 }

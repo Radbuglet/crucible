@@ -2,7 +2,7 @@
 
 use crate::engine::context::GfxContext;
 use crate::engine::input::InputTracker;
-use crate::engine::run_loop::RunLoopStatTracker;
+use crate::engine::run_loop::RunLoopTiming;
 use crate::engine::util::std140::Std140;
 use crate::engine::util::uniform::UniformManager;
 use cgmath::{perspective, Deg, InnerSpace, Matrix3, Matrix4, Rad, Transform, Vector3, Zero};
@@ -115,7 +115,7 @@ impl PerspectiveCamera {
 pub fn update_camera_free_cam(
 	camera: &mut PerspectiveCamera,
 	input: &InputTracker,
-	run_stats: &RunLoopStatTracker,
+	timings: &RunLoopTiming,
 ) {
 	// Calculate heading
 	let mut heading = Vector3::zero();
@@ -170,5 +170,5 @@ pub fn update_camera_free_cam(
 		camera_mat.y.truncate(),
 		camera_mat.z.truncate(),
 	);
-	camera.position += basis_mat * heading * run_stats.delta_secs() * speed;
+	camera.position += basis_mat * heading * timings.delta_secs() * speed;
 }

@@ -4,7 +4,7 @@
 use crate::engine::context::GfxContext;
 use crate::engine::input::InputTracker;
 use crate::engine::run_loop::{
-	start_run_loop, DepGuard, RunLoopCommand, RunLoopHandler, RunLoopStatTracker,
+	start_run_loop, DepGuard, RunLoopCommand, RunLoopHandler, RunLoopTiming,
 };
 use crate::engine::util::camera::{update_camera_free_cam, GfxCameraManager, PerspectiveCamera};
 use crate::engine::util::uniform::UniformManager;
@@ -41,7 +41,7 @@ provider_struct! {
 		input: RwLock<InputTracker>,
 		uniform: RwLock<UniformManager>,
 		camera_mgr: RwLock<GfxCameraManager>,
-		run_stats: RwLock<RunLoopStatTracker>,
+		timings: RwLock<RunLoopTiming>,
 
 		// Game services
 		voxel_data: RwLock<VoxelWorld>,
@@ -87,7 +87,7 @@ impl Engine {
 		log::info!("Done initializing graphics subsystem!");
 
 		// Setup core engine services
-		let run_stats = RunLoopStatTracker::start(u32::MAX);
+		let timings = RunLoopTiming::start(u32::MAX);
 		let input = InputTracker::new();
 		let uniform = UniformManager::new(
 			&gfx,
@@ -174,7 +174,7 @@ impl Engine {
 		let input = RwLock::new(rw_mgr.clone(), input);
 		let uniform = RwLock::new(rw_mgr.clone(), uniform);
 		let camera_mgr = RwLock::new(rw_mgr.clone(), camera_mgr);
-		let run_stats = RwLock::new(rw_mgr.clone(), run_stats);
+		let timings = RwLock::new(rw_mgr.clone(), timings);
 		let voxel_data = RwLock::new(rw_mgr.clone(), voxel_data);
 		let voxel_render = RwLock::new(rw_mgr.clone(), voxel_render);
 		let game_state = RwLock::new(rw_mgr.clone(), game_state);
@@ -190,7 +190,7 @@ impl Engine {
 			input,
 			uniform,
 			camera_mgr,
-			run_stats,
+			timings,
 			voxel_data,
 			voxel_render,
 			game_state,
@@ -207,7 +207,7 @@ impl RunLoopHandler for Arc<Engine> {
 		dep_guard: DepGuard,
 	) {
 		// Lock services
-		let (wm, run_stats) = dep_guard.get();
+		let (wm, timings) = dep_guard.get();
 		let gfx = &self.gfx;
 		lock_many_now!(
 			self.get_many() => _guard,
@@ -251,14 +251,15 @@ impl RunLoopHandler for Arc<Engine> {
 		}
 
 		if state.is_active {
-			update_camera_free_cam(&mut state.camera, &input, &run_stats);
+			update_camera_free_cam(&mut state.camera, &input, &timings);
 		}
 
 		// Update title
 		let title = format!(
-			"Crucible - TPS: {} - MSPT: {}",
-			run_stats.tps().unwrap_or(0),
-			FormatMs(run_stats.mspt().unwrap_or(Duration::ZERO)),
+			"Crucible - TPS: {} - MSPT: {}, MSPF: {}",
+			timings.tps().unwrap_or(0),
+			FormatMs(timings.mspt().unwrap_or(Duration::ZERO)),
+			FormatMs(timings.mspf().unwrap_or(Duration::ZERO))
 		);
 		for entity in wm.get_entities() {
 			let viewport = wm.get_viewport(entity).unwrap();
