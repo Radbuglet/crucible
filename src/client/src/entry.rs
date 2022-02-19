@@ -204,7 +204,7 @@ impl RunLoopHandler for Arc<Engine> {
 		&self,
 		on_loop_ev: &mut VecDeque<RunLoopCommand>,
 		_event_loop: &EventLoopWindowTarget<()>,
-		dep_guard: DepGuard,
+		mut dep_guard: DepGuard,
 	) {
 		// Lock services
 		let (wm, timings) = dep_guard.get();
@@ -274,7 +274,7 @@ impl RunLoopHandler for Arc<Engine> {
 		&self,
 		_on_loop_ev: &mut VecDeque<RunLoopCommand>,
 		_event_loop: &EventLoopWindowTarget<()>,
-		dep_guard: DepGuard,
+		mut dep_guard: DepGuard,
 		window: Entity,
 		frame: &wgpu::SurfaceTexture,
 	) {
@@ -346,7 +346,7 @@ impl RunLoopHandler for Arc<Engine> {
 		&self,
 		on_loop_ev: &mut VecDeque<RunLoopCommand>,
 		_event_loop: &EventLoopWindowTarget<()>,
-		dep_guard: DepGuard,
+		mut dep_guard: DepGuard,
 		window: Entity,
 		event: &WindowEvent,
 	) {

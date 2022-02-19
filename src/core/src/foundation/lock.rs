@@ -1,3 +1,5 @@
+//! Async-friendly RW-locks which can be locked in atomic groups. Useful for async-based scheduling.
+
 use self::internals::{wake_up_requests, LockRequestHandle, LockRequestState};
 use crate::util::bitmask::Bitmask64;
 use crate::util::error::ResultExt;
@@ -76,9 +78,6 @@ mod internals {
 		available_locks: RwMask,
 
 		/// An unordered set of requests.
-		// Ideally, futures would have ownership over "LockPendingState" instances to avoid allocations
-		// but this is a really small micro-optimization that seems pretty hard to implement correctly
-		// so I'm going to hold off on it until later.
 		requests: Vec<LockRequest>,
 	}
 
@@ -605,6 +604,14 @@ impl<T: ?Sized> RwLock<T> {
 		self.value.get_mut()
 	}
 
+	pub fn can_lock_now_mut(&self) -> bool {
+		RwGuardMut::can_lock_now(&self)
+	}
+
+	pub fn can_lock_now_ref(&self) -> bool {
+		RwGuardRef::can_lock_now(&self)
+	}
+
 	pub fn try_lock_mut_now(&self) -> Option<RwGuardMut<T>> {
 		RwGuard::try_lock_now(self)
 	}
@@ -767,6 +774,12 @@ pub struct RwGuard<T: LockTarget> {
 impl<T: LockTarget> RwGuard<T> {
 	// === Guard constructors === //
 
+	pub fn can_lock_now(deps: &T::Deps) -> bool {
+		T::manager(&deps)
+			.inner()
+			.can_lock_mask(T::mask(&deps).unwrap_pretty())
+	}
+
 	pub fn try_lock_now(deps: T::Deps) -> Option<Self> {
 		let mask = T::mask(&deps).unwrap_pretty();
 		if T::manager(&deps).inner().try_lock_mask(mask) {
@@ -790,7 +803,8 @@ impl<T: LockTarget> RwGuard<T> {
 
 	// === Fetching === //
 
-	pub fn get(&self) -> T {
+	// FIXME: [CRITICAL] The lifetime of this is too long!
+	pub fn get(&mut self) -> T {
 		unsafe { T::get(&self.deps) }
 	}
 }
@@ -810,6 +824,6 @@ impl<T: LockTarget> Drop for RwGuard<T> {
 }
 
 pub macro lock_many_now($target:expr => $guard:ident, $($comp:ident : $ty:ty),+$(,)?) {
-	let $guard = RwGuard::<($($ty,)*)>::lock_now($target);
+	let mut $guard = RwGuard::<($($ty,)*)>::lock_now($target);
 	let ($($comp,)*) = $guard.get();
 }
