@@ -1,3 +1,5 @@
+use crate::util::error::ResultExt;
+use crate::util::iter_ext::ArrayCollectExt;
 use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::error::Error;
@@ -5,8 +7,6 @@ use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
-
-// TODO: Document promises
 
 // === PointerLike === //
 
@@ -24,7 +24,7 @@ pub trait PointerLike {
 	// lives as long as the lifetime since objects can only live as long as the lifetimes of their
 	// generic parameters.
 	#[rustfmt::skip]
-	type AsRef<'a>: Deref<Target = Self::Value> where Self: 'a;
+	type AsRef<'a>: Clone + Deref<Target = Self::Value> where Self: 'a;
 
 	#[rustfmt::skip]
 	type AsMut<'a>: Deref<Target = Self::Value> + DerefMut where Self: 'a;
@@ -88,7 +88,6 @@ impl<'r, T: ?Sized> PointerLike for &'r UnsafeCell<T> {
 /// then list the promises made by an object by setting `P` to *e.g.* `dyn PromisesFoo`. Traits have
 /// the benefit of being easily composable by specifying super-traits *e.g.* if `PromisesFoo: PromisesBar`,
 /// then having a promise of `P = dyn PromisesFoo` implies having a promise of `dyn PromisesBar` as well.
-// TODO: Add derivations (send and sync are also probably needed)
 #[repr(transparent)]
 pub struct Promise<T: ?Sized, P: ?Sized> {
 	_promise: PhantomData<fn(P) -> P>,
@@ -140,25 +139,38 @@ impl<T: ?Sized, P: ?Sized> DerefMut for Promise<T, P> {
 	}
 }
 
+impl<T: Debug, P: ?Sized> Debug for Promise<T, P> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("Promise")
+			.field(
+				"_promise",
+				&std::any::type_name::<PhantomData<fn(P) -> P>>(),
+			)
+			.field("value", &self.value)
+			.finish()
+	}
+}
+
 // === Accessors === //
 
 pub type PtrOf<T> = <T as Accessor>::Ptr;
 pub type RefOf<'a, T> = <PtrOf<T> as PointerLike>::AsRef<'a>;
 pub type MutOf<'a, T> = <PtrOf<T> as PointerLike>::AsMut<'a>;
 
-/// An `Accessor` represents an object which maps indices to distinct value pointers in a one-to-one
-/// fashion. A vector mapping indices to elements or a hash map mapping keys to values are examples
-/// of an `Accessor`. `Accessors` return [PointerLike] objects, which allows users to unsafely promote
-/// the pointee to either a mutable or immutable reference. Wrappers and extension methods can use the
-/// one-to-one property of the map alongside `PointerLike` promotion to implement mechanisms to provide
-/// mutable references to several distinct values in the `Accessor` at once.
+/// An `Accessor` represents an object which maps indices to pointers to their contents. A vector
+/// mapping indices to elements or a hash map mapping keys to values are examples of an `Accessor`.
+/// `Accessors` return [PointerLike] objects, which allows users to unsafely promote the pointer to
+/// either a mutable or immutable reference. Wrappers and extension methods can use the guarantees
+/// provided by *e.g.* [PromiseUnborrowed], which states that the pointers are mapped injectively and
+/// can be promoted mutably, to implement mechanisms to provide mutable references to several distinct
+/// values in the `Accessor` at once.
 ///
 /// ## Avoiding Wrapper Chains
 ///
 /// To avoid cascades of `Option<Option<Option<NonNull<T>>>>` when wrapping `Accessors` with out-of-
 /// bounds reporting, all accessors have the ability to return an `OobError` type implementing the
 /// standard library's [Error] trait. Implementors of this trait are recommended to keep error
-/// conditions to the `Err` variant of the result, preferring *e.g.* `Err(FirstWrapperError::Parent(
+/// conditions to the `Err` variant of the result, preferring *e.g.* `Err(FirstWrapperError::Inherit(
 /// SecondWrapperError))` over `Ok(Err(SecondWrapperError))` to make pointer unwrapping always exactly
 /// one step.
 ///
@@ -190,10 +202,11 @@ pub trait Accessor {
 	fn try_get_raw(&self, index: Self::Index) -> Result<Self::Ptr, Self::OobError>;
 
 	fn get_raw(&self, index: Self::Index) -> Self::Ptr {
-		self.try_get_raw(index).unwrap()
+		self.try_get_raw(index).unwrap_pretty()
 	}
 }
 
+// Objects implementing `Deref` where `Target: Accessor` also implement `Accessor`.
 impl<A: ?Sized + Accessor, T: ?Sized + Deref<Target = A>> Accessor for T {
 	type Index = A::Index;
 	type Value = A::Value;
@@ -204,6 +217,12 @@ impl<A: ?Sized + Accessor, T: ?Sized + Deref<Target = A>> Accessor for T {
 		(**self).try_get_raw(index)
 	}
 }
+
+// === Accessor promises === //
+
+pub type PromiseUnborrowed<T> = Promise<T, dyn PromisesUnborrowed>;
+
+pub type PromiseImmutable<T> = Promise<T, dyn PromisesImmutable>;
 
 pub trait AsAccessor<'a> {
 	type Accessor: Accessor;
@@ -216,12 +235,6 @@ pub trait AsAccessorMut<'a> {
 
 	fn as_accessor_mut(&'a mut self) -> PromiseUnborrowed<Self::Accessor>;
 }
-
-// === Accessor promises === //
-
-pub type PromiseUnborrowed<T> = Promise<T, dyn PromisesUnborrowed>;
-
-pub type PromiseImmutable<T> = Promise<T, dyn PromisesImmutable>;
 
 /// Promises that an [Accessor] behaves injectively and provides the foundations for other more useful
 /// promises.
@@ -240,8 +253,8 @@ pub type PromiseImmutable<T> = Promise<T, dyn PromisesImmutable>;
 ///    are guaranteed not to logically alias. In other words, this map is injective.
 ///    TODO: Replace with TrustedEq and TrustedOrd traits.
 /// 3. **Promotion Lifetime:** Pointers are valid to promote for at most the lifetime of the **owned**
-///    instance `T` and virtual aliasing rules must be followed. Note that this implicitly means that
-///    owning a `T` reference (`&'a T`) will limit promotion lifetimes to the lifetime of that
+///    instance `T` so long as virtual aliasing rules are followed. Note that this implicitly means
+///    that owning a `T` reference (`&'a T`) will limit promotion lifetimes to the lifetime of that
 ///    reference (`'a`), not the lifetime of `T`.
 ///
 /// As a note to implementors, because `Accessors` take immutable references to themselves, promoting
@@ -256,15 +269,48 @@ pub type PromiseImmutable<T> = Promise<T, dyn PromisesImmutable>;
 /// made by external actors such as [PromisesImmutable] and [PromisesUnborrowed].
 pub trait PromisesInjective {}
 
+/// Promises that all references returned by an [Accessor] begin in an unborrowed state and can be
+/// promoted to immutable references. No guarantees are made about the validity of promoting to a
+/// mutable reference (see: [PromisesUnborrowed]).
+///
+/// ## Safety
+///
+/// Promises from the safety section of [PromiseInjective] must be kept.
+///
+/// Upon [unwrap](Promise::unwrap)'ing the [Promise], the returned `T: Accessor` is guaranteed to:
+///
+/// 1. Start in a logically unborrowed state.
+/// 2. Pointers are valid to promote **immutably** so long as the requirements in the "promotion
+///    lifetime" section are met (see: [PromiseInjective]). Note that the validity of mutable borrows
+///    is not guaranteed by this promise (see: [PromiseUnborrowed]).
+///
 pub trait PromisesImmutable: PromisesInjective {}
 
+/// Promises that all references returned by an [Accessor] begin in an unborrowed state and can be
+/// promoted to immutable or mutable references.
+///
+/// ## Safety
+///
+/// Promises from the safety section of [PromiseImmutable] (and, recursively, [PromiseInjective]) must
+/// be kept.
+///
+/// Upon [unwrap](Promise::unwrap)'ing the [Promise], the returned `T: Accessor` is guaranteed to:
+///
+/// 1. Start in a logically unborrowed state. (inherited from [PromiseImmutable]).
+/// 2. Pointers are valid to promote **immutably** so long as the requirements in the "promotion lifetime"
+///    section are met (see: [PromiseInjective]). (inherited from [PromiseImmutable])
+/// 3. Pointers are valid to promote **mutably** so long as the requirements in the "promotion lifetime"
+///    section are met (see: [PromiseInjective]) **and** .
+///
 pub trait PromisesUnborrowed: PromisesImmutable {}
 
-pub struct PromisesInheritMutability<S>(PhantomData<S>);
+/// A promise object that strips `S` of all its promises besides [PromisesInjective],
+/// [PromisesImmutable], and [PromisesUnborrowed].
+pub struct PromisesInheritMutability<S: ?Sized>(PhantomData<S>);
 
-impl<S: PromisesInjective> PromisesInjective for S {}
-impl<S: PromisesImmutable> PromisesImmutable for S {}
-impl<S: PromisesUnborrowed> PromisesUnborrowed for S {}
+impl<S: ?Sized + PromisesInjective> PromisesInjective for PromisesInheritMutability<S> {}
+impl<S: ?Sized + PromisesImmutable> PromisesImmutable for PromisesInheritMutability<S> {}
+impl<S: ?Sized + PromisesUnborrowed> PromisesUnborrowed for PromisesInheritMutability<S> {}
 
 // === Core Accessors === //
 
@@ -362,7 +408,7 @@ pub trait RefAccessorExt: Accessor {
 	fn try_get_ref(&self, index: Self::Index) -> Result<RefOf<'_, Self>, Self::OobError>;
 
 	fn get_ref(&self, index: Self::Index) -> RefOf<'_, Self> {
-		self.try_get_ref(index).unwrap()
+		self.try_get_ref(index).unwrap_pretty()
 	}
 }
 
@@ -376,7 +422,7 @@ pub trait MutAccessorExt: Accessor {
 	fn try_get_mut(&mut self, index: Self::Index) -> Result<MutOf<'_, Self>, Self::OobError>;
 
 	fn get_mut(&mut self, index: Self::Index) -> MutOf<'_, Self> {
-		self.try_get_mut(index).unwrap()
+		self.try_get_mut(index).unwrap_pretty()
 	}
 }
 
@@ -445,13 +491,36 @@ pub struct AccessorSplitter<'a, A: ?Sized + Accessor> {
 	side: SplitterSide,
 }
 
+impl<'a, A: Accessor> AccessorSplitter<'a, A> {
+	pub fn new<P: ?Sized>(
+		accessor: &'a mut Promise<A, P>,
+		mid: A::Index,
+	) -> (
+		Promise<Self, PromisesInheritMutability<P>>,
+		Promise<Self, PromisesInheritMutability<P>>,
+	) {
+		unsafe {
+			(
+				Promise::make(Self {
+					target: accessor.unwrap_ref(),
+					mid,
+					side: SplitterSide::Left,
+				}),
+				Promise::make(Self {
+					target: accessor.unwrap_ref(),
+					mid,
+					side: SplitterSide::Right,
+				}),
+			)
+		}
+	}
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum SplitterSide {
 	Left,
 	Right,
 }
-
-// TODO: How do we write competent constructors for varied mutability wrappers?!
 
 impl<'a, A> Accessor for AccessorSplitter<'a, A>
 where
@@ -540,6 +609,23 @@ where
 	}
 }
 
-// === Accessor maps === //
+// === Tests === //
 
-// TODO: Map accessors
+#[test]
+fn accessor_splitter_test() {
+	let mut my_vec = vec![2, 3, 4, 5, 6];
+	let mut accessor = my_vec.as_accessor_mut();
+	*accessor.get_mut(2) = 2;
+
+	let (mut left, right) = AccessorSplitter::new(&mut accessor, 2);
+	let [a, b, c] = OrderedAccessorIter::new(&mut left, [0, 1, 2]).collect_array();
+	*a = 1;
+	*b = 2;
+	*c = 3;
+
+	assert_eq!(*right.get_ref(3), 5);
+	assert_eq!(*right.get_ref(4), 6);
+	assert!(left.try_get_ref(4).is_err());
+	assert!(right.try_get_ref(2).is_err());
+	assert_eq!(my_vec, [1, 2, 3, 5, 6]);
+}

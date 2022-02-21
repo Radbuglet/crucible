@@ -8,6 +8,8 @@
 #![feature(generic_associated_types)]
 #![feature(maybe_uninit_write_slice)]
 #![feature(never_type)]
+#![feature(maybe_uninit_uninit_array)]
+#![feature(maybe_uninit_array_assume_init)]
 
 pub mod foundation;
 pub mod util;

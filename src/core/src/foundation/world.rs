@@ -1,4 +1,4 @@
-use hashbrown::raw::{RawIter, RawTable};
+use hashbrown::raw::{Bucket, RawIter, RawTable};
 use std::hash::Hash;
 use std::mem::replace;
 use std::ops::{Deref, DerefMut};
@@ -130,7 +130,7 @@ impl<T> Storage<T> {
 	}
 
 	pub fn insert(&mut self, world: &World, entity: Entity, value: T) -> Option<T> {
-		debug_assert!(world.is_alive(entity));
+		assert!(world.is_alive(entity));
 
 		// Try to find and replace the existing entity in the map.
 		if let Some(slot) = self.map.get_mut(entity.hash_index(), |(candidate, _)| {
@@ -148,33 +148,32 @@ impl<T> Storage<T> {
 				None
 			}
 		} else {
-			// The key isn't yet mapped to anything. We have to insert a new entry.
+			let _ = self.force_insert(world, entity, value);
+			None
+		}
+	}
 
-			// Try a simple insertion
-			// ^ although honestly, it's probably more worthwhile to make an ECS-specific weak map
-			// implementation than to retrofit a general purpose hash table. We might even want to
-			// make an archetype system.
-			match self
-				.map
-				.try_insert_no_grow(entity.hash_index(), (entity, value))
-			{
-				// Insertion was successful.
-				Ok(_) => None,
+	fn force_insert(&mut self, world: &World, entity: Entity, value: T) -> Bucket<(Entity, T)> {
+		// The key isn't yet mapped to anything. We have to insert a new entry.
 
-				// We need to grow.
-				Err((entity, value)) => {
-					// If we failed to clean up the existing chain, we are pretty much forced to grow.
-					// While we could technically clean up the entire map to leave some free slots
-					// open, doing so would only increase the length of the current chain, making
-					// lookups more expensive. And anyways, cleaning up the entire chain is an O(n)
-					// operation so we might as well rehash the entire map anyways.
-					self.clean(world);
-					self.map
-						.insert(entity.hash_index(), (entity, value), |(rehashed, _)| {
-							rehashed.hash_index()
-						});
-					None
-				}
+		// Try a simple insertion
+		// We do this in two passes because we can't inject custom cleanup logic into the rehasher so
+		// this is our best alternative.
+		match self
+			.map
+			.try_insert_no_grow(entity.hash_index(), (entity, value))
+		{
+			// Insertion was successful.
+			Ok(bucket) => bucket,
+
+			// We need to grow.
+			Err((entity, value)) => {
+				// If we failed to clean up the existing chain, we are pretty much forced to grow.
+				self.clean(world);
+				self.map
+					.insert(entity.hash_index(), (entity, value), |(rehashed, _)| {
+						rehashed.hash_index()
+					})
 			}
 		}
 	}
@@ -227,6 +226,38 @@ impl<T> Storage<T> {
 
 	pub fn get(&self, world: &World, entity: Entity) -> ComponentPair<'_, T> {
 		self.try_get(world, entity).unwrap()
+	}
+
+	pub fn get_or_insert<F>(
+		&mut self,
+		world: &World,
+		entity: Entity,
+		mut init: F,
+	) -> ComponentPairMut<'_, T>
+	where
+		F: FnMut() -> T,
+	{
+		assert!(world.is_alive(entity));
+
+		// Try to find and replace the existing entity in the map.
+		if let Some(slot) = self.map.find(entity.hash_index(), |(candidate, _)| {
+			// See reasoning in "insert".
+			candidate.index == entity.index
+		}) {
+			let (found, comp) = unsafe { slot.as_mut() };
+			if entity.gen == found.gen {
+				ComponentPairMut { entity, comp }
+			} else {
+				let _ = (found, comp); // Helps prevent stupid mistakes.
+				unsafe { slot.write((entity, init())) }
+
+				let (_, comp) = unsafe { slot.as_mut() };
+				ComponentPairMut { entity, comp }
+			}
+		} else {
+			let (_, comp) = unsafe { self.force_insert(world, entity, init()).as_mut() };
+			ComponentPairMut { entity, comp }
+		}
 	}
 
 	pub fn try_get_mut(

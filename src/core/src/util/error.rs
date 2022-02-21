@@ -60,19 +60,17 @@ impl<T: ?Sized + Error> Display for FormattedError<'_, T> {
 }
 
 /// A version of [anyhow::Context] for [Result] only. Supports producing context from an error value.
-pub trait ResultExt<T, E> {
+pub trait ResultExt<T, E: Error> {
 	fn unwrap_pretty(self) -> T;
 
 	fn with_context_map<C, F>(self, f: F) -> Result<T, AnyError>
 	where
+		E: Send + Sync + 'static,
 		C: Display + Send + Sync + 'static,
 		F: FnOnce(&E) -> C;
 }
 
-impl<T, E> ResultExt<T, E> for Result<T, E>
-where
-	E: Error + Send + Sync + 'static,
-{
+impl<T, E: Error> ResultExt<T, E> for Result<T, E> {
 	fn unwrap_pretty(self) -> T {
 		match self {
 			Ok(val) => val,
@@ -82,6 +80,7 @@ where
 
 	fn with_context_map<C, F>(self, f: F) -> Result<T, AnyError>
 	where
+		E: Send + Sync + 'static,
 		C: Display + Send + Sync + 'static,
 		F: FnOnce(&E) -> C,
 	{

@@ -2,12 +2,13 @@
 
 ## Core
 
-- [ ] **Foundations:** Implement `Accessors` and document them
+- [x] **Foundations:** Implement `Accessors` and document them
 - [ ] **General:** Integrate `Accessors` into `VoxelData`, `ViewportManager`, `Storages`, and `Providers`
-- [ ] **Foundations:** Make `RwGuards` into `Providers` to simplify external guard decomposition
+- [ ] **Foundations:** Make `RwGuards` into `Providers` to simplify external guard decomposition.
 - [ ] **Foundations:** Finish implementing archetypal ECS
-- [ ] **Foundations:** Implement ECS-style tagging `EventTarget` (single and multi layered), multithreaded `VecDequeue`, fixed-size `Array`, and event target reflection/multiplexing for plugin event busses.
+- [ ] **Foundations:** Implement ECS-style tagging `EventTarget` (single and multi layered), multithreaded `VecDequeue`, fixed-size `Array`
 - [ ] **Foundations:** Automate dependency currying with forwarders (or an `impl_curried!` macro).
+- [ ] **Foundations:** Add event target reflection/multiplexing for plugin event busses.
 - [ ] **Foundation:** Implement `PluginManager`.
 
 ## Basic

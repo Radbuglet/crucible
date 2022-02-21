@@ -2,6 +2,7 @@ pub mod bitmask;
 pub mod error;
 pub mod format;
 pub mod free_list;
+pub mod iter_ext;
 pub mod macro_util;
 pub mod meta_enum;
 pub mod pod;
