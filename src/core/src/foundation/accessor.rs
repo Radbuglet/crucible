@@ -1,5 +1,4 @@
 use crate::util::error::ResultExt;
-use crate::util::iter_ext::ArrayCollectExt;
 use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::error::Error;
@@ -607,25 +606,4 @@ where
 				.finish(),
 		}
 	}
-}
-
-// === Tests === //
-
-#[test]
-fn accessor_splitter_test() {
-	let mut my_vec = vec![2, 3, 4, 5, 6];
-	let mut accessor = my_vec.as_accessor_mut();
-	*accessor.get_mut(2) = 2;
-
-	let (mut left, right) = AccessorSplitter::new(&mut accessor, 2);
-	let [a, b, c] = OrderedAccessorIter::new(&mut left, [0, 1, 2]).collect_array();
-	*a = 1;
-	*b = 2;
-	*c = 3;
-
-	assert_eq!(*right.get_ref(3), 5);
-	assert_eq!(*right.get_ref(4), 6);
-	assert!(left.try_get_ref(4).is_err());
-	assert!(right.try_get_ref(2).is_err());
-	assert_eq!(my_vec, [1, 2, 3, 5, 6]);
 }
