@@ -4,7 +4,6 @@ use std::fmt::Display;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::hash::Hash;
 use std::marker::PhantomData;
-use std::num::NonZeroU64;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Not};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -174,8 +173,8 @@ impl OptionalUsize {
 
 	pub fn as_option(self) -> Option<usize> {
 		match self {
-			OptionalUsize(usize::MAX) => None,
-			OptionalUsize(value) => Some(value),
+			OptionalUsize { raw: usize::MAX } => None,
+			OptionalUsize { raw: value } => Some(value),
 		}
 	}
 }
@@ -254,8 +253,4 @@ pub const fn usize_msb_mask(offset: u32) -> usize {
 
 pub const fn usize_has_mask(value: usize, mask: usize) -> bool {
 	value | mask == value
-}
-
-pub fn peek_iter<I: Iterator + Clone>(iter: &I) -> Option<I::Item> {
-	iter.clone().next()
 }

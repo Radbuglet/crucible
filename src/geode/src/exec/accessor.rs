@@ -1,3 +1,4 @@
+use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
@@ -24,7 +25,7 @@ pub trait PointerLike<'a> {
 	unsafe fn promote_mut(self) -> Self::AsMut;
 }
 
-impl<'a, T: ?Sized + 'static> PointerLike<'a> for NonNull<T> {
+impl<'a, T: ?Sized + 'a> PointerLike<'a> for NonNull<T> {
 	type Value = T;
 
 	type AsRef = &'a T;
@@ -39,20 +40,20 @@ impl<'a, T: ?Sized + 'static> PointerLike<'a> for NonNull<T> {
 	}
 }
 
-// impl<'a, 'r: 'a, T: ?Sized> PointerLike<'a> for &'r UnsafeCell<T> {
-//     type Value = T;
-//
-//     type AsRef = &'a T;
-//     type AsMut = &'a mut T;
-//
-//     unsafe fn promote_ref(self) -> Self::AsRef {
-//         &*self.get()
-//     }
-//
-//     unsafe fn promote_mut(self) -> Self::AsMut {
-//         &mut *self.get()
-//     }
-// }
+impl<'a, 'r: 'a, T: ?Sized> PointerLike<'a> for &'r UnsafeCell<T> {
+	type Value = T;
+
+	type AsRef = &'a T;
+	type AsMut = &'a mut T;
+
+	unsafe fn promote_ref(self) -> Self::AsRef {
+		&*self.get()
+	}
+
+	unsafe fn promote_mut(self) -> Self::AsMut {
+		&mut *self.get()
+	}
+}
 
 // === Promises === //
 
