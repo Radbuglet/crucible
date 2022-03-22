@@ -246,11 +246,11 @@ impl<'a> NumberGenExt for &'a AtomicU64 {
 
 // === usize bit-masking === //
 
-pub const fn usize_msb_mask(offset: u32) -> usize {
+pub const fn u64_msb_mask(offset: u32) -> u64 {
 	debug_assert!(offset < 64);
-	1usize.rotate_right(offset + 1)
+	1u64.rotate_right(offset + 1)
 }
 
-pub const fn usize_has_mask(value: usize, mask: usize) -> bool {
+pub const fn u64_has_mask(value: u64, mask: u64) -> bool {
 	value | mask == value
 }

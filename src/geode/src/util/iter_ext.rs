@@ -143,3 +143,21 @@ where
 	}
 	hasher.finish()
 }
+
+pub fn is_sorted<I>(list: I) -> bool
+where
+	I: IntoIterator,
+	I::Item: Ord,
+{
+	let mut prev: Option<I::Item> = None;
+	list.into_iter().all(move |val| {
+		if let Some(prev) = prev.take() {
+			if prev.cmp(&val) == Ordering::Greater {
+				return false;
+			}
+		}
+
+		prev = Some(val);
+		true
+	})
+}

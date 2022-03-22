@@ -1,5 +1,5 @@
 use super::{AtomicEntityGen, Entity, EntityGen};
-use crate::ecs::world::arch::EntityArchLocator;
+use crate::ecs::world::arch::RawEntityArchLocator;
 use crate::util::number::NumberGenExt;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicU64;
@@ -36,10 +36,6 @@ impl Default for EntityManager {
 }
 
 impl EntityManager {
-	pub fn new() -> Self {
-		Self::default()
-	}
-
 	pub fn spawn_now(&mut self) -> Entity {
 		// Increment generation
 		let gen = self.generation_gen.get_mut().try_generate().unwrap();
@@ -123,7 +119,20 @@ impl EntityManager {
 		self.is_future_entity(entity) || self.is_alive(entity)
 	}
 
-	pub fn flush(&mut self) {
+	pub fn locate_entity_raw(&self, index: usize) -> (EntityGen, &RawEntityArchLocator) {
+		let slot = self.slots[index].as_ref().unwrap();
+		(slot.gen, &slot.arch)
+	}
+
+	pub fn locate_entity_raw_mut(
+		&mut self,
+		index: usize,
+	) -> (EntityGen, &mut RawEntityArchLocator) {
+		let slot = self.slots[index].as_mut().unwrap();
+		(slot.gen, &mut slot.arch)
+	}
+
+	pub fn flush_creations(&mut self) {
 		let max_gen = *self.generation_gen.get_mut();
 		let mut gen = self.gen_at_last_flush;
 
@@ -146,27 +155,27 @@ impl EntityManager {
 }
 
 #[derive(Debug, Clone)]
-pub struct EntitySlot {
+struct EntitySlot {
 	/// The generation of the entity which is currently living in this slot.
-	pub gen: EntityGen,
+	gen: EntityGen,
 
-	/// Information on the archetype in which we can find this entity.
-	pub arch: EntityArchLocator,
+	/// The location of the archetype in which the entity is stored.
+	arch: RawEntityArchLocator,
 }
 
 impl EntitySlot {
 	pub fn new(gen: EntityGen) -> Self {
 		Self {
 			gen,
-			arch: EntityArchLocator::default(),
+			arch: RawEntityArchLocator::default(),
 		}
 	}
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Error)]
 #[error("entity {0:?} is dead")]
-pub struct EntityDeadError(Entity);
+pub struct EntityDeadError(pub Entity);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Error)]
 #[error("entity at index {0} is dead")]
-pub struct EntitySlotDeadError(usize);
+pub struct EntitySlotDeadError(pub usize);

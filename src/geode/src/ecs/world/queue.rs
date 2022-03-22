@@ -1,4 +1,4 @@
-//! A queue of entity actions encoded as a bunch of `usize`s.
+//! A queue of entity actions encoded as a bunch of `u64`s.
 //!
 //! ## Encoding scheme
 //!
@@ -6,94 +6,83 @@
 //!
 //! In the command context:
 //!
-//! - The most significant bit indicates whether this is a deletion (true) or an archetypal
-//!   adjustment (false).
-//! - The other bits indicate the entity index.
-//! - The presence of this instruction transitions the decoder to archetype listing context.
+//! - Indicates the target entity slot and transitions to the storage listing context.
 //!
-//! In the archetype listing context:
+//! In the storage listing context:
 //!
 //! - The most significant bit indicates whether this is a continuation (true) or a terminator
 //!   bringing us back to the command context (false).
 //! - The 2nd most significant bit indicates whether this is a deletion (true) or a deletion (false).
 //!
-//! This encoding scheme allows us to pack deletion and archetype data in the same buffer and
+//! This encoding scheme allows us to pack deletion and storage data in the same buffer and
 //! implement bundles in an efficient manner.
 
-use crate::util::number::{usize_has_mask, usize_msb_mask, OptionalUsize};
+use crate::util::number::{u64_has_mask, u64_msb_mask, OptionalUsize};
 
 #[derive(Debug, Clone, Default)]
 pub struct EntityActionEncoder {
 	last_slot: OptionalUsize,
-	actions: Vec<usize>,
+	actions: Vec<u64>,
 }
 
 impl EntityActionEncoder {
-	pub fn new() -> Self {
-		Self::default()
-	}
-
 	fn set_target(&mut self, slot: usize) {
 		if self.last_slot.as_option() != Some(slot) {
 			// Push a target
-			self.actions.push(slot);
+			self.actions.push(slot as u64);
 			self.last_slot = OptionalUsize::some(slot);
 		} else {
 			// Add the continuation bit
-			*self.actions.last_mut().unwrap() |= usize_msb_mask(0);
+			*self.actions.last_mut().unwrap() |= u64_msb_mask(0);
 		}
 	}
 
-	pub fn add(&mut self, action: EntityAction) {
+	pub fn add(&mut self, action: ReshapeAction) {
 		match action {
-			EntityAction::Despawn { slot } => {
-				debug_assert!(slot < isize::MAX as usize);
-				self.actions.push(usize_msb_mask(0) | slot);
+			ReshapeAction::Add { slot, storage } => {
+				debug_assert!(slot < isize::MAX as usize && storage < u64_msb_mask(1));
+				self.set_target(slot);
+				self.actions.push(storage as u64);
 			}
-			EntityAction::AddArch { slot, arch } => {
-				debug_assert!(slot < isize::MAX as usize && arch < usize_msb_mask(1));
-				self.set_target(arch);
-				self.actions.push(arch);
-			}
-			EntityAction::RemoveArch { slot, arch } => {
-				debug_assert!(slot < isize::MAX as usize && arch < usize_msb_mask(1));
-				self.set_target(arch);
-				self.actions.push(arch | usize_msb_mask(1));
+			ReshapeAction::Remove { slot, storage } => {
+				debug_assert!(slot < isize::MAX as usize && storage < u64_msb_mask(1));
+				self.set_target(slot);
+				self.actions.push(storage | u64_msb_mask(1));
 			}
 		}
 	}
 
-	pub fn finish(self) -> Box<[usize]> {
+	pub fn finish(self) -> Box<[u64]> {
 		self.actions.into_boxed_slice()
 	}
 }
 
 #[derive(Debug, Clone)]
 pub struct EntityActionDecoder<'a> {
-	mode: QueueMode,
-	actions: std::slice::Iter<'a, usize>,
+	build_to: OptionalUsize,
+	actions: std::slice::Iter<'a, u64>,
 }
 
 impl<'a> EntityActionDecoder<'a> {
-	pub fn new(actions: &'a [usize]) -> Self {
+	pub fn new(actions: &'a [u64]) -> Self {
 		Self {
-			mode: QueueMode::Command,
+			build_to: OptionalUsize::NONE,
 			actions: actions.into_iter(),
 		}
 	}
 
-	fn parse_arch_id(slot: usize, cmd: usize) -> (bool, EntityAction) {
-		let arch = cmd & !(usize_msb_mask(0) | usize_msb_mask(1));
+	fn parse_storage_id(slot: usize, cmd: u64) -> (bool, ReshapeAction) {
+		let storage = cmd & !(u64_msb_mask(0) | u64_msb_mask(1));
 
 		// Check if we have the continuation flag.
-		let should_continue = usize_has_mask(cmd, usize_msb_mask(0));
+		let should_continue = u64_has_mask(cmd, u64_msb_mask(0));
 
 		// Parse command
-		let is_deletion = usize_has_mask(cmd, usize_msb_mask(1));
+		let is_deletion = u64_has_mask(cmd, u64_msb_mask(1));
 		let action = if is_deletion {
-			EntityAction::RemoveArch { slot, arch }
+			ReshapeAction::Remove { slot, storage }
 		} else {
-			EntityAction::AddArch { slot, arch }
+			ReshapeAction::Add { slot, storage }
 		};
 
 		(should_continue, action)
@@ -101,35 +90,28 @@ impl<'a> EntityActionDecoder<'a> {
 }
 
 impl Iterator for EntityActionDecoder<'_> {
-	type Item = EntityAction;
+	type Item = ReshapeAction;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		match self.mode {
-			QueueMode::Command => {
-				let base_cmd = *self.actions.next()?;
-				let base_target = base_cmd & !usize_msb_mask(0);
+		match self.build_to.as_option() {
+			None => {
+				let target = *self.actions.next()?;
+				debug_assert!(target <= usize::MAX as u64);
+				let target = target as usize;
 
-				if usize_has_mask(base_cmd, usize_msb_mask(0)) {
-					// This is a deletion.
-					Some(EntityAction::Despawn { slot: base_target })
-				} else {
-					// This is an archetypal adjustment.
-					let arch_cmd = *self.actions.next().unwrap();
+				let storage_cmd = *self.actions.next().unwrap();
 
-					let (should_continue, action) = Self::parse_arch_id(base_target, arch_cmd);
-					if should_continue {
-						self.mode = QueueMode::ArchList {
-							target: base_target,
-						};
-					}
-					Some(action)
+				let (should_continue, action) = Self::parse_storage_id(target, storage_cmd);
+				if should_continue {
+					self.build_to = OptionalUsize::some(target);
 				}
+				Some(action)
 			}
-			QueueMode::ArchList { target } => {
+			Some(target) => {
 				let arch_cmd = *self.actions.next().unwrap();
-				let (should_continue, action) = Self::parse_arch_id(target, arch_cmd);
+				let (should_continue, action) = Self::parse_storage_id(target, arch_cmd);
 				if !should_continue {
-					self.mode = QueueMode::Command;
+					self.build_to = OptionalUsize::NONE;
 				}
 				Some(action)
 			}
@@ -138,14 +120,7 @@ impl Iterator for EntityActionDecoder<'_> {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-enum QueueMode {
-	Command,
-	ArchList { target: usize },
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum EntityAction {
-	Despawn { slot: usize },
-	AddArch { slot: usize, arch: usize },
-	RemoveArch { slot: usize, arch: usize },
+pub enum ReshapeAction {
+	Add { slot: usize, storage: u64 },
+	Remove { slot: usize, storage: u64 },
 }
