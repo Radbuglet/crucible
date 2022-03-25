@@ -1,17 +1,17 @@
-use super::{entities::EntityManager, ArchGen, AtomicStorageId, DirtyId, Entity, StorageId};
+use crate::ecs::world::entities::EntityManager;
+use crate::ecs::world::ids::{ArchGen, DirtyId, StorageId, StorageIdGenerator};
+use crate::ecs::world::Entity;
 use crate::util::free_list::FreeList;
 use crate::util::iter_ext::{hash_iter, is_sorted, ExcludeSortedIter, MergeSortedIter};
-use crate::util::number::{NumberGenExt, OptionalUsize};
+use crate::util::number::{NumberGenMut, NumberGenRef, OptionalUsize};
 use hashbrown::raw::RawTable;
 use std::collections::hash_map::RandomState;
 use std::fmt::{Debug, Formatter};
-use std::marker::PhantomData;
 use thiserror::Error;
 
-#[derive(Default)]
 pub struct ArchManager {
 	/// A monotonically increasing storage ID generator.
-	storage_id_gen: AtomicStorageId,
+	storage_id_gen: StorageIdGenerator,
 
 	/// A monotonically increasing archetype ID generator.
 	arch_gen_gen: ArchGen,
@@ -39,13 +39,25 @@ impl Debug for ArchManager {
 	}
 }
 
+impl Default for ArchManager {
+	fn default() -> Self {
+		Self {
+			storage_id_gen: StorageIdGenerator::default(),
+			arch_gen_gen: ArchGen::new(1).unwrap(),
+			full_archetype_map: RawTable::new(),
+			archetypes: FreeList::new(),
+			hasher: RandomState::new(),
+		}
+	}
+}
+
 impl ArchManager {
 	pub fn new_storage_sync(&mut self) -> StorageId {
-		self.storage_id_gen.get_mut().try_generate().unwrap()
+		self.storage_id_gen.try_generate_mut().unwrap()
 	}
 
 	pub fn new_storage_async(&self) -> StorageId {
-		(&self.storage_id_gen).try_generate().unwrap()
+		self.storage_id_gen.try_generate_ref().unwrap()
 	}
 
 	pub fn slot_to_handle(&self, index: usize) -> ArchHandle {
@@ -72,7 +84,6 @@ impl ArchManager {
 			index_in_arch: arch.entities().len(),
 		};
 		arch.push_entity(Entity {
-			_ty: PhantomData,
 			index: entity_index,
 			gen,
 		});
@@ -151,7 +162,7 @@ impl ArchManager {
 		} else {
 			let comp_list = comp_list.collect();
 			let index = self.archetypes.add(Archetype::new(
-				(&mut self.arch_gen_gen).try_generate().unwrap(),
+				self.arch_gen_gen.try_generate_mut().unwrap(),
 				comp_list,
 			));
 			self.full_archetype_map
@@ -260,7 +271,7 @@ pub struct Archetype {
 	dirty_id_gen: DirtyId,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct DirtyEntityNode {
 	dirty_id: DirtyId,
 
@@ -271,6 +282,16 @@ struct DirtyEntityNode {
 	next_dirty: OptionalUsize,
 }
 
+impl Default for DirtyEntityNode {
+	fn default() -> Self {
+		Self {
+			dirty_id: DirtyId::new(1).unwrap(),
+			prev_dirty: OptionalUsize::NONE,
+			next_dirty: OptionalUsize::NONE,
+		}
+	}
+}
+
 impl Archetype {
 	pub fn new(gen: ArchGen, storages: Box<[StorageId]>) -> Self {
 		Self {
@@ -279,7 +300,7 @@ impl Archetype {
 			entity_ids: Vec::new(),
 			entity_dirty_meta: Vec::new(),
 			dirty_head: OptionalUsize::NONE,
-			dirty_id_gen: 0,
+			dirty_id_gen: DirtyId::new(1).unwrap(),
 		}
 	}
 
@@ -310,7 +331,7 @@ impl Archetype {
 		// New link layout:
 		// [head_ptr] [index] [self.dirty_head] [...]
 
-		let dirty_id = (&mut self.dirty_id_gen).try_generate().unwrap();
+		let dirty_id = self.dirty_id_gen.try_generate_mut().unwrap();
 
 		self.entity_dirty_meta[index] = DirtyEntityNode {
 			dirty_id,
@@ -359,7 +380,10 @@ impl Archetype {
 		&self.entity_ids
 	}
 
-	pub fn iter_dirties(&self, last_checked: u64) -> (u64, impl Iterator<Item = usize> + '_) {
+	pub fn iter_dirties(
+		&self,
+		last_checked: DirtyId,
+	) -> (DirtyId, impl Iterator<Item = usize> + '_) {
 		let mut iter_index = self.dirty_head.as_option();
 
 		let iter = std::iter::from_fn(move || {

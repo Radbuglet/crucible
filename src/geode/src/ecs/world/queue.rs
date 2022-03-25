@@ -17,6 +17,7 @@
 //! This encoding scheme allows us to pack deletion and storage data in the same buffer and
 //! implement bundles in an efficient manner.
 
+use crate::ecs::world::ids::StorageId;
 use crate::util::number::{u64_has_mask, u64_msb_mask, OptionalUsize};
 
 #[derive(Debug, Clone, Default)]
@@ -40,14 +41,14 @@ impl EntityActionEncoder {
 	pub fn add(&mut self, action: ReshapeAction) {
 		match action {
 			ReshapeAction::Add { slot, storage } => {
-				debug_assert!(slot < isize::MAX as usize && storage < u64_msb_mask(1));
+				debug_assert!(slot < isize::MAX as usize && storage.get() < u64_msb_mask(1));
 				self.set_target(slot);
-				self.actions.push(storage as u64);
+				self.actions.push(storage.get() as u64);
 			}
 			ReshapeAction::Remove { slot, storage } => {
-				debug_assert!(slot < isize::MAX as usize && storage < u64_msb_mask(1));
+				debug_assert!(slot < isize::MAX as usize && storage.get() < u64_msb_mask(1));
 				self.set_target(slot);
-				self.actions.push(storage | u64_msb_mask(1));
+				self.actions.push(storage.get() | u64_msb_mask(1));
 			}
 		}
 	}
@@ -72,7 +73,7 @@ impl<'a> EntityActionDecoder<'a> {
 	}
 
 	fn parse_storage_id(slot: usize, cmd: u64) -> (bool, ReshapeAction) {
-		let storage = cmd & !(u64_msb_mask(0) | u64_msb_mask(1));
+		let storage = StorageId::new(cmd & !(u64_msb_mask(0) | u64_msb_mask(1))).unwrap();
 
 		// Check if we have the continuation flag.
 		let should_continue = u64_has_mask(cmd, u64_msb_mask(0));
@@ -121,6 +122,6 @@ impl Iterator for EntityActionDecoder<'_> {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum ReshapeAction {
-	Add { slot: usize, storage: u64 },
-	Remove { slot: usize, storage: u64 },
+	Add { slot: usize, storage: StorageId },
+	Remove { slot: usize, storage: StorageId },
 }

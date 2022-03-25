@@ -1,8 +1,6 @@
-use super::{AtomicEntityGen, Entity, EntityGen};
+use super::{ids::EntityGenGenerator, Entity, EntityGen};
 use crate::ecs::world::arch::RawEntityArchLocator;
-use crate::util::number::NumberGenExt;
-use std::marker::PhantomData;
-use std::sync::atomic::AtomicU64;
+use crate::util::number::{NumberGenMut, NumberGenRef};
 use thiserror::Error;
 
 #[derive(Debug)]
@@ -12,7 +10,7 @@ pub struct EntityManager {
 
 	/// A monotonically increasing generation counter. This represents the next value to be yielded
 	/// when generating new generations.
-	generation_gen: AtomicEntityGen,
+	generation_gen: EntityGenGenerator,
 
 	/// A buffer of alive entity slots or `None`. Never shrinks. Used to check for liveness and to
 	/// find containing archetypes for archetype moving.
@@ -26,9 +24,8 @@ pub struct EntityManager {
 impl Default for EntityManager {
 	fn default() -> Self {
 		Self {
-			// We start generators at `1` instead of `0` in preparation for our move to `NonZeroU64`.
-			gen_at_last_flush: 1,
-			generation_gen: AtomicU64::new(1),
+			gen_at_last_flush: EntityGen::new(1).unwrap(),
+			generation_gen: EntityGenGenerator::default(),
 			slots: Vec::new(),
 			free_slots: Vec::new(),
 		}
@@ -38,7 +35,7 @@ impl Default for EntityManager {
 impl EntityManager {
 	pub fn spawn_now(&mut self) -> Entity {
 		// Increment generation
-		let gen = self.generation_gen.get_mut().try_generate().unwrap();
+		let gen = self.generation_gen.try_generate_mut().unwrap();
 		self.gen_at_last_flush = gen;
 
 		// Determine index
@@ -54,17 +51,14 @@ impl EntityManager {
 			}
 		};
 
-		Entity {
-			_ty: PhantomData,
-			index,
-			gen,
-		}
+		Entity { index, gen }
 	}
 
 	pub fn spawn_deferred(&self) -> Entity {
 		// Determine generation
-		let gen = (&self.generation_gen).try_generate().unwrap();
-		let count = self.free_slots.len() as isize - (gen - self.gen_at_last_flush) as isize;
+		let gen = self.generation_gen.try_generate_ref().unwrap();
+		let count =
+			self.free_slots.len() as isize - (gen.get() - self.gen_at_last_flush.get()) as isize;
 
 		// Determine index
 		let index = if count <= 0 {
@@ -77,11 +71,7 @@ impl EntityManager {
 		};
 
 		// Build entity handle
-		Entity {
-			_ty: PhantomData,
-			index,
-			gen,
-		}
+		Entity { index, gen }
 	}
 
 	pub fn despawn_by_slot_now(&mut self, target: usize) -> Result<(), EntitySlotDeadError> {
@@ -133,20 +123,21 @@ impl EntityManager {
 	}
 
 	pub fn flush_creations(&mut self) {
-		let max_gen = *self.generation_gen.get_mut();
-		let mut gen = self.gen_at_last_flush;
+		let max_gen = self.generation_gen.next_value();
+		let mut gen = self.gen_at_last_flush.get();
 
 		// Reserve slots in existing allocation
-		while gen < max_gen && !self.free_slots.is_empty() {
+		while gen < max_gen.get() && !self.free_slots.is_empty() {
 			let index = self.free_slots.pop().unwrap();
-			self.slots[index] = Some(EntitySlot::new(gen));
+			self.slots[index] = Some(EntitySlot::new(EntityGen::new(gen).unwrap()));
 			gen += 1;
 		}
 
 		// Reserve slots at end of buffer
-		self.slots.reserve((max_gen - gen) as usize);
-		for gen in gen..max_gen {
-			self.slots.push(Some(EntitySlot::new(gen)));
+		self.slots.reserve((max_gen.get() - gen) as usize);
+		for gen in gen..max_gen.get() {
+			self.slots
+				.push(Some(EntitySlot::new(EntityGen::new(gen).unwrap())));
 		}
 
 		// Update `last_flushed_gen`

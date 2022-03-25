@@ -27,28 +27,34 @@ pub trait EnumMeta: 'static + Sized + Copy + Eq + Hash {
 		&Self::values()[self.index()].1
 	}
 
-	fn values_iter() -> EnumMetaIter<Self> {
-		EnumMetaIter::from_slice(Self::values())
+	fn values_iter() -> EnumPairIter<Self> {
+		EnumPairIter::from_slice(Self::values())
 	}
 
 	fn variants() -> EnumVariantIter<Self> {
 		EnumVariantIter::from_slice(Self::values())
 	}
 
-	fn find_where<F>(mut fn_: F) -> Option<Self>
+	fn find_where<F>(mut predicate: F) -> Option<Self>
 	where
 		F: FnMut(Self, &'static Self::Meta) -> bool,
 	{
-		Self::values_iter().find_map(|(val, meta)| if fn_(val, meta) { Some(val) } else { None })
+		Self::values_iter().find_map(|(val, meta)| {
+			if predicate(val, meta) {
+				Some(val)
+			} else {
+				None
+			}
+		})
 	}
 }
 
 #[derive(Clone)]
-pub struct EnumMetaIter<T: EnumMeta> {
+pub struct EnumPairIter<T: EnumMeta> {
 	iter: SliceIter<'static, (T, T::Meta)>,
 }
 
-impl<T: EnumMeta> EnumMetaIter<T> {
+impl<T: EnumMeta> EnumPairIter<T> {
 	pub fn from_slice(slice: &'static [(T, T::Meta)]) -> Self {
 		Self { iter: slice.iter() }
 	}
@@ -58,8 +64,8 @@ impl<T: EnumMeta> EnumMetaIter<T> {
 	}
 }
 
-impl<T: EnumMeta> ExactSizeIterator for EnumMetaIter<T> {}
-impl<T: EnumMeta> Iterator for EnumMetaIter<T> {
+impl<T: EnumMeta> ExactSizeIterator for EnumPairIter<T> {}
+impl<T: EnumMeta> Iterator for EnumPairIter<T> {
 	type Item = (T, &'static T::Meta);
 
 	fn next(&mut self) -> Option<Self::Item> {
