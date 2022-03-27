@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bumpalo = "3.9.1"
 thiserror = "1.0.30"
 crossbeam = { version = "0.8.1", features = ["crossbeam-queue"] }
 derive-where = "1.0.0-rc.2"

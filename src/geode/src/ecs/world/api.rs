@@ -6,16 +6,6 @@ use crate::ecs::world::{ArchHandle, ArchetypeDeadError, EntityArchLocator, Entit
 use crossbeam::queue::SegQueue;
 use std::ops::{Deref, DerefMut};
 
-// === World === //
-
-#[derive(Debug, Default)]
-pub struct World {
-	entities: EntityManager,
-	arch: ArchManager,
-	delete_queues: SegQueue<Box<[usize]>>,
-	reshape_queues: SegQueue<Box<[u64]>>,
-}
-
 pub trait WorldAccessor {
 	fn raw_world(&self) -> &World;
 
@@ -58,6 +48,14 @@ pub trait WorldAccessor {
 	fn attach_storage(&mut self, target: Entity, storage: StorageId);
 
 	fn detach_storage(&mut self, target: Entity, storage: StorageId);
+}
+
+#[derive(Debug, Default)]
+pub struct World {
+	entities: EntityManager,
+	arch: ArchManager,
+	delete_queues: SegQueue<Box<[usize]>>,
+	reshape_queues: SegQueue<Box<[u64]>>,
 }
 
 impl World {
@@ -256,8 +254,6 @@ impl<H: Deref<Target = World>> Drop for AsyncWorldHandle<H> {
 			.push(queues.deletion_queue.into_boxed_slice());
 	}
 }
-
-// === Entity === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Entity {

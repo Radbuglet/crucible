@@ -1,5 +1,6 @@
-// use crate::ecs::map::{Entity, MapStorage, World};
 use std::collections::VecDeque;
+
+// === Core === //
 
 pub trait EventTarget<'i, E> {
 	fn fire(&mut self, event: E);
@@ -35,19 +36,6 @@ impl<'i, E> EventTarget<'i, E> for VecDeque<E> {
 		self.extend(iter)
 	}
 }
-
-// #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-// pub struct EntityEvent<'a, E> {
-//     pub world: &'a World,
-//     pub target: Entity,
-//     pub event: E,
-// }
-//
-// impl<'w, E> EventTarget<'_, EntityEvent<'w, E>> for MapStorage<E> {
-//     fn fire(&mut self, event: EntityEvent<'w, E>) {
-//         self.insert(event.world, event.target, event.event);
-//     }
-// }
 
 pub struct EventTargetCallback<'i, E, X> {
 	queue: VecDeque<PollEntry<'i, E, X>>,
@@ -131,21 +119,18 @@ where
 	}
 }
 
-// pub trait NestedEvent {
-//     type Event;
-//     type DirtyQuery;
-//     type EventQuery;
-//
-//     fn dirty_query(&self) -> Self::DirtyQuery;
-//     fn event_query(&self) -> Self::EventQuery;
-// }
-//
-// pub struct SimpleEventPath {}
-//
-// pub struct ListenerTree {
-//     listens_to: MapStorage<()>,
-// }
+// === Object Safety === //
 
-pub trait DynEventTarget {
-	// ...
+pub trait ObjectSafeEventTarget<E> {
+	fn fire_but_object_safe(&mut self, event: E);
 }
+
+impl<'a, E, T: EventTarget<'a, E>> ObjectSafeEventTarget<E> for T {
+	fn fire_but_object_safe(&mut self, event: E) {
+		self.fire(event);
+	}
+}
+
+// === ECS Integrations === //
+
+// TODO
