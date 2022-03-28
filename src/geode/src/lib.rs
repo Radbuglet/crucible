@@ -1,5 +1,4 @@
 #![feature(decl_macro)]
-#![feature(nonzero_ops)]
 #![feature(ptr_metadata)]
 #![feature(unsize)]
 

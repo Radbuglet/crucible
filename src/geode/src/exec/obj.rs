@@ -3,20 +3,51 @@ use crate::util::inline_store::ByteContainer;
 use crate::util::macro_util::impl_tuples;
 use bumpalo::Bump;
 use std::alloc::Layout;
-use std::any::TypeId;
+use std::any::{type_name, TypeId};
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt::{Debug, Display, Formatter};
 use std::marker::{PhantomData, Unsize};
+use std::ops::{Deref, DerefMut};
 use std::ptr::{NonNull, Pointee};
+use thiserror::Error;
+
+// === Obj core === //
 
 #[derive(Default)]
 pub struct Obj {
 	comp_map: HashMap<TypeId, ObjEntry>,
-	locks: Vec<Cell<isize>>,
+	locks: Vec<LockCounter>,
 	bump: Bump,
 }
 
+impl Debug for Obj {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		#[cfg(debug_assertions)]
+		{
+			let mut builder = f.debug_tuple("Obj");
+			for entry in self.comp_map.values() {
+				builder.field(&format_args!(
+					"{}: {:?}",
+					entry.comp_name,
+					self.locks[entry.lock_index].state()
+				));
+			}
+			builder.finish()
+		}
+		#[cfg(not(debug_assertions))]
+		{
+			f.debug_struct("Obj").finish_non_exhaustive()
+		}
+	}
+}
+
 impl Obj {
+	pub fn new() -> Self {
+		Self::default()
+	}
+
 	pub fn add<T: 'static>(&mut self, value: T) {
 		self.add_as(value, ());
 	}
@@ -28,7 +59,7 @@ impl Obj {
 
 		// Register it
 		let lock_index = self.locks.len();
-		self.locks.push(Cell::new(0));
+		self.locks.push(LockCounter::new());
 		self.comp_map.insert(
 			TypeId::of::<T>(),
 			ObjEntry::new_owned(ptr, lock_index, &mut self.bump),
@@ -40,6 +71,79 @@ impl Obj {
 		}
 	}
 
+	pub fn try_get_raw<T: ?Sized + 'static>(&self) -> Result<NonNull<T>, ComponentMissingError> {
+		self.comp_map
+			.get(&TypeId::of::<T>())
+			.map(|entry| unsafe { entry.target_ptr::<T>() })
+			.ok_or(ComponentMissingError)
+	}
+
+	pub fn try_borrow_ref<'a, T: ?Sized + 'static>(&'a self) -> Result<RwRef<'a, T>, BorrowError> {
+		// Try to fetch entry
+		let entry = self
+			.comp_map
+			.get(&TypeId::of::<T>())
+			.ok_or(BorrowError::ComponentMissing {
+				component_name: type_name::<T>(),
+				error: ComponentMissingError,
+			})?;
+
+		// Try to acquire lock
+		self.locks[entry.lock_index]
+			.try_lock_ref()
+			.map_err(|error| BorrowError::LockError {
+				component_name: type_name::<T>(),
+				error,
+			})?;
+
+		// Promote to reference
+		let comp = unsafe { entry.target_ptr::<T>().as_ref() } as &'a T;
+
+		Ok(RwRef {
+			obj: self,
+			lock_index: entry.lock_index,
+			target: comp,
+		})
+	}
+
+	pub fn try_borrow_mut<'a, T: ?Sized + 'static>(&'a self) -> Result<RwMut<'a, T>, BorrowError> {
+		// Try to fetch entry
+		let entry = self
+			.comp_map
+			.get(&TypeId::of::<T>())
+			.ok_or(BorrowError::ComponentMissing {
+				component_name: type_name::<T>(),
+				error: ComponentMissingError,
+			})?;
+
+		// Try to acquire lock
+		self.locks[entry.lock_index]
+			.try_lock_mut()
+			.map_err(|error| BorrowError::LockError {
+				component_name: type_name::<T>(),
+				error,
+			})?;
+
+		// Promote to reference
+		let comp = unsafe { entry.target_ptr::<T>().as_mut() } as &'a mut T;
+
+		Ok(RwMut {
+			obj: self,
+			lock_index: entry.lock_index,
+			target: comp,
+		})
+	}
+
+	pub fn borrow_ref<T: ?Sized + 'static>(&self) -> RwRef<T> {
+		self.try_borrow_ref::<T>().unwrap()
+	}
+
+	pub fn borrow_mut<T: ?Sized + 'static>(&self) -> RwMut<T> {
+		self.try_borrow_mut::<T>().unwrap()
+	}
+
+	// === Event handler extensions === //
+
 	pub fn add_event_handler<T, E>(&mut self, handler: T)
 	where
 		T: 'static + ObjectSafeEventTarget<E>,
@@ -48,34 +152,25 @@ impl Obj {
 		self.add_as(handler, (alias_as::<dyn ObjectSafeEventTarget<E>>(),));
 	}
 
-	pub fn try_get_raw<T: ?Sized + 'static>(&self) -> Option<NonNull<T>> {
-		self.comp_map.get(&TypeId::of::<T>()).map(|entry| {
-			let is_inline = ByteContainer::<usize>::can_host::<<T as Pointee>::Metadata>().is_ok();
-			let ptr_meta = if is_inline {
-				unsafe { *entry.ptr_meta.as_ref::<<T as Pointee>::Metadata>() }
-			} else {
-				unsafe {
-					let ptr_to_meta = entry.ptr_meta.as_ref::<NonNull<<T as Pointee>::Metadata>>();
-					*ptr_to_meta.as_ref()
-				}
-			};
-
-			NonNull::from_raw_parts(entry.ptr, ptr_meta)
-		})
+	pub fn try_fire<E: 'static>(&self, event: E) -> Result<(), (E, ComponentMissingError)> {
+		match self.try_borrow_mut::<dyn ObjectSafeEventTarget<E>>() {
+			Ok(mut target) => {
+				target.fire_but_object_safe(event);
+				Ok(())
+			}
+			Err(BorrowError::LockError { error, .. }) => panic!("{}", error),
+			Err(BorrowError::ComponentMissing { error, .. }) => Err((event, error)),
+		}
 	}
 
-	pub fn try_get<T: ?Sized + 'static>(&self) -> Option<&'_ T> {
-		self.try_get_raw().map(|inner| unsafe { inner.as_ref() })
-	}
-
-	pub fn try_get_mut<T: ?Sized + 'static>(&mut self) -> Option<&'_ mut T> {
-		self.try_get_raw()
-			.map(|mut inner| unsafe { inner.as_mut() })
+	pub fn fire<E: 'static>(&self, event: E) {
+		self.try_fire(event).map_err(|(_, err)| err).unwrap()
 	}
 }
 
 impl Drop for Obj {
 	fn drop(&mut self) {
+		// Bump does not run destructors.
 		for comp in self.comp_map.values() {
 			if let Some(drop_fn) = comp.drop_fn_or_alias {
 				unsafe {
@@ -91,6 +186,8 @@ struct ObjEntry {
 	ptr_meta: ByteContainer<usize>,
 	lock_index: usize,
 	drop_fn_or_alias: Option<unsafe fn(*mut ())>,
+	#[cfg(debug_assertions)]
+	comp_name: &'static str,
 }
 
 impl ObjEntry {
@@ -131,6 +228,8 @@ impl ObjEntry {
 			ptr_meta,
 			lock_index,
 			drop_fn_or_alias: Some(drop_fn),
+			#[cfg(debug_assertions)]
+			comp_name: type_name::<T>(),
 		}
 	}
 
@@ -142,9 +241,168 @@ impl ObjEntry {
 			ptr_meta,
 			lock_index,
 			drop_fn_or_alias: None,
+			#[cfg(debug_assertions)]
+			comp_name: type_name::<T>(),
+		}
+	}
+
+	unsafe fn target_ptr<T: ?Sized>(&self) -> NonNull<T> {
+		let is_inline = ByteContainer::<usize>::can_host::<<T as Pointee>::Metadata>().is_ok();
+		let ptr_meta = if is_inline {
+			*self.ptr_meta.as_ref::<<T as Pointee>::Metadata>()
+		} else {
+			let ptr_to_meta = self.ptr_meta.as_ref::<NonNull<<T as Pointee>::Metadata>>();
+			*ptr_to_meta.as_ref()
+		};
+
+		NonNull::from_raw_parts(self.ptr, ptr_meta)
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct LockCounter(Cell<isize>);
+
+impl Default for LockCounter {
+	fn default() -> Self {
+		Self(Cell::new(0))
+	}
+}
+
+impl LockCounter {
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	pub fn state(&self) -> LockState {
+		LockState::decode(self.0.get())
+	}
+
+	pub fn try_lock_mut(&self) -> Result<(), LockError> {
+		if self.0.get() != 0 {
+			return Err(LockError::XorError(self.state()));
+		}
+
+		self.0.set(-1);
+		Ok(())
+	}
+
+	pub fn try_lock_ref(&self) -> Result<(), LockError> {
+		if self.0.get() < 0 {
+			return Err(LockError::XorError(self.state()));
+		}
+		let new_count = self
+			.0
+			.get()
+			.checked_add(1)
+			.ok_or(LockError::TooManyImmutable)?;
+
+		self.0.set(new_count);
+		Ok(())
+	}
+
+	pub unsafe fn unlock_mut(&self) {
+		debug_assert_eq!(self.0.get(), -1);
+		self.0.set(0);
+	}
+
+	pub unsafe fn unlock_ref(&self) {
+		debug_assert!(self.0.get() > 0);
+		self.0.set(self.0.get() - 1);
+	}
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum LockState {
+	Mutably,
+	Immutably(usize),
+	Unborrowed,
+}
+
+impl LockState {
+	fn decode(count: isize) -> Self {
+		if count == 0 {
+			Self::Unborrowed
+		} else if count > 0 {
+			Self::Immutably(count as usize)
+		} else {
+			debug_assert_eq!(count, -1);
+			Self::Mutably
 		}
 	}
 }
+
+// === Error types === //
+
+// TODO: Make lock and component missing errors include target components.
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Error)]
+#[error("Component missing from `Obj`.")]
+pub struct ComponentMissingError;
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub enum LockError {
+	XorError(LockState),
+	TooManyImmutable,
+}
+
+impl Error for LockError {}
+
+impl Display for LockError {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::XorError(lock_state) => {
+				f.write_str("Failed to lock component ")?;
+				match lock_state {
+					LockState::Mutably => {
+						f.write_str(
+							"immutably: 1 concurrent mutable borrow prevents shared immutable access.",
+						)?;
+					}
+					LockState::Immutably(concurrent) => {
+						write!(
+							f,
+							"mutably: {} concurrent immutable borrow{} prevent{} exclusive mutable access.",
+							concurrent,
+							// Gotta love English grammar
+							if *concurrent == 1 { "" } else { "s" },
+							if *concurrent == 1 { "s" } else { "" },
+						)?;
+					}
+					LockState::Unborrowed => {
+						#[cfg(debug_assertions)]
+						unreachable!();
+						#[cfg(not(debug_assertions))]
+						f.write_str("even though it was unborrowed?!")?;
+					}
+				}
+			}
+			Self::TooManyImmutable => {
+				write!(
+					f,
+					"Failed to lock component immutably: more than {} concurrent immutable borrows \
+					 outstanding, which is the `isize::MAX` limit!",
+					isize::MAX
+				)?;
+			}
+		}
+		Ok(())
+	}
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Error)]
+pub enum BorrowError {
+	#[error("Error while borrowing component of type `{component_name}`. {error}")]
+	ComponentMissing {
+		component_name: &'static str,
+		error: ComponentMissingError,
+	},
+	#[error("Error while borrowing component of type `{component_name}`. {error}")]
+	LockError {
+		component_name: &'static str,
+		error: LockError,
+	},
+}
+
+// === Keys === //
 
 pub unsafe trait AliasList<T> {
 	unsafe fn push_aliases(self, obj: &mut Obj, ptr: NonNull<T>, lock_index: usize);
@@ -183,3 +441,68 @@ macro tup_impl_alias_list($($name:ident: $field:tt),*) {
 }
 
 impl_tuples!(tup_impl_alias_list);
+
+// === Rw Guards === //
+
+#[derive(Debug)]
+pub struct RwMut<'a, T: ?Sized> {
+	obj: &'a Obj,
+	lock_index: usize,
+	target: &'a mut T,
+}
+
+impl<'a, T: ?Sized> Deref for RwMut<'a, T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		self.target
+	}
+}
+
+impl<'a, T: ?Sized> DerefMut for RwMut<'a, T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		self.target
+	}
+}
+
+impl<'a, T: ?Sized> Drop for RwMut<'a, T> {
+	fn drop(&mut self) {
+		unsafe {
+			self.obj.locks[self.lock_index].unlock_mut();
+		}
+	}
+}
+
+#[derive(Debug)]
+pub struct RwRef<'a, T: ?Sized> {
+	obj: &'a Obj,
+	lock_index: usize,
+	target: &'a T,
+}
+
+impl<'a, T: ?Sized> Deref for RwRef<'a, T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		self.target
+	}
+}
+
+impl<'a, T: ?Sized> Clone for RwRef<'a, T> {
+	fn clone(&self) -> Self {
+		self.obj.locks[self.lock_index].try_lock_ref().unwrap();
+		Self {
+			obj: self.obj,
+			lock_index: self.lock_index,
+			target: self.target,
+		}
+	}
+}
+
+impl<'a, T: ?Sized> Drop for RwRef<'a, T> {
+	fn drop(&mut self) {
+		unsafe {
+			self.obj.locks[self.lock_index].unlock_ref();
+		}
+	}
+}

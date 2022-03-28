@@ -295,7 +295,7 @@ impl NumberGenMut for NonZeroU64 {
 	fn try_generate_mut(&mut self) -> Result<Self::Value, GenOverflowError<Self>> {
 		Ok(replace(
 			self,
-			self.checked_add(1).ok_or(GenOverflowError::new())?,
+			NonZeroU64::new(self.get().checked_add(1).ok_or(GenOverflowError::new())?).unwrap(),
 		))
 	}
 }
