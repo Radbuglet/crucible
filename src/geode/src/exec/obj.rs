@@ -1,6 +1,6 @@
 use crate::exec::event::ObjectSafeEventTarget;
+use crate::util::arity_utils::{impl_tuples, InjectableClosure};
 use crate::util::inline_store::ByteContainer;
-use crate::util::macro_util::impl_tuples;
 use bumpalo::Bump;
 use std::alloc::Layout;
 use std::any::{type_name, TypeId};
@@ -140,6 +140,30 @@ impl Obj {
 
 	pub fn borrow_mut<T: ?Sized + 'static>(&self) -> RwMut<T> {
 		self.try_borrow_mut::<T>().unwrap()
+	}
+
+	pub fn try_borrow_many<'a, T: ObjBorrowable<'a>>(&'a self) -> Result<T, BorrowError> {
+		T::try_borrow_from(self)
+	}
+
+	pub fn borrow_many<'a, T: ObjBorrowable<'a>>(&'a self) -> T {
+		self.try_borrow_many().unwrap()
+	}
+
+	pub fn inject<'a, D, F>(&'a self, target: F) -> F::Return
+	where
+		D: ObjBorrowable<'a>,
+		F: InjectableClosure<(), D>,
+	{
+		self.inject_with((), target)
+	}
+
+	pub fn inject_with<'a, A, D, F>(&'a self, args: A, mut target: F) -> F::Return
+	where
+		D: ObjBorrowable<'a>,
+		F: InjectableClosure<A, D>,
+	{
+		target.call_injected(args, self.borrow_many())
 	}
 
 	// === Event handler extensions === //
@@ -401,6 +425,35 @@ pub enum BorrowError {
 		error: LockError,
 	},
 }
+
+// === Multi-fetch === //
+
+pub trait ObjBorrowable<'a>: Sized {
+	fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError>;
+}
+
+impl<'a, T: ?Sized + 'static> ObjBorrowable<'a> for RwMut<'a, T> {
+	fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError> {
+		obj.try_borrow_mut()
+	}
+}
+
+impl<'a, T: ?Sized + 'static> ObjBorrowable<'a> for RwRef<'a, T> {
+	fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError> {
+		obj.try_borrow_ref()
+	}
+}
+
+macro impl_tup_obj_borrowable($($name:ident: $field:tt),*) {
+	impl<'a, $($name: ObjBorrowable<'a>),*> ObjBorrowable<'a> for ($($name,)*) {
+		#[allow(unused_variables)]
+		fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError> {
+			Ok(($($name::try_borrow_from(obj)?,)*))
+		}
+	}
+}
+
+impl_tuples!(impl_tup_obj_borrowable);
 
 // === Keys === //
 

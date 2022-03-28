@@ -1,8 +1,8 @@
 //! Async-friendly RW-locks which can be locked in atomic groups. Useful for async-based scheduling.
 
 use self::internals::{wake_up_requests, LockRequestHandle, LockRequestState};
+use crate::util::arity_utils::impl_tuples;
 use crate::util::error::ResultExt;
-use crate::util::macro_util::impl_tuples;
 use crate::util::number::Bitmask64;
 use log::trace;
 use std::cell::UnsafeCell;
