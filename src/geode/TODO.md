@@ -2,15 +2,15 @@
 
 - [ ] Implement single-threaded `Obj` proof-of-concept:
   - [ ] Implement borrowing models:
-    - [ ] Basic `.borrow_ref` and `.borrow_mut`
-    - [ ] Basic `.fetch_many`
+    - [x] Basic `.borrow_ref` and `.borrow_mut`
+    - [x] Basic `.fetch_many`
     - [ ] Macro-based `.fetch_many`
-    - [ ] Closure borrowing
+    - [x] Closure borrowing
     - [ ] `.borrow_raw`, `.to_raw`, `.downgrade`, `.upgrade`, `.loan`
-  - [ ] Integrate with `EventTarget`:
-    - [ ] Write `add_event_target` helper
-    - [ ] Write `fire_event` helper
-  - [ ] Integrate with context trees
+  - [x] Integrate with `EventTarget`:
+    - [x] Write `add_event_target` helper
+    - [x] Write `fire_event` helper
+  - [ ] Implement object tree
   - [ ] Add `DebugLabel`
   - [ ] Add dynamic, static, and semi-static component keys
 - [ ] Implement multithreaded `Obj`:
