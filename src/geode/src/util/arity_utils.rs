@@ -45,6 +45,7 @@ impl<ZZClosure: FnMut($($left_name,)* $($right_name,)*) -> ZZRet, ZZRet, $($left
 }
 
 macro tup_impl_closure_call($($name:ident: $field:tt),*) {
+	tup_impl_closure_call_derive_for_fn!($($name: $field),* ~);
 	tup_impl_closure_call_derive_for_fn!($($name: $field),* ~ N: 0);
 	tup_impl_closure_call_derive_for_fn!($($name: $field),* ~ N: 0, O: 1);
 	tup_impl_closure_call_derive_for_fn!($($name: $field),* ~ N: 0, O: 1, P: 2);

@@ -1,5 +1,6 @@
 use crate::exec::event::ObjectSafeEventTarget;
 use crate::util::arity_utils::{impl_tuples, InjectableClosure};
+use crate::util::error::ResultExt;
 use crate::util::inline_store::ByteContainer;
 use bumpalo::Bump;
 use std::alloc::Layout;
@@ -135,11 +136,11 @@ impl Obj {
 	}
 
 	pub fn borrow_ref<T: ?Sized + 'static>(&self) -> RwRef<T> {
-		self.try_borrow_ref::<T>().unwrap()
+		self.try_borrow_ref::<T>().unwrap_pretty()
 	}
 
 	pub fn borrow_mut<T: ?Sized + 'static>(&self) -> RwMut<T> {
-		self.try_borrow_mut::<T>().unwrap()
+		self.try_borrow_mut::<T>().unwrap_pretty()
 	}
 
 	pub fn try_borrow_many<'a, T: ObjBorrowable<'a>>(&'a self) -> Result<T, BorrowError> {
@@ -147,7 +148,7 @@ impl Obj {
 	}
 
 	pub fn borrow_many<'a, T: ObjBorrowable<'a>>(&'a self) -> T {
-		self.try_borrow_many().unwrap()
+		self.try_borrow_many().unwrap_pretty()
 	}
 
 	pub fn inject<'a, D, F>(&'a self, target: F) -> F::Return
@@ -168,18 +169,28 @@ impl Obj {
 
 	// === Event handler extensions === //
 
-	pub fn add_event_handler<T, E>(&mut self, handler: T)
+	// TODO: Implement proper component injection; allow non `'static` events.
+	pub fn add_event_handler<T, E>(&mut self, mut handler: T)
 	where
-		T: 'static + ObjectSafeEventTarget<E>,
+		T: 'static + FnMut(E, &Obj),
 		E: 'static,
 	{
-		self.add_as(handler, (alias_as::<dyn ObjectSafeEventTarget<E>>(),));
+		self.add_as(
+			move |event: ObjEvent<E>| {
+				let obj = unsafe { event.obj.as_ref() };
+				(handler)(event.event, obj)
+			},
+			(alias_as::<dyn ObjectSafeEventTarget<ObjEvent<E>>>(),),
+		);
 	}
 
 	pub fn try_fire<E: 'static>(&self, event: E) -> Result<(), (E, ComponentMissingError)> {
-		match self.try_borrow_mut::<dyn ObjectSafeEventTarget<E>>() {
+		match self.try_borrow_mut::<dyn ObjectSafeEventTarget<ObjEvent<E>>>() {
 			Ok(mut target) => {
-				target.fire_but_object_safe(event);
+				target.fire_but_object_safe(ObjEvent {
+					obj: NonNull::from(self),
+					event,
+				});
 				Ok(())
 			}
 			Err(BorrowError::LockError { error, .. }) => panic!("{}", error),
@@ -188,8 +199,13 @@ impl Obj {
 	}
 
 	pub fn fire<E: 'static>(&self, event: E) {
-		self.try_fire(event).map_err(|(_, err)| err).unwrap()
+		self.try_fire(event).map_err(|(_, err)| err).unwrap_pretty()
 	}
+}
+
+struct ObjEvent<E: 'static> {
+	obj: NonNull<Obj>,
+	event: E,
 }
 
 impl Drop for Obj {
@@ -504,6 +520,28 @@ pub struct RwMut<'a, T: ?Sized> {
 	target: &'a mut T,
 }
 
+impl<'a, T: ?Sized> RwMut<'a, T> {
+	pub fn downgrade(ptr: Self) -> RwRef<'a, T> {
+		// Copy down guard state
+		let obj = ptr.obj;
+		let lock_index = ptr.lock_index;
+		let target = NonNull::from(&*ptr.target);
+
+		// Release guard
+		drop(ptr);
+
+		// Attempt to lock guard
+		obj.locks[lock_index].try_lock_ref().unwrap_pretty();
+
+		// Create new guard
+		RwRef {
+			obj,
+			lock_index,
+			target: unsafe { target.as_ref() } as &'a T,
+		}
+	}
+}
+
 impl<'a, T: ?Sized> Deref for RwMut<'a, T> {
 	type Target = T;
 
@@ -533,6 +571,28 @@ pub struct RwRef<'a, T: ?Sized> {
 	target: &'a T,
 }
 
+impl<'a, T: ?Sized> RwRef<'a, T> {
+	pub fn upgrade(ptr: Self) -> RwMut<'a, T> {
+		// Copy down guard state
+		let obj = ptr.obj;
+		let lock_index = ptr.lock_index;
+		let mut target = NonNull::from(ptr.target);
+
+		// Release guard
+		drop(ptr);
+
+		// Attempt to lock guard
+		obj.locks[lock_index].try_lock_mut().unwrap_pretty();
+
+		// Create new guard
+		RwMut {
+			obj,
+			lock_index,
+			target: unsafe { target.as_mut() } as &'a mut T,
+		}
+	}
+}
+
 impl<'a, T: ?Sized> Deref for RwRef<'a, T> {
 	type Target = T;
 
@@ -543,7 +603,9 @@ impl<'a, T: ?Sized> Deref for RwRef<'a, T> {
 
 impl<'a, T: ?Sized> Clone for RwRef<'a, T> {
 	fn clone(&self) -> Self {
-		self.obj.locks[self.lock_index].try_lock_ref().unwrap();
+		self.obj.locks[self.lock_index]
+			.try_lock_ref()
+			.unwrap_pretty();
 		Self {
 			obj: self.obj,
 			lock_index: self.lock_index,

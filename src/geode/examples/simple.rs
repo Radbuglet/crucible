@@ -1,5 +1,5 @@
 use geode::ecs::world::World;
-use geode::exec::obj::Obj;
+use geode::exec::obj::{Obj, RwMut, RwRef};
 use std::cell::Cell;
 use std::mem::replace;
 
@@ -9,16 +9,20 @@ fn main() {
 	root.add(World::new());
 	root.add(SceneManager::new(make_main_scene()));
 
-	let mut sm = root.borrow_mut::<SceneManager>();
+	let sm = root.borrow_ref::<SceneManager>();
 	sm.current_scene().fire(UpdateEvent);
 	sm.set_next_scene(make_play_scene());
+
+	let mut sm = RwRef::upgrade(sm);
 	sm.swap_scene();
+
+	let sm = RwMut::downgrade(sm);
 	sm.current_scene().fire(UpdateEvent);
 }
 
 fn make_main_scene() -> Obj {
 	let mut scene = Obj::new();
-	scene.add_event_handler(|_: UpdateEvent| {
+	scene.add_event_handler(|_: UpdateEvent, _| {
 		println!("Wow, an update in main!");
 	});
 	scene
@@ -26,7 +30,7 @@ fn make_main_scene() -> Obj {
 
 fn make_play_scene() -> Obj {
 	let mut scene = Obj::new();
-	scene.add_event_handler(|_: UpdateEvent| {
+	scene.add_event_handler(|_: UpdateEvent, _| {
 		println!("Wow, an update in play!");
 	});
 	scene
@@ -40,7 +44,7 @@ struct SceneManager {
 impl SceneManager {
 	pub fn new(initial_scene: Obj) -> Self {
 		Self {
-			next_scene: Default::default(),
+			next_scene: Cell::new(None),
 			current_scene: initial_scene,
 		}
 	}
@@ -50,8 +54,7 @@ impl SceneManager {
 	}
 
 	pub fn set_next_scene(&self, scene: Obj) {
-		let replaced = self.next_scene.replace(Some(scene));
-		debug_assert!(replaced.is_none());
+		self.next_scene.replace(Some(scene));
 	}
 
 	pub fn swap_scene(&mut self) -> Option<Obj> {
