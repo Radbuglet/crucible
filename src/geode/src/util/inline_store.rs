@@ -64,18 +64,8 @@ impl<H> ByteContainer<H> {
 		(self as *const Self).cast::<G>()
 	}
 
-	pub fn as_mut_ptr<G>(&mut self) -> *mut G {
-		#[cfg(debug_assertions)]
-		Self::can_host::<G>().unwrap();
-		(self as *mut Self).cast::<G>()
-	}
-
 	pub unsafe fn as_ref<G>(&self) -> &G {
 		&*self.as_const_ptr()
-	}
-
-	pub unsafe fn as_mut<G>(&mut self) -> &mut G {
-		&mut *self.as_mut_ptr()
 	}
 }
 

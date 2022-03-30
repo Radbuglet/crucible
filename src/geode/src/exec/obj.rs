@@ -5,43 +5,28 @@ use crate::util::inline_store::ByteContainer;
 use bumpalo::Bump;
 use std::alloc::Layout;
 use std::any::{type_name, TypeId};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::{PhantomData, Unsize};
+use std::mem::replace;
 use std::ops::{Deref, DerefMut};
 use std::ptr::{NonNull, Pointee};
+use std::rc::{Rc, Weak};
 use thiserror::Error;
 
 // === Obj core === //
 
+#[derive(Debug, Clone, Default)]
+pub struct Obj(Rc<RefCell<ObjInner>>);
+
 #[derive(Default)]
-pub struct Obj {
+pub struct ObjInner {
+	parent: Option<Weak<RefCell<ObjInner>>>,
 	comp_map: HashMap<TypeId, ObjEntry>,
 	locks: Vec<LockCounter>,
 	bump: Bump,
-}
-
-impl Debug for Obj {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		#[cfg(debug_assertions)]
-		{
-			let mut builder = f.debug_tuple("Obj");
-			for entry in self.comp_map.values() {
-				builder.field(&format_args!(
-					"{}: {:?}",
-					entry.comp_name,
-					self.locks[entry.lock_index].state()
-				));
-			}
-			builder.finish()
-		}
-		#[cfg(not(debug_assertions))]
-		{
-			f.debug_struct("Obj").finish_non_exhaustive()
-		}
-	}
 }
 
 impl Obj {
@@ -49,89 +34,154 @@ impl Obj {
 		Self::default()
 	}
 
-	pub fn add<T: 'static>(&mut self, value: T) {
+	pub fn parent(&self) -> Option<Obj> {
+		self.0
+			.borrow()
+			.parent
+			.as_ref()
+			.map(|parent| Obj(parent.upgrade().unwrap()))
+	}
+
+	pub fn set_parent(&self, parent: Option<&Obj>) {
+		self.0.borrow_mut().parent = parent.map(|obj| Rc::downgrade(&obj.0));
+	}
+
+	pub fn ancestors(&self, include_self: bool) -> impl Iterator<Item = Obj> {
+		let mut target_iter = if include_self {
+			Some(self.clone())
+		} else {
+			self.parent()
+		};
+
+		std::iter::from_fn(move || {
+			// Fetch target
+			let target = target_iter.as_ref()?;
+
+			// Get its parent
+			let parent = target.parent();
+
+			// Replace the iterator with the new parent and return the new element
+			replace(&mut target_iter, parent)
+		})
+	}
+
+	pub fn add<T: 'static>(&self, value: T) {
 		self.add_as(value, ());
 	}
 
-	pub fn add_as<T: 'static, A: AliasList<T>>(&mut self, value: T, aliases: A) {
+	pub fn add_as<T: 'static, A: AliasList<T>>(&self, value: T, aliases: A) {
+		let mut inner = self.0.borrow_mut();
+		let inner = &mut *inner;
+
 		// Allocate the value
-		let ptr = self.bump.alloc_layout(Layout::new::<T>()).cast::<T>();
+		let ptr = inner.bump.alloc_layout(Layout::new::<T>()).cast::<T>();
 		unsafe { ptr.as_ptr().write(value) }
 
 		// Register it
-		let lock_index = self.locks.len();
-		self.locks.push(LockCounter::new());
-		self.comp_map.insert(
+		let lock_index = inner.locks.len();
+		inner.locks.push(LockCounter::new());
+		inner.comp_map.insert(
 			TypeId::of::<T>(),
-			ObjEntry::new_owned(ptr, lock_index, &mut self.bump),
+			ObjEntry::new_owned(ptr, lock_index, &mut inner.bump),
 		);
 
 		// Register bundle aliases
 		unsafe {
-			aliases.push_aliases(self, ptr, lock_index);
+			aliases.push_aliases(inner, ptr, lock_index);
 		}
 	}
 
-	pub fn try_get_raw<T: ?Sized + 'static>(&self) -> Result<NonNull<T>, ComponentMissingError> {
-		self.comp_map
-			.get(&TypeId::of::<T>())
-			.map(|entry| unsafe { entry.target_ptr::<T>() })
-			.ok_or(ComponentMissingError)
-	}
+	pub fn try_borrow_ref_here<T: ?Sized + 'static>(&self) -> Result<RwRef<T>, BorrowError> {
+		let inner = self.0.borrow();
 
-	pub fn try_borrow_ref<'a, T: ?Sized + 'static>(&'a self) -> Result<RwRef<'a, T>, BorrowError> {
 		// Try to fetch entry
-		let entry = self
-			.comp_map
-			.get(&TypeId::of::<T>())
-			.ok_or(BorrowError::ComponentMissing {
-				component_name: type_name::<T>(),
-				error: ComponentMissingError,
-			})?;
+		let entry =
+			inner
+				.comp_map
+				.get(&TypeId::of::<T>())
+				.ok_or(BorrowError::ComponentMissing {
+					component_name: type_name::<T>(),
+					error: ComponentMissingError,
+				})?;
 
 		// Try to acquire lock
-		self.locks[entry.lock_index]
+		inner.locks[entry.lock_index]
 			.try_lock_ref()
 			.map_err(|error| BorrowError::LockError {
 				component_name: type_name::<T>(),
 				error,
 			})?;
 
-		// Promote to reference
-		let comp = unsafe { entry.target_ptr::<T>().as_ref() } as &'a T;
+		// Construct a pointer to the target
+		let comp = unsafe { entry.target_ptr::<T>() };
 
+		// Create the reference guard
 		Ok(RwRef {
-			obj: self,
+			obj: self.clone(),
 			lock_index: entry.lock_index,
-			target: comp,
+			comp,
 		})
 	}
 
-	pub fn try_borrow_mut<'a, T: ?Sized + 'static>(&'a self) -> Result<RwMut<'a, T>, BorrowError> {
+	pub fn try_borrow_mut_here<T: ?Sized + 'static>(&self) -> Result<RwMut<T>, BorrowError> {
+		let inner = self.0.borrow();
+
 		// Try to fetch entry
-		let entry = self
-			.comp_map
-			.get(&TypeId::of::<T>())
-			.ok_or(BorrowError::ComponentMissing {
-				component_name: type_name::<T>(),
-				error: ComponentMissingError,
-			})?;
+		let entry =
+			inner
+				.comp_map
+				.get(&TypeId::of::<T>())
+				.ok_or(BorrowError::ComponentMissing {
+					component_name: type_name::<T>(),
+					error: ComponentMissingError,
+				})?;
 
 		// Try to acquire lock
-		self.locks[entry.lock_index]
+		inner.locks[entry.lock_index]
 			.try_lock_mut()
 			.map_err(|error| BorrowError::LockError {
 				component_name: type_name::<T>(),
 				error,
 			})?;
 
-		// Promote to reference
-		let comp = unsafe { entry.target_ptr::<T>().as_mut() } as &'a mut T;
+		// Construct a pointer to the target
+		let comp = unsafe { entry.target_ptr::<T>() };
 
+		// Create the reference guard
 		Ok(RwMut {
-			obj: self,
+			obj: self.clone(),
 			lock_index: entry.lock_index,
-			target: comp,
+			comp,
+		})
+	}
+
+	pub fn try_borrow_ref<T: ?Sized + 'static>(&self) -> Result<RwRef<T>, BorrowError> {
+		for ancestor in self.ancestors(true) {
+			match ancestor.try_borrow_ref_here::<T>() {
+				Ok(comp) => return Ok(comp),
+				Err(lock_error @ BorrowError::LockError { .. }) => return Err(lock_error),
+				Err(BorrowError::ComponentMissing { .. }) => {}
+			}
+		}
+
+		Err(BorrowError::ComponentMissing {
+			component_name: type_name::<T>(),
+			error: ComponentMissingError,
+		})
+	}
+
+	pub fn try_borrow_mut<T: ?Sized + 'static>(&self) -> Result<RwMut<T>, BorrowError> {
+		for ancestor in self.ancestors(true) {
+			match ancestor.try_borrow_mut_here::<T>() {
+				Ok(comp) => return Ok(comp),
+				Err(lock_error @ BorrowError::LockError { .. }) => return Err(lock_error),
+				Err(BorrowError::ComponentMissing { .. }) => {}
+			}
+		}
+
+		Err(BorrowError::ComponentMissing {
+			component_name: type_name::<T>(),
+			error: ComponentMissingError,
 		})
 	}
 
@@ -143,25 +193,25 @@ impl Obj {
 		self.try_borrow_mut::<T>().unwrap_pretty()
 	}
 
-	pub fn try_borrow_many<'a, T: ObjBorrowable<'a>>(&'a self) -> Result<T, BorrowError> {
+	pub fn try_borrow_many<T: ObjBorrowable>(&self) -> Result<T, BorrowError> {
 		T::try_borrow_from(self)
 	}
 
-	pub fn borrow_many<'a, T: ObjBorrowable<'a>>(&'a self) -> T {
+	pub fn borrow_many<T: ObjBorrowable>(&self) -> T {
 		self.try_borrow_many().unwrap_pretty()
 	}
 
-	pub fn inject<'a, D, F>(&'a self, target: F) -> F::Return
+	pub fn inject<D, F>(&self, target: F) -> F::Return
 	where
-		D: ObjBorrowable<'a>,
+		D: ObjBorrowable,
 		F: InjectableClosure<(), D>,
 	{
-		self.inject_with((), target)
+		self.inject_with(target, ())
 	}
 
-	pub fn inject_with<'a, A, D, F>(&'a self, args: A, mut target: F) -> F::Return
+	pub fn inject_with<A, D, F>(&self, mut target: F, args: A) -> F::Return
 	where
-		D: ObjBorrowable<'a>,
+		D: ObjBorrowable,
 		F: InjectableClosure<A, D>,
 	{
 		target.call_injected(args, self.borrow_many())
@@ -169,16 +219,17 @@ impl Obj {
 
 	// === Event handler extensions === //
 
-	// TODO: Implement proper component injection; allow non `'static` events.
-	pub fn add_event_handler<T, E>(&mut self, mut handler: T)
+	// TODO: allow non-'static events.
+	pub fn add_event_handler<T, E, D>(&self, mut handler: T)
 	where
-		T: 'static + FnMut(E, &Obj),
+		T: 'static + InjectableClosure<(E,), D>,
 		E: 'static,
+		D: ObjBorrowable,
 	{
 		self.add_as(
 			move |event: ObjEvent<E>| {
 				let obj = unsafe { event.obj.as_ref() };
-				(handler)(event.event, obj)
+				handler.call_injected((event.event,), obj.borrow_many());
 			},
 			(alias_as::<dyn ObjectSafeEventTarget<ObjEvent<E>>>(),),
 		);
@@ -203,14 +254,30 @@ impl Obj {
 	}
 }
 
-struct ObjEvent<E: 'static> {
-	obj: NonNull<Obj>,
-	event: E,
+impl Debug for ObjInner {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		#[cfg(debug_assertions)]
+		{
+			let mut builder = f.debug_tuple("ObjInner");
+			for entry in self.comp_map.values() {
+				builder.field(&format_args!(
+					"{}: {:?}",
+					entry.comp_name,
+					self.locks[entry.lock_index].state()
+				));
+			}
+			builder.finish()
+		}
+		#[cfg(not(debug_assertions))]
+		{
+			f.debug_struct("Obj").finish_non_exhaustive()
+		}
+	}
 }
 
-impl Drop for Obj {
+impl Drop for ObjInner {
 	fn drop(&mut self) {
-		// Bump does not run destructors.
+		// Bump does not run destructors by itself.
 		for comp in self.comp_map.values() {
 			if let Some(drop_fn) = comp.drop_fn_or_alias {
 				unsafe {
@@ -219,6 +286,13 @@ impl Drop for Obj {
 			}
 		}
 	}
+}
+
+// === Obj core internals === //
+
+struct ObjEvent<E: 'static> {
+	obj: NonNull<Obj>,
+	event: E,
 }
 
 struct ObjEntry {
@@ -444,26 +518,32 @@ pub enum BorrowError {
 
 // === Multi-fetch === //
 
-pub trait ObjBorrowable<'a>: Sized {
-	fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError>;
+pub trait ObjBorrowable: Sized {
+	fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError>;
 }
 
-impl<'a, T: ?Sized + 'static> ObjBorrowable<'a> for RwMut<'a, T> {
-	fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError> {
+impl ObjBorrowable for Obj {
+	fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError> {
+		Ok(obj.clone())
+	}
+}
+
+impl<T: ?Sized + 'static> ObjBorrowable for RwMut<T> {
+	fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError> {
 		obj.try_borrow_mut()
 	}
 }
 
-impl<'a, T: ?Sized + 'static> ObjBorrowable<'a> for RwRef<'a, T> {
-	fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError> {
+impl<T: ?Sized + 'static> ObjBorrowable for RwRef<T> {
+	fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError> {
 		obj.try_borrow_ref()
 	}
 }
 
 macro impl_tup_obj_borrowable($($name:ident: $field:tt),*) {
-	impl<'a, $($name: ObjBorrowable<'a>),*> ObjBorrowable<'a> for ($($name,)*) {
+	impl<$($name: ObjBorrowable),*> ObjBorrowable for ($($name,)*) {
 		#[allow(unused_variables)]
-		fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError> {
+		fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError> {
 			Ok(($($name::try_borrow_from(obj)?,)*))
 		}
 	}
@@ -474,7 +554,7 @@ impl_tuples!(impl_tup_obj_borrowable);
 // === Keys === //
 
 pub unsafe trait AliasList<T> {
-	unsafe fn push_aliases(self, obj: &mut Obj, ptr: NonNull<T>, lock_index: usize);
+	unsafe fn push_aliases(self, obj: &mut ObjInner, ptr: NonNull<T>, lock_index: usize);
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -487,7 +567,7 @@ pub fn alias_as<T: ?Sized + 'static>() -> AliasAs<T> {
 }
 
 unsafe impl<T: Unsize<U>, U: ?Sized + 'static> AliasList<T> for AliasAs<U> {
-	unsafe fn push_aliases(self, obj: &mut Obj, ptr: NonNull<T>, lock_index: usize) {
+	unsafe fn push_aliases(self, obj: &mut ObjInner, ptr: NonNull<T>, lock_index: usize) {
 		// Unsize the value and convert it back into a pointer
 		let ptr = (ptr.as_ref() as &U) as *const U as *mut U;
 		let ptr = NonNull::new_unchecked(ptr);
@@ -503,7 +583,7 @@ unsafe impl<T: Unsize<U>, U: ?Sized + 'static> AliasList<T> for AliasAs<U> {
 macro tup_impl_alias_list($($name:ident: $field:tt),*) {
 	unsafe impl<ZZ $(,$name: AliasList<ZZ>)*> AliasList<ZZ> for ($($name,)*) {
 		#[allow(unused_variables)]
-		unsafe fn push_aliases(self, obj: &mut Obj, ptr: NonNull<ZZ>, lock_index: usize) {
+		unsafe fn push_aliases(self, obj: &mut ObjInner, ptr: NonNull<ZZ>, lock_index: usize) {
 			$( self.$field.push_aliases(obj, ptr, lock_index); )*
 		}
 	}
@@ -514,110 +594,125 @@ impl_tuples!(tup_impl_alias_list);
 // === Rw Guards === //
 
 #[derive(Debug)]
-pub struct RwMut<'a, T: ?Sized> {
-	obj: &'a Obj,
+pub struct RwMut<T: ?Sized> {
+	obj: Obj,
 	lock_index: usize,
-	target: &'a mut T,
+	// Safety: this reference is valid until `Obj` is dropped.
+	comp: NonNull<T>,
 }
 
-impl<'a, T: ?Sized> RwMut<'a, T> {
-	pub fn downgrade(ptr: Self) -> RwRef<'a, T> {
+impl<T: ?Sized> RwMut<T> {
+	pub fn obj(ptr: &Self) -> &Obj {
+		&ptr.obj
+	}
+
+	pub fn downgrade(ptr: Self) -> RwRef<T> {
 		// Copy down guard state
-		let obj = ptr.obj;
+		let obj = ptr.obj.clone();
 		let lock_index = ptr.lock_index;
-		let target = NonNull::from(&*ptr.target);
+		let comp = ptr.comp;
 
 		// Release guard
 		drop(ptr);
 
 		// Attempt to lock guard
-		obj.locks[lock_index].try_lock_ref().unwrap_pretty();
+		obj.0.borrow_mut().locks[lock_index]
+			.try_lock_ref()
+			.unwrap_pretty();
 
 		// Create new guard
 		RwRef {
 			obj,
 			lock_index,
-			target: unsafe { target.as_ref() } as &'a T,
+			comp,
 		}
 	}
 }
 
-impl<'a, T: ?Sized> Deref for RwMut<'a, T> {
+impl<T: ?Sized> Deref for RwMut<T> {
 	type Target = T;
 
 	fn deref(&self) -> &Self::Target {
-		self.target
+		unsafe { self.comp.as_ref() }
 	}
 }
 
-impl<'a, T: ?Sized> DerefMut for RwMut<'a, T> {
+impl<T: ?Sized> DerefMut for RwMut<T> {
 	fn deref_mut(&mut self) -> &mut Self::Target {
-		self.target
+		unsafe { self.comp.as_mut() }
 	}
 }
 
-impl<'a, T: ?Sized> Drop for RwMut<'a, T> {
+impl<T: ?Sized> Drop for RwMut<T> {
 	fn drop(&mut self) {
 		unsafe {
-			self.obj.locks[self.lock_index].unlock_mut();
+			self.obj.0.borrow_mut().locks[self.lock_index].unlock_mut();
 		}
 	}
 }
 
 #[derive(Debug)]
-pub struct RwRef<'a, T: ?Sized> {
-	obj: &'a Obj,
+pub struct RwRef<T: ?Sized> {
+	obj: Obj,
 	lock_index: usize,
-	target: &'a T,
+	// Safety: this reference is valid until `Obj` is dropped.
+	comp: NonNull<T>,
 }
 
-impl<'a, T: ?Sized> RwRef<'a, T> {
-	pub fn upgrade(ptr: Self) -> RwMut<'a, T> {
+impl<T: ?Sized> RwRef<T> {
+	pub fn obj(ptr: &Self) -> &Obj {
+		&ptr.obj
+	}
+
+	pub fn upgrade(ptr: Self) -> RwMut<T> {
 		// Copy down guard state
-		let obj = ptr.obj;
+		let obj = ptr.obj.clone();
 		let lock_index = ptr.lock_index;
-		let mut target = NonNull::from(ptr.target);
+		let comp = ptr.comp;
 
 		// Release guard
 		drop(ptr);
 
 		// Attempt to lock guard
-		obj.locks[lock_index].try_lock_mut().unwrap_pretty();
+		obj.0.borrow_mut().locks[lock_index]
+			.try_lock_mut()
+			.unwrap_pretty();
 
 		// Create new guard
 		RwMut {
 			obj,
 			lock_index,
-			target: unsafe { target.as_mut() } as &'a mut T,
+			comp,
 		}
 	}
 }
 
-impl<'a, T: ?Sized> Deref for RwRef<'a, T> {
+impl<T: ?Sized> Deref for RwRef<T> {
 	type Target = T;
 
 	fn deref(&self) -> &Self::Target {
-		self.target
+		unsafe { self.comp.as_ref() }
 	}
 }
 
-impl<'a, T: ?Sized> Clone for RwRef<'a, T> {
+impl<T: ?Sized> Clone for RwRef<T> {
 	fn clone(&self) -> Self {
-		self.obj.locks[self.lock_index]
+		self.obj.0.borrow_mut().locks[self.lock_index]
 			.try_lock_ref()
 			.unwrap_pretty();
+
 		Self {
-			obj: self.obj,
+			obj: self.obj.clone(),
 			lock_index: self.lock_index,
-			target: self.target,
+			comp: self.comp,
 		}
 	}
 }
 
-impl<'a, T: ?Sized> Drop for RwRef<'a, T> {
+impl<T: ?Sized> Drop for RwRef<T> {
 	fn drop(&mut self) {
 		unsafe {
-			self.obj.locks[self.lock_index].unlock_ref();
+			self.obj.0.borrow_mut().locks[self.lock_index].unlock_ref();
 		}
 	}
 }

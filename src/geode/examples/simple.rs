@@ -4,14 +4,17 @@ use std::cell::Cell;
 use std::mem::replace;
 
 fn main() {
-	let mut root = Obj::new();
+	let root = Obj::new();
 
 	root.add(World::new());
-	root.add(SceneManager::new(make_main_scene()));
+	root.add(SceneManager::new({
+		let menu_scene = make_main_scene();
+		menu_scene.set_parent(Some(&root));
+		menu_scene
+	}));
 
 	let sm = root.borrow_ref::<SceneManager>();
 	sm.current_scene().fire(UpdateEvent);
-	sm.set_next_scene(make_play_scene());
 
 	let mut sm = RwRef::upgrade(sm);
 	sm.swap_scene();
@@ -21,16 +24,22 @@ fn main() {
 }
 
 fn make_main_scene() -> Obj {
-	let mut scene = Obj::new();
-	scene.add_event_handler(|_: UpdateEvent, _| {
+	let scene = Obj::new();
+	scene.add_event_handler(|_: UpdateEvent, sm: RwRef<SceneManager>| {
 		println!("Wow, an update in main!");
+
+		sm.set_next_scene({
+			let play_scene = make_play_scene();
+			play_scene.set_parent(Some(RwRef::obj(&sm)));
+			play_scene
+		});
 	});
 	scene
 }
 
 fn make_play_scene() -> Obj {
-	let mut scene = Obj::new();
-	scene.add_event_handler(|_: UpdateEvent, _| {
+	let scene = Obj::new();
+	scene.add_event_handler(|_: UpdateEvent| {
 		println!("Wow, an update in play!");
 	});
 	scene

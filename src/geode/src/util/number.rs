@@ -6,7 +6,6 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::mem::replace;
 use std::num::NonZeroU64;
-use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Not};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 // === OptionalUsize === //
@@ -28,13 +27,6 @@ impl OptionalUsize {
 	pub fn some(value: usize) -> Self {
 		debug_assert!(value != usize::MAX);
 		Self { raw: value }
-	}
-
-	pub fn wrap(value: Option<usize>) -> Self {
-		match value {
-			Some(value) => Self::some(value),
-			None => Self::NONE,
-		}
 	}
 
 	pub fn as_option(self) -> Option<usize> {
