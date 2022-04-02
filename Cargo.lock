@@ -813,8 +813,6 @@ dependencies = [
  "crossbeam",
  "derive-where",
  "hashbrown 0.12.0",
- "log",
- "once_cell",
  "smallvec",
  "thiserror",
 ]

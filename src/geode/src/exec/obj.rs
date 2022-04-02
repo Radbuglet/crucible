@@ -1,284 +1,74 @@
-use crate::exec::event::ObjectSafeEventTarget;
-use crate::util::arity_utils::{impl_tuples, InjectableClosure};
+use crate::util::arity_utils::impl_tuples;
 use crate::util::error::ResultExt;
 use crate::util::inline_store::ByteContainer;
+use crate::util::number::NumberGenRef;
 use bumpalo::Bump;
+use derive_where::derive_where;
 use std::alloc::Layout;
 use std::any::{type_name, TypeId};
-use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
+use std::hash::{Hash, Hasher};
 use std::marker::{PhantomData, Unsize};
-use std::mem::replace;
-use std::ops::{Deref, DerefMut};
 use std::ptr::{NonNull, Pointee};
-use std::rc::{Rc, Weak};
+use std::sync::atomic::AtomicU64;
 use thiserror::Error;
 
 // === Obj core === //
 
-#[derive(Debug, Clone, Default)]
-pub struct Obj(Rc<RefCell<ObjInner>>);
-
-#[derive(Default)]
-pub struct ObjInner {
-	parent: Option<Weak<RefCell<ObjInner>>>,
-	comp_map: HashMap<TypeId, ObjEntry>,
-	locks: Vec<LockCounter>,
+#[derive(Debug, Default)]
+pub struct Obj {
+	comps: HashMap<RawTypedKey, CompMapEntry>,
 	bump: Bump,
 }
 
+// `Obj` is `Send` and `Sync` because all components inserted into it must also be `Send` and `Sync`.
+unsafe impl Send for Obj {}
+unsafe impl Sync for Obj {}
+
 impl Obj {
-	pub fn new() -> Self {
-		Self::default()
+	pub fn add<T>(&mut self, value: T)
+	where
+		T: Sized + Send + Sync + 'static,
+	{
+		self.add_as(typed_key::<T>(), value, ());
 	}
 
-	pub fn parent(&self) -> Option<Obj> {
-		self.0
-			.borrow()
-			.parent
-			.as_ref()
-			.map(|parent| Obj(parent.upgrade().unwrap()))
-	}
+	pub fn add_as<T, A>(&mut self, owning_key: TypedKey<T>, value: T, alias_as: A)
+	where
+		T: Sized + Send + Sync,
+		A: AliasList<T>,
+	{
+		// Ensure that we haven't already registered this key.
+		let owning_key = owning_key.raw();
+		assert!(!self.comps.contains_key(&owning_key));
 
-	pub fn set_parent(&self, parent: Option<&Obj>) {
-		self.0.borrow_mut().parent = parent.map(|obj| Rc::downgrade(&obj.0));
-	}
-
-	pub fn ancestors(&self, include_self: bool) -> impl Iterator<Item = Obj> {
-		let mut target_iter = if include_self {
-			Some(self.clone())
-		} else {
-			self.parent()
-		};
-
-		std::iter::from_fn(move || {
-			// Fetch target
-			let target = target_iter.as_ref()?;
-
-			// Get its parent
-			let parent = target.parent();
-
-			// Replace the iterator with the new parent and return the new element
-			replace(&mut target_iter, parent)
-		})
-	}
-
-	pub fn add<T: 'static>(&self, value: T) {
-		self.add_as(value, ());
-	}
-
-	pub fn add_as<T: 'static, A: AliasList<T>>(&self, value: T, aliases: A) {
-		let mut inner = self.0.borrow_mut();
-		let inner = &mut *inner;
-
-		// Allocate the value
-		let ptr = inner.bump.alloc_layout(Layout::new::<T>()).cast::<T>();
-		unsafe { ptr.as_ptr().write(value) }
-
-		// Register it
-		let lock_index = inner.locks.len();
-		inner.locks.push(LockCounter::new());
-		inner.comp_map.insert(
-			TypeId::of::<T>(),
-			ObjEntry::new_owned(ptr, lock_index, &mut inner.bump),
-		);
-
-		// Register bundle aliases
+		// Allocate component
+		let comp = self.bump.alloc_layout(Layout::new::<T>()).cast::<T>();
 		unsafe {
-			aliases.push_aliases(inner, ptr, lock_index);
+			comp.as_ptr().write(value);
+		}
+
+		// Register the principal entry
+		#[rustfmt::skip]
+		self.comps.insert(owning_key, CompMapEntry::new_owned(comp, &mut self.bump));
+
+		// Register alias entries
+		unsafe {
+			alias_as.push_aliases(self, comp);
 		}
 	}
 
-	pub fn try_borrow_ref_here<T: ?Sized + 'static>(&self) -> Result<RwRef<T>, BorrowError> {
-		let inner = self.0.borrow();
-
-		// Try to fetch entry
-		let entry =
-			inner
-				.comp_map
-				.get(&TypeId::of::<T>())
-				.ok_or(BorrowError::ComponentMissing {
-					component_name: type_name::<T>(),
-					error: ComponentMissingError,
-				})?;
-
-		// Try to acquire lock
-		inner.locks[entry.lock_index]
-			.try_lock_ref()
-			.map_err(|error| BorrowError::LockError {
-				component_name: type_name::<T>(),
-				error,
-			})?;
-
-		// Construct a pointer to the target
-		let comp = unsafe { entry.target_ptr::<T>() };
-
-		// Create the reference guard
-		Ok(RwRef {
-			obj: self.clone(),
-			lock_index: entry.lock_index,
-			comp,
-		})
-	}
-
-	pub fn try_borrow_mut_here<T: ?Sized + 'static>(&self) -> Result<RwMut<T>, BorrowError> {
-		let inner = self.0.borrow();
-
-		// Try to fetch entry
-		let entry =
-			inner
-				.comp_map
-				.get(&TypeId::of::<T>())
-				.ok_or(BorrowError::ComponentMissing {
-					component_name: type_name::<T>(),
-					error: ComponentMissingError,
-				})?;
-
-		// Try to acquire lock
-		inner.locks[entry.lock_index]
-			.try_lock_mut()
-			.map_err(|error| BorrowError::LockError {
-				component_name: type_name::<T>(),
-				error,
-			})?;
-
-		// Construct a pointer to the target
-		let comp = unsafe { entry.target_ptr::<T>() };
-
-		// Create the reference guard
-		Ok(RwMut {
-			obj: self.clone(),
-			lock_index: entry.lock_index,
-			comp,
-		})
-	}
-
-	pub fn try_borrow_ref<T: ?Sized + 'static>(&self) -> Result<RwRef<T>, BorrowError> {
-		for ancestor in self.ancestors(true) {
-			match ancestor.try_borrow_ref_here::<T>() {
-				Ok(comp) => return Ok(comp),
-				Err(lock_error @ BorrowError::LockError { .. }) => return Err(lock_error),
-				Err(BorrowError::ComponentMissing { .. }) => {}
-			}
-		}
-
-		Err(BorrowError::ComponentMissing {
-			component_name: type_name::<T>(),
-			error: ComponentMissingError,
-		})
-	}
-
-	pub fn try_borrow_mut<T: ?Sized + 'static>(&self) -> Result<RwMut<T>, BorrowError> {
-		for ancestor in self.ancestors(true) {
-			match ancestor.try_borrow_mut_here::<T>() {
-				Ok(comp) => return Ok(comp),
-				Err(lock_error @ BorrowError::LockError { .. }) => return Err(lock_error),
-				Err(BorrowError::ComponentMissing { .. }) => {}
-			}
-		}
-
-		Err(BorrowError::ComponentMissing {
-			component_name: type_name::<T>(),
-			error: ComponentMissingError,
-		})
-	}
-
-	pub fn borrow_ref<T: ?Sized + 'static>(&self) -> RwRef<T> {
-		self.try_borrow_ref::<T>().unwrap_pretty()
-	}
-
-	pub fn borrow_mut<T: ?Sized + 'static>(&self) -> RwMut<T> {
-		self.try_borrow_mut::<T>().unwrap_pretty()
-	}
-
-	pub fn try_borrow_many<T: ObjBorrowable>(&self) -> Result<T, BorrowError> {
-		T::try_borrow_from(self)
-	}
-
-	pub fn borrow_many<T: ObjBorrowable>(&self) -> T {
-		self.try_borrow_many().unwrap_pretty()
-	}
-
-	pub fn inject<D, F>(&self, target: F) -> F::Return
-	where
-		D: ObjBorrowable,
-		F: InjectableClosure<(), D>,
-	{
-		self.inject_with(target, ())
-	}
-
-	pub fn inject_with<A, D, F>(&self, mut target: F, args: A) -> F::Return
-	where
-		D: ObjBorrowable,
-		F: InjectableClosure<A, D>,
-	{
-		target.call_injected(args, self.borrow_many())
-	}
-
-	// === Event handler extensions === //
-
-	// TODO: allow non-'static events.
-	pub fn add_event_handler<T, E, D>(&self, mut handler: T)
-	where
-		T: 'static + InjectableClosure<(E,), D>,
-		E: 'static,
-		D: ObjBorrowable,
-	{
-		self.add_as(
-			move |event: ObjEvent<E>| {
-				let obj = unsafe { event.obj.as_ref() };
-				handler.call_injected((event.event,), obj.borrow_many());
-			},
-			(alias_as::<dyn ObjectSafeEventTarget<ObjEvent<E>>>(),),
-		);
-	}
-
-	pub fn try_fire<E: 'static>(&self, event: E) -> Result<(), (E, ComponentMissingError)> {
-		match self.try_borrow_mut::<dyn ObjectSafeEventTarget<ObjEvent<E>>>() {
-			Ok(mut target) => {
-				target.fire_but_object_safe(ObjEvent {
-					obj: NonNull::from(self),
-					event,
-				});
-				Ok(())
-			}
-			Err(BorrowError::LockError { error, .. }) => panic!("{}", error),
-			Err(BorrowError::ComponentMissing { error, .. }) => Err((event, error)),
-		}
-	}
-
-	pub fn fire<E: 'static>(&self, event: E) {
-		self.try_fire(event).map_err(|(_, err)| err).unwrap_pretty()
+	pub fn try_get_raw<T: ?Sized>(&self, key: TypedKey<T>) -> Option<NonNull<T>> {
+		let entry = self.comps.get(&key.raw())?;
+		Some(unsafe { entry.target_ptr::<T>() })
 	}
 }
 
-impl Debug for ObjInner {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		#[cfg(debug_assertions)]
-		{
-			let mut builder = f.debug_tuple("ObjInner");
-			for entry in self.comp_map.values() {
-				builder.field(&format_args!(
-					"{}: {:?}",
-					entry.comp_name,
-					self.locks[entry.lock_index].state()
-				));
-			}
-			builder.finish()
-		}
-		#[cfg(not(debug_assertions))]
-		{
-			f.debug_struct("Obj").finish_non_exhaustive()
-		}
-	}
-}
-
-impl Drop for ObjInner {
+impl Drop for Obj {
 	fn drop(&mut self) {
-		// Bump does not run destructors by itself.
-		for comp in self.comp_map.values() {
+		for comp in self.comps.values() {
 			if let Some(drop_fn) = comp.drop_fn_or_alias {
 				unsafe {
 					(drop_fn)(comp.ptr.as_ptr());
@@ -288,23 +78,15 @@ impl Drop for ObjInner {
 	}
 }
 
-// === Obj core internals === //
-
-struct ObjEvent<E: 'static> {
-	obj: NonNull<Obj>,
-	event: E,
-}
-
-struct ObjEntry {
+struct CompMapEntry {
 	ptr: NonNull<()>,
 	ptr_meta: ByteContainer<usize>,
-	lock_index: usize,
 	drop_fn_or_alias: Option<unsafe fn(*mut ())>,
 	#[cfg(debug_assertions)]
 	comp_name: &'static str,
 }
 
-impl ObjEntry {
+impl CompMapEntry {
 	fn new_common<T: ?Sized>(
 		ptr: NonNull<T>,
 		bump: &mut Bump,
@@ -328,7 +110,7 @@ impl ObjEntry {
 		(ptr, ptr_meta)
 	}
 
-	fn new_owned<T>(ptr: NonNull<T>, lock_index: usize, bump: &mut Bump) -> Self {
+	fn new_owned<T: Sized>(ptr: NonNull<T>, bump: &mut Bump) -> Self {
 		let (ptr, ptr_meta) = Self::new_common(ptr, bump);
 
 		unsafe fn drop_ptr<T>(ptr: *mut ()) {
@@ -340,20 +122,18 @@ impl ObjEntry {
 		Self {
 			ptr,
 			ptr_meta,
-			lock_index,
 			drop_fn_or_alias: Some(drop_fn),
 			#[cfg(debug_assertions)]
 			comp_name: type_name::<T>(),
 		}
 	}
 
-	fn new_alias<T: ?Sized>(ptr: NonNull<T>, lock_index: usize, bump: &mut Bump) -> Self {
+	fn new_alias<T: ?Sized>(ptr: NonNull<T>, bump: &mut Bump) -> Self {
 		let (ptr, ptr_meta) = Self::new_common(ptr, bump);
 
 		Self {
 			ptr,
 			ptr_meta,
-			lock_index,
 			drop_fn_or_alias: None,
 			#[cfg(debug_assertions)]
 			comp_name: type_name::<T>(),
@@ -373,57 +153,45 @@ impl ObjEntry {
 	}
 }
 
-#[derive(Debug, Clone)]
-pub struct LockCounter(Cell<isize>);
-
-impl Default for LockCounter {
-	fn default() -> Self {
-		Self(Cell::new(0))
+impl Debug for CompMapEntry {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let mut builder = f.debug_tuple("CompMapEntry");
+		#[cfg(debug_assertions)]
+		builder.field(&self.comp_name);
+		builder.finish()
 	}
 }
 
-impl LockCounter {
-	pub fn new() -> Self {
-		Self::default()
-	}
+// === Multi-fetch === //
 
-	pub fn state(&self) -> LockState {
-		LockState::decode(self.0.get())
-	}
+pub trait ObjBorrowable<'a>: Sized {
+	fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError>;
+}
 
-	pub fn try_lock_mut(&self) -> Result<(), LockError> {
-		if self.0.get() != 0 {
-			return Err(LockError::XorError(self.state()));
+// impl<'a, T: ?Sized + 'static> ObjBorrowable for RwMut<'a, T> {
+// 	fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError> {
+// 		obj.try_borrow_mut()
+// 	}
+// }
+//
+// impl<T: ?Sized + 'static> ObjBorrowable for RwRef<T> {
+// 	fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError> {
+// 		obj.try_borrow_ref()
+// 	}
+// }
+
+macro impl_tup_obj_borrowable($($name:ident: $field:tt),*) {
+	impl<'a, $($name: ObjBorrowable<'a>),*> ObjBorrowable<'a> for ($($name,)*) {
+		#[allow(unused_variables)]
+		fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError> {
+			Ok(($($name::try_borrow_from(obj)?,)*))
 		}
-
-		self.0.set(-1);
-		Ok(())
-	}
-
-	pub fn try_lock_ref(&self) -> Result<(), LockError> {
-		if self.0.get() < 0 {
-			return Err(LockError::XorError(self.state()));
-		}
-		let new_count = self
-			.0
-			.get()
-			.checked_add(1)
-			.ok_or(LockError::TooManyImmutable)?;
-
-		self.0.set(new_count);
-		Ok(())
-	}
-
-	pub unsafe fn unlock_mut(&self) {
-		debug_assert_eq!(self.0.get(), -1);
-		self.0.set(0);
-	}
-
-	pub unsafe fn unlock_ref(&self) {
-		debug_assert!(self.0.get() > 0);
-		self.0.set(self.0.get() - 1);
 	}
 }
+
+impl_tuples!(impl_tup_obj_borrowable);
+
+// === Errors === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum LockState {
@@ -432,70 +200,44 @@ pub enum LockState {
 	Unborrowed,
 }
 
-impl LockState {
-	fn decode(count: isize) -> Self {
-		if count == 0 {
-			Self::Unborrowed
-		} else if count > 0 {
-			Self::Immutably(count as usize)
-		} else {
-			debug_assert_eq!(count, -1);
-			Self::Mutably
-		}
-	}
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Error)]
+#[error("Component {key:?} missing from `Obj`.")]
+pub struct ComponentMissingError {
+	key: RawTypedKey,
 }
 
-// === Error types === //
-
-// TODO: Make lock and component missing errors include target components.
-#[derive(Debug, Clone, Hash, Eq, PartialEq, Error)]
-#[error("Component missing from `Obj`.")]
-pub struct ComponentMissingError;
-
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub enum LockError {
-	XorError(LockState),
-	TooManyImmutable,
+pub struct LockError {
+	state: LockState,
+	key: RawTypedKey,
 }
 
 impl Error for LockError {}
 
 impl Display for LockError {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		match self {
-			Self::XorError(lock_state) => {
-				f.write_str("Failed to lock component ")?;
-				match lock_state {
-					LockState::Mutably => {
-						f.write_str(
-							"immutably: 1 concurrent mutable borrow prevents shared immutable access.",
-						)?;
-					}
-					LockState::Immutably(concurrent) => {
-						write!(
-							f,
-							"mutably: {} concurrent immutable borrow{} prevent{} exclusive mutable access.",
-							concurrent,
-							// Gotta love English grammar
-							if *concurrent == 1 { "" } else { "s" },
-							if *concurrent == 1 { "s" } else { "" },
-						)?;
-					}
-					LockState::Unborrowed => {
-						#[cfg(debug_assertions)]
-						unreachable!();
-						#[cfg(not(debug_assertions))]
-						f.write_str("even though it was unborrowed?!")?;
-					}
-				}
+		write!(f, "Failed to lock component with key {:?}", self.key)?;
+		match self.state {
+			LockState::Mutably => {
+				f.write_str(
+					"immutably: 1 concurrent mutable borrow prevents shared immutable access.",
+				)?;
 			}
-			Self::TooManyImmutable => {
+			LockState::Immutably(concurrent) => {
 				write!(
 					f,
-					"Failed to lock component immutably: more than {} concurrent immutable borrows \
-					 outstanding, which is the `isize::MAX` limit!",
-					isize::MAX
+					"mutably: {} concurrent immutable borrow{} prevent{} exclusive mutable access.",
+					concurrent,
+					// Gotta love English grammar
+					if concurrent == 1 { "" } else { "s" },
+					if concurrent == 1 { "s" } else { "" },
 				)?;
+			}
+			LockState::Unborrowed => {
+				#[cfg(debug_assertions)]
+				unreachable!();
+				#[cfg(not(debug_assertions))]
+				f.write_str("even though it was unborrowed?!")?;
 			}
 		}
 		Ok(())
@@ -504,215 +246,196 @@ impl Display for LockError {
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Error)]
 pub enum BorrowError {
-	#[error("Error while borrowing component of type `{component_name}`. {error}")]
-	ComponentMissing {
-		component_name: &'static str,
-		error: ComponentMissingError,
-	},
-	#[error("Error while borrowing component of type `{component_name}`. {error}")]
-	LockError {
-		component_name: &'static str,
-		error: LockError,
-	},
+	#[error("Failed to borrow. {0}")]
+	ComponentMissing(ComponentMissingError),
+	#[error("Failed to borrow. {0}")]
+	LockError(LockError),
 }
 
-// === Multi-fetch === //
+// === Keys === //
 
-pub trait ObjBorrowable: Sized {
-	fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError>;
+#[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct TypedKey<T: ?Sized> {
+	_ty: PhantomData<fn(T) -> T>,
+	raw: RawTypedKey,
 }
 
-impl ObjBorrowable for Obj {
-	fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError> {
-		Ok(obj.clone())
+impl<T: ?Sized> TypedKey<T> {
+	pub unsafe fn from_raw(raw: RawTypedKey) -> TypedKey<T> {
+		Self {
+			_ty: PhantomData,
+			raw,
+		}
+	}
+
+	pub fn raw(&self) -> RawTypedKey {
+		self.raw
 	}
 }
 
-impl<T: ?Sized + 'static> ObjBorrowable for RwMut<T> {
-	fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError> {
-		obj.try_borrow_mut()
-	}
-}
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+pub struct RawTypedKey(TypedKeyRawInner);
 
-impl<T: ?Sized + 'static> ObjBorrowable for RwRef<T> {
-	fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError> {
-		obj.try_borrow_ref()
-	}
-}
-
-macro impl_tup_obj_borrowable($($name:ident: $field:tt),*) {
-	impl<$($name: ObjBorrowable),*> ObjBorrowable for ($($name,)*) {
-		#[allow(unused_variables)]
-		fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError> {
-			Ok(($($name::try_borrow_from(obj)?,)*))
+impl Debug for RawTypedKey {
+	#[rustfmt::skip]
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		match &self.0 {
+			TypedKeyRawInner::Static(key) => {
+				f.debug_tuple("RawTypedKey::Static").field(key).finish()
+			}
+			TypedKeyRawInner::Proxy(key) => {
+				f.debug_tuple("RawTypedKey::Proxy").field(key).finish()
+			}
+			TypedKeyRawInner::Runtime(key) => {
+				f.debug_tuple("RawTypedKey::Runtime").field(key).finish()
+			}
 		}
 	}
 }
 
-impl_tuples!(impl_tup_obj_borrowable);
-
-// === Keys === //
-
-pub unsafe trait AliasList<T> {
-	unsafe fn push_aliases(self, obj: &mut ObjInner, ptr: NonNull<T>, lock_index: usize);
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+enum TypedKeyRawInner {
+	Static(FancyTypeId),
+	Proxy(FancyTypeId),
+	Runtime(u64),
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct AliasAs<T: ?Sized + 'static> {
-	_ty: PhantomData<fn(T) -> T>,
+pub fn typed_key<T: ?Sized + 'static>() -> TypedKey<T> {
+	TypedKey {
+		_ty: PhantomData,
+		raw: RawTypedKey(TypedKeyRawInner::Static(FancyTypeId::of::<T>())),
+	}
 }
 
-pub fn alias_as<T: ?Sized + 'static>() -> AliasAs<T> {
-	AliasAs { _ty: PhantomData }
+pub fn proxy_key<T: ?Sized + 'static + ProxyKeyType>() -> TypedKey<T::Provides> {
+	TypedKey {
+		_ty: PhantomData,
+		raw: RawTypedKey(TypedKeyRawInner::Proxy(FancyTypeId::of::<T>())),
+	}
 }
 
-unsafe impl<T: Unsize<U>, U: ?Sized + 'static> AliasList<T> for AliasAs<U> {
-	unsafe fn push_aliases(self, obj: &mut ObjInner, ptr: NonNull<T>, lock_index: usize) {
+pub fn dyn_key<T: ?Sized + 'static>() -> TypedKey<T> {
+	static GEN: AtomicU64 = AtomicU64::new(0);
+
+	TypedKey {
+		_ty: PhantomData,
+		raw: RawTypedKey(TypedKeyRawInner::Runtime(
+			GEN.try_generate_ref().unwrap_pretty(),
+		)),
+	}
+}
+
+#[doc(hidden)]
+pub trait ProxyKeyType {
+	type Provides: ?Sized + 'static;
+}
+
+pub macro proxy_key($(
+	$(#[$macro_meta:meta])*
+	$vis:vis proxy $name:ident($target:ty);
+)*) {$(
+	$(#[$macro_meta])*
+	$vis struct $name;
+
+	impl ProxyKeyType for $name {
+		type Provides = $target;
+	}
+)*}
+
+/// A fancy [TypeId] that records type names on debug builds.
+#[derive(Copy, Clone)]
+pub struct FancyTypeId {
+	id: TypeId,
+	#[cfg(debug_assertions)]
+	name: &'static str,
+}
+
+impl FancyTypeId {
+	pub fn of<T: ?Sized + 'static>() -> Self {
+		Self {
+			id: TypeId::of::<T>(),
+			#[cfg(debug_assertions)]
+			name: type_name::<T>(),
+		}
+	}
+
+	pub fn key(&self) -> TypeId {
+		self.id
+	}
+
+	pub fn name(&self) -> &'static str {
+		#[cfg(debug_assertions)]
+		{
+			self.name
+		}
+		#[cfg(not(debug_assertions))]
+		{
+			"type name unavailable"
+		}
+	}
+}
+
+impl Debug for FancyTypeId {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		#[cfg(debug_assertions)]
+		{
+			f.debug_tuple(format!("FancyTypeId<{}>", self.name).as_str())
+				.field(&self.id)
+				.finish()
+		}
+		#[cfg(not(debug_assertions))]
+		{
+			f.debug_tuple("FancyTypeId").field(&self.id).finish()
+		}
+	}
+}
+
+impl Hash for FancyTypeId {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		self.id.hash(state)
+	}
+}
+
+impl Eq for FancyTypeId {}
+
+impl PartialEq for FancyTypeId {
+	fn eq(&self, other: &Self) -> bool {
+		self.id == other.id
+	}
+}
+
+// === Alias lists === //
+
+pub unsafe trait AliasList<T: Sized> {
+	unsafe fn push_aliases(self, map: &mut Obj, ptr: NonNull<T>);
+}
+
+unsafe impl<T, U> AliasList<T> for TypedKey<U>
+where
+	T: Sized + Unsize<U>,
+	U: ?Sized + 'static,
+{
+	unsafe fn push_aliases(self, map: &mut Obj, ptr: NonNull<T>) {
 		// Unsize the value and convert it back into a pointer
 		let ptr = (ptr.as_ref() as &U) as *const U as *mut U;
 		let ptr = NonNull::new_unchecked(ptr);
 
 		// Insert the entry
-		obj.comp_map.insert(
-			TypeId::of::<U>(),
-			ObjEntry::new_alias(ptr, lock_index, &mut obj.bump),
+		#[rustfmt::skip]
+		map.comps.insert(
+			self.raw(),
+			CompMapEntry::new_alias(ptr, &mut map.bump)
 		);
 	}
 }
 
 macro tup_impl_alias_list($($name:ident: $field:tt),*) {
-	unsafe impl<ZZ $(,$name: AliasList<ZZ>)*> AliasList<ZZ> for ($($name,)*) {
+unsafe impl<_Src: Sized $(,$name: AliasList<_Src>)*> AliasList<_Src> for ($($name,)*) {
 		#[allow(unused_variables)]
-		unsafe fn push_aliases(self, obj: &mut ObjInner, ptr: NonNull<ZZ>, lock_index: usize) {
-			$( self.$field.push_aliases(obj, ptr, lock_index); )*
+		unsafe fn push_aliases(self, obj: &mut Obj, ptr: NonNull<_Src>) {
+			$( self.$field.push_aliases(obj, ptr); )*
 		}
 	}
 }
 
 impl_tuples!(tup_impl_alias_list);
-
-// === Rw Guards === //
-
-#[derive(Debug)]
-pub struct RwMut<T: ?Sized> {
-	obj: Obj,
-	lock_index: usize,
-	// Safety: this reference is valid until `Obj` is dropped.
-	comp: NonNull<T>,
-}
-
-impl<T: ?Sized> RwMut<T> {
-	pub fn obj(ptr: &Self) -> &Obj {
-		&ptr.obj
-	}
-
-	pub fn downgrade(ptr: Self) -> RwRef<T> {
-		// Copy down guard state
-		let obj = ptr.obj.clone();
-		let lock_index = ptr.lock_index;
-		let comp = ptr.comp;
-
-		// Release guard
-		drop(ptr);
-
-		// Attempt to lock guard
-		obj.0.borrow_mut().locks[lock_index]
-			.try_lock_ref()
-			.unwrap_pretty();
-
-		// Create new guard
-		RwRef {
-			obj,
-			lock_index,
-			comp,
-		}
-	}
-}
-
-impl<T: ?Sized> Deref for RwMut<T> {
-	type Target = T;
-
-	fn deref(&self) -> &Self::Target {
-		unsafe { self.comp.as_ref() }
-	}
-}
-
-impl<T: ?Sized> DerefMut for RwMut<T> {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		unsafe { self.comp.as_mut() }
-	}
-}
-
-impl<T: ?Sized> Drop for RwMut<T> {
-	fn drop(&mut self) {
-		unsafe {
-			self.obj.0.borrow_mut().locks[self.lock_index].unlock_mut();
-		}
-	}
-}
-
-#[derive(Debug)]
-pub struct RwRef<T: ?Sized> {
-	obj: Obj,
-	lock_index: usize,
-	// Safety: this reference is valid until `Obj` is dropped.
-	comp: NonNull<T>,
-}
-
-impl<T: ?Sized> RwRef<T> {
-	pub fn obj(ptr: &Self) -> &Obj {
-		&ptr.obj
-	}
-
-	pub fn upgrade(ptr: Self) -> RwMut<T> {
-		// Copy down guard state
-		let obj = ptr.obj.clone();
-		let lock_index = ptr.lock_index;
-		let comp = ptr.comp;
-
-		// Release guard
-		drop(ptr);
-
-		// Attempt to lock guard
-		obj.0.borrow_mut().locks[lock_index]
-			.try_lock_mut()
-			.unwrap_pretty();
-
-		// Create new guard
-		RwMut {
-			obj,
-			lock_index,
-			comp,
-		}
-	}
-}
-
-impl<T: ?Sized> Deref for RwRef<T> {
-	type Target = T;
-
-	fn deref(&self) -> &Self::Target {
-		unsafe { self.comp.as_ref() }
-	}
-}
-
-impl<T: ?Sized> Clone for RwRef<T> {
-	fn clone(&self) -> Self {
-		self.obj.0.borrow_mut().locks[self.lock_index]
-			.try_lock_ref()
-			.unwrap_pretty();
-
-		Self {
-			obj: self.obj.clone(),
-			lock_index: self.lock_index,
-			comp: self.comp,
-		}
-	}
-}
-
-impl<T: ?Sized> Drop for RwRef<T> {
-	fn drop(&mut self) {
-		unsafe {
-			self.obj.0.borrow_mut().locks[self.lock_index].unlock_ref();
-		}
-	}
-}

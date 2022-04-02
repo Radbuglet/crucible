@@ -77,46 +77,6 @@ impl<D: NumberGenBase> Display for GenOverflowError<D> {
 	}
 }
 
-// Delegation
-pub trait NumberGenDelegator {
-	type Generator: NumberGenBase;
-	type Value: Sized + Debug;
-
-	fn wrap_generated_value(value: <Self::Generator as NumberGenBase>::Value) -> Self::Value;
-	fn base_generator(&self) -> &Self::Generator;
-	fn base_generator_mut(&mut self) -> &mut Self::Generator;
-}
-
-impl<D: NumberGenDelegator<Generator = G>, G: NumberGenBase> NumberGenBase for D {
-	type Value = D::Value;
-
-	fn generator_limit() -> Self::Value {
-		D::wrap_generated_value(G::generator_limit())
-	}
-}
-
-impl<D: NumberGenDelegator<Generator = G>, G: NumberGenRef> NumberGenRef for D {
-	fn try_generate_ref(&self) -> Result<Self::Value, GenOverflowError<Self>> {
-		Ok(D::wrap_generated_value(
-			self.base_generator()
-				.try_generate_ref()
-				.ok()
-				.ok_or(GenOverflowError::new())?,
-		))
-	}
-}
-
-impl<D: NumberGenDelegator<Generator = G>, G: NumberGenMut> NumberGenMut for D {
-	fn try_generate_mut(&mut self) -> Result<Self::Value, GenOverflowError<Self>> {
-		Ok(D::wrap_generated_value(
-			self.base_generator_mut()
-				.try_generate_mut()
-				.ok()
-				.ok_or(GenOverflowError::new())?,
-		))
-	}
-}
-
 // Primitive generators
 impl NumberGenBase for u64 {
 	type Value = u64;

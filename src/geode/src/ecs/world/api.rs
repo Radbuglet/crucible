@@ -6,50 +6,6 @@ use crate::ecs::world::{ArchHandle, ArchetypeDeadError, EntityArchLocator, Entit
 use crossbeam::queue::SegQueue;
 use std::ops::{Deref, DerefMut};
 
-pub trait WorldAccessor {
-	fn raw_world(&self) -> &World;
-
-	fn is_sync(&self) -> bool;
-
-	fn spawn(&mut self) -> Entity;
-
-	fn despawn(&mut self, target: Entity);
-
-	fn is_alive(&self, target: Entity) -> bool {
-		self.raw_world().is_alive(target)
-	}
-
-	fn is_future_entity(&self, target: Entity) -> bool {
-		self.raw_world().is_future_entity(target)
-	}
-
-	fn is_alive_or_future(&self, target: Entity) -> bool {
-		self.raw_world().is_alive_or_future(target)
-	}
-
-	fn locate_entity(&self, target: Entity) -> Result<Option<EntityArchLocator>, EntityDeadError> {
-		self.raw_world().locate_entity(target)
-	}
-
-	fn get_archetype(&self, handle: ArchHandle) -> Result<&Archetype, ArchetypeDeadError> {
-		self.raw_world().get_archetype(handle)
-	}
-
-	fn find_archetype<I>(&self, comp_list_sorted: I) -> Option<ArchHandle>
-	where
-		I: IntoIterator<Item = StorageId>,
-		I::IntoIter: ExactSizeIterator + Clone,
-	{
-		self.raw_world().find_archetype(comp_list_sorted)
-	}
-
-	fn new_storage(&mut self) -> StorageId;
-
-	fn attach_storage(&mut self, target: Entity, storage: StorageId);
-
-	fn detach_storage(&mut self, target: Entity, storage: StorageId);
-}
-
 #[derive(Debug, Default)]
 pub struct World {
 	entities: EntityManager,
@@ -61,10 +17,6 @@ pub struct World {
 impl World {
 	pub fn new() -> Self {
 		Self::default()
-	}
-
-	pub fn ref_handle(&self) -> AsyncWorldHandleRef<'_> {
-		AsyncWorldHandle::new(self)
 	}
 
 	pub fn flush(&mut self) {
@@ -82,38 +34,35 @@ impl World {
 		// Flush reshape requests
 		todo!()
 	}
-}
 
-impl WorldAccessor for World {
-	fn raw_world(&self) -> &World {
-		self
+	pub fn queue_ref(&self) -> WorldQueueRef<'_> {
+		WorldQueue::new(self)
 	}
 
-	fn is_sync(&self) -> bool {
-		true
-	}
-
-	fn spawn(&mut self) -> Entity {
+	pub fn spawn_now(&mut self) -> Entity {
 		self.entities.spawn_now()
 	}
 
-	fn despawn(&mut self, target: Entity) {
+	pub fn despawn_now(&mut self, target: Entity) {
 		self.entities.despawn_now(target).unwrap();
 	}
 
-	fn is_alive(&self, target: Entity) -> bool {
+	pub fn is_alive(&self, target: Entity) -> bool {
 		self.entities.is_alive(target)
 	}
 
-	fn is_future_entity(&self, target: Entity) -> bool {
+	pub fn is_future_entity(&self, target: Entity) -> bool {
 		self.entities.is_future_entity(target)
 	}
 
-	fn is_alive_or_future(&self, target: Entity) -> bool {
+	pub fn is_alive_or_future(&self, target: Entity) -> bool {
 		self.entities.is_alive_or_future(target)
 	}
 
-	fn locate_entity(&self, target: Entity) -> Result<Option<EntityArchLocator>, EntityDeadError> {
+	pub fn locate_entity(
+		&self,
+		target: Entity,
+	) -> Result<Option<EntityArchLocator>, EntityDeadError> {
 		if self.is_alive(target) {
 			let (_, arch_raw) = self.entities.locate_entity_raw(target.index);
 			Ok(arch_raw
@@ -128,11 +77,11 @@ impl WorldAccessor for World {
 		}
 	}
 
-	fn get_archetype(&self, handle: ArchHandle) -> Result<&Archetype, ArchetypeDeadError> {
+	pub fn get_archetype(&self, handle: ArchHandle) -> Result<&Archetype, ArchetypeDeadError> {
 		self.arch.get_arch(handle)
 	}
 
-	fn find_archetype<I>(&self, comp_list_sorted: I) -> Option<ArchHandle>
+	pub fn find_archetype<I>(&self, comp_list_sorted: I) -> Option<ArchHandle>
 	where
 		I: IntoIterator<Item = StorageId>,
 		I::IntoIter: ExactSizeIterator + Clone,
@@ -140,11 +89,11 @@ impl WorldAccessor for World {
 		self.arch.find_arch(comp_list_sorted)
 	}
 
-	fn new_storage(&mut self) -> StorageId {
+	pub fn new_storage_now(&mut self) -> StorageId {
 		self.arch.new_storage_sync()
 	}
 
-	fn attach_storage(&mut self, target: Entity, storage: StorageId) {
+	pub fn attach_storage_now(&mut self, target: Entity, storage: StorageId) {
 		assert!(self.is_alive(target));
 
 		// Get entity slot info
@@ -155,10 +104,10 @@ impl WorldAccessor for World {
 
 		// Move from the old archetype to the new one
 		#[rustfmt::skip]
-        self.arch.move_to_arch(&mut self.entities, target.index, arch);
+		self.arch.move_to_arch(&mut self.entities, target.index, arch);
 	}
 
-	fn detach_storage(&mut self, target: Entity, storage: StorageId) {
+	pub fn detach_storage_now(&mut self, target: Entity, storage: StorageId) {
 		assert!(self.is_alive(target));
 
 		// Get entity slot info
@@ -169,14 +118,14 @@ impl WorldAccessor for World {
 
 		// Move from the old archetype to the new one
 		#[rustfmt::skip]
-        self.arch.move_to_arch(&mut self.entities, target.index, arch);
+		self.arch.move_to_arch(&mut self.entities, target.index, arch);
 	}
 }
 
-pub type AsyncWorldHandleRef<'a> = AsyncWorldHandle<&'a World>;
+pub type WorldQueueRef<'a> = WorldQueue<&'a World>;
 
 #[derive(Debug)]
-pub struct AsyncWorldHandle<H: Deref<Target = World>> {
+pub struct WorldQueue<H: Deref<Target = World>> {
 	handle: H,
 	queues: Option<Queues>,
 }
@@ -187,7 +136,7 @@ struct Queues {
 	deletion_queue: Vec<usize>,
 }
 
-impl<H: Deref<Target = World>> AsyncWorldHandle<H> {
+impl<H: Deref<Target = World>> WorldQueue<H> {
 	pub fn new(handle: H) -> Self {
 		Self {
 			handle,
@@ -195,45 +144,35 @@ impl<H: Deref<Target = World>> AsyncWorldHandle<H> {
 		}
 	}
 
+	fn queues(&mut self) -> &mut Queues {
+		self.queues.as_mut().unwrap()
+	}
+
 	pub fn handle(&self) -> &H {
 		&self.handle
 	}
 
-	fn queues(&mut self) -> &mut Queues {
-		self.queues.as_mut().unwrap()
-	}
-}
-
-impl<H: Deref<Target = World>> WorldAccessor for AsyncWorldHandle<H> {
-	fn raw_world(&self) -> &World {
-		self.handle.deref()
-	}
-
-	fn is_sync(&self) -> bool {
-		false
-	}
-
-	fn spawn(&mut self) -> Entity {
+	pub fn spawn_deferred(&mut self) -> Entity {
 		self.handle.entities.spawn_deferred()
 	}
 
-	fn despawn(&mut self, target: Entity) {
+	pub fn despawn_deferred(&mut self, target: Entity) {
 		debug_assert!(self.is_alive_or_future(target));
 		self.queues().deletion_queue.push(target.index);
 	}
 
-	fn new_storage(&mut self) -> StorageId {
+	pub fn new_storage_async(&mut self) -> StorageId {
 		self.handle.arch.new_storage_async()
 	}
 
-	fn attach_storage(&mut self, target: Entity, storage: StorageId) {
+	pub fn attach_storage_deferred(&mut self, target: Entity, storage: StorageId) {
 		self.queues().reshape_queue.add(ReshapeAction::Add {
 			slot: target.index,
 			storage,
 		});
 	}
 
-	fn detach_storage(&mut self, target: Entity, storage: StorageId) {
+	pub fn detach_storage_deferred(&mut self, target: Entity, storage: StorageId) {
 		self.queues().reshape_queue.add(ReshapeAction::Remove {
 			slot: target.index,
 			storage,
@@ -241,15 +180,23 @@ impl<H: Deref<Target = World>> WorldAccessor for AsyncWorldHandle<H> {
 	}
 }
 
-impl<H: Deref<Target = World>> Drop for AsyncWorldHandle<H> {
+impl<H: Deref<Target = World>> Deref for WorldQueue<H> {
+	type Target = World;
+
+	fn deref(&self) -> &Self::Target {
+		&*self.handle
+	}
+}
+
+impl<H: Deref<Target = World>> Drop for WorldQueue<H> {
 	fn drop(&mut self) {
 		let queues = self.queues.take().unwrap();
 
-		self.raw_world()
+		self.handle
 			.reshape_queues
 			.push(queues.reshape_queue.finish());
 
-		self.raw_world()
+		self.handle
 			.delete_queues
 			.push(queues.deletion_queue.into_boxed_slice());
 	}
