@@ -6,7 +6,7 @@ use thiserror::Error;
 #[derive(Debug)]
 pub struct EntityManager {
 	/// The generation generator at the time it was last flushed.
-	gen_at_last_flush: EntityGen,
+	next_gen_at_last_flush: EntityGen,
 
 	/// A monotonically increasing generation counter. This represents the next value to be yielded
 	/// when generating new generations.
@@ -24,7 +24,7 @@ pub struct EntityManager {
 impl Default for EntityManager {
 	fn default() -> Self {
 		Self {
-			gen_at_last_flush: EntityGen::new(1).unwrap(),
+			next_gen_at_last_flush: EntityGen::new(1).unwrap(),
 			generation_gen: EntityGenGenerator::default(),
 			slots: Vec::new(),
 			free_slots: Vec::new(),
@@ -36,12 +36,13 @@ impl EntityManager {
 	pub fn spawn_now(&mut self) -> Entity {
 		// Increment generation
 		let gen = self.generation_gen.try_generate_mut().unwrap();
-		self.gen_at_last_flush = gen;
+		self.next_gen_at_last_flush = self.generation_gen.next_value();
 
 		// Determine index
 		let index = self.free_slots.pop();
 		let index = match index {
 			Some(index) => {
+				debug_assert!(self.slots[index].is_none());
 				self.slots[index] = Some(EntitySlot::new(gen));
 				index
 			}
@@ -57,17 +58,26 @@ impl EntityManager {
 	pub fn spawn_deferred(&self) -> Entity {
 		// Determine generation
 		let gen = self.generation_gen.try_generate_ref().unwrap();
-		let count =
-			self.free_slots.len() as isize - (gen.get() - self.gen_at_last_flush.get()) as isize;
+
+		// Determine the index of the entity being generated in the `free_slots` list if we were reading
+		// from left to right.
+		//
+		// N.B. `next_gen_at_last_flush` represents the generation that would have been yielded by a
+		// deferred spawn right after the flush. e.g. the first generation would result in
+		// `gen == next_gen_at_last_flush` and a `gen_index` equal to `0`.
+		//
+		// This index may overflow a `usize` but that is fine because:
+		// 1. We don't actually use these to handle flushing so internal invariants are not broken.
+		// 2. Users can produce invalid entity IDs safely by using entity IDs from other worlds so
+		//    it's not really worth guarding against bizarre behavior so long as it doesn't cause
+		//    unsoundness.
+		let free_list_index = (gen.get() - self.next_gen_at_last_flush.get()) as usize;
 
 		// Determine index
-		let index = if count <= 0 {
-			// When count is positive, it's an index in the free slot list.
-			self.free_slots[count as usize]
+		let index = if free_list_index < self.free_slots.len() {
+			self.free_slots[self.free_slots.len() - 1 - free_list_index]
 		} else {
-			// When it's negative, it's a number of entities allocated at the end of the free slot
-			// list.
-			self.slots.len() - 1 + (-count) as usize
+			self.slots.len() + free_list_index
 		};
 
 		// Build entity handle
@@ -78,6 +88,9 @@ impl EntityManager {
 		let slot = self
 			.slots
 			.get_mut(target)
+			// We need to ensure that the entity has not already been released lest queued deletions
+			// add the same entity slot to the `free_slots` vector several times.
+			.filter(|target| target.is_some())
 			.ok_or(EntitySlotDeadError(target))?;
 
 		*slot = None;
@@ -102,7 +115,7 @@ impl EntityManager {
 	}
 
 	pub fn is_future_entity(&self, entity: Entity) -> bool {
-		entity.gen >= self.gen_at_last_flush
+		entity.gen >= self.next_gen_at_last_flush
 	}
 
 	pub fn is_alive_or_future(&self, entity: Entity) -> bool {
@@ -123,25 +136,33 @@ impl EntityManager {
 	}
 
 	pub fn flush_creations(&mut self) {
-		let max_gen = self.generation_gen.next_value();
-		let mut gen = self.gen_at_last_flush.get();
+		// The generation of the next entity this routine will spawn.
+		let mut gen_of_next_spawn = self.next_gen_at_last_flush.get();
+
+		// The next generation to be spawned by the global generation counter.
+		// i.e. this is an upper exclusive bound for the generation.
+		let global_next_gen = self.generation_gen.next_value();
 
 		// Reserve slots in existing allocation
-		while gen < max_gen.get() && !self.free_slots.is_empty() {
+		while gen_of_next_spawn < global_next_gen.get() && !self.free_slots.is_empty() {
 			let index = self.free_slots.pop().unwrap();
-			self.slots[index] = Some(EntitySlot::new(EntityGen::new(gen).unwrap()));
-			gen += 1;
+			self.slots[index] = Some(EntitySlot::new(EntityGen::new(gen_of_next_spawn).unwrap()));
+			gen_of_next_spawn += 1;
 		}
 
 		// Reserve slots at end of buffer
-		self.slots.reserve((max_gen.get() - gen) as usize);
-		for gen in gen..max_gen.get() {
-			self.slots
-				.push(Some(EntitySlot::new(EntityGen::new(gen).unwrap())));
-		}
+		let extensions =
+			// `global_next_gen` is an exclusive upper bound for generating entities
+			(gen_of_next_spawn..global_next_gen.get())
+				// Make each of the generations for which we're creating an entity into an entity slot.
+				.map(|gen| {
+					Some(EntitySlot::new(EntityGen::new(gen).unwrap()))
+				});
 
-		// Update `last_flushed_gen`
-		self.gen_at_last_flush = max_gen;
+		self.slots.extend(extensions);
+
+		// Update `next_gen_at_last_flush`
+		self.next_gen_at_last_flush = global_next_gen;
 	}
 }
 
