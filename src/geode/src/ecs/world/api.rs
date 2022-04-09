@@ -1,4 +1,4 @@
-use crate::ecs::world::arch::{ArchManager, Archetype};
+use crate::ecs::world::arch::{ArchManager, WorldArchetype};
 use crate::ecs::world::entities::{EntityDeadError, EntityManager};
 use crate::ecs::world::ids::StorageId;
 use crate::ecs::world::queue::{EntityActionEncoder, ReshapeAction};
@@ -77,7 +77,7 @@ impl World {
 		}
 	}
 
-	pub fn get_archetype(&self, handle: ArchHandle) -> Result<&Archetype, ArchetypeDeadError> {
+	pub fn get_archetype(&self, handle: ArchHandle) -> Result<&WorldArchetype, ArchetypeDeadError> {
 		self.arch.get_arch(handle)
 	}
 
@@ -209,10 +209,6 @@ pub struct Entity {
 }
 
 impl Entity {
-	pub fn hash_index(&self) -> u64 {
-		self.index as u64
-	}
-
 	pub fn index(&self) -> usize {
 		self.index
 	}
@@ -224,8 +220,22 @@ impl Entity {
 
 #[derive(Debug, Copy, Clone)]
 pub struct ComponentPair<'a, T: ?Sized> {
-	pub entity: Entity,
-	pub comp: &'a T,
+	entity: Entity,
+	comp: &'a T,
+}
+
+impl<'a, T: ?Sized> ComponentPair<'a, T> {
+	pub fn new(entity: Entity, comp: &'a T) -> Self {
+		Self { entity, comp }
+	}
+
+	pub fn entity(this: &Self) -> Entity {
+		this.entity
+	}
+
+	pub fn comp(this: &Self) -> &'a T {
+		this.comp
+	}
 }
 
 impl<'a, T: ?Sized> Deref for ComponentPair<'a, T> {
@@ -238,31 +248,35 @@ impl<'a, T: ?Sized> Deref for ComponentPair<'a, T> {
 
 #[derive(Debug)]
 pub struct ComponentPairMut<'a, T: ?Sized> {
-	pub entity: Entity,
-	pub comp: &'a mut T,
+	entity: Entity,
+	comp: &'a mut T,
 }
 
 impl<'a, T: ?Sized> ComponentPairMut<'a, T> {
-	pub fn entity(&self) -> Entity {
-		self.entity
+	pub fn new(entity: Entity, comp: &'a mut T) -> Self {
+		Self { entity, comp }
 	}
 
-	pub fn component(&self) -> &T {
-		self.comp
+	pub fn entity(this: &Self) -> Entity {
+		this.entity
 	}
 
-	pub fn component_mut(&mut self) -> &mut T {
-		self.comp
+	pub fn component(this: &Self) -> &T {
+		this.comp
 	}
 
-	pub fn to_component(self) -> &'a mut T {
-		self.comp
+	pub fn component_mut(this: &mut Self) -> &mut T {
+		this.comp
 	}
 
-	pub fn downgrade(&self) -> ComponentPair<'_, T> {
+	pub fn to_component(this: Self) -> &'a mut T {
+		this.comp
+	}
+
+	pub fn downgrade(this: &Self) -> ComponentPair<'_, T> {
 		ComponentPair {
-			entity: self.entity,
-			comp: self.comp,
+			entity: this.entity,
+			comp: this.comp,
 		}
 	}
 }

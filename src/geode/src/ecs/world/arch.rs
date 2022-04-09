@@ -22,7 +22,10 @@ pub struct ArchManager {
 	full_archetype_map: RawTable<(u64, usize)>,
 
 	/// A free list of archetypes.
-	archetypes: FreeList<Archetype>,
+	archetypes: FreeList<WorldArchetype>,
+
+	/// A global generator of dirty version IDs
+	dirty_id_gen: DirtyId,
 
 	/// An archetype hasher.
 	hasher: RandomState,
@@ -46,6 +49,7 @@ impl Default for ArchManager {
 			arch_gen_gen: ArchGen::new(1).unwrap(),
 			full_archetype_map: RawTable::new(),
 			archetypes: FreeList::new(),
+			dirty_id_gen: DirtyId::new(1).unwrap(),
 			hasher: RandomState::new(),
 		}
 	}
@@ -75,7 +79,7 @@ impl ArchManager {
 	) {
 		let (gen, slot) = entities.locate_entity_raw_mut(entity_index);
 		if let Some(index) = slot.arch_index.as_option() {
-			self.archetypes[index].remove_entity(slot.index_in_arch);
+			self.archetypes[index].remove_entity(slot.index_in_arch, &mut self.dirty_id_gen);
 		}
 
 		let arch = &mut self.archetypes[arch_index];
@@ -83,13 +87,16 @@ impl ArchManager {
 			arch_index: OptionalUsize::some(arch_index),
 			index_in_arch: arch.entities().len(),
 		};
-		arch.push_entity(Entity {
-			index: entity_index,
-			gen,
-		});
+		arch.push_entity(
+			Entity {
+				index: entity_index,
+				gen,
+			},
+			&mut self.dirty_id_gen,
+		);
 	}
 
-	pub fn get_arch(&self, handle: ArchHandle) -> Result<&Archetype, ArchetypeDeadError> {
+	pub fn get_arch(&self, handle: ArchHandle) -> Result<&WorldArchetype, ArchetypeDeadError> {
 		self.archetypes
 			.get(handle.index)
 			.filter(|arch| arch.gen == handle.gen)
@@ -161,7 +168,7 @@ impl ArchManager {
 			index
 		} else {
 			let comp_list = comp_list.collect();
-			let index = self.archetypes.add(Archetype::new(
+			let index = self.archetypes.add(WorldArchetype::new(
 				self.arch_gen_gen.try_generate_mut().unwrap(),
 				comp_list,
 			));
@@ -250,7 +257,7 @@ pub struct ArchHandle {
 }
 
 #[derive(Debug, Clone)]
-pub struct Archetype {
+pub struct WorldArchetype {
 	/// The archetype's current generation to distinguish it between other archetypes in the same
 	/// slot. Archetypes are cleaned up once their entity count drops to zero.
 	gen: ArchGen,
@@ -266,9 +273,6 @@ pub struct Archetype {
 
 	/// The head of the dirty nodes linked list.
 	dirty_head: OptionalUsize,
-
-	/// A generator of dirty node identifiers.
-	dirty_id_gen: DirtyId,
 }
 
 #[derive(Debug, Clone)]
@@ -292,7 +296,7 @@ impl Default for DirtyEntityNode {
 	}
 }
 
-impl Archetype {
+impl WorldArchetype {
 	pub fn new(gen: ArchGen, storages: Box<[StorageId]>) -> Self {
 		Self {
 			gen,
@@ -300,7 +304,6 @@ impl Archetype {
 			entity_ids: Vec::new(),
 			entity_dirty_meta: Vec::new(),
 			dirty_head: OptionalUsize::NONE,
-			dirty_id_gen: DirtyId::new(1).unwrap(),
 		}
 	}
 
@@ -324,14 +327,14 @@ impl Archetype {
 		}
 	}
 
-	fn link_front_push_inner(&mut self, index: usize) {
+	fn link_front_push_inner(&mut self, index: usize, dirty_id_gen: &mut DirtyId) {
 		// Old link layout:
 		// [head_ptr] [self.dirty_head] [...]
 		//
 		// New link layout:
 		// [head_ptr] [index] [self.dirty_head] [...]
 
-		let dirty_id = self.dirty_id_gen.try_generate_mut().unwrap();
+		let dirty_id = dirty_id_gen.try_generate_mut().unwrap();
 
 		self.entity_dirty_meta[index] = DirtyEntityNode {
 			dirty_id,
@@ -346,15 +349,15 @@ impl Archetype {
 		self.dirty_head = OptionalUsize::some(index);
 	}
 
-	fn push_entity(&mut self, entity: Entity) {
+	fn push_entity(&mut self, entity: Entity, dirty_id_gen: &mut DirtyId) {
 		self.entity_ids.push(entity);
 
 		// This is just some temporary state for `link_front_push_inner` to initialize.
 		self.entity_dirty_meta.push(DirtyEntityNode::default());
-		self.link_front_push_inner(self.entity_dirty_meta.len() - 1);
+		self.link_front_push_inner(self.entity_dirty_meta.len() - 1, dirty_id_gen);
 	}
 
-	fn remove_entity(&mut self, index: usize) {
+	fn remove_entity(&mut self, index: usize, dirty_id_gen: &mut DirtyId) {
 		let last_index = self.entity_dirty_meta.len() - 1;
 
 		// Unlink last index from its surroundings
@@ -373,32 +376,50 @@ impl Archetype {
 		self.entity_dirty_meta.swap_remove(index);
 
 		// Push `index` to the front of the dirty list
-		self.link_front_push_inner(index);
+		self.link_front_push_inner(index, dirty_id_gen);
 	}
 
 	pub fn entities(&self) -> &[Entity] {
 		&self.entity_ids
 	}
 
-	pub fn iter_dirties(
-		&self,
-		last_checked: DirtyId,
-	) -> (DirtyId, impl Iterator<Item = usize> + '_) {
-		let mut iter_index = self.dirty_head.as_option();
+	pub fn dirty_version(&self) -> DirtyId {
+		self.dirty_head
+			.as_option()
+			.map_or(DirtyId::new(1).unwrap(), |index| {
+				self.entity_dirty_meta[index].dirty_id
+			})
+	}
 
-		let iter = std::iter::from_fn(move || {
-			let index = iter_index?;
-			let node = &self.entity_dirty_meta[index];
+	pub fn iter_dirties(&self, last_checked: DirtyId) -> WorldArchDirtyIter {
+		WorldArchDirtyIter {
+			arch: self,
+			last_checked,
+			iter_index: self.dirty_head.as_option(),
+		}
+	}
+}
 
-			if node.dirty_id >= last_checked {
-				iter_index = node.next_dirty.as_option();
-				Some(index)
-			} else {
-				None
-			}
-		});
+#[derive(Debug, Clone)]
+pub struct WorldArchDirtyIter<'a> {
+	arch: &'a WorldArchetype,
+	last_checked: DirtyId,
+	iter_index: Option<usize>,
+}
 
-		(self.dirty_id_gen, iter)
+impl<'a> Iterator for WorldArchDirtyIter<'a> {
+	type Item = (DirtyId, usize);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let index = self.iter_index?;
+		let node = &self.arch.entity_dirty_meta[index];
+
+		if node.dirty_id >= self.last_checked {
+			self.iter_index = node.next_dirty.as_option();
+			Some((node.dirty_id, index))
+		} else {
+			None
+		}
 	}
 }
 

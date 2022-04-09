@@ -1,11 +1,24 @@
 use crate::ecs::world::{ComponentPair, ComponentPairMut, Entity, World};
 use hashbrown::raw::{Bucket, RawIter, RawTable};
+use std::fmt::{Debug, Formatter};
 use std::mem::replace;
 
 // === MapStorage === //
 
+#[derive(Clone)]
 pub struct MapStorage<T> {
 	map: RawTable<(Entity, T)>,
+}
+
+impl<T: Debug> Debug for MapStorage<T> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let iter = unsafe { self.map.iter() };
+		let iter = iter.map(|bucket| {
+			let (k, v) = unsafe { bucket.as_ref() };
+			(*k, v)
+		});
+		f.debug_map().entries(iter).finish()
+	}
 }
 
 impl<T> Default for MapStorage<T> {
@@ -14,6 +27,10 @@ impl<T> Default for MapStorage<T> {
 			map: Default::default(),
 		}
 	}
+}
+
+fn hash_entity_slot(entity: &Entity) -> u64 {
+	entity.index() as u64
 }
 
 impl<T> MapStorage<T> {
@@ -25,14 +42,16 @@ impl<T> MapStorage<T> {
 		debug_assert!(world.is_alive_or_future(entity));
 
 		// Try to find and replace the existing entity in the map.
-		if let Some(slot) = self.map.get_mut(entity.hash_index(), |(candidate, _)| {
-			// We can do this reduced equality check because two entities in the same slot but with
-			// different generations will never be simultaneously alive in a single container.
-			//
-			// Doing this reduced check has the benefit of enabling searches to short-circuit
-			// earlier and allows us to tombstone earlier versions of the same slot automatically.
-			candidate.index() == entity.index()
-		}) {
+		if let Some(slot) = self
+			.map
+			.get_mut(hash_entity_slot(&entity), |(candidate, _)| {
+				// We can do this reduced equality check because two entities in the same slot but with
+				// different generations will never be simultaneously alive in a single container.
+				//
+				// Doing this reduced check has the benefit of enabling searches to short-circuit
+				// earlier and allows us to tombstone earlier versions of the same slot automatically.
+				candidate.index() == entity.index()
+			}) {
 			let (replaced_entity, replaced_comp) = replace(slot, (entity, value));
 			if replaced_entity.gen() == entity.gen() {
 				Some(replaced_comp)
@@ -53,7 +72,7 @@ impl<T> MapStorage<T> {
 		// this is our best alternative.
 		match self
 			.map
-			.try_insert_no_grow(entity.hash_index(), (entity, value))
+			.try_insert_no_grow(hash_entity_slot(&entity), (entity, value))
 		{
 			// Insertion was successful.
 			Ok(bucket) => bucket,
@@ -62,23 +81,24 @@ impl<T> MapStorage<T> {
 			Err((entity, value)) => {
 				// If we failed to clean up the existing chain, we are pretty much forced to grow.
 				self.clean(world);
-				self.map
-					.insert(entity.hash_index(), (entity, value), |(rehashed, _)| {
-						rehashed.hash_index()
-					})
+				self.map.insert(
+					hash_entity_slot(&entity),
+					(entity, value),
+					|(rehashed, _)| hash_entity_slot(rehashed),
+				)
 			}
 		}
 	}
 
 	pub fn try_get_raw(&self, entity: Entity) -> Option<ComponentPair<'_, T>> {
 		self.map
-			.get(entity.hash_index(), |(candidate, _)| {
+			.get(hash_entity_slot(&entity), |(candidate, _)| {
 				// See reasoning above.
 				candidate.index() == entity.index()
 			})
 			.and_then(|(found, comp)| {
 				if entity.gen() == found.gen() {
-					Some(ComponentPair { entity, comp })
+					Some(ComponentPair::new(entity, comp))
 				} else {
 					None
 				}
@@ -91,13 +111,13 @@ impl<T> MapStorage<T> {
 
 	pub fn try_get_mut_raw(&mut self, entity: Entity) -> Option<ComponentPairMut<'_, T>> {
 		self.map
-			.get_mut(entity.hash_index(), |(candidate, _)| {
+			.get_mut(hash_entity_slot(&entity), |(candidate, _)| {
 				// See reasoning above.
 				candidate.index() == entity.index()
 			})
 			.and_then(|(found, comp)| {
 				if entity.gen() == found.gen() {
-					Some(ComponentPairMut { entity, comp })
+					Some(ComponentPairMut::new(entity, comp))
 				} else {
 					None
 				}
@@ -132,23 +152,23 @@ impl<T> MapStorage<T> {
 		debug_assert!(world.is_alive_or_future(entity));
 
 		// Try to find and replace the existing entity in the map.
-		if let Some(slot) = self.map.find(entity.hash_index(), |(candidate, _)| {
+		if let Some(slot) = self.map.find(hash_entity_slot(&entity), |(candidate, _)| {
 			// See reasoning in "insert".
 			candidate.index() == entity.index()
 		}) {
 			let (found, comp) = unsafe { slot.as_mut() };
 			if entity.gen() == found.gen() {
-				ComponentPairMut { entity, comp }
+				ComponentPairMut::new(entity, comp)
 			} else {
 				let _ = (found, comp); // Helps prevent stupid mistakes.
 				unsafe { slot.write((entity, init())) }
 
 				let (_, comp) = unsafe { slot.as_mut() };
-				ComponentPairMut { entity, comp }
+				ComponentPairMut::new(entity, comp)
 			}
 		} else {
 			let (_, comp) = unsafe { self.force_insert(world, entity, init()).as_mut() };
-			ComponentPairMut { entity, comp }
+			ComponentPairMut::new(entity, comp)
 		}
 	}
 
@@ -158,7 +178,7 @@ impl<T> MapStorage<T> {
 		entity: Entity,
 	) -> Option<ComponentPairMut<'_, T>> {
 		if world.is_alive_or_future(entity) {
-			let bucket = self.map.find(entity.hash_index(), |(candidate, _)| {
+			let bucket = self.map.find(hash_entity_slot(&entity), |(candidate, _)| {
 				candidate.index() == entity.index()
 			})?;
 			let (found, component) = unsafe { bucket.as_mut() };
@@ -173,11 +193,8 @@ impl<T> MapStorage<T> {
 				return None;
 			}
 
-			// "comp" is bounded by the function signature. No bad references here!
-			Some(ComponentPairMut {
-				entity,
-				comp: component,
-			})
+			// "comp" lifetime is bounded by the function signature. No bad references here!
+			Some(ComponentPairMut::new(entity, component))
 		} else {
 			None
 		}
@@ -189,7 +206,7 @@ impl<T> MapStorage<T> {
 
 	pub fn remove(&mut self, entity: Entity) -> Option<T> {
 		self.map
-			.remove_entry(entity.hash_index(), |(candidate, _)| {
+			.remove_entry(hash_entity_slot(&entity), |(candidate, _)| {
 				// This reduced equality check will either match the desired entity and thus remove it
 				// or it will match a dead entity, which it should remove anyways.
 				candidate.index() == entity.index()
@@ -249,10 +266,7 @@ impl<'a, T> Iterator for StorageIterEntryRef<'a, T> {
 		for bucket in &mut self.iter {
 			let (entity, comp) = unsafe { bucket.as_ref() };
 			if self.world.is_alive_or_future(*entity) {
-				return Some(ComponentPair {
-					entity: *entity,
-					comp,
-				});
+				return Some(ComponentPair::new(*entity, comp));
 			}
 		}
 		None
@@ -283,10 +297,7 @@ impl<'a, T> Iterator for StorageIterEntryMut<'a, T> {
 		for bucket in &mut self.iter {
 			let (entity, comp) = unsafe { bucket.as_mut() };
 			if self.world.is_alive_or_future(*entity) {
-				return Some(ComponentPairMut {
-					entity: *entity,
-					comp,
-				});
+				return Some(ComponentPairMut::new(*entity, comp));
 			} else {
 				let _ = (entity, comp);
 				// `map.iter()` doesn't bound the lifetime of the iterator so this "double borrow"

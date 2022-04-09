@@ -2,42 +2,14 @@ use derive_where::derive_where;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash, Hasher};
-use std::mem::replace;
-
-/// An iterator with one element of lookahead.
-#[derive_where(Debug; I: Debug, I::Item: Debug)]
-#[derive_where(Clone; I: Clone, I::Item: Clone)]
-pub struct LookaheadIter<I: Iterator> {
-	next: Option<I::Item>,
-	iter: I,
-}
-
-impl<I: Iterator> LookaheadIter<I> {
-	pub fn new(source: impl IntoIterator<IntoIter = I>) -> Self {
-		let mut iter = source.into_iter();
-		let next = iter.next();
-		Self { next, iter }
-	}
-
-	pub fn peek(&self) -> Option<&I::Item> {
-		self.next.as_ref()
-	}
-}
-
-impl<I: Iterator> Iterator for LookaheadIter<I> {
-	type Item = I::Item;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		replace(&mut self.next, self.iter.next())
-	}
-}
+use std::iter::Peekable;
 
 /// An iterator merging two properly sorted iterators into one properly sorted stream.
-#[derive_where(Debug; LookaheadIter<IL>: Debug, LookaheadIter<IR>: Debug)]
-#[derive_where(Clone; LookaheadIter<IL>: Clone, LookaheadIter<IR>: Clone)]
+#[derive_where(Debug; Peekable<IL>: Debug, Peekable<IR>: Debug)]
+#[derive_where(Clone; Peekable<IL>: Clone, Peekable<IR>: Clone)]
 pub struct MergeSortedIter<IL: Iterator, IR: Iterator> {
-	left: LookaheadIter<IL>,
-	right: LookaheadIter<IR>,
+	left: Peekable<IL>,
+	right: Peekable<IR>,
 }
 
 impl<IL: Iterator, IR: Iterator> MergeSortedIter<IL, IR> {
@@ -46,8 +18,8 @@ impl<IL: Iterator, IR: Iterator> MergeSortedIter<IL, IR> {
 		right: impl IntoIterator<IntoIter = IR>,
 	) -> Self {
 		Self {
-			left: LookaheadIter::new(left.into_iter()),
-			right: LookaheadIter::new(right.into_iter()),
+			left: left.into_iter().peekable(),
+			right: right.into_iter().peekable(),
 		}
 	}
 }
@@ -70,11 +42,11 @@ impl<T: Ord, IL: Iterator<Item = T>, IR: Iterator<Item = T>> Iterator for MergeS
 
 /// An iterator excluding elements in the properly sorted right stream from elements in the properly
 /// sorted left stream.
-#[derive_where(Debug; IL: Debug, LookaheadIter<IR>: Debug)]
-#[derive_where(Clone; IL: Clone, LookaheadIter<IR>: Clone)]
+#[derive_where(Debug; IL: Debug, Peekable<IR>: Debug)]
+#[derive_where(Clone; IL: Clone, Peekable<IR>: Clone)]
 pub struct ExcludeSortedIter<IL: Iterator, IR: Iterator> {
 	left: IL,
-	right: LookaheadIter<IR>,
+	right: Peekable<IR>,
 }
 
 impl<IL: Iterator, IR: Iterator> ExcludeSortedIter<IL, IR> {
@@ -84,7 +56,7 @@ impl<IL: Iterator, IR: Iterator> ExcludeSortedIter<IL, IR> {
 	) -> Self {
 		Self {
 			left: left.into_iter(),
-			right: LookaheadIter::new(right.into_iter()),
+			right: right.into_iter().peekable(),
 		}
 	}
 }
@@ -160,4 +132,32 @@ where
 		prev = Some(val);
 		true
 	})
+}
+
+pub trait VecFilterExt {
+	type Item;
+
+	fn retain_enumerated<F>(&mut self, f: F)
+	where
+		F: FnMut(usize, &Self::Item) -> bool;
+}
+
+impl<T> VecFilterExt for Vec<T> {
+	type Item = T;
+
+	fn retain_enumerated<F>(&mut self, mut f: F)
+	where
+		F: FnMut(usize, &Self::Item) -> bool,
+	{
+		let mut index = 0;
+
+		self.retain(|val| {
+			if f(index, val) {
+				index += 1;
+				true
+			} else {
+				false
+			}
+		});
+	}
 }

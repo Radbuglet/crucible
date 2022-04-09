@@ -2,12 +2,12 @@ mod api;
 pub use api::*;
 
 mod arch;
-pub use arch::{ArchHandle, ArchetypeDeadError, EntityArchLocator};
+pub use arch::*;
 
 mod entities;
-pub use entities::EntityDeadError;
+pub use entities::*;
 
 mod ids;
-pub use ids::EntityGen;
+pub use ids::*;
 
 mod queue;
