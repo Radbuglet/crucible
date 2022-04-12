@@ -391,6 +391,7 @@ impl WorldArchetype {
 			})
 	}
 
+	// TODO: Clarify order of `DirtyId` (check `api.rs` to make sure these invariants are being upheld)
 	pub fn iter_dirties(&self, last_checked: DirtyId) -> WorldArchDirtyIter {
 		WorldArchDirtyIter {
 			arch: self,
