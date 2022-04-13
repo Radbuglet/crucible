@@ -47,7 +47,9 @@ impl<T> ArchStorage<T> {
 
 		// These iterators provide a list of slots that might have a different target entity than
 		// is currently present in them. Slots without a target entity are not included.
-		let mut archetype_iters = self
+		// FIXME: This actually needs to iterate over *all* possible archetypes that could contain
+		//  the storage, rather than the ones that actually exist in the storage.
+		let mut target_iters = self
 			.archetypes
 			.iter()
 			.filter_map(|(store_arch_index, store_arch)| {
@@ -80,13 +82,11 @@ impl<T> ArchStorage<T> {
 			let arch_iter_index = {
 				let mut greatest_entry: Option<(DirtyId, usize)> = None;
 
-				archetype_iters.retain_enumerated(|entry_index, entry| {
+				target_iters.retain_enumerated(|entry_index, entry| {
 					// Fetch the next ID in this iterator
 					let head_id = match entry.iter.clone().next() {
 						Some((id, _)) => id,
-						None => {
-							return false;
-						}
+						None => return false,
 					};
 
 					// If it's greater than the greatest entry we found, mark it.
@@ -99,9 +99,7 @@ impl<T> ArchStorage<T> {
 
 				match greatest_entry {
 					Some((_, index)) => index,
-					None => {
-						break;
-					}
+					None => break,
 				}
 			};
 
@@ -123,12 +121,12 @@ impl<T> ArchStorage<T> {
 			// Determine initial state
 			{
 				// Determine starting location
-				let entry = &mut archetype_iters[arch_iter_index];
+				let entry = &mut target_iters[arch_iter_index];
 
 				let (_, dirty_slot_index) = entry
 					.iter
 					.next()
-					// We already discard all `arch_dirty_iter` without a proceeding element so this
+					// We already discard all `arch_dirty_iter` without a succeeding element so this
 					// is guaranteed to be valid.
 					.unwrap();
 
@@ -138,15 +136,14 @@ impl<T> ArchStorage<T> {
 				};
 
 				// Determine what the target should be.
-				let should_be_entity = match entry.world_arch.entities().get(dirty_slot_index) {
-					Some(entity) => *entity,
-					None => {
-						// This slot is logically invalid and will be pruned by a later phase.
-						continue;
-					}
-				};
+				let should_be_entity = *entry
+					.world_arch
+					// This will never fail because only slots with an actual `should_be` entity can
+					// be marked as dirty.
+					.entities()[dirty_slot_index];
 
 				// Update the location of the entity that should be here.
+				// Yes, this doesn't update the entity currently
 				self.locs.insert(world, should_be_entity, start_loc);
 
 				// This is valid because entities can only be added to this storage's archetype
@@ -165,7 +162,6 @@ impl<T> ArchStorage<T> {
 					// This promotion is valid, despite not having a mutable reference to the
 					// `store_arch`, because the returned raw pointer to the heap wasn't derived from
 					// a immutable reference... I think.
-					// FIXME: Gah! Why are stacked borrows so complicated!
 					unsafe { entry.store_arch.components.as_ptr().add(dirty_slot_index) } as *mut T;
 
 				// And backup the start data in preparation for the copies.
@@ -207,6 +203,10 @@ impl<T> ArchStorage<T> {
 				match should_be_entity_or_none {
 					Some(should_be_entity) => {
 						let loc = *self.locs.get_raw(should_be_entity);
+
+						// Move the target entity's location.
+						self.locs.insert(world, should_be_entity, loc);
+
 						if loc == start_loc {
 							// ...we went back to the beginning slot, meaning that we're now moving
 							// `start_data` into `target_ptr`, thus completing the chain.
@@ -222,25 +222,25 @@ impl<T> ArchStorage<T> {
 							// location we have to check for repeats and b) this algorithm will
 							// terminate.
 
-							// Move the target entity's location.
-							self.locs.insert(world, should_be_entity, loc);
-
 							// And move on to this next location.
 							should_be_loc = loc;
 						}
 					}
 
-					// ...nothing should be in the target slot. Ignore it, drop `start_data` and let
-					// the purging routine handle the dead slot.
+					// ...nothing should be in the target slot. Ignore it, put `start_data` in the
+					// dead slot and let the purging routine drop it.
 					//
-					// "Oh no, but in doing so, we might loose `start_data` that is being used
-					// somewhere else"
+					// "Why do we write the element back instead of just dropping it immediately?"
 					//
-					// Luckily for the sanity of the author, the `World` conveniently sorts archetype
-					// modifications by when they were performed. That means that the last
-					// modification moving an entity to a new archetype is the one that the algorithm
-					// will detect first. *i.e.* We will always process the head of each of these
-					// movement lists so nothing could possibly point to `start_data`.
+					// The purging routine expects that all the arrays are property initialized. This
+					// is required because the purging routine actually does have to drop some amount
+					// of elements that were not part of a move chain. Furthermore, doing so would
+					// mean that the storage would be being left in a super dangerous state where
+					// some of the vector elements are logically uninitialized and dangerous to give
+					// to the user. Dropping components immediately would mean that we would have to
+					// run user code, which could panic and allow this invalid state to become
+					// accessible to the user. We're better off making this entire section panic-unsafe
+					// and being super careful to ensure that the users never take over.
 					//
 					// "What about updating the location `HashMap` for entities who do not have a
 					// `should_be` location?"
@@ -256,9 +256,16 @@ impl<T> ArchStorage<T> {
 					// Entity removal is reflected by queries in a `MapStorage`, meaning that the
 					// entries don't need to be updated.
 					//
-					// Huzzah!
+					// "But won't loosing track of this component be bad if it turns out this value
+					// is needed somewhere else?"
+					//
+					// Luckily for the sanity of the author, the `World` conveniently sorts archetype
+					// modifications by when they were performed. That means that the last modification
+					// moving an entity to a new archetype is the one that the algorithm will detect
+					// first. *i.e.* We will always process the head of each of these movement lists
+					// so nothing could possibly point to `start_data`.
 					None => {
-						drop(start_data);
+						unsafe { ptr::write(target_ptr, start_data) };
 						break;
 					}
 				}
@@ -272,7 +279,7 @@ impl<T> ArchStorage<T> {
 			let local = &mut self.archetypes[index];
 			match world.get_archetype(local.handle) {
 				Ok(template) => unsafe {
-					local.components.set_len(template.entities().len());
+					local.components.truncate(template.entities().len());
 				},
 				Err(_) => {
 					self.archetypes.release(index);
