@@ -71,6 +71,8 @@ impl ArchManager {
 		}
 	}
 
+	// TODO: We need to remove dead entities from the archetype registry.
+
 	pub fn move_to_arch(
 		&mut self,
 		entities: &mut EntityManager,
@@ -78,10 +80,13 @@ impl ArchManager {
 		arch_index: usize,
 	) {
 		let (gen, slot) = entities.locate_entity_raw_mut(entity_index);
+
+		// Remove from last archetype
 		if let Some(index) = slot.arch_index.as_option() {
 			self.archetypes[index].remove_entity(slot.index_in_arch, &mut self.dirty_id_gen);
 		}
 
+		// Move into new archetype
 		let arch = &mut self.archetypes[arch_index];
 		*slot = RawEntityArchLocator {
 			arch_index: OptionalUsize::some(arch_index),

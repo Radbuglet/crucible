@@ -84,7 +84,8 @@ impl<T: Ord, IL: Iterator<Item = T>, IR: Iterator<Item = T>> Iterator
 					}
 					Ordering::Equal => {
 						// `right` is equal to `next` so we must exclude `next`.
-						let _ = self.right.next();
+						// We don't remove `right` from the exclude iterator just yet because we might
+						// find a duplicate.
 						continue 'left_scan;
 					}
 					Ordering::Greater => {

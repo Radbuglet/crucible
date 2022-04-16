@@ -6,7 +6,7 @@ use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ptr::{NonNull, Pointee};
 
-/// A fancy [TypeId] that records type names on debug builds.
+/// A fancy [TypeId] that records type names in debug builds.
 #[derive(Copy, Clone)]
 pub struct FancyTypeId {
 	id: TypeId,
@@ -23,7 +23,7 @@ impl FancyTypeId {
 		}
 	}
 
-	pub fn key(&self) -> TypeId {
+	pub fn raw(&self) -> TypeId {
 		self.id
 	}
 

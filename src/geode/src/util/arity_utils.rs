@@ -31,7 +31,7 @@ pub trait InjectableClosure<A, D> {
 }
 
 macro tup_impl_closure_call_derive_for_fn($($left_name:ident: $left_field: tt),* ~ $($right_name:ident: $right_field: tt),*) {
-impl<ZZClosure: FnMut($($left_name,)* $($right_name,)*) -> ZZRet, ZZRet, $($left_name,)* $($right_name),*> InjectableClosure<($($left_name,)*), ($($right_name,)*)> for ZZClosure {
+	impl<ZZClosure: FnMut($($left_name,)* $($right_name,)*) -> ZZRet, ZZRet, $($left_name,)* $($right_name),*> InjectableClosure<($($left_name,)*), ($($right_name,)*)> for ZZClosure {
 		type Return = ZZRet;
 
 		#[allow(unused_variables)]

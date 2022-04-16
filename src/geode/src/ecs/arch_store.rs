@@ -4,6 +4,7 @@ use crate::ecs::world::{
 };
 use crate::util::free_list::IterableFreeList;
 use crate::util::iter_ext::VecFilterExt;
+use crate::util::usually_init::UsuallyInit;
 
 pub struct ArchStorage<T> {
 	id: StorageId,
@@ -15,7 +16,7 @@ pub struct ArchStorage<T> {
 struct StorageArchetype<T> {
 	handle: ArchHandle,
 	last_checked: DirtyId,
-	components: Vec<T>,
+	components: Vec<UsuallyInit<T>>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -36,6 +37,16 @@ impl<T> ArchStorage<T> {
 	// head element since nothing could possibly point to it.
 	pub fn flush(&mut self, world: &World) {
 		use std::ptr;
+
+		//> Ensure that every archetype is sufficiently sized to accommodate component data past their
+		//> ends. This routine does not shrink component storages if they're too big because we still
+		//> need that data. Shrinking is rather handled during the slot purging routine.
+		for (_, arch) in self.archetypes.iter_mut() {
+			let template_len = world.get_archetype(arch.handle).map_or(0, |template| template.entities().len());
+			if arch.components.len() < template_len {
+				arch.components.resize_with(template_len, || unsafe { UsuallyInit::uninit() });
+			}
+		}
 
 		//> Collect dirty slot iterators for each archetype.
 		struct ArchIterState<'a, T> {
@@ -136,14 +147,15 @@ impl<T> ArchStorage<T> {
 				};
 
 				// Determine what the target should be.
-				let should_be_entity = *entry
+				let should_be_entity = entry
 					.world_arch
 					// This will never fail because only slots with an actual `should_be` entity can
 					// be marked as dirty.
 					.entities()[dirty_slot_index];
 
 				// Update the location of the entity that should be here.
-				// Yes, this doesn't update the entity currently
+				// Yes, this doesn't unlink the `target` entity currently being evicted. See the
+				// "three cases" comment later on in the file for an explanation on why this is fine.
 				self.locs.insert(world, should_be_entity, start_loc);
 
 				// This is valid because entities can only be added to this storage's archetype
@@ -278,12 +290,10 @@ impl<T> ArchStorage<T> {
 		while let Some((index, _)) = iter.next_raw(&self.archetypes) {
 			let local = &mut self.archetypes[index];
 			match world.get_archetype(local.handle) {
-				Ok(template) => unsafe {
-					local.components.truncate(template.entities().len());
-				},
+				Ok(template) => local.components.truncate(template.entities().len()),
 				Err(_) => {
 					self.archetypes.release(index);
-				}
+				},
 			}
 		}
 	}

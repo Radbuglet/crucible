@@ -45,7 +45,7 @@ impl<H> ByteContainer<H> {
 		let mut target = Self { zst: () };
 		unsafe {
 			// Use the extra padding bytes to store `T`. This behavior is guaranteed by the Rust
-			// [Unsafe Code Guidelines](UCG), which promise that a union containing a ZST can house
+			// [Unsafe Code Guidelines](UCG), which promises that a union containing a ZST can house
 			// any bit pattern.
 			// [UCG]: https://rust-lang.github.io/unsafe-code-guidelines/validity/unions.html#validity-of-unions-with-zero-sized-fields
 			(&mut target as *mut Self).cast::<G>().write(value);
