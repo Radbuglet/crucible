@@ -1,6 +1,7 @@
 use crate::ecs::world::entities::EntityManager;
 use crate::ecs::world::ids::{ArchGen, DirtyId, StorageId, StorageIdGenerator};
 use crate::ecs::world::Entity;
+use crate::util::error::ResultExt;
 use crate::util::free_list::FreeList;
 use crate::util::iter_ext::{hash_iter, is_sorted, ExcludeSortedIter, MergeSortedIter};
 use crate::util::number::{NumberGenMut, NumberGenRef, OptionalUsize};
@@ -63,13 +64,13 @@ impl ArchManager {
 	/// Register a new storage. Functionally identical to [new_storage_multi_threaded] but slightly
 	/// quicker.
 	pub fn new_storage(&mut self) -> StorageId {
-		self.storage_id_gen.try_generate_mut().unwrap()
+		self.storage_id_gen.try_generate_mut().unwrap_pretty()
 	}
 
 	/// Register a new storage. Functionally identical to [new_storage] but uses atomics to generate
 	/// the ID, making it slightly slower.
 	pub fn new_storage_multi_threaded(&self) -> StorageId {
-		self.storage_id_gen.try_generate_ref().unwrap()
+		self.storage_id_gen.try_generate_ref().unwrap_pretty()
 	}
 
 	/// Fetches an [ArchHandle] to the archetype in the given archetype slot. [ArchHandle]s allow
@@ -213,7 +214,7 @@ impl ArchManager {
 		} else {
 			let comp_list = comp_list.collect();
 			let index = self.archetypes.add(WorldArchetype::new(
-				self.arch_gen_gen.try_generate_mut().unwrap(),
+				self.arch_gen_gen.try_generate_mut().unwrap_pretty(),
 				comp_list,
 			));
 			self.full_archetype_map
@@ -382,7 +383,7 @@ impl WorldArchetype {
 		// New link layout:
 		// [head_ptr] [index] [self.dirty_head] [...]
 
-		let dirty_id = dirty_id_gen.try_generate_mut().unwrap();
+		let dirty_id = dirty_id_gen.try_generate_mut().unwrap_pretty();
 
 		self.entity_dirty_meta[index] = DirtyEntityNode {
 			dirty_id,

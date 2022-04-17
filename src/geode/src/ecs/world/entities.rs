@@ -1,5 +1,6 @@
 use super::{ids::EntityGenGenerator, Entity, EntityGen};
 use crate::ecs::world::arch::RawEntityArchLocator;
+use crate::util::error::ResultExt;
 use crate::util::number::{NumberGenMut, NumberGenRef};
 use thiserror::Error;
 
@@ -35,7 +36,7 @@ impl Default for EntityManager {
 impl EntityManager {
 	pub fn spawn_now(&mut self) -> Entity {
 		// Increment generation
-		let gen = self.generation_gen.try_generate_mut().unwrap();
+		let gen = self.generation_gen.try_generate_mut().unwrap_pretty();
 		self.next_gen_at_last_flush = self.generation_gen.next_value();
 
 		// Determine index
@@ -57,7 +58,7 @@ impl EntityManager {
 
 	pub fn spawn_deferred(&self) -> Entity {
 		// Determine generation
-		let gen = self.generation_gen.try_generate_ref().unwrap();
+		let gen = self.generation_gen.try_generate_ref().unwrap_pretty();
 
 		// Determine the index of the entity being generated in the `free_slots` list if we were reading
 		// from left to right.
@@ -100,7 +101,7 @@ impl EntityManager {
 
 	pub fn despawn_now(&mut self, target: Entity) -> Result<(), EntityDeadError> {
 		if self.is_alive(target) {
-			self.despawn_by_slot_now(target.index).unwrap();
+			self.despawn_by_slot_now(target.index).unwrap_pretty();
 			Ok(())
 		} else {
 			Err(EntityDeadError(target))

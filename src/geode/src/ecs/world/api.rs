@@ -3,6 +3,7 @@ use crate::ecs::world::entities::{EntityDeadError, EntityManager};
 use crate::ecs::world::ids::StorageId;
 use crate::ecs::world::queue::{EntityActionEncoder, ReshapeAction};
 use crate::ecs::world::{ArchHandle, ArchetypeDeadError, DirtyId, EntityArchLocator, EntityGen};
+use crate::util::error::ResultExt;
 use crossbeam::queue::SegQueue;
 use std::ops::{Deref, DerefMut};
 
@@ -45,7 +46,9 @@ impl World {
 
 	pub fn despawn_now(&mut self, target: Entity) {
 		// TODO: Pass event to ArchManager as well.
-		self.entities.despawn_by_slot_now(target.index).unwrap();
+		self.entities
+			.despawn_by_slot_now(target.index)
+			.unwrap_pretty();
 	}
 
 	pub fn is_alive(&self, target: Entity) -> bool {

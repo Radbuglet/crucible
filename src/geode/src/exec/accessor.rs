@@ -1,3 +1,4 @@
+use crate::util::error::ResultExt;
 use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::error::Error;
@@ -182,7 +183,7 @@ pub trait Accessor {
 	fn try_get_raw(&self, index: Self::Index) -> Result<Self::Ptr, Self::OobError>;
 
 	fn get_raw(&self, index: Self::Index) -> Self::Ptr {
-		self.try_get_raw(index).unwrap()
+		self.try_get_raw(index).unwrap_pretty()
 	}
 }
 
@@ -393,7 +394,7 @@ pub trait RefAccessorExt: Accessor {
 	fn try_get_ref(&self, index: Self::Index) -> Result<RefOf<'_, Self>, Self::OobError>;
 
 	fn get_ref(&self, index: Self::Index) -> RefOf<'_, Self> {
-		self.try_get_ref(index).unwrap()
+		self.try_get_ref(index).unwrap_pretty()
 	}
 }
 
@@ -407,7 +408,7 @@ pub trait MutAccessorExt: Accessor {
 	fn try_get_mut(&mut self, index: Self::Index) -> Result<MutOf<'_, Self>, Self::OobError>;
 
 	fn get_mut(&mut self, index: Self::Index) -> MutOf<'_, Self> {
-		self.try_get_mut(index).unwrap()
+		self.try_get_mut(index).unwrap_pretty()
 	}
 }
 
