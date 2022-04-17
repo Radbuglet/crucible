@@ -56,14 +56,21 @@ impl Default for ArchManager {
 }
 
 impl ArchManager {
-	pub fn new_storage_sync(&mut self) -> StorageId {
+	/// Register a new storage. Functionally identical to [new_storage_multi_threaded] but slightly
+	/// quicker.
+	pub fn new_storage(&mut self) -> StorageId {
 		self.storage_id_gen.try_generate_mut().unwrap()
 	}
 
-	pub fn new_storage_async(&self) -> StorageId {
+	/// Register a new storage. Functionally identical to [new_storage] but uses atomics to generate
+	/// the ID, making it slightly slower.
+	pub fn new_storage_multi_threaded(&self) -> StorageId {
 		self.storage_id_gen.try_generate_ref().unwrap()
 	}
 
+	/// Fetches an [ArchHandle] to the archetype in the given archetype slot. [ArchHandle]s allow
+	/// users to discriminate between two different archetypes which have been allocated in the same
+	/// slot.
 	pub fn slot_to_handle(&self, index: usize) -> ArchHandle {
 		ArchHandle {
 			index,
@@ -73,34 +80,61 @@ impl ArchManager {
 
 	// TODO: We need to remove dead entities from the archetype registry.
 
-	pub fn move_to_arch(
+	/// Moves the entity in entity slot [src_entity_slot] to the archetype [target_arch_index],
+	/// properly updating all location mirrors in the [EntityManager].
+	pub fn move_to_arch_and_track_locs(
 		&mut self,
-		entities: &mut EntityManager,
-		entity_index: usize,
-		arch_index: usize,
+		entity_manager: &mut EntityManager,
+		src_entity_slot: usize,
+		target_arch_slot: usize,
 	) {
-		let (gen, slot) = entities.locate_entity_raw_mut(entity_index);
+		let (_, slot) = entity_manager.locate_entity_raw_mut(src_entity_slot);
+		let slot = slot.clone();
 
 		// Remove from last archetype
 		if let Some(index) = slot.arch_index.as_option() {
-			self.archetypes[index].remove_entity(slot.index_in_arch, &mut self.dirty_id_gen);
+			self.archetypes[index].remove_entity_track_tail_slot_loc(
+				slot.index_in_arch,
+				entity_manager,
+				&mut self.dirty_id_gen,
+			);
 		}
 
+		let (gen, slot) = entity_manager.locate_entity_raw_mut(src_entity_slot);
+
 		// Move into new archetype
-		let arch = &mut self.archetypes[arch_index];
+		let arch = &mut self.archetypes[target_arch_slot];
 		*slot = RawEntityArchLocator {
-			arch_index: OptionalUsize::some(arch_index),
+			arch_index: OptionalUsize::some(target_arch_slot),
 			index_in_arch: arch.entities().len(),
 		};
 		arch.push_entity(
 			Entity {
-				index: entity_index,
+				index: src_entity_slot,
 				gen,
 			},
 			&mut self.dirty_id_gen,
 		);
 	}
 
+	/// Unregisters a given entity (specified by its [arch_index] and its [entity_index_in_arch])
+	/// from the [ArchManager]. Updates the location mirrors in [EntityManager] of all touched entities
+	/// *except* the target's, which must be handled externally.
+	pub fn remove_entity_no_track_target(
+		&mut self,
+		entity_manager: &mut EntityManager,
+		arch_index: usize,
+		entity_index_in_arch: usize,
+	) {
+		let arch = &mut self.archetypes[arch_index];
+		arch.remove_entity_track_tail_slot_loc(
+			entity_index_in_arch,
+			entity_manager,
+			&mut self.dirty_id_gen,
+		);
+	}
+
+	/// Returns a [WorldArchetype] for a given [ArchHandle] if it still exists.
 	pub fn get_arch(&self, handle: ArchHandle) -> Result<&WorldArchetype, ArchetypeDeadError> {
 		self.archetypes
 			.get(handle.index)
@@ -108,6 +142,7 @@ impl ArchManager {
 			.ok_or(ArchetypeDeadError(handle))
 	}
 
+	/// Finds an archetype by a list of its components, sorted by [StorageId].
 	pub fn find_arch<I>(&self, comp_list_sorted: I) -> Option<ArchHandle>
 	where
 		I: IntoIterator<Item = StorageId>,
@@ -312,7 +347,8 @@ impl WorldArchetype {
 		}
 	}
 
-	fn relink_remove_dirty_inner(&mut self, index: usize) {
+	/// Removes a given slot from the dirty entity linked list.
+	fn link_remove_dirty_inner(&mut self, index: usize) {
 		// Old link layout:
 		// [...] [old_node.prev | head] [old_node] [old_node.next] [...]
 		//
@@ -324,6 +360,7 @@ impl WorldArchetype {
 		if let Some(prev) = node.prev_dirty.as_option() {
 			self.entity_dirty_meta[prev].next_dirty = node.next_dirty;
 		} else {
+			// The head pointer is technically our leftward sibling.
 			self.dirty_head = node.next_dirty;
 		}
 
@@ -332,6 +369,8 @@ impl WorldArchetype {
 		}
 	}
 
+	/// Pushes a given slot, currently outside of the dirty entity linked list, to the head of the
+	/// list.
 	fn link_front_push_inner(&mut self, index: usize, dirty_id_gen: &mut DirtyId) {
 		// Old link layout:
 		// [head_ptr] [self.dirty_head] [...]
@@ -354,40 +393,63 @@ impl WorldArchetype {
 		self.dirty_head = OptionalUsize::some(index);
 	}
 
+	/// Registers an entity, not already present in the archetype, at the end of the archetype slot
+	/// list, updating the dirty list accordingly.
+	///
+	/// This method does not update entity locations in the `EntityManager`.
 	fn push_entity(&mut self, entity: Entity, dirty_id_gen: &mut DirtyId) {
 		self.entity_ids.push(entity);
-
-		// This is just some temporary state for `link_front_push_inner` to initialize.
-		self.entity_dirty_meta.push(DirtyEntityNode::default());
+		self.entity_dirty_meta.push(
+			// This is just some temporary state for `link_front_push_inner` to initialize.
+			DirtyEntityNode::default(),
+		);
 		self.link_front_push_inner(self.entity_dirty_meta.len() - 1, dirty_id_gen);
 	}
 
-	fn remove_entity(&mut self, index: usize, dirty_id_gen: &mut DirtyId) {
+	/// Removes an entity slot from the archetype by swap removing it. Updates the location of the
+	/// previous list tail (so long as `index` isn't the index of the tail) in the `EntityManager`
+	/// but leaves the removed `index` intact.
+	fn remove_entity_track_tail_slot_loc(
+		&mut self,
+		index: usize,
+		entity_manager: &mut EntityManager,
+		dirty_id_gen: &mut DirtyId,
+	) {
 		let last_index = self.entity_dirty_meta.len() - 1;
 
 		// Unlink last index from its surroundings
-		self.relink_remove_dirty_inner(last_index);
+		self.link_remove_dirty_inner(last_index);
 
 		if index == last_index {
-			// We're done here.
+			// We're done here. Remove the last element and break.
+			self.entity_ids.pop();
+			self.entity_dirty_meta.pop();
+
 			return;
 		}
 
-		// Unlink `index` from its surroundings
-		self.relink_remove_dirty_inner(index);
+		// Update the location of `last_index`'s entity in the `EntityManager` to reflect its changed
+		// position in the archetype.
+		let (_, last_loc) = entity_manager.locate_entity_raw_mut(self.entity_ids[last_index].index);
+		last_loc.index_in_arch = index;
 
-		// Perform swap removes
+		// Unlink `index` from its surroundings
+		self.link_remove_dirty_inner(index);
+
+		// Perform swap removes, moving `last_index` to `index`.
 		self.entity_ids.swap_remove(index);
 		self.entity_dirty_meta.swap_remove(index);
 
-		// Push `index` to the front of the dirty list
+		// Push `index` (what used to be `last_index`) to the front of the dirty list
 		self.link_front_push_inner(index, dirty_id_gen);
 	}
 
+	/// Get the list of entities in the archetype, ordered by their universally-agreed-upon order.
 	pub fn entities(&self) -> &[Entity] {
 		&self.entity_ids
 	}
 
+	/// Get the [DirtyId] of the latest change in this archetype.
 	pub fn dirty_version(&self) -> DirtyId {
 		self.dirty_head
 			.as_option()
@@ -396,7 +458,9 @@ impl WorldArchetype {
 			})
 	}
 
-	// TODO: Clarify order of `DirtyId` (check `api.rs` to make sure these invariants are being upheld)
+	/// Gets a list of all updated entity slots since (and excluding) the specified [DirtyId]. These
+	/// changes are ordered from newest to oldest, allowing users to determine the head a given
+	/// chain of changed slots.
 	pub fn iter_dirties(&self, last_checked: DirtyId) -> WorldArchDirtyIter {
 		WorldArchDirtyIter {
 			arch: self,

@@ -1,7 +1,7 @@
 use crate::util::inline_store::ByteContainer;
 use bumpalo::Bump;
 use std::alloc::Layout;
-use std::any::{type_name, TypeId};
+use std::any::TypeId;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ptr::{NonNull, Pointee};
@@ -19,7 +19,7 @@ impl FancyTypeId {
 		Self {
 			id: TypeId::of::<T>(),
 			#[cfg(debug_assertions)]
-			name: type_name::<T>(),
+			name: std::any::type_name::<T>(),
 		}
 	}
 
@@ -114,7 +114,7 @@ impl Component {
 			ptr_meta,
 			drop_fn_or_alias: Some(drop_fn),
 			#[cfg(debug_assertions)]
-			comp_name: type_name::<T>(),
+			comp_name: std::any::type_name::<T>(),
 		}
 	}
 
@@ -126,7 +126,7 @@ impl Component {
 			ptr_meta,
 			drop_fn_or_alias: None,
 			#[cfg(debug_assertions)]
-			comp_name: type_name::<T>(),
+			comp_name: std::any::type_name::<T>(),
 		}
 	}
 

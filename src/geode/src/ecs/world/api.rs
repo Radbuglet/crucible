@@ -44,7 +44,8 @@ impl World {
 	}
 
 	pub fn despawn_now(&mut self, target: Entity) {
-		self.entities.despawn_now(target).unwrap();
+		// TODO: Pass event to ArchManager as well.
+		self.entities.despawn_by_slot_now(target.index).unwrap();
 	}
 
 	pub fn is_alive(&self, target: Entity) -> bool {
@@ -90,7 +91,7 @@ impl World {
 	}
 
 	pub fn new_storage_now(&mut self) -> StorageId {
-		self.arch.new_storage_sync()
+		self.arch.new_storage()
 	}
 
 	pub fn attach_storage_now(&mut self, target: Entity, storage: StorageId) {
@@ -104,7 +105,7 @@ impl World {
 
 		// Move from the old archetype to the new one
 		#[rustfmt::skip]
-		self.arch.move_to_arch(&mut self.entities, target.index, arch);
+		self.arch.move_to_arch_and_track_locs(&mut self.entities, target.index, arch);
 	}
 
 	pub fn detach_storage_now(&mut self, target: Entity, storage: StorageId) {
@@ -118,7 +119,7 @@ impl World {
 
 		// Move from the old archetype to the new one
 		#[rustfmt::skip]
-		self.arch.move_to_arch(&mut self.entities, target.index, arch);
+		self.arch.move_to_arch_and_track_locs(&mut self.entities, target.index, arch);
 	}
 }
 
@@ -162,7 +163,7 @@ impl<H: Deref<Target = World>> WorldQueue<H> {
 	}
 
 	pub fn new_storage_async(&mut self) -> StorageId {
-		self.handle.arch.new_storage_async()
+		self.handle.arch.new_storage_multi_threaded()
 	}
 
 	pub fn attach_storage_deferred(&mut self, target: Entity, storage: StorageId) {

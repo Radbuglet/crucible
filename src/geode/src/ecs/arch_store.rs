@@ -42,9 +42,12 @@ impl<T> ArchStorage<T> {
 		//> ends. This routine does not shrink component storages if they're too big because we still
 		//> need that data. Shrinking is rather handled during the slot purging routine.
 		for (_, arch) in self.archetypes.iter_mut() {
-			let template_len = world.get_archetype(arch.handle).map_or(0, |template| template.entities().len());
+			let template_len = world
+				.get_archetype(arch.handle)
+				.map_or(0, |template| template.entities().len());
 			if arch.components.len() < template_len {
-				arch.components.resize_with(template_len, || unsafe { UsuallyInit::uninit() });
+				arch.components
+					.resize_with(template_len, || unsafe { UsuallyInit::uninit() });
 			}
 		}
 
@@ -293,7 +296,7 @@ impl<T> ArchStorage<T> {
 				Ok(template) => local.components.truncate(template.entities().len()),
 				Err(_) => {
 					self.archetypes.release(index);
-				},
+				}
 			}
 		}
 	}
