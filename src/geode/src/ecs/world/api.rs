@@ -2,7 +2,7 @@ use crate::ecs::world::arch::{ArchManager, WorldArchetype};
 use crate::ecs::world::entities::{EntityDeadError, EntityManager};
 use crate::ecs::world::ids::StorageId;
 use crate::ecs::world::queue::{EntityActionEncoder, ReshapeAction};
-use crate::ecs::world::{ArchHandle, ArchetypeDeadError, EntityArchLocator, EntityGen};
+use crate::ecs::world::{ArchHandle, ArchetypeDeadError, DirtyId, EntityArchLocator, EntityGen};
 use crossbeam::queue::SegQueue;
 use std::ops::{Deref, DerefMut};
 
@@ -80,6 +80,10 @@ impl World {
 
 	pub fn get_archetype(&self, handle: ArchHandle) -> Result<&WorldArchetype, ArchetypeDeadError> {
 		self.arch.get_arch(handle)
+	}
+
+	pub fn latest_dirty_id(&self) -> DirtyId {
+		self.arch.latest_dirty_id()
 	}
 
 	pub fn find_archetype<I>(&self, comp_list_sorted: I) -> Option<ArchHandle>

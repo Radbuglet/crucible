@@ -56,6 +56,10 @@ impl Default for ArchManager {
 }
 
 impl ArchManager {
+	pub fn latest_dirty_id(&self) -> DirtyId {
+		self.dirty_id_gen
+	}
+
 	/// Register a new storage. Functionally identical to [new_storage_multi_threaded] but slightly
 	/// quicker.
 	pub fn new_storage(&mut self) -> StorageId {
@@ -450,12 +454,16 @@ impl WorldArchetype {
 	}
 
 	/// Get the [DirtyId] of the latest change in this archetype.
-	pub fn dirty_version(&self) -> DirtyId {
+	pub fn head_dirty_version(&self) -> DirtyId {
 		self.dirty_head
 			.as_option()
 			.map_or(DirtyId::new(1).unwrap(), |index| {
 				self.entity_dirty_meta[index].dirty_id
 			})
+	}
+
+	pub fn dirty_version_of(&self, index: usize) -> DirtyId {
+		self.entity_dirty_meta[index].dirty_id
 	}
 
 	/// Gets a list of all updated entity slots since (and excluding) the specified [DirtyId]. These

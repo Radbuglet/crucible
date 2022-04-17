@@ -5,4 +5,3 @@ pub mod free_list;
 pub mod inline_store;
 pub mod iter_ext;
 pub mod number;
-pub mod usually_init;

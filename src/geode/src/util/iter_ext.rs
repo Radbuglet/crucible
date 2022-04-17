@@ -134,31 +134,3 @@ where
 		true
 	})
 }
-
-pub trait VecFilterExt {
-	type Item;
-
-	fn retain_enumerated<F>(&mut self, f: F)
-	where
-		F: FnMut(usize, &Self::Item) -> bool;
-}
-
-impl<T> VecFilterExt for Vec<T> {
-	type Item = T;
-
-	fn retain_enumerated<F>(&mut self, mut f: F)
-	where
-		F: FnMut(usize, &Self::Item) -> bool,
-	{
-		let mut index = 0;
-
-		self.retain(|val| {
-			if f(index, val) {
-				index += 1;
-				true
-			} else {
-				false
-			}
-		});
-	}
-}
