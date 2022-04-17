@@ -8,7 +8,8 @@ use std::ptr::NonNull;
 
 // === PointerLike === //
 
-/// A raw reference type that can be promoted into either its mutable or immutable form.
+/// A raw reference type that can be promoted into either its mutable or immutable form for the
+/// lifetime `'a`.
 ///
 /// ## Safety
 ///
