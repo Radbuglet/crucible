@@ -1,15 +1,28 @@
-use geode::ecs_next::world::World;
+use geode::exec::event::event_type;
+use geode::exec::obj::Obj;
 
 fn main() {
-	let mut world = World::new();
-	let mut world_queue = world.queue_ref();
+	let root = make_engine_root();
+	let mut data = 21;
+	dbg!(data);
+	root.fire_event::<MyEvent>(MyEvent {
+		some_data: &mut data,
+	});
+	dbg!(data);
+}
 
-	let friend = world_queue.spawn_deferred();
-	assert!(!world_queue.is_alive(friend));
-	assert!(world_queue.is_future_entity(friend));
-	drop(world_queue);
-	world.flush();
+fn make_engine_root() -> Obj {
+	let mut root = Obj::new();
 
-	assert!(world.is_alive(friend));
-	assert!(!world.is_future_entity(friend));
+	root.add_event_handler::<MyEvent>(|event| {
+		*event.some_data = 42;
+	});
+
+	root
+}
+
+event_type! {
+	struct MyEvent<'a> {
+		some_data: &'a mut u32,
+	}
 }

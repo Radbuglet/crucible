@@ -123,19 +123,26 @@ impl Obj {
 		handler.call_injected(args, self.borrow_many())
 	}
 
-	#[rustfmt::skip]
-	pub fn add_event_handler<E>(
+	pub fn add_event_handler<E: 'static>(
 		&mut self,
-		_handler: for<'a, 'b, 'c, 'd>
-			fn(<E as Parameterizable<'a, 'b, 'c, 'd>>::Value),
+		handler: for<'a, 'b, 'c, 'd> fn(<E as Parameterizable<'a, 'b, 'c, 'd>>::Value),
 	) where
-		E: for<'a, 'b, 'c, 'd>
-			Parameterizable<'a, 'b, 'c, 'd>,
+		E: for<'a, 'b, 'c, 'd> Parameterizable<'a, 'b, 'c, 'd>,
 	{
-		todo!()
+		self.add(handler);
 	}
 
-	// TODO: wrapped, mutexed, and locked variants
+	pub fn fire_event<'pa, 'pb, 'pc, 'pd, E: 'static>(
+		&self,
+		event: <E as Parameterizable<'pa, 'pb, 'pc, 'pd>>::Value,
+	) where
+		E: for<'a, 'b, 'c, 'd> Parameterizable<'a, 'b, 'c, 'd>,
+	{
+		self.get::<for<'a, 'b, 'c, 'd> fn(<E as Parameterizable<'a, 'b, 'c, 'd>>::Value)>()(event);
+	}
+
+	// TODO: Mutexed, and locked variants
+	// TODO: Single-threaded accessors
 	// TODO: Context trees
 }
 
