@@ -1,4 +1,4 @@
-use geode::ecs::world::World;
+use geode::ecs_next::world::World;
 
 fn main() {
 	let mut world = World::new();

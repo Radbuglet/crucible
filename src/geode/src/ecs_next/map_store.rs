@@ -1,4 +1,4 @@
-use crate::ecs::world::{ComponentPair, ComponentPairMut, Entity, World};
+use crate::ecs_next::world::{ComponentPair, ComponentPairMut, Entity, World};
 use hashbrown::raw::{Bucket, RawIter, RawTable};
 use std::fmt::{Debug, Formatter};
 use std::mem::replace;

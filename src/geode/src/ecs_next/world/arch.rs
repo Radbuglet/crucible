@@ -1,6 +1,6 @@
-use crate::ecs::world::entities::EntityManager;
-use crate::ecs::world::ids::{ArchGen, DirtyId, StorageId, StorageIdGenerator};
-use crate::ecs::world::Entity;
+use crate::ecs_next::world::entities::EntityManager;
+use crate::ecs_next::world::ids::{ArchGen, DirtyId, StorageId, StorageIdGenerator};
+use crate::ecs_next::world::Entity;
 use crate::util::error::ResultExt;
 use crate::util::free_list::FreeList;
 use crate::util::iter_ext::{hash_iter, is_sorted, ExcludeSortedIter, MergeSortedIter};

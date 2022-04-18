@@ -1,5 +1,5 @@
 use super::{ids::EntityGenGenerator, Entity, EntityGen};
-use crate::ecs::world::arch::RawEntityArchLocator;
+use crate::ecs_next::world::arch::RawEntityArchLocator;
 use crate::util::error::ResultExt;
 use crate::util::number::{NumberGenMut, NumberGenRef};
 use thiserror::Error;
@@ -34,6 +34,8 @@ impl Default for EntityManager {
 }
 
 impl EntityManager {
+	// FIXME: If the user doesn't flush the world before doing this, everything will go bad.
+
 	pub fn spawn_now(&mut self) -> Entity {
 		// Increment generation
 		let gen = self.generation_gen.try_generate_mut().unwrap_pretty();

@@ -1,7 +1,8 @@
 use crate::util::arity_utils::impl_tuples;
-use crate::util::component::{Component, FancyTypeId};
 use crate::util::error::ResultExt;
+use crate::util::inline_store::ByteContainer;
 use crate::util::number::NumberGenRef;
+use crate::util::type_id::FancyTypeId;
 use bumpalo::Bump;
 use derive_where::derive_where;
 use std::alloc::Layout;
@@ -10,15 +11,19 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::marker::{PhantomData, Unsize};
-use std::ptr::NonNull;
+use std::ptr::{NonNull, Pointee};
 use std::sync::atomic::AtomicU64;
 use thiserror::Error;
 
 // === Obj core === //
 
+pub trait ComponentValue: Sized + 'static + Send + Sync {}
+
+impl<T: 'static + Send + Sync> ComponentValue for T {}
+
 #[derive(Debug, Default)]
 pub struct Obj {
-	comps: HashMap<RawTypedKey, Component>,
+	comps: HashMap<RawTypedKey, ObjEntry>,
 	bump: Bump,
 }
 
@@ -29,14 +34,14 @@ unsafe impl Sync for Obj {}
 impl Obj {
 	pub fn add<T>(&mut self, value: T)
 	where
-		T: Sized + Send + Sync + 'static,
+		T: ComponentValue,
 	{
 		self.add_as(typed_key::<T>(), value, ());
 	}
 
 	pub fn add_as<T, A>(&mut self, owning_key: TypedKey<T>, value: T, alias_as: A)
 	where
-		T: Sized + Send + Sync,
+		T: ComponentValue,
 		A: AliasList<T>,
 	{
 		// Ensure that we haven't already registered this key.
@@ -51,7 +56,7 @@ impl Obj {
 
 		// Register the principal entry
 		#[rustfmt::skip]
-		self.comps.insert(owning_key, Component::new_owned(comp, &mut self.bump));
+		self.comps.insert(owning_key, ObjEntry::new_owned(comp, &mut self.bump));
 
 		// Register alias entries
 		unsafe {
@@ -59,10 +64,44 @@ impl Obj {
 		}
 	}
 
-	pub fn try_get_raw<T: ?Sized>(&self, key: TypedKey<T>) -> Option<NonNull<T>> {
-		let entry = self.comps.get(&key.raw())?;
-		Some(unsafe { entry.target_ptr::<T>() })
+	pub fn try_get_raw<T: ?Sized + 'static>(
+		&self,
+		key: TypedKey<T>,
+	) -> Result<NonNull<T>, ComponentMissingError> {
+		let entry = self
+			.comps
+			.get(&key.raw())
+			.ok_or(ComponentMissingError { key: key.raw() })?;
+
+		Ok(unsafe { entry.target_ptr::<T>() })
 	}
+
+	pub fn get_raw<T: ?Sized + 'static>(&self, key: TypedKey<T>) -> NonNull<T> {
+		self.try_get_raw(key).unwrap_pretty()
+	}
+
+	pub fn try_get_as<T: ?Sized + 'static>(
+		&self,
+		key: TypedKey<T>,
+	) -> Result<&T, ComponentMissingError> {
+		self.try_get_raw(key).map(|value| unsafe { value.as_ref() })
+	}
+
+	pub fn get_as<T: ?Sized + 'static>(&self, key: TypedKey<T>) -> &T {
+		self.try_get_as(key).unwrap_pretty()
+	}
+
+	pub fn try_get<T: ?Sized + 'static>(&self) -> Result<&T, ComponentMissingError> {
+		self.try_get_as(typed_key::<T>())
+	}
+
+	pub fn get<T: ?Sized + 'static>(&self) -> &T {
+		self.try_get().unwrap_pretty()
+	}
+
+	// TODO: wrapped, mutexed, and locked variants
+	// TODO: Proper event registration and `EventTarget` integration
+	// TODO: Context trees
 }
 
 impl Drop for Obj {
@@ -75,34 +114,95 @@ impl Drop for Obj {
 	}
 }
 
-// === Multi-fetch === //
-
-pub trait ObjBorrowable<'a>: Sized {
-	fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError>;
+struct ObjEntry {
+	ptr: NonNull<()>,
+	ptr_meta: ByteContainer<usize>,
+	drop_fn_or_alias: Option<unsafe fn(*mut ())>,
+	#[cfg(debug_assertions)]
+	comp_name: &'static str,
 }
 
-// impl<'a, T: ?Sized + 'static> ObjBorrowable for RwMut<'a, T> {
-// 	fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError> {
-// 		obj.try_borrow_mut()
-// 	}
-// }
-//
-// impl<T: ?Sized + 'static> ObjBorrowable for RwRef<T> {
-// 	fn try_borrow_from(obj: &Obj) -> Result<Self, BorrowError> {
-// 		obj.try_borrow_ref()
-// 	}
-// }
+impl ObjEntry {
+	pub fn new_common<T: ?Sized>(
+		ptr: NonNull<T>,
+		bump: &mut Bump,
+	) -> (NonNull<()>, ByteContainer<usize>) {
+		let (ptr, ptr_meta) = ptr.to_raw_parts();
+		let ptr_meta = if let Ok(inlined) = ByteContainer::<usize>::try_new(ptr_meta) {
+			inlined
+		} else {
+			// Reserve space on the bump.
+			let meta_on_heap = bump
+				.alloc_layout(Layout::new::<<T as Pointee>::Metadata>())
+				.cast::<<T as Pointee>::Metadata>();
 
-macro impl_tup_obj_borrowable($($name:ident: $field:tt),*) {
-	impl<'a, $($name: ObjBorrowable<'a>),*> ObjBorrowable<'a> for ($($name,)*) {
-		#[allow(unused_variables)]
-		fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError> {
-			Ok(($($name::try_borrow_from(obj)?,)*))
+			// And initialize it to the over-sized `ptr_meta`.
+			unsafe { meta_on_heap.as_ptr().write(ptr_meta) }
+
+			// Wrap the pointer to the heap.
+			ByteContainer::<usize>::new(meta_on_heap)
+		};
+
+		(ptr, ptr_meta)
+	}
+
+	pub fn new_owned<T: Sized>(ptr: NonNull<T>, bump: &mut Bump) -> Self {
+		let (ptr, ptr_meta) = Self::new_common(ptr, bump);
+
+		unsafe fn drop_ptr<T>(ptr: *mut ()) {
+			ptr.cast::<T>().drop_in_place()
+		}
+
+		let drop_fn: unsafe fn(*mut ()) = drop_ptr::<T>;
+
+		Self {
+			ptr,
+			ptr_meta,
+			drop_fn_or_alias: Some(drop_fn),
+			#[cfg(debug_assertions)]
+			comp_name: std::any::type_name::<T>(),
+		}
+	}
+
+	pub fn new_alias<T: ?Sized>(ptr: NonNull<T>, bump: &mut Bump) -> Self {
+		let (ptr, ptr_meta) = Self::new_common(ptr, bump);
+
+		Self {
+			ptr,
+			ptr_meta,
+			drop_fn_or_alias: None,
+			#[cfg(debug_assertions)]
+			comp_name: std::any::type_name::<T>(),
+		}
+	}
+
+	pub unsafe fn target_ptr<T: ?Sized>(&self) -> NonNull<T> {
+		let is_inline = ByteContainer::<usize>::can_host::<<T as Pointee>::Metadata>().is_ok();
+		let ptr_meta = if is_inline {
+			*self.ptr_meta.as_ref::<<T as Pointee>::Metadata>()
+		} else {
+			let ptr_to_meta = self.ptr_meta.as_ref::<NonNull<<T as Pointee>::Metadata>>();
+			*ptr_to_meta.as_ref()
+		};
+
+		NonNull::from_raw_parts(self.ptr, ptr_meta)
+	}
+
+	pub unsafe fn drop_if_owned(&mut self) {
+		if let Some(drop_fn) = self.drop_fn_or_alias {
+			drop_fn(self.ptr.as_ptr())
 		}
 	}
 }
 
-impl_tuples!(impl_tup_obj_borrowable);
+impl Debug for ObjEntry {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let mut builder = f.debug_tuple("ObjEntry");
+		#[cfg(debug_assertions)]
+		builder.field(&self.comp_name);
+		builder.finish()
+	}
+}
 
 // === Errors === //
 
@@ -116,13 +216,13 @@ pub enum LockState {
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Error)]
 #[error("Component {key:?} missing from `Obj`.")]
 pub struct ComponentMissingError {
-	key: RawTypedKey,
+	pub key: RawTypedKey,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct LockError {
-	state: LockState,
-	key: RawTypedKey,
+	pub state: LockState,
+	pub key: RawTypedKey,
 }
 
 impl Error for LockError {}
@@ -164,6 +264,41 @@ pub enum BorrowError {
 	#[error("Failed to borrow. {0}")]
 	LockError(LockError),
 }
+
+impl From<ComponentMissingError> for BorrowError {
+	fn from(err: ComponentMissingError) -> Self {
+		Self::ComponentMissing(err)
+	}
+}
+
+impl From<LockError> for BorrowError {
+	fn from(err: LockError) -> Self {
+		Self::LockError(err)
+	}
+}
+
+// === Multi-fetch === //
+
+pub trait ObjBorrowable<'a>: Sized {
+	fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError>;
+}
+
+impl<'a, T: ?Sized + 'static> ObjBorrowable<'a> for &'a T {
+	fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError> {
+		obj.try_get().map_err(From::from)
+	}
+}
+
+macro impl_tup_obj_borrowable($($name:ident: $field:tt),*) {
+	impl<'a, $($name: ObjBorrowable<'a>),*> ObjBorrowable<'a> for ($($name,)*) {
+		#[allow(unused_variables)]
+		fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError> {
+			Ok(($($name::try_borrow_from(obj)?,)*))
+		}
+	}
+}
+
+impl_tuples!(impl_tup_obj_borrowable);
 
 // === Keys === //
 
@@ -275,7 +410,7 @@ where
 		#[rustfmt::skip]
 		map.comps.insert(
 			self.raw(),
-			Component::new_alias(ptr, &mut map.bump)
+			ObjEntry::new_alias(ptr, &mut map.bump)
 		);
 	}
 }
