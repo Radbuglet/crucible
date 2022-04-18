@@ -1,4 +1,4 @@
-use crate::util::arity_utils::impl_tuples;
+use crate::util::arity_utils::{impl_tuples, InjectableClosure};
 use crate::util::error::ResultExt;
 use crate::util::inline_store::ByteContainer;
 use crate::util::number::NumberGenRef;
@@ -17,10 +17,6 @@ use thiserror::Error;
 
 // === Obj core === //
 
-pub trait ComponentValue: Sized + 'static + Send + Sync {}
-
-impl<T: 'static + Send + Sync> ComponentValue for T {}
-
 #[derive(Debug, Default)]
 pub struct Obj {
 	comps: HashMap<RawTypedKey, ObjEntry>,
@@ -32,6 +28,10 @@ unsafe impl Send for Obj {}
 unsafe impl Sync for Obj {}
 
 impl Obj {
+	pub fn new() -> Self {
+		Default::default()
+	}
+
 	pub fn add<T>(&mut self, value: T)
 	where
 		T: ComponentValue,
@@ -99,8 +99,43 @@ impl Obj {
 		self.try_get().unwrap_pretty()
 	}
 
+	pub fn try_borrow_many<'a, D: ObjBorrowable<'a>>(&'a self) -> Result<D, BorrowError> {
+		D::try_borrow_from(self)
+	}
+
+	pub fn borrow_many<'a, D: ObjBorrowable<'a>>(&'a self) -> D {
+		self.try_borrow_many().unwrap_pretty()
+	}
+
+	pub fn inject<'a, D, F>(&'a self, mut handler: F) -> F::Return
+	where
+		D: ObjBorrowable<'a>,
+		F: InjectableClosure<(), D>,
+	{
+		handler.call_injected((), self.borrow_many())
+	}
+
+	pub fn inject_with<'a, A, D, F>(&'a self, mut handler: F, args: A) -> F::Return
+	where
+		D: ObjBorrowable<'a>,
+		F: InjectableClosure<A, D>,
+	{
+		handler.call_injected(args, self.borrow_many())
+	}
+
+	#[rustfmt::skip]
+	pub fn add_event_handler<E>(
+		&mut self,
+		_handler: for<'a, 'b, 'c, 'd>
+			fn(<E as Parameterizable<'a, 'b, 'c, 'd>>::Value),
+	) where
+		E: for<'a, 'b, 'c, 'd>
+			Parameterizable<'a, 'b, 'c, 'd>,
+	{
+		todo!()
+	}
+
 	// TODO: wrapped, mutexed, and locked variants
-	// TODO: Proper event registration and `EventTarget` integration
 	// TODO: Context trees
 }
 
@@ -203,6 +238,14 @@ impl Debug for ObjEntry {
 		builder.finish()
 	}
 }
+
+// === Helper traits === //
+
+pub use super::parameterizable::{Parameterizable, Unpara};
+
+pub trait ComponentValue: Sized + 'static + Send + Sync {}
+
+impl<T: 'static + Send + Sync> ComponentValue for T {}
 
 // === Errors === //
 

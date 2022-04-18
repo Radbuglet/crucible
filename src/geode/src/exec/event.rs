@@ -2,6 +2,8 @@ use std::collections::VecDeque;
 
 // === Core === //
 
+pub use super::parameterizable::event_type;
+
 pub trait EventTarget<'i, E> {
 	fn fire(&mut self, event: E);
 

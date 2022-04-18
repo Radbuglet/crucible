@@ -40,7 +40,6 @@ impl Debug for FancyTypeId {
 		#[cfg(debug_assertions)]
 		{
 			f.debug_tuple(format!("FancyTypeId<{}>", self.name).as_str())
-				.field(&self.id)
 				.finish()
 		}
 		#[cfg(not(debug_assertions))]
