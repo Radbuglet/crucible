@@ -1,28 +1,49 @@
-use geode::exec::event::event_type;
-use geode::exec::obj::Obj;
+use geode::exec::obj::{event_trait, typed_key, Obj, ObjLike};
 
 fn main() {
 	let root = make_engine_root();
-	let mut data = 21;
-	dbg!(data);
-	root.fire_event::<MyEvent>(MyEvent {
-		some_data: &mut data,
-	});
-	dbg!(data);
+	let mut value = 42;
+
+	root.get::<dyn TickHandler<u32, i32>>()
+		.on_tick(&&root, &mut value);
+
+	dbg!(value);
+
+	root.borrow_mut::<MyService>().count();
+	root.borrow_mut::<MyService>().count();
 }
 
 fn make_engine_root() -> Obj {
 	let mut root = Obj::new();
 
-	root.add_event_handler::<MyEvent>(|event| {
-		*event.some_data = 42;
-	});
+	root.add_as(
+		typed_key(),
+		|obj: &&Obj, value: &mut u32| {
+			dbg!(obj.try_get::<dyn TickHandler<u32, i32>>().is_ok());
+			dbg!(obj.try_get::<dyn TickHandler<i32, i32>>().is_err());
+			dbg!(*value);
+			*value = 12;
+		},
+		typed_key::<dyn TickHandler<u32, i32>>(),
+	);
+
+	root.add_rw(MyService::default());
 
 	root
 }
 
-event_type! {
-	struct MyEvent<'a> {
-		some_data: &'a mut u32,
+#[derive(Debug, Default)]
+struct MyService {
+	counter: u32,
+}
+
+impl MyService {
+	fn count(&mut self) {
+		self.counter += 1;
+		dbg!(self.counter);
 	}
+}
+
+event_trait! {
+	trait TickHandler::<T, A>::on_tick<'a, 'b>(&self, obj: &'a &'b Obj, value: &mut T);
 }

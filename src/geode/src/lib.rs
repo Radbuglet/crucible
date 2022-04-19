@@ -1,3 +1,4 @@
+#![feature(coerce_unsized)]
 #![feature(decl_macro)]
 #![feature(ptr_metadata)]
 #![feature(unsize)]

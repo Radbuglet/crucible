@@ -1,3 +1,5 @@
+use crate::ecs::ArchStorage;
+use crate::exec::atomic_ref_cell::{AMut, ARef, ARefCell, LockError};
 use crate::util::arity_utils::{impl_tuples, InjectableClosure};
 use crate::util::error::ResultExt;
 use crate::util::inline_store::ByteContainer;
@@ -7,8 +9,7 @@ use bumpalo::Bump;
 use derive_where::derive_where;
 use std::alloc::Layout;
 use std::collections::HashMap;
-use std::error::Error;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::marker::{PhantomData, Unsize};
 use std::ptr::{NonNull, Pointee};
@@ -16,6 +17,120 @@ use std::sync::atomic::AtomicU64;
 use thiserror::Error;
 
 // === Obj core === //
+
+pub trait ComponentValue: Sized + 'static + Send + Sync {}
+
+impl<T: 'static + Send + Sync> ComponentValue for T {}
+
+pub unsafe trait ObjLike {
+	// === Basic getters === //
+
+	fn try_get_raw<T: ?Sized + 'static>(
+		&self,
+		key: TypedKey<T>,
+	) -> Result<NonNull<T>, ComponentMissingError>;
+
+	fn get_raw<T: ?Sized + 'static>(&self, key: TypedKey<T>) -> NonNull<T> {
+		self.try_get_raw(key).unwrap_pretty()
+	}
+
+	fn try_get_as<T: ?Sized + 'static>(
+		&self,
+		key: TypedKey<T>,
+	) -> Result<&T, ComponentMissingError> {
+		self.try_get_raw(key).map(|value| unsafe { value.as_ref() })
+	}
+
+	fn get_as<T: ?Sized + 'static>(&self, key: TypedKey<T>) -> &T {
+		self.try_get_as(key).unwrap_pretty()
+	}
+
+	fn try_get<T: ?Sized + 'static>(&self) -> Result<&T, ComponentMissingError> {
+		self.try_get_as(typed_key::<T>())
+	}
+
+	fn get<T: ?Sized + 'static>(&self) -> &T {
+		self.try_get().unwrap_pretty()
+	}
+
+	// === Borrow getters === //
+
+	fn try_borrow_as<T: ?Sized + 'static>(
+		&self,
+		key: TypedKey<ARefCell<T>>,
+	) -> Result<ARef<T>, BorrowError> {
+		Ok(self
+			.try_get_as(key)?
+			.try_borrow()
+			.map_err(|error| ComponentLockError {
+				key: key.raw(),
+				error,
+			})?)
+	}
+
+	fn borrow_as<T: ?Sized + 'static>(&self, key: TypedKey<ARefCell<T>>) -> ARef<T> {
+		self.try_borrow_as(key).unwrap_pretty()
+	}
+
+	fn try_borrow_mut_as<T: ?Sized + 'static>(
+		&self,
+		key: TypedKey<ARefCell<T>>,
+	) -> Result<AMut<T>, BorrowError> {
+		Ok(self
+			.try_get_as(key)?
+			.try_borrow_mut()
+			.map_err(|error| ComponentLockError {
+				key: key.raw(),
+				error,
+			})?)
+	}
+
+	fn borrow_mut_as<T: ?Sized + 'static>(&self, key: TypedKey<ARefCell<T>>) -> AMut<T> {
+		self.try_borrow_mut_as(key).unwrap_pretty()
+	}
+
+	fn try_borrow<T: ?Sized + 'static>(&self) -> Result<ARef<T>, BorrowError> {
+		self.try_borrow_as(typed_key::<ARefCell<T>>())
+	}
+
+	fn borrow<T: ?Sized + 'static>(&self) -> ARef<T> {
+		self.try_borrow::<T>().unwrap_pretty()
+	}
+
+	fn try_borrow_mut<T: ?Sized + 'static>(&self) -> Result<AMut<T>, BorrowError> {
+		self.try_borrow_mut_as(typed_key::<ARefCell<T>>())
+	}
+
+	fn borrow_mut<T: ?Sized + 'static>(&self) -> AMut<T> {
+		self.try_borrow_mut::<T>().unwrap_pretty()
+	}
+
+	// === Multi-getters === //
+
+	fn try_borrow_many<'a, D: MultiBorrowTarget<'a>>(&'a self) -> Result<D, BorrowError> {
+		D::try_borrow_from(self)
+	}
+
+	fn borrow_many<'a, D: MultiBorrowTarget<'a>>(&'a self) -> D {
+		self.try_borrow_many().unwrap_pretty()
+	}
+
+	fn inject<'a, D, F>(&'a self, mut handler: F) -> F::Return
+	where
+		D: MultiBorrowTarget<'a>,
+		F: InjectableClosure<(), D>,
+	{
+		handler.call_injected((), self.borrow_many())
+	}
+
+	fn inject_with<'a, A, D, F>(&'a self, mut handler: F, args: A) -> F::Return
+	where
+		D: MultiBorrowTarget<'a>,
+		F: InjectableClosure<A, D>,
+	{
+		handler.call_injected(args, self.borrow_many())
+	}
+}
 
 #[derive(Debug, Default)]
 pub struct Obj {
@@ -32,10 +147,7 @@ impl Obj {
 		Default::default()
 	}
 
-	pub fn add<T>(&mut self, value: T)
-	where
-		T: ComponentValue,
-	{
+	pub fn add<T: ComponentValue>(&mut self, value: T) {
 		self.add_as(typed_key::<T>(), value, ());
 	}
 
@@ -64,7 +176,17 @@ impl Obj {
 		}
 	}
 
-	pub fn try_get_raw<T: ?Sized + 'static>(
+	pub fn add_rw<T: ComponentValue>(&mut self, value: T) {
+		self.add(ARefCell::new(value));
+	}
+
+	// TODO: Context trees
+	// TODO: Single-threaded accessor wrapper
+	// TODO: Integration with storages
+}
+
+unsafe impl ObjLike for Obj {
+	fn try_get_raw<T: ?Sized + 'static>(
 		&self,
 		key: TypedKey<T>,
 	) -> Result<NonNull<T>, ComponentMissingError> {
@@ -75,75 +197,6 @@ impl Obj {
 
 		Ok(unsafe { entry.target_ptr::<T>() })
 	}
-
-	pub fn get_raw<T: ?Sized + 'static>(&self, key: TypedKey<T>) -> NonNull<T> {
-		self.try_get_raw(key).unwrap_pretty()
-	}
-
-	pub fn try_get_as<T: ?Sized + 'static>(
-		&self,
-		key: TypedKey<T>,
-	) -> Result<&T, ComponentMissingError> {
-		self.try_get_raw(key).map(|value| unsafe { value.as_ref() })
-	}
-
-	pub fn get_as<T: ?Sized + 'static>(&self, key: TypedKey<T>) -> &T {
-		self.try_get_as(key).unwrap_pretty()
-	}
-
-	pub fn try_get<T: ?Sized + 'static>(&self) -> Result<&T, ComponentMissingError> {
-		self.try_get_as(typed_key::<T>())
-	}
-
-	pub fn get<T: ?Sized + 'static>(&self) -> &T {
-		self.try_get().unwrap_pretty()
-	}
-
-	pub fn try_borrow_many<'a, D: ObjBorrowable<'a>>(&'a self) -> Result<D, BorrowError> {
-		D::try_borrow_from(self)
-	}
-
-	pub fn borrow_many<'a, D: ObjBorrowable<'a>>(&'a self) -> D {
-		self.try_borrow_many().unwrap_pretty()
-	}
-
-	pub fn inject<'a, D, F>(&'a self, mut handler: F) -> F::Return
-	where
-		D: ObjBorrowable<'a>,
-		F: InjectableClosure<(), D>,
-	{
-		handler.call_injected((), self.borrow_many())
-	}
-
-	pub fn inject_with<'a, A, D, F>(&'a self, mut handler: F, args: A) -> F::Return
-	where
-		D: ObjBorrowable<'a>,
-		F: InjectableClosure<A, D>,
-	{
-		handler.call_injected(args, self.borrow_many())
-	}
-
-	pub fn add_event_handler<E: 'static>(
-		&mut self,
-		handler: for<'a, 'b, 'c, 'd> fn(<E as Parameterizable<'a, 'b, 'c, 'd>>::Value),
-	) where
-		E: for<'a, 'b, 'c, 'd> Parameterizable<'a, 'b, 'c, 'd>,
-	{
-		self.add(handler);
-	}
-
-	pub fn fire_event<'pa, 'pb, 'pc, 'pd, E: 'static>(
-		&self,
-		event: <E as Parameterizable<'pa, 'pb, 'pc, 'pd>>::Value,
-	) where
-		E: for<'a, 'b, 'c, 'd> Parameterizable<'a, 'b, 'c, 'd>,
-	{
-		self.get::<for<'a, 'b, 'c, 'd> fn(<E as Parameterizable<'a, 'b, 'c, 'd>>::Value)>()(event);
-	}
-
-	// TODO: Mutexed, and locked variants
-	// TODO: Single-threaded accessors
-	// TODO: Context trees
 }
 
 impl Drop for Obj {
@@ -246,103 +299,57 @@ impl Debug for ObjEntry {
 	}
 }
 
-// === Helper traits === //
-
-pub use super::parameterizable::{Parameterizable, Unpara};
-
-pub trait ComponentValue: Sized + 'static + Send + Sync {}
-
-impl<T: 'static + Send + Sync> ComponentValue for T {}
-
 // === Errors === //
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum LockState {
-	Mutably,
-	Immutably(usize),
-	Unborrowed,
-}
-
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Error)]
-#[error("Component {key:?} missing from `Obj`.")]
+#[error("component {key:?} missing from `Obj`")]
 pub struct ComponentMissingError {
 	pub key: RawTypedKey,
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct LockError {
-	pub state: LockState,
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Error)]
+#[error("failed to lock component with key {key:?}")]
+pub struct ComponentLockError {
+	pub error: LockError,
 	pub key: RawTypedKey,
-}
-
-impl Error for LockError {}
-
-impl Display for LockError {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		write!(f, "Failed to lock component with key {:?}", self.key)?;
-		match self.state {
-			LockState::Mutably => {
-				f.write_str(
-					"immutably: 1 concurrent mutable borrow prevents shared immutable access.",
-				)?;
-			}
-			LockState::Immutably(concurrent) => {
-				write!(
-					f,
-					"mutably: {} concurrent immutable borrow{} prevent{} exclusive mutable access.",
-					concurrent,
-					// Gotta love English grammar
-					if concurrent == 1 { "" } else { "s" },
-					if concurrent == 1 { "s" } else { "" },
-				)?;
-			}
-			LockState::Unborrowed => {
-				#[cfg(debug_assertions)]
-				unreachable!();
-				#[cfg(not(debug_assertions))]
-				f.write_str("even though it was unborrowed?!")?;
-			}
-		}
-		Ok(())
-	}
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Error)]
 pub enum BorrowError {
-	#[error("Failed to borrow. {0}")]
-	ComponentMissing(ComponentMissingError),
-	#[error("Failed to borrow. {0}")]
-	LockError(LockError),
+	#[error("failed to find component in `Obj`")]
+	ComponentMissing(#[from] ComponentMissingError),
+	#[error("failed to borrow component from `Obj`")]
+	LockError(#[from] ComponentLockError),
 }
 
-impl From<ComponentMissingError> for BorrowError {
-	fn from(err: ComponentMissingError) -> Self {
-		Self::ComponentMissing(err)
-	}
+// === Multi-borrow === //
+
+pub trait MultiBorrowTarget<'a>: Sized {
+	fn try_borrow_from<O: ?Sized + ObjLike>(obj: &'a O) -> Result<Self, BorrowError>;
 }
 
-impl From<LockError> for BorrowError {
-	fn from(err: LockError) -> Self {
-		Self::LockError(err)
-	}
-}
-
-// === Multi-fetch === //
-
-pub trait ObjBorrowable<'a>: Sized {
-	fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError>;
-}
-
-impl<'a, T: ?Sized + 'static> ObjBorrowable<'a> for &'a T {
-	fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError> {
+impl<'a, T: ?Sized + 'static> MultiBorrowTarget<'a> for &'a T {
+	fn try_borrow_from<O: ?Sized + ObjLike>(obj: &'a O) -> Result<Self, BorrowError> {
 		obj.try_get().map_err(From::from)
 	}
 }
 
+impl<'a, T: ?Sized + 'static> MultiBorrowTarget<'a> for ARef<'a, T> {
+	fn try_borrow_from<O: ?Sized + ObjLike>(obj: &'a O) -> Result<Self, BorrowError> {
+		obj.try_borrow()
+	}
+}
+
+impl<'a, T: ?Sized + 'static> MultiBorrowTarget<'a> for AMut<'a, T> {
+	fn try_borrow_from<O: ?Sized + ObjLike>(obj: &'a O) -> Result<Self, BorrowError> {
+		obj.try_borrow_mut()
+	}
+}
+
 macro impl_tup_obj_borrowable($($name:ident: $field:tt),*) {
-	impl<'a, $($name: ObjBorrowable<'a>),*> ObjBorrowable<'a> for ($($name,)*) {
+	impl<'a, $($name: MultiBorrowTarget<'a>),*> MultiBorrowTarget<'a> for ($($name,)*) {
 		#[allow(unused_variables)]
-		fn try_borrow_from(obj: &'a Obj) -> Result<Self, BorrowError> {
+		fn try_borrow_from<O: ?Sized + ObjLike>(obj: &'a O) -> Result<Self, BorrowError> {
 			Ok(($($name::try_borrow_from(obj)?,)*))
 		}
 	}
@@ -466,7 +473,7 @@ where
 }
 
 macro tup_impl_alias_list($($name:ident: $field:tt),*) {
-unsafe impl<_Src: Sized $(,$name: AliasList<_Src>)*> AliasList<_Src> for ($($name,)*) {
+	unsafe impl<_Src: Sized $(,$name: AliasList<_Src>)*> AliasList<_Src> for ($($name,)*) {
 		#[allow(unused_variables)]
 		unsafe fn push_aliases(self, obj: &mut Obj, ptr: NonNull<_Src>) {
 			$( self.$field.push_aliases(obj, ptr); )*
@@ -475,3 +482,84 @@ unsafe impl<_Src: Sized $(,$name: AliasList<_Src>)*> AliasList<_Src> for ($($nam
 }
 
 impl_tuples!(tup_impl_alias_list);
+
+// === Event trait creation === //
+
+pub macro event_trait {
+	// Muncher base case
+	() => {},
+
+	// Immutable
+	(
+		$(#[$attr:meta])*
+		$vis:vis trait
+			$name:ident
+			$(::<$($generic_param:ident),*$(,)?>)?
+			::
+			$fn_name:ident
+			$(<
+				$($lt_decl:lifetime),*
+				$(,)?
+			>)?
+		(
+			&self,
+			$($arg_name:ident: $arg_ty:ty),*
+			$(,)?
+		) $(-> $ret:ty)?;
+
+		$($rest:tt)*
+	) => {
+		$(#[$attr:meta])*
+		$vis trait $name $(<$($generic_param),*>)? {
+			fn $fn_name $(<$($lt_decl),*>)? (&self, $($arg_name: $arg_ty),*) $(-> $ret)?;
+		}
+
+		impl<F $(,$($generic_param),*)?> $name $(<$($generic_param),*>)? for F
+		where
+			F: $(for<$($lt_decl),*>)? Fn($($arg_ty),*) $(-> $ret)?,
+		{
+			fn $fn_name $(<$($lt_decl),*>)? (&self, $($arg_name: $arg_ty),*) $(-> $ret)? {
+				(self)($($arg_name),*)
+			}
+		}
+
+		event_trait!($($rest)*);
+	},
+
+	// Mutable
+	(
+		$(#[$attr:meta])*
+		$vis:vis trait
+			$name:ident
+			$(::<$($generic_param:ident),*$(,)?>)?
+			::
+			$fn_name:ident
+			$(<
+				$($lt_decl:lifetime),*
+				$(,)?
+			>)?
+		(
+			&mut self,
+			$($arg_name:ident: $arg_ty:ty),*
+			$(,)?
+		) $(-> $ret:ty)?;
+
+		$($rest:tt)*
+	) => {
+		$(#[$attr:meta])*
+		$vis trait $name $(<$($generic_param),*>)? {
+			fn $fn_name $(<$($lt_decl),*>)? (&mut self, $($arg_name: $arg_ty),*) $(-> $ret)?;
+		}
+
+		impl<F $(,$($generic_param),*)?> $name $(<$($generic_param),*>)? for F
+		where
+			F: $(for<$($lt_decl),*>)? FnMut($($arg_ty),*) $(-> $ret)?,
+		{
+			fn $fn_name $(<$($lt_decl),*>)? (&mut self, $($arg_name: $arg_ty),*) $(-> $ret)? {
+				(self)($($arg_name),*)
+			}
+		}
+
+		event_trait!($($rest)*);
+	},
+}

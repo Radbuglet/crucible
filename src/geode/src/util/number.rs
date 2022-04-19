@@ -197,7 +197,7 @@ impl NumberGenMut for NonZeroU64Generator {
 	}
 }
 
-// === usize bit-masking === //
+// === u64 bit-masking === //
 
 pub const fn u64_msb_mask(offset: u32) -> u64 {
 	debug_assert!(offset < 64);
