@@ -1,4 +1,3 @@
-use crate::ecs::ArchStorage;
 use crate::exec::atomic_ref_cell::{AMut, ARef, ARefCell, LockError};
 use crate::util::arity_utils::{impl_tuples, InjectableClosure};
 use crate::util::error::ResultExt;
@@ -9,7 +8,7 @@ use bumpalo::Bump;
 use derive_where::derive_where;
 use std::alloc::Layout;
 use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::marker::{PhantomData, Unsize};
 use std::ptr::{NonNull, Pointee};
@@ -136,6 +135,8 @@ pub unsafe trait ObjLike {
 pub struct Obj {
 	comps: HashMap<RawTypedKey, ObjEntry>,
 	bump: Bump,
+	#[cfg(debug_assertions)]
+	debug_label: Option<String>,
 }
 
 // `Obj` is `Send` and `Sync` because all components inserted into it must also be `Send` and `Sync`.
@@ -145,6 +146,27 @@ unsafe impl Sync for Obj {}
 impl Obj {
 	pub fn new() -> Self {
 		Default::default()
+	}
+
+	#[allow(unused_variables)] // For "name" in release builds.
+	pub fn labeled<D: Display>(name: D) -> Self {
+		Self {
+			comps: Default::default(),
+			bump: Default::default(),
+			#[cfg(debug_assertions)]
+			debug_label: Some(name.to_string()),
+		}
+	}
+
+	pub fn debug_label(&self) -> &str {
+		#[cfg(debug_assertions)]
+		{
+			self.debug_label.as_ref().map_or("unset", String::as_str)
+		}
+		#[cfg(not(debug_assertions))]
+		{
+			"unavailable"
+		}
 	}
 
 	pub fn add<T: ComponentValue>(&mut self, value: T) {
@@ -176,11 +198,18 @@ impl Obj {
 		}
 	}
 
+	pub fn add_alias<T, A>(&mut self, value: T, alias_as: A)
+	where
+		T: ComponentValue,
+		A: AliasList<T>,
+	{
+		self.add_as(typed_key(), value, alias_as);
+	}
+
 	pub fn add_rw<T: ComponentValue>(&mut self, value: T) {
 		self.add(ARefCell::new(value));
 	}
 
-	// TODO: Context trees
 	// TODO: Single-threaded accessor wrapper
 	// TODO: Integration with storages
 }
@@ -296,6 +325,98 @@ impl Debug for ObjEntry {
 		#[cfg(debug_assertions)]
 		builder.field(&self.comp_name);
 		builder.finish()
+	}
+}
+
+// === ObjCx === //
+
+pub struct ObjCx<'borrow, 'obj> {
+	backing: ObjCxBacking<'borrow, 'obj>,
+	length: usize,
+}
+
+enum ObjCxBacking<'borrow, 'obj> {
+	Root(Vec<&'obj Obj>),
+	Child(&'borrow mut Vec<&'obj Obj>),
+}
+
+impl<'borrow, 'obj> Debug for ObjCx<'borrow, 'obj> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("ObjCx")
+			.field("children", &self.path())
+			.finish_non_exhaustive()
+	}
+}
+
+impl<'obj> ObjCx<'_, 'obj> {
+	pub fn root(root: &'obj Obj) -> Self {
+		Self {
+			backing: ObjCxBacking::Root(vec![root]),
+			length: 1,
+		}
+	}
+
+	fn backing_ref(&self) -> &Vec<&'obj Obj> {
+		match &self.backing {
+			ObjCxBacking::Root(root) => root,
+			ObjCxBacking::Child(root) => *root,
+		}
+	}
+
+	pub fn path(&self) -> &[&'obj Obj] {
+		&self.backing_ref()[0..self.length]
+	}
+
+	pub fn ancestors(&self, include_self: bool) -> impl Iterator<Item = &'obj Obj> + '_ {
+		let path = self.path();
+		let path = if include_self {
+			path
+		} else {
+			&path[0..path.len()]
+		};
+
+		path.iter().copied().rev()
+	}
+
+	pub fn me(&self) -> &'obj Obj {
+		self.path().last().unwrap()
+	}
+
+	pub fn add<'borrow>(&'borrow mut self, child: &'obj Obj) -> ObjCx<'borrow, 'obj> {
+		let root = match &mut self.backing {
+			ObjCxBacking::Root(root) => root,
+			ObjCxBacking::Child(root) => *root,
+		};
+
+		root.truncate(self.length);
+		root.push(child);
+
+		ObjCx {
+			backing: ObjCxBacking::Child(root),
+			length: self.length + 1,
+		}
+	}
+
+	pub fn clone(&self) -> ObjCx<'static, 'obj> {
+		ObjCx {
+			backing: ObjCxBacking::Root(self.backing_ref().clone()),
+			length: self.length,
+		}
+	}
+}
+
+unsafe impl ObjLike for ObjCx<'_, '_> {
+	fn try_get_raw<T: ?Sized + 'static>(
+		&self,
+		key: TypedKey<T>,
+	) -> Result<NonNull<T>, ComponentMissingError> {
+		for ancestor in self.ancestors(true) {
+			if let Ok(value) = ancestor.try_get_raw(key) {
+				return Ok(value);
+			}
+		}
+
+		Err(ComponentMissingError { key: key.raw() })
 	}
 }
 

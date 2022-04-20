@@ -1,0 +1,21 @@
+# Geode To-Do List
+
+- [ ] Obj:
+  - [ ] Integrate with `Storages`.
+  - [ ] Allow single-threaded `RefCell` tracking via `&mut`.
+  - [ ] Write a single-threaded `Obj` variant?
+- [ ] ECS:
+  - [ ] Fix up `World` spawning semantics (`spawn_now` interferes with `spawn_deferred`).
+  - [ ] Fix up `MapStorage` API (there's too many things going on here).
+  - [ ] Make `FreeList` implementation a bit less unsafe and improve packing via `hibitsets`.
+  - [ ] Fully implement `ArchStorage` flushing.
+  - [ ] Implement `ArchStorage` APIs.
+  - [ ] Implement partial `ArchStorage` flushing.
+- [ ] Obj ECS integration:
+  - [ ] Implement `ServiceManager`, a way to attach `Obj` to `Entities`.
+  - [ ] Implement a thread-exclusive `RefCell`-tracked `ArchStorage`.
+  - [ ] Implement a scheduler.
+- [ ] Polish for release:
+  - [ ] Write documentation.
+  - [ ] Remove hard dependencies on atomics.
+  - [ ] Write a copious amount of unit tests.
