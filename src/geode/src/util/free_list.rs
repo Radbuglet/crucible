@@ -1,285 +1,196 @@
-use crate::util::number::OptionalUsize;
-use derive_where::derive_where;
-use std::cell::UnsafeCell;
-use std::mem::replace;
+use crate::util::number::{hibitset_length, is_valid_hibitset_index};
+use hibitset::{BitSet, BitSetLike};
+use std::fmt::{Debug, Formatter};
+use std::iter::repeat_with;
+use std::mem::MaybeUninit;
 use std::ops::{Index, IndexMut};
 
-pub type FreeList<T> = GenericFreeList<SimpleFreeListNode<T>>;
-pub type IterableFreeList<T> = GenericFreeList<IterableFreeListNode<T>>;
+pub struct FreeList<T> {
+	// A bitset containing the set of all free slots *actively contained within the backing vector*.
+	free: BitSet,
 
-#[derive(Debug, Clone)]
-#[derive_where(Default)]
-pub struct GenericFreeList<T: FreeListNode> {
-	slots: Vec<T>,
-	free_head: OptionalUsize,
-	occupied_head: T::OccupiedHead,
+	// A bitset containing the set of all slots reserved in the backing vector.
+	//
+	// Reserved is necessary, even when iteration is not needed by the end user, to find the maximum
+	// index of the storage, and to more efficiently drop the backing values once the free list is
+	// dropped.
+	reserved: BitSet,
+
+	// A sparse backing vector of the free list.
+	values: Vec<MaybeUninit<T>>,
 }
 
-impl<T: FreeListNode> GenericFreeList<T> {
+impl<T> Default for FreeList<T> {
+	fn default() -> Self {
+		Self {
+			free: BitSet::new(),
+			reserved: BitSet::new(),
+			values: Vec::new(),
+		}
+	}
+}
+
+impl<T> FreeList<T> {
 	pub fn new() -> Self {
 		Self::default()
 	}
 
-	pub fn add(&mut self, value: T::Value) -> usize {
-		match self.free_head.as_option() {
+	pub fn reserve(&mut self, value: T) -> u32 {
+		match (&self.free).iter().next() {
 			Some(index) => {
-				// Update free head
-				self.free_head = match self.slots[index].as_occupied_raw() {
-					Ok(_) => unreachable!(),
-					Err(next) => next,
-				};
-
-				// Generate the new slot
-				let slot = T::new_occupied(value, index, self);
-				self.slots[index] = slot;
+				self.reserved.add(index);
+				self.free.remove(index);
+				self.values[index as usize] = MaybeUninit::new(value);
 				index
 			}
 			None => {
-				let index = self.slots.len();
-				let slot = T::new_occupied(value, index, self);
-				self.slots.push(slot);
+				let index = self.values.len();
+				debug_assert!(is_valid_hibitset_index(index));
+				let index = index as u32;
+
+				self.reserved.add(index);
+				self.values.push(MaybeUninit::new(value));
 				index
 			}
 		}
 	}
 
-	pub fn release(&mut self, index: usize) -> T::Value {
-		let target = self
-			.slots
-			.get_mut(index)
-			// Ensure that we're not releasing an freed node because that would be a logical error.
-			.filter(|node| node.as_occupied_raw().is_ok())
-			.expect("Cannot release a free or non-existent node!");
+	pub fn free(&mut self, index: u32) -> Option<T> {
+		// If the element actually exists.
+		if self.reserved.contains(index) {
+			// Unregister it and grab the value
+			self.reserved.remove(index);
+			let value = unsafe { self.values.get_unchecked(index as usize).assume_init_read() };
 
-		// Release it!
-		let old_target = replace(target, T::new_free(self.free_head));
-		self.free_head = OptionalUsize::some(index);
-		old_target.handle_occupied_unlink(self)
-	}
+			// If the max index in the reservation bitset is less than the length of the backing
+			// vector, the vector can be truncated.
+			let reserved_len = hibitset_length(&self.reserved) as usize;
+			if reserved_len < self.values.len() {
+				self.values.truncate(reserved_len)
+			} else {
+				// Otherwise, we have to mark the slot as free.
+				debug_assert!(reserved_len == self.values.len());
+				self.free.add((reserved_len - 1) as u32);
+			}
 
-	pub fn get_raw(&self, index: usize) -> Option<*mut T::Value> {
-		self.slots
-			.get(index)
-			.and_then(|node| node.as_occupied_raw().ok())
-	}
-
-	pub fn get(&self, index: usize) -> Option<&T::Value> {
-		self.slots
-			.get(index)
-			.and_then(|node| node.as_occupied_ref().ok())
-	}
-
-	pub fn get_mut(&mut self, index: usize) -> Option<&mut T::Value> {
-		self.slots
-			.get_mut(index)
-			.and_then(|node| node.as_occupied_mut().ok())
-	}
-}
-
-impl<T> IterableFreeList<T> {
-	pub fn raw_iter(&self) -> RawFreeListIterator {
-		RawFreeListIterator {
-			head: self.occupied_head,
-		}
-	}
-
-	pub fn iter(&self) -> impl Iterator<Item = (usize, &T)> {
-		let mut raw = self.raw_iter();
-
-		std::iter::from_fn(move || {
-			let (index, ptr) = raw.next_raw(&self)?;
-			Some((index, unsafe { &*ptr }))
-		})
-	}
-
-	pub fn iter_mut(&mut self) -> impl Iterator<Item = (usize, &mut T)> {
-		let mut raw = self.raw_iter();
-
-		std::iter::from_fn(move || {
-			let (index, ptr) = raw.next_raw(&self)?;
-			Some((index, unsafe { &mut *ptr }))
-		})
-	}
-}
-
-impl<T: FreeListNode> Index<usize> for GenericFreeList<T> {
-	type Output = T::Value;
-
-	fn index(&self, index: usize) -> &Self::Output {
-		self.get(index).unwrap()
-	}
-}
-
-impl<T: FreeListNode> IndexMut<usize> for GenericFreeList<T> {
-	fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-		self.get_mut(index).unwrap()
-	}
-}
-
-pub unsafe trait FreeListNode: Sized {
-	type OccupiedHead: Default;
-	type Value;
-
-	fn new_free(next: OptionalUsize) -> Self;
-	fn new_occupied(value: Self::Value, my_index: usize, list: &mut GenericFreeList<Self>) -> Self;
-
-	fn as_occupied_raw(&self) -> Result<*mut Self::Value, OptionalUsize>;
-
-	fn as_occupied_ref(&self) -> Result<&Self::Value, OptionalUsize> {
-		self.as_occupied_raw().map(|ptr| unsafe { &*ptr })
-	}
-
-	fn as_occupied_mut(&self) -> Result<&mut Self::Value, OptionalUsize> {
-		self.as_occupied_raw().map(|ptr| unsafe { &mut *ptr })
-	}
-
-	fn handle_occupied_unlink(self, list: &mut GenericFreeList<Self>) -> Self::Value;
-}
-
-#[derive(Debug)]
-pub enum SimpleFreeListNode<T> {
-	Occupied(UnsafeCell<T>),
-	Free(OptionalUsize),
-}
-
-impl<T: Clone> Clone for SimpleFreeListNode<T> {
-	fn clone(&self) -> Self {
-		use SimpleFreeListNode::*;
-
-		match self {
-			Occupied(data) => Occupied(UnsafeCell::new(unsafe { &*data.get() }.clone())),
-			Free(data) => Free(*data),
-		}
-	}
-}
-
-unsafe impl<T> FreeListNode for SimpleFreeListNode<T> {
-	type OccupiedHead = ();
-	type Value = T;
-
-	fn new_free(next: OptionalUsize) -> Self {
-		Self::Free(next)
-	}
-
-	fn new_occupied(
-		value: Self::Value,
-		_my_index: usize,
-		_list: &mut GenericFreeList<Self>,
-	) -> Self {
-		Self::Occupied(UnsafeCell::new(value))
-	}
-
-	fn as_occupied_raw(&self) -> Result<*mut Self::Value, OptionalUsize> {
-		match self {
-			Self::Occupied(value) => Ok(value.get()),
-			Self::Free(next) => Err(*next),
-		}
-	}
-
-	fn handle_occupied_unlink(self, _list: &mut GenericFreeList<Self>) -> Self::Value {
-		// Nothing to unlink, just return the value.
-		match self {
-			Self::Occupied(value) => value.into_inner(),
-			Self::Free(_) => unreachable!(),
-		}
-	}
-}
-
-#[derive(Debug)]
-pub struct IterableFreeListNode<T> {
-	next: OptionalUsize,
-	occupied: Option<(OptionalUsize, UnsafeCell<T>)>,
-}
-
-impl<T: Clone> Clone for IterableFreeListNode<T> {
-	fn clone(&self) -> Self {
-		Self {
-			next: self.next,
-			occupied: self
-				.occupied
-				.as_ref()
-				.map(|(index, cell)| (*index, UnsafeCell::new(unsafe { &*cell.get() }.clone()))),
-		}
-	}
-}
-
-unsafe impl<T> FreeListNode for IterableFreeListNode<T> {
-	type OccupiedHead = OptionalUsize;
-	type Value = T;
-
-	fn new_free(next: OptionalUsize) -> Self {
-		Self {
-			next,
-			occupied: None,
-		}
-	}
-
-	fn new_occupied(value: Self::Value, my_index: usize, list: &mut GenericFreeList<Self>) -> Self {
-		// New layout:
-		// <occupied_head> -> <self> -> <slots[old_occupied_head]>
-
-		// Link head to self
-		let old_occupied_head = replace(&mut list.occupied_head, OptionalUsize::some(my_index));
-
-		// Link `old_occupied_head` to self
-		if let Some(old_occupied_head) = old_occupied_head.as_option() {
-			let old_occupied_head = &mut list.slots[old_occupied_head];
-			let (old_occupied_head_prev, _) = old_occupied_head.occupied.as_mut().unwrap();
-
-			*old_occupied_head_prev = OptionalUsize::some(my_index);
-		}
-
-		// "Link" self to head and `old_occupied_head`
-		Self {
-			next: old_occupied_head,
-			occupied: Some((OptionalUsize::NONE, UnsafeCell::new(value))),
-		}
-	}
-
-	fn as_occupied_raw(&self) -> Result<*mut Self::Value, OptionalUsize> {
-		match &self.occupied {
-			Some((_, value)) => Ok(value.get()),
-			None => Err(self.next),
-		}
-	}
-
-	fn handle_occupied_unlink(self, list: &mut GenericFreeList<Self>) -> Self::Value {
-		// New layout:
-		// <prev> -> (removed: self) -> <next>
-
-		let (prev, value) = self.occupied.unwrap();
-
-		// Link prev to next
-		if let Some(prev) = prev.as_option() {
-			let prev = &mut list.slots[prev];
-			debug_assert!(prev.occupied.is_some());
-			prev.next = self.next;
+			Some(value)
 		} else {
-			list.occupied_head = self.next;
+			None
 		}
+	}
 
-		// Link next to prev
-		if let Some(next) = self.next.as_option() {
-			let next = &mut list.slots[next];
-			let (next_prev, _) = next.occupied.as_mut().unwrap();
-			*next_prev = prev;
+	pub fn get(&self, index: u32) -> Option<&T> {
+		if self.reserved.contains(index) {
+			Some(unsafe { self.values.get_unchecked(index as usize).assume_init_ref() })
+		} else {
+			None
 		}
+	}
 
-		value.into_inner()
+	pub fn get_mut(&mut self, index: u32) -> Option<&mut T> {
+		if self.reserved.contains(index) {
+			Some(unsafe {
+				self.values
+					.get_unchecked_mut(index as usize)
+					.assume_init_mut()
+			})
+		} else {
+			None
+		}
+	}
+
+	pub fn raw_iter(&self) -> impl Iterator<Item = u32> {
+		// FIXME: Gotta love lifetimes.
+		self.free.clone().iter()
+	}
+
+	pub fn iter(&self) -> impl Iterator<Item = (u32, &T)> + '_ {
+		(&self.reserved).iter().map(move |index| {
+			(index, unsafe {
+				self.values.get_unchecked(index as usize).assume_init_ref()
+			})
+		})
+	}
+
+	pub fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = (u32, &'a mut T)> + 'a {
+		let root = self.values.as_mut_ptr();
+
+		// TODO: Rewrite using `Accessors` once they stabilize because manual pointer arithmetic is
+		//  really un-fun.
+		(&self.reserved).iter().map(move |index| {
+			(index, unsafe {
+				(&mut *root.add(index as usize)).assume_init_mut()
+			})
+		})
 	}
 }
 
-#[derive(Debug, Clone)]
-pub struct RawFreeListIterator {
-	head: OptionalUsize,
+impl<T> Index<u32> for FreeList<T> {
+	type Output = T;
+
+	fn index(&self, index: u32) -> &Self::Output {
+		match self.get(index) {
+			Some(value) => value,
+			None => panic!(
+				"Index {index} does not point to an actively reserved element of the free list."
+			),
+		}
+	}
 }
 
-impl RawFreeListIterator {
-	pub fn next_raw<T>(&mut self, store: &IterableFreeList<T>) -> Option<(usize, *mut T)> {
-		let curr_index = self.head.as_option()?;
-		let curr_slot = &store.slots[curr_index];
-		let (next, ptr) = curr_slot.occupied.as_ref().unwrap();
-		self.head = *next;
-		Some((curr_index, ptr.get()))
+impl<T> IndexMut<u32> for FreeList<T> {
+	fn index_mut(&mut self, index: u32) -> &mut Self::Output {
+		match self.get_mut(index) {
+			Some(value) => value,
+			None => panic!(
+				"Index {index} does not point to an actively reserved element of the free list."
+			),
+		}
+	}
+}
+
+impl<T: Debug> Debug for FreeList<T> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let mut builder = f.debug_list();
+
+		for (index, slot) in self.values.iter().enumerate() {
+			if self.reserved.contains(index as u32) {
+				builder.entry(&Some(unsafe { slot.assume_init_ref() }));
+			} else {
+				builder.entry(&None::<&T>);
+			}
+		}
+
+		builder.finish()
+	}
+}
+
+impl<T: Clone> Clone for FreeList<T> {
+	fn clone(&self) -> Self {
+		let mut values = repeat_with(MaybeUninit::uninit)
+			.take(self.values.len())
+			.collect::<Vec<_>>();
+
+		for (index, value) in self.iter() {
+			values[index as usize] = MaybeUninit::new(value.clone());
+		}
+
+		Self {
+			free: self.free.clone(),
+			reserved: self.reserved.clone(),
+			values,
+		}
+	}
+}
+
+impl<T> Drop for FreeList<T> {
+	fn drop(&mut self) {
+		for index in (&self.reserved).iter() {
+			unsafe {
+				self.values
+					.get_unchecked_mut(index as usize)
+					.assume_init_drop();
+			}
+		}
 	}
 }

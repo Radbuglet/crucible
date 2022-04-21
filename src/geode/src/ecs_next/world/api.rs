@@ -71,13 +71,10 @@ impl World {
 	) -> Result<Option<EntityArchLocator>, EntityDeadError> {
 		if self.is_alive(target) {
 			let (_, arch_raw) = self.entities.locate_entity_raw(target.index);
-			Ok(arch_raw
-				.arch_index
-				.as_option()
-				.map(|slot| EntityArchLocator {
-					arch: self.arch.slot_to_handle(slot),
-					index_in_arch: arch_raw.index_in_arch,
-				}))
+			Ok(arch_raw.arch_index.map(|slot| EntityArchLocator {
+				arch: self.arch.slot_to_handle(slot),
+				index_in_arch: arch_raw.index_in_arch,
+			}))
 		} else {
 			Err(EntityDeadError(target))
 		}

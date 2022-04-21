@@ -19,3 +19,7 @@
   - [ ] Write documentation.
   - [ ] Remove hard dependencies on atomics.
   - [ ] Write a copious amount of unit tests.
+  - [ ] Code review:
+    - [ ] Generic invariants checking (ensure that the program fails fast)
+    - [ ] Aliasing rules
+    - [ ] Numeric casts and memory semantics

@@ -1,13 +1,13 @@
 use crate::ecs_next::map_store::MapStorage;
 use crate::ecs_next::world::{ArchHandle, DirtyId, StorageId, World};
-use crate::util::free_list::IterableFreeList;
+use crate::util::free_list::FreeList;
 use std::cell::UnsafeCell;
 
 pub struct ArchStorage<T> {
 	id: StorageId,
 	last_checked: DirtyId,
 	locs: MapStorage<EntityLoc>,
-	archetypes: IterableFreeList<StorageArchetype<T>>,
+	archetypes: FreeList<StorageArchetype<T>>,
 }
 
 #[derive(Debug)]
@@ -19,7 +19,7 @@ struct StorageArchetype<T> {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 struct EntityLoc {
-	arch_index: usize,
+	arch_index: u32,
 	comp_index: usize,
 }
 
@@ -196,8 +196,7 @@ impl<T> ArchStorage<T> {
 		self.last_checked = world.latest_dirty_id();
 
 		//> Run destructors
-		let mut iter = self.archetypes.raw_iter();
-		while let Some((store_index, _)) = iter.next_raw(&self.archetypes) {
+		for store_index in self.archetypes.raw_iter() {
 			let store_arch = &mut self.archetypes[store_index];
 
 			match world.get_archetype(store_arch.handle) {
@@ -207,7 +206,7 @@ impl<T> ArchStorage<T> {
 						.truncate(template_arch.entities().len());
 				}
 				Err(_) => {
-					self.archetypes.release(store_index);
+					self.archetypes.free(store_index);
 				}
 			};
 		}

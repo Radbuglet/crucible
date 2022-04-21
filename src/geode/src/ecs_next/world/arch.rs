@@ -20,7 +20,7 @@ pub struct ArchManager {
 	/// Maps component list hashes to archetypes. The first element of each entry is the hash and the
 	/// second is the archetype index. Equality is checked against the corresponding
 	/// `ArchetypeData.storages` buffer in `archetypes`.
-	full_archetype_map: RawTable<(u64, usize)>,
+	full_archetype_map: RawTable<(u64, u32)>,
 
 	/// A free list of archetypes.
 	archetypes: FreeList<WorldArchetype>,
@@ -76,7 +76,7 @@ impl ArchManager {
 	/// Fetches an [ArchHandle] to the archetype in the given archetype slot. [ArchHandle]s allow
 	/// users to discriminate between two different archetypes which have been allocated in the same
 	/// slot.
-	pub fn slot_to_handle(&self, index: usize) -> ArchHandle {
+	pub fn slot_to_handle(&self, index: u32) -> ArchHandle {
 		ArchHandle {
 			index,
 			gen: self.archetypes[index].gen,
@@ -91,13 +91,13 @@ impl ArchManager {
 		&mut self,
 		entity_manager: &mut EntityManager,
 		src_entity_slot: usize,
-		target_arch_slot: usize,
+		target_arch_slot: u32,
 	) {
 		let (_, slot) = entity_manager.locate_entity_raw_mut(src_entity_slot);
 		let slot = slot.clone();
 
 		// Remove from last archetype
-		if let Some(index) = slot.arch_index.as_option() {
+		if let Some(index) = slot.arch_index {
 			self.archetypes[index].remove_entity_track_tail_slot_loc(
 				slot.index_in_arch,
 				entity_manager,
@@ -110,7 +110,7 @@ impl ArchManager {
 		// Move into new archetype
 		let arch = &mut self.archetypes[target_arch_slot];
 		*slot = RawEntityArchLocator {
-			arch_index: OptionalUsize::some(target_arch_slot),
+			arch_index: Some(target_arch_slot),
 			index_in_arch: arch.entities().len(),
 		};
 		arch.push_entity(
@@ -128,7 +128,7 @@ impl ArchManager {
 	pub fn remove_entity_no_track_target(
 		&mut self,
 		entity_manager: &mut EntityManager,
-		arch_index: usize,
+		arch_index: u32,
 		entity_index_in_arch: usize,
 	) {
 		let arch = &mut self.archetypes[arch_index];
@@ -170,7 +170,7 @@ impl ArchManager {
 		comp_list_hash: u64,
 		comp_list: I,
 		comp_list_len: usize,
-	) -> Option<usize>
+	) -> Option<u32>
 	where
 		I: Iterator<Item = StorageId> + Clone,
 	{
@@ -195,11 +195,11 @@ impl ArchManager {
 	// High effort code-dedup.
 	fn arch_dest_or_insert_slow_base<G: for<'a> CompListGenerator<'a>>(
 		&mut self,
-		source_arch: OptionalUsize,
+		source_arch: Option<u32>,
 		comps_from_arch: G,
-	) -> usize {
+	) -> u32 {
 		// Find source archetype info
-		let original_storages = match source_arch.as_option() {
+		let original_storages = match source_arch {
 			Some(source_arch) => &*self.archetypes[source_arch].storages,
 			None => &[],
 		};
@@ -213,7 +213,7 @@ impl ArchManager {
 			index
 		} else {
 			let comp_list = comp_list.collect();
-			let index = self.archetypes.add(WorldArchetype::new(
+			let index = self.archetypes.reserve(WorldArchetype::new(
 				self.arch_gen_gen.try_generate_mut().unwrap_pretty(),
 				comp_list,
 			));
@@ -223,11 +223,7 @@ impl ArchManager {
 		}
 	}
 
-	pub fn arch_dest_for_addition(
-		&mut self,
-		source_arch: OptionalUsize,
-		adding: StorageId,
-	) -> usize {
+	pub fn arch_dest_for_addition(&mut self, source_arch: Option<u32>, adding: StorageId) -> u32 {
 		// TODO: Memoize conversions
 		use std::iter::{once, Copied, Once};
 
@@ -247,11 +243,7 @@ impl ArchManager {
 		self.arch_dest_or_insert_slow_base(source_arch, AddGen(adding))
 	}
 
-	pub fn arch_dest_for_deletion(
-		&mut self,
-		source_arch: OptionalUsize,
-		removing: StorageId,
-	) -> usize {
+	pub fn arch_dest_for_deletion(&mut self, source_arch: Option<u32>, removing: StorageId) -> u32 {
 		use std::iter::{once, Copied, Once};
 
 		struct DelGen(StorageId);
@@ -280,7 +272,7 @@ trait CompListGenerator<'a> {
 #[derive(Debug, Clone, Default)]
 pub struct RawEntityArchLocator {
 	/// The slot containing this entity.
-	pub arch_index: OptionalUsize,
+	pub arch_index: Option<u32>,
 
 	/// The index of this entity within the archetype.
 	pub index_in_arch: usize,
@@ -297,7 +289,7 @@ pub struct EntityArchLocator {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct ArchHandle {
-	index: usize,
+	index: u32,
 	gen: ArchGen,
 }
 

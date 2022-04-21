@@ -169,11 +169,7 @@ impl Obj {
 		}
 	}
 
-	pub fn add<T: ComponentValue>(&mut self, value: T) {
-		self.add_as(typed_key::<T>(), value, ());
-	}
-
-	pub fn add_as<T, A>(&mut self, owning_key: TypedKey<T>, value: T, alias_as: A)
+	pub fn add_as<T, A>(&mut self, value: T, owning_key: TypedKey<T>, alias_as: A)
 	where
 		T: ComponentValue,
 		A: AliasList<T>,
@@ -198,20 +194,32 @@ impl Obj {
 		}
 	}
 
+	pub fn add_in<T>(&mut self, value: T, owning_key: TypedKey<T>)
+	where
+		T: ComponentValue,
+	{
+		self.add_as(value, owning_key, ());
+	}
+
+	pub fn add<T: ComponentValue>(&mut self, value: T) {
+		self.add_in(value, typed_key::<T>());
+	}
+
 	pub fn add_alias<T, A>(&mut self, value: T, alias_as: A)
 	where
 		T: ComponentValue,
 		A: AliasList<T>,
 	{
-		self.add_as(typed_key(), value, alias_as);
+		self.add_as(value, typed_key(), alias_as);
 	}
 
 	pub fn add_rw<T: ComponentValue>(&mut self, value: T) {
 		self.add(ARefCell::new(value));
 	}
 
-	// TODO: Single-threaded accessor wrapper
 	// TODO: Integration with storages
+	// TODO: Dynamically computed components?
+	// TODO: Single-threaded `Obj`
 }
 
 unsafe impl ObjLike for Obj {
