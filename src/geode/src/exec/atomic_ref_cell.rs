@@ -1,4 +1,5 @@
 use crate::util::error::ResultExt;
+use crate::util::usually::UsuallySafeCell;
 use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::error::Error;
@@ -15,7 +16,7 @@ const TOO_MANY_REFS_ERROR: &str =
 /// scheduling primitive directly runs the risk of introducing dead locks for even simple scenarios.
 pub struct ARefCell<T: ?Sized> {
 	// Value
-	rc: AtomicIsize,
+	rc: UsuallySafeCell<AtomicIsize>,
 	value: UnsafeCell<T>,
 }
 
@@ -56,7 +57,7 @@ unsafe impl<T: ?Sized + Sync> Sync for ARefCell<T> {}
 impl<T> ARefCell<T> {
 	pub fn new(value: T) -> Self {
 		Self {
-			rc: AtomicIsize::new(0),
+			rc: UsuallySafeCell::new(AtomicIsize::new(0)),
 			value: UnsafeCell::new(value),
 		}
 	}
@@ -83,6 +84,28 @@ impl<T: ?Sized> ARefCell<T> {
 		LockState::from_state(self.rc.load(AtomicOrdering::Relaxed))
 	}
 
+	// === Immutable Borrow === //
+
+	pub unsafe fn try_borrow_unsynchronized(&self) -> Result<ARef<T>, LockError> {
+		let rc = self.rc.unchecked_get_mut().get_mut();
+
+		if *rc <= 0 {
+			*rc = rc.checked_sub(1).expect(TOO_MANY_REFS_ERROR);
+			Ok(ARef {
+				borrow: ABorrow(&self.rc),
+				value: &*self.value.get(),
+			})
+		} else {
+			Err(LockError {
+				state: LockState::from_state(*rc),
+			})
+		}
+	}
+
+	pub unsafe fn borrow_unsynchronized(&self) -> ARef<T> {
+		self.try_borrow_unsynchronized().unwrap_pretty()
+	}
+
 	pub fn try_borrow(&self) -> Result<ARef<T>, LockError> {
 		let result = self
 			.rc
@@ -107,6 +130,28 @@ impl<T: ?Sized> ARefCell<T> {
 
 	pub fn borrow(&self) -> ARef<T> {
 		self.try_borrow().unwrap_pretty()
+	}
+
+	// === Mutable Borrow === //
+
+	pub unsafe fn try_borrow_unsynchronized_mut(&self) -> Result<AMut<T>, LockError> {
+		let rc = self.rc.unchecked_get_mut().get_mut();
+
+		if *rc == 0 {
+			*rc = 1;
+			Ok(AMut {
+				borrow: ABorrow(&self.rc),
+				value: &mut *self.value.get(),
+			})
+		} else {
+			Err(LockError {
+				state: LockState::from_state(*rc),
+			})
+		}
+	}
+
+	pub unsafe fn borrow_unsynchronized_mut(&self) -> AMut<T> {
+		self.try_borrow_unsynchronized_mut().unwrap_pretty()
 	}
 
 	pub fn try_borrow_mut(&self) -> Result<AMut<T>, LockError> {

@@ -12,7 +12,9 @@ pub mod prelude {
 	pub use crate::{
 		ecs::{ArchStorage, Entity, MapStorage, World},
 		exec::atomic_ref_cell::{AMut, ARef, ARefCell},
-		exec::obj::{dyn_key, event_trait, proxy_key, typed_key, Obj, ObjCx, ObjLike},
+		exec::obj::{
+			dyn_key, event_trait, proxy_key, typed_key, Obj, ObjCx, ObjLike, SendObj, StObj,
+		},
 	};
 }
 

@@ -7,6 +7,7 @@ use crate::util::type_id::FancyTypeId;
 use bumpalo::Bump;
 use derive_where::derive_where;
 use std::alloc::Layout;
+use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
@@ -15,13 +16,68 @@ use std::ptr::{NonNull, Pointee};
 use std::sync::atomic::AtomicU64;
 use thiserror::Error;
 
-// === Obj core === //
+// === Flavor definitions === //
 
-pub trait ComponentValue: Sized + 'static + Send + Sync {}
+pub trait ObjFlavor: Sized {
+	unsafe fn try_acquire_rw_ref<T: ?Sized>(rw: &ARefCell<T>) -> Result<ARef<T>, LockError>;
+	unsafe fn try_acquire_rw_mut<T: ?Sized>(rw: &ARefCell<T>) -> Result<AMut<T>, LockError>;
+}
 
-impl<T: 'static + Send + Sync> ComponentValue for T {}
+pub unsafe trait ObjFlavorSupports<T: ?Sized>: ObjFlavor {}
+
+pub struct SendSyncFlavor {
+	_private: (),
+}
+
+impl ObjFlavor for SendSyncFlavor {
+	unsafe fn try_acquire_rw_ref<T: ?Sized>(rw: &ARefCell<T>) -> Result<ARef<T>, LockError> {
+		rw.try_borrow()
+	}
+
+	unsafe fn try_acquire_rw_mut<T: ?Sized>(rw: &ARefCell<T>) -> Result<AMut<T>, LockError> {
+		rw.try_borrow_mut()
+	}
+}
+
+unsafe impl<T: ?Sized + Send + Sync> ObjFlavorSupports<T> for SendSyncFlavor {}
+
+pub struct SendFlavor {
+	_private: PhantomData<UnsafeCell<()>>,
+}
+
+impl ObjFlavor for SendFlavor {
+	unsafe fn try_acquire_rw_ref<T: ?Sized>(rw: &ARefCell<T>) -> Result<ARef<T>, LockError> {
+		rw.try_borrow_unsynchronized()
+	}
+
+	unsafe fn try_acquire_rw_mut<T: ?Sized>(rw: &ARefCell<T>) -> Result<AMut<T>, LockError> {
+		rw.try_borrow_unsynchronized_mut()
+	}
+}
+
+unsafe impl<T: ?Sized + Send> ObjFlavorSupports<T> for SendFlavor {}
+
+pub struct SingleThreadedFlavor {
+	_private: PhantomData<*const ()>,
+}
+
+impl ObjFlavor for SingleThreadedFlavor {
+	unsafe fn try_acquire_rw_ref<T: ?Sized>(rw: &ARefCell<T>) -> Result<ARef<T>, LockError> {
+		rw.try_borrow_unsynchronized()
+	}
+
+	unsafe fn try_acquire_rw_mut<T: ?Sized>(rw: &ARefCell<T>) -> Result<AMut<T>, LockError> {
+		rw.try_borrow_unsynchronized_mut()
+	}
+}
+
+unsafe impl<T: ?Sized> ObjFlavorSupports<T> for SingleThreadedFlavor {}
+
+// === ObjLike trait === //
 
 pub unsafe trait ObjLike {
+	type Flavor: ObjFlavor;
+
 	// === Basic getters === //
 
 	fn try_get_raw<T: ?Sized + 'static>(
@@ -58,13 +114,14 @@ pub unsafe trait ObjLike {
 		&self,
 		key: TypedKey<ARefCell<T>>,
 	) -> Result<ARef<T>, BorrowError> {
-		Ok(self
-			.try_get_as(key)?
-			.try_borrow()
-			.map_err(|error| ComponentLockError {
-				key: key.raw(),
-				error,
-			})?)
+		Ok(
+			unsafe { Self::Flavor::try_acquire_rw_ref(self.try_get_as(key)?) }.map_err(
+				|error| ComponentLockError {
+					key: key.raw(),
+					error,
+				},
+			)?,
+		)
 	}
 
 	fn borrow_as<T: ?Sized + 'static>(&self, key: TypedKey<ARefCell<T>>) -> ARef<T> {
@@ -75,13 +132,14 @@ pub unsafe trait ObjLike {
 		&self,
 		key: TypedKey<ARefCell<T>>,
 	) -> Result<AMut<T>, BorrowError> {
-		Ok(self
-			.try_get_as(key)?
-			.try_borrow_mut()
-			.map_err(|error| ComponentLockError {
-				key: key.raw(),
-				error,
-			})?)
+		Ok(
+			unsafe { Self::Flavor::try_acquire_rw_mut(self.try_get_as(key)?) }.map_err(
+				|error| ComponentLockError {
+					key: key.raw(),
+					error,
+				},
+			)?,
+		)
 	}
 
 	fn borrow_mut_as<T: ?Sized + 'static>(&self, key: TypedKey<ARefCell<T>>) -> AMut<T> {
@@ -131,19 +189,21 @@ pub unsafe trait ObjLike {
 	}
 }
 
-#[derive(Debug, Default)]
-pub struct Obj {
+// === Obj definition === //
+
+pub type StObj = Obj<SingleThreadedFlavor>;
+pub type SendObj = Obj<SendFlavor>;
+
+#[derive_where(Debug, Default)]
+pub struct Obj<F: ObjFlavor = SendSyncFlavor> {
+	flavor: PhantomData<F>,
 	comps: HashMap<RawTypedKey, ObjEntry>,
 	bump: Bump,
 	#[cfg(debug_assertions)]
 	debug_label: Option<String>,
 }
 
-// `Obj` is `Send` and `Sync` because all components inserted into it must also be `Send` and `Sync`.
-unsafe impl Send for Obj {}
-unsafe impl Sync for Obj {}
-
-impl Obj {
+impl<F: ObjFlavor> Obj<F> {
 	pub fn new() -> Self {
 		Default::default()
 	}
@@ -151,6 +211,7 @@ impl Obj {
 	#[allow(unused_variables)] // For "name" in release builds.
 	pub fn labeled<D: Display>(name: D) -> Self {
 		Self {
+			flavor: PhantomData,
 			comps: Default::default(),
 			bump: Default::default(),
 			#[cfg(debug_assertions)]
@@ -171,7 +232,7 @@ impl Obj {
 
 	pub fn add_as<T, A>(&mut self, value: T, owning_key: TypedKey<T>, alias_as: A)
 	where
-		T: ComponentValue,
+		F: ObjFlavorSupports<T>,
 		A: AliasList<T>,
 	{
 		// Ensure that we haven't already registered this key.
@@ -196,33 +257,40 @@ impl Obj {
 
 	pub fn add_in<T>(&mut self, value: T, owning_key: TypedKey<T>)
 	where
-		T: ComponentValue,
+		F: ObjFlavorSupports<T>,
 	{
 		self.add_as(value, owning_key, ());
 	}
 
-	pub fn add<T: ComponentValue>(&mut self, value: T) {
+	pub fn add<T: 'static>(&mut self, value: T)
+	where
+		F: ObjFlavorSupports<T>,
+	{
 		self.add_in(value, typed_key::<T>());
 	}
 
-	pub fn add_alias<T, A>(&mut self, value: T, alias_as: A)
+	pub fn add_alias<T: 'static, A>(&mut self, value: T, alias_as: A)
 	where
-		T: ComponentValue,
+		F: ObjFlavorSupports<T>,
 		A: AliasList<T>,
 	{
 		self.add_as(value, typed_key(), alias_as);
 	}
 
-	pub fn add_rw<T: ComponentValue>(&mut self, value: T) {
+	pub fn add_rw<T: 'static>(&mut self, value: T)
+	where
+		F: ObjFlavorSupports<ARefCell<T>>,
+	{
 		self.add(ARefCell::new(value));
 	}
 
 	// TODO: Integration with storages
 	// TODO: Dynamically computed components?
-	// TODO: Single-threaded `Obj`
 }
 
-unsafe impl ObjLike for Obj {
+unsafe impl<F: ObjFlavor> ObjLike for Obj<F> {
+	type Flavor = F;
+
 	fn try_get_raw<T: ?Sized + 'static>(
 		&self,
 		key: TypedKey<T>,
@@ -236,7 +304,7 @@ unsafe impl ObjLike for Obj {
 	}
 }
 
-impl Drop for Obj {
+impl<F: ObjFlavor> Drop for Obj<F> {
 	fn drop(&mut self) {
 		for comp in self.comps.values_mut() {
 			unsafe {
@@ -253,6 +321,19 @@ struct ObjEntry {
 	#[cfg(debug_assertions)]
 	comp_name: &'static str,
 }
+
+impl Debug for ObjEntry {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let mut builder = f.debug_tuple("ObjEntry");
+		#[cfg(debug_assertions)]
+		builder.field(&self.comp_name);
+		builder.finish()
+	}
+}
+
+// Unsound methods exposing the contents of the `ObjEntry` are all `unsafe`.
+unsafe impl Send for ObjEntry {}
+unsafe impl Sync for ObjEntry {}
 
 impl ObjEntry {
 	pub fn new_common<T: ?Sized>(
@@ -327,28 +408,19 @@ impl ObjEntry {
 	}
 }
 
-impl Debug for ObjEntry {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		let mut builder = f.debug_tuple("ObjEntry");
-		#[cfg(debug_assertions)]
-		builder.field(&self.comp_name);
-		builder.finish()
-	}
-}
-
 // === ObjCx === //
 
-pub struct ObjCx<'borrow, 'obj> {
-	backing: ObjCxBacking<'borrow, 'obj>,
+pub struct ObjCx<'borrow, 'obj, F: ObjFlavor = SendSyncFlavor> {
+	backing: ObjCxBacking<'borrow, 'obj, F>,
 	length: usize,
 }
 
-enum ObjCxBacking<'borrow, 'obj> {
-	Root(Vec<&'obj Obj>),
-	Child(&'borrow mut Vec<&'obj Obj>),
+enum ObjCxBacking<'borrow, 'obj, F: ObjFlavor> {
+	Root(Vec<&'obj Obj<F>>),
+	Child(&'borrow mut Vec<&'obj Obj<F>>),
 }
 
-impl<'borrow, 'obj> Debug for ObjCx<'borrow, 'obj> {
+impl<'borrow, 'obj, F: ObjFlavor> Debug for ObjCx<'borrow, 'obj, F> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("ObjCx")
 			.field("children", &self.path())
@@ -356,26 +428,26 @@ impl<'borrow, 'obj> Debug for ObjCx<'borrow, 'obj> {
 	}
 }
 
-impl<'obj> ObjCx<'_, 'obj> {
-	pub fn root(root: &'obj Obj) -> Self {
+impl<'obj, F: ObjFlavor> ObjCx<'_, 'obj, F> {
+	pub fn root(root: &'obj Obj<F>) -> Self {
 		Self {
 			backing: ObjCxBacking::Root(vec![root]),
 			length: 1,
 		}
 	}
 
-	fn backing_ref(&self) -> &Vec<&'obj Obj> {
+	fn backing_ref(&self) -> &Vec<&'obj Obj<F>> {
 		match &self.backing {
 			ObjCxBacking::Root(root) => root,
 			ObjCxBacking::Child(root) => *root,
 		}
 	}
 
-	pub fn path(&self) -> &[&'obj Obj] {
+	pub fn path(&self) -> &[&'obj Obj<F>] {
 		&self.backing_ref()[0..self.length]
 	}
 
-	pub fn ancestors(&self, include_self: bool) -> impl Iterator<Item = &'obj Obj> + '_ {
+	pub fn ancestors(&self, include_self: bool) -> impl Iterator<Item = &'obj Obj<F>> + '_ {
 		let path = self.path();
 		let path = if include_self {
 			path
@@ -386,11 +458,11 @@ impl<'obj> ObjCx<'_, 'obj> {
 		path.iter().copied().rev()
 	}
 
-	pub fn me(&self) -> &'obj Obj {
+	pub fn me(&self) -> &'obj Obj<F> {
 		self.path().last().unwrap()
 	}
 
-	pub fn add<'borrow>(&'borrow mut self, child: &'obj Obj) -> ObjCx<'borrow, 'obj> {
+	pub fn with<'borrow>(&'borrow mut self, child: &'obj Obj<F>) -> ObjCx<'borrow, 'obj, F> {
 		let root = match &mut self.backing {
 			ObjCxBacking::Root(root) => root,
 			ObjCxBacking::Child(root) => *root,
@@ -405,7 +477,7 @@ impl<'obj> ObjCx<'_, 'obj> {
 		}
 	}
 
-	pub fn clone(&self) -> ObjCx<'static, 'obj> {
+	pub fn clone(&self) -> ObjCx<'static, 'obj, F> {
 		ObjCx {
 			backing: ObjCxBacking::Root(self.backing_ref().clone()),
 			length: self.length,
@@ -413,7 +485,9 @@ impl<'obj> ObjCx<'_, 'obj> {
 	}
 }
 
-unsafe impl ObjLike for ObjCx<'_, '_> {
+unsafe impl<F: ObjFlavor> ObjLike for ObjCx<'_, '_, F> {
+	type Flavor = F;
+
 	fn try_get_raw<T: ?Sized + 'static>(
 		&self,
 		key: TypedKey<T>,
@@ -579,7 +653,7 @@ pub macro proxy_key($(
 // === Alias lists === //
 
 pub unsafe trait AliasList<T: Sized> {
-	unsafe fn push_aliases(self, map: &mut Obj, ptr: NonNull<T>);
+	unsafe fn push_aliases<F: ObjFlavor>(self, map: &mut Obj<F>, ptr: NonNull<T>);
 }
 
 unsafe impl<T, U> AliasList<T> for TypedKey<U>
@@ -587,7 +661,7 @@ where
 	T: Sized + Unsize<U>,
 	U: ?Sized + 'static,
 {
-	unsafe fn push_aliases(self, map: &mut Obj, ptr: NonNull<T>) {
+	unsafe fn push_aliases<F: ObjFlavor>(self, map: &mut Obj<F>, ptr: NonNull<T>) {
 		// Unsize the value and convert it back into a pointer
 		let ptr = (ptr.as_ref() as &U) as *const U as *mut U;
 		let ptr = NonNull::new_unchecked(ptr);
@@ -604,7 +678,7 @@ where
 macro tup_impl_alias_list($($name:ident: $field:tt),*) {
 	unsafe impl<_Src: Sized $(,$name: AliasList<_Src>)*> AliasList<_Src> for ($($name,)*) {
 		#[allow(unused_variables)]
-		unsafe fn push_aliases(self, obj: &mut Obj, ptr: NonNull<_Src>) {
+		unsafe fn push_aliases<F: ObjFlavor>(self, obj: &mut Obj<F>, ptr: NonNull<_Src>) {
 			$( self.$field.push_aliases(obj, ptr); )*
 		}
 	}

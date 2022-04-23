@@ -1,4 +1,6 @@
 use geode::prelude::*;
+use std::cell::Cell;
+use std::rc::Rc;
 
 fn main() {
 	let root = make_engine_root();
@@ -8,6 +10,10 @@ fn main() {
 
 	root.borrow_mut::<MyService>().count();
 	root.borrow_mut::<MyService>().count();
+
+	let mut st_example = StObj::new();
+	st_example.add_rw(Cell::new(4u32));
+	assert_eq!(*st_example.borrow_mut::<Cell<u32>>().get_mut(), 4);
 }
 
 fn make_engine_root() -> Obj {
