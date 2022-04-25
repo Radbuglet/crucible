@@ -1,6 +1,5 @@
 use geode::prelude::*;
 use std::cell::Cell;
-use std::rc::Rc;
 
 fn main() {
 	let root = make_engine_root();

@@ -1,4 +1,4 @@
-use crate::util::number::{hibitset_length, is_valid_hibitset_index};
+use crate::util::bitset::{hibitset_length, is_valid_hibitset_index};
 use hibitset::{BitSet, BitSetLike};
 use std::fmt::{Debug, Formatter};
 use std::iter::repeat_with;
