@@ -212,7 +212,7 @@ mod tests {
 	use super::*;
 
 	fn init_seed() {
-		let seed = 1000;
+		let seed = fastrand::u64(..);
 		fastrand::seed(seed);
 		println!("Set seed to {seed}.");
 	}

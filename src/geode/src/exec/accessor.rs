@@ -1,8 +1,10 @@
 use crate::util::error::ResultExt;
+use derive_where::derive_where;
 use std::borrow::Borrow;
 use std::error::Error;
 use std::hash::Hash;
 use std::marker::PhantomData;
+use std::ops::Deref;
 use thiserror::Error;
 
 // === Core accessor traits === //
@@ -28,110 +30,173 @@ trusted_eq_for_prim!(
 	String,
 );
 
-// Accessor constructors
-pub trait AsAccessorRef<'a> {
-	type Key: TrustedEq;
-	type Error: Error;
-	type Ref;
-	type AccessorRef: Accessor<'a, Key = Self::Key, Error = Self::Error, Ref = Self::Ref>;
+// Bounded
+pub unsafe trait Bounded<'r> {}
 
-	fn accessor_ref(&'a self) -> Untainted<Self::AccessorRef>;
+unsafe impl<'a: 'r, 'r, T: ?Sized> Bounded<'r> for &'a T {}
+unsafe impl<'a: 'r, 'r, T: ?Sized> Bounded<'r> for &'a mut T {}
 
-	fn try_get<Q: Borrow<Self::Key>>(&'a self, key: Q) -> Result<Self::Ref, Self::Error> {
-		unsafe { self.accessor_ref().unwrap().try_get_unchecked(key) }
-	}
+// Untainted
+pub trait MutabilityMarker {}
 
-	fn get<Q: Borrow<Self::Key>>(&'a self, key: Q) -> Self::Ref {
-		self.try_get(key).unwrap_pretty()
-	}
+pub struct Ref {
+	_private: (),
 }
 
-pub trait AsAccessorMut<'a>: AsAccessorRef<'a> {
-	type Mut;
-	type AccessorMut: AccessorMut<
-		'a,
-		Key = Self::Key,
-		Error = Self::Error,
-		Ref = Self::Ref,
-		Mut = Self::Mut,
-	>;
+impl MutabilityMarker for Ref {}
 
-	fn accessor_mut(&'a mut self) -> Untainted<Self::AccessorMut>;
-
-	fn try_get_mut<Q: Borrow<Self::Key>>(&'a mut self, key: Q) -> Result<Self::Mut, Self::Error> {
-		unsafe { self.accessor_mut().unwrap().try_get_unchecked_mut(key) }
-	}
-
-	fn get_mut<Q: Borrow<Self::Key>>(&'a mut self, key: Q) -> Self::Mut {
-		self.try_get_mut(key).unwrap_pretty()
-	}
-
-	fn try_get_pair_mut<Q: Borrow<Self::Key>, P: Borrow<Self::Key>>(
-		&'a mut self,
-		key_a: Q,
-		key_b: P,
-	) -> Result<(Self::Mut, Self::Mut), Self::Error> {
-		let (key_a, key_b) = (key_a.borrow(), key_b.borrow());
-		if key_a == key_b {
-			panic!("Keys cannot alias.");
-		}
-
-		let accessor = self.accessor_mut().unwrap();
-		unsafe {
-			Ok((
-				accessor.try_get_unchecked_mut(key_a)?,
-				accessor.try_get_unchecked_mut(key_b)?,
-			))
-		}
-	}
-
-	fn get_pair_mut<Q: Borrow<Self::Key>, P: Borrow<Self::Key>>(
-		&'a mut self,
-		key_a: Q,
-		key_b: P,
-	) -> (Self::Mut, Self::Mut) {
-		self.try_get_pair_mut(key_a, key_b).unwrap_pretty()
-	}
+pub struct Mut {
+	_private: (),
 }
 
-pub struct Untainted<T>(T);
+impl MutabilityMarker for Mut {}
 
-impl<T> Untainted<T> {
+pub type UntaintedRef<T> = Untainted<T, Ref>;
+
+pub type UntaintedMut<T> = Untainted<T, Mut>;
+
+/// An opaque wrapper that asserts that a given [Accessor] is untainted. This means that, immediately
+/// upon [`.unwrap`](unwrap)'ing the wrapper, one can assume that every value in the `Accessor` is
+/// borrowable by the exposed [AccessorRef::try_get_unchecked] and [AccessorRef::try_get_unchecked_mut]
+/// (if `M = Mut`) methods.
+pub struct Untainted<T: Accessor, M: MutabilityMarker> {
+	_ty: PhantomData<fn(M) -> M>,
+	value: T,
+}
+
+impl<T: Accessor, M: MutabilityMarker> Untainted<T, M> {
+	/// Wraps an [Accessor] to mark it as "untainted."
+	///
+	/// ## Safety
+	///
+	/// See structure item's documentation on the definition of "untainted."
 	pub unsafe fn new(value: T) -> Self {
-		Self(value)
+		Self {
+			_ty: PhantomData,
+			value,
+		}
 	}
 
+	/// Unwraps an [Accessor] and asserts the invariants provided by the structure's item
+	/// documentation.
 	pub fn unwrap(self) -> T {
-		self.0
+		self.value
+	}
+
+	pub fn as_ref(&self) -> UntaintedRef<&T> {
+		unsafe {
+			// Safety:
+			// We can already assume that the value we contain is immutably untainted by the invariant
+			// of the structure. We know that this method doesn't mess up this invariant because
+			// references are limited to the lifetime of `&T` and, while we return `UntaintedRef<&T>`
+			// instances, we prevent `.unwrap()` and `.as_mut()` calls.
+			UntaintedRef::new(&self.value)
+		}
+	}
+
+	/// Unwraps an [Accessor] and asserts the **immutable** invariants provided by the structure's item
+	/// documentation. This is equivalent to `.as_ref().unwrap()`
+	pub fn unwrap_ref(&self) -> &T {
+		self.as_ref().unwrap()
 	}
 }
 
-// Accessors
-pub trait Accessor<'a> {
+impl<T: Accessor> UntaintedMut<T> {
+	pub fn as_mut(&mut self) -> UntaintedMut<&T> {
+		unsafe {
+			// Safety:
+			// We can already assume that the value we contain is mutably untainted by the invariants
+			// of the structure. We know that this method doesn't mess up this invariant because
+			// the references are limited to the lifetime of `&T` and, while we return `UntaintedMut<&T>`
+			// instances, we prevent `.unwrap()` and `.as_mut()` calls.
+			UntaintedMut::new(&self.value)
+		}
+	}
+
+	/// Unwraps an [Accessor] and asserts the invariants provided by the structure's item documentation.
+	/// This is equivalent to `.as_mut().unwrap()`
+	pub fn unwrap_mut(&mut self) -> &T {
+		self.as_mut().unwrap()
+	}
+}
+
+impl<T: Accessor, M: MutabilityMarker> ToAccessor for Untainted<T, M> {
+	type Accessor = T;
+	type Marker = M;
+
+	fn to_accessor(self) -> Untainted<Self::Accessor, Self::Marker> {
+		self
+	}
+}
+
+// Accessor
+pub trait ToAccessor {
+	type Accessor: Accessor;
+	type Marker: MutabilityMarker;
+
+	fn to_accessor(self) -> Untainted<Self::Accessor, Self::Marker>;
+}
+
+pub trait Accessor: Clone {
 	type Key: TrustedEq;
 	type Error: Error;
-	type Ref: 'a;
+}
 
-	unsafe fn try_get_unchecked<Q: Borrow<Self::Key>>(
-		&self,
-		key: Q,
-	) -> Result<Self::Ref, Self::Error>;
+pub trait AccessorRef<'r>: 'r + Accessor {
+	type Ref: Bounded<'r> + Clone;
 
-	unsafe fn get_unchecked<Q: Borrow<Self::Key>>(&self, key: Q) -> Self::Ref {
+	unsafe fn try_get_unchecked<Q>(&'r self, key: Q) -> Result<Self::Ref, Self::Error>
+	where
+		Q: Borrow<Self::Key>;
+
+	unsafe fn get_unchecked<Q: Borrow<Self::Key>>(&'r self, key: Q) -> Self::Ref {
 		self.try_get_unchecked(key).unwrap_pretty()
 	}
 }
 
-pub trait AccessorMut<'a>: Accessor<'a> {
-	type Mut: 'a;
+pub trait AccessorMut<'r>: AccessorRef<'r> {
+	type Mut: Bounded<'r>;
 
-	unsafe fn try_get_unchecked_mut<Q: Borrow<Self::Key>>(
-		&self,
-		key: Q,
-	) -> Result<Self::Mut, Self::Error>;
+	unsafe fn try_get_unchecked_mut<Q>(&'r self, key: Q) -> Result<Self::Mut, Self::Error>
+	where
+		Q: Borrow<Self::Key>;
 
-	unsafe fn get_unchecked_mut<Q: Borrow<Self::Key>>(&self, key: Q) -> Self::Mut {
+	unsafe fn get_unchecked_mut<Q: Borrow<Self::Key>>(&'r self, key: Q) -> Self::Mut {
+		// Safety: provided by caller
 		self.try_get_unchecked_mut(key).unwrap_pretty()
+	}
+}
+
+impl<T: Clone + Deref<Target = A>, A: Accessor> Accessor for T {
+	type Key = A::Key;
+	type Error = A::Error;
+}
+
+impl<'r, T: 'r + Clone + Deref<Target = A>, A: AccessorRef<'r>> AccessorRef<'r> for T {
+	type Ref = A::Ref;
+
+	unsafe fn try_get_unchecked<Q>(&'r self, key: Q) -> Result<Self::Ref, Self::Error>
+	where
+		Q: Borrow<Self::Key>,
+	{
+		// Safety is provided by caller.
+		// `Deref` is not allowed to run unchecked borrows in the meantime since
+		// it lacks the proper guarantees to do so.
+		(&**self).try_get_unchecked(key)
+	}
+}
+
+impl<'r, T: 'r + Clone + Deref<Target = A>, A: AccessorMut<'r>> AccessorMut<'r> for T {
+	type Mut = A::Mut;
+
+	unsafe fn try_get_unchecked_mut<Q>(&'r self, key: Q) -> Result<Self::Mut, Self::Error>
+	where
+		Q: Borrow<Self::Key>,
+	{
+		// Safety is provided by caller.
+		// `Deref` is not allowed to run unchecked borrows in the meantime since
+		// it lacks the proper guarantees to do so.
+		(&**self).try_get_unchecked_mut(key)
 	}
 }
 
@@ -145,51 +210,77 @@ pub struct SliceIndexError {
 	length: usize,
 }
 
-// &'a [T] accessor
-impl<'a, T: 'a> Accessor<'a> for &'a [T] {
+#[derive(Debug)]
+#[derive_where(Copy, Clone)]
+pub struct SliceAccessorRef<'a, T>(&'a [T]);
+
+impl<'a, T> ToAccessor for &'a [T] {
+	type Accessor = SliceAccessorRef<'a, T>;
+	type Marker = Ref;
+
+	fn to_accessor(self) -> UntaintedRef<Self::Accessor> {
+		unsafe { UntaintedRef::new(SliceAccessorRef(self)) }
+	}
+}
+
+impl<'m, T: 'm> Accessor for SliceAccessorRef<'m, T> {
 	type Key = usize;
 	type Error = SliceIndexError;
-	type Ref = &'a T;
+}
 
-	unsafe fn try_get_unchecked<Q: Borrow<Self::Key>>(
-		&self,
-		key: Q,
-	) -> Result<Self::Ref, Self::Error> {
+// &'a [T] accessor
+impl<'r, 'm: 'r, T: 'm> AccessorRef<'r> for SliceAccessorRef<'m, T> {
+	type Ref = &'r T;
+
+	unsafe fn try_get_unchecked<Q>(&'r self, key: Q) -> Result<Self::Ref, Self::Error>
+	where
+		Q: Borrow<Self::Key>,
+	{
 		let index = *key.borrow();
-		self.get(index).ok_or(SliceIndexError {
+
+		self.0.get(index).ok_or(SliceIndexError {
 			index,
-			length: self.len(),
+			length: self.0.len(),
 		})
 	}
 }
 
 // &'a mut [T] accessor
+#[derive_where(Clone)]
 pub struct SliceAccessorMut<'a, T> {
 	_ty: PhantomData<&'a mut [T]>,
 	base: *mut T,
 	length: usize,
 }
 
-impl<'a, T> SliceAccessorMut<'a, T> {
-	pub fn new(slice: &'a mut [T]) -> Self {
-		let length = slice.len();
-		Self {
-			_ty: PhantomData,
-			base: slice.as_mut_ptr(),
-			length,
+impl<'a, T> ToAccessor for &'a mut [T] {
+	type Accessor = SliceAccessorMut<'a, T>;
+	type Marker = Mut;
+
+	fn to_accessor(self) -> UntaintedMut<Self::Accessor> {
+		let length = self.len();
+		unsafe {
+			Untainted::new(SliceAccessorMut {
+				_ty: PhantomData,
+				base: self.as_mut_ptr(),
+				length,
+			})
 		}
 	}
 }
 
-impl<'a, T: 'a> Accessor<'a> for SliceAccessorMut<'a, T> {
+impl<'m, T> Accessor for SliceAccessorMut<'m, T> {
 	type Key = usize;
 	type Error = SliceIndexError;
-	type Ref = &'a T;
+}
 
-	unsafe fn try_get_unchecked<Q: Borrow<Self::Key>>(
-		&self,
-		key: Q,
-	) -> Result<Self::Ref, Self::Error> {
+impl<'r, 'm: 'r, T: 'm> AccessorRef<'r> for SliceAccessorMut<'m, T> {
+	type Ref = &'r T;
+
+	unsafe fn try_get_unchecked<Q>(&self, key: Q) -> Result<Self::Ref, Self::Error>
+	where
+		Q: Borrow<Self::Key>,
+	{
 		let index = *key.borrow();
 		if index < self.length {
 			Ok(&*self.base.add(index))
@@ -202,13 +293,13 @@ impl<'a, T: 'a> Accessor<'a> for SliceAccessorMut<'a, T> {
 	}
 }
 
-impl<'a, T: 'a> AccessorMut<'a> for SliceAccessorMut<'a, T> {
-	type Mut = &'a mut T;
+impl<'r, 'm: 'r, T: 'm> AccessorMut<'r> for SliceAccessorMut<'m, T> {
+	type Mut = &'r mut T;
 
-	unsafe fn try_get_unchecked_mut<Q: Borrow<Self::Key>>(
-		&self,
-		key: Q,
-	) -> Result<Self::Mut, Self::Error> {
+	unsafe fn try_get_unchecked_mut<Q>(&self, key: Q) -> Result<Self::Mut, Self::Error>
+	where
+		Q: Borrow<Self::Key>,
+	{
 		let index = *key.borrow();
 		if index < self.length {
 			Ok(&mut *self.base.add(index))
@@ -221,24 +312,63 @@ impl<'a, T: 'a> AccessorMut<'a> for SliceAccessorMut<'a, T> {
 	}
 }
 
-// Constructors
-impl<'a, T: 'a> AsAccessorRef<'a> for [T] {
-	type Key = usize;
-	type Error = SliceIndexError;
-	type Ref = &'a T;
-	type AccessorRef = &'a [T];
+// === Extensions === //
 
-	fn accessor_ref(&'a self) -> Untainted<Self::AccessorRef> {
-		unsafe { Untainted::new(self) }
+impl<'r, A: AccessorRef<'r>, M: MutabilityMarker> Untainted<A, M> {
+	pub fn try_get<Q>(&'r self, key: Q) -> Result<A::Ref, A::Error>
+	where
+		Q: Borrow<A::Key>,
+	{
+		unsafe { self.unwrap_ref().try_get_unchecked(key) }
+	}
+
+	pub fn get<Q>(&'r self, key: Q) -> A::Ref
+	where
+		Q: Borrow<A::Key>,
+	{
+		self.try_get(key).unwrap_pretty()
 	}
 }
 
-impl<'a, T: 'a> AsAccessorMut<'a> for [T] {
-	type Mut = &'a mut T;
-	type AccessorMut = SliceAccessorMut<'a, T>;
+impl<'r, A: AccessorMut<'r>> UntaintedMut<A> {
+	pub fn try_get_mut<Q>(&'r mut self, key: Q) -> Result<A::Mut, A::Error>
+	where
+		Q: Borrow<A::Key>,
+	{
+		unsafe { self.unwrap_mut().try_get_unchecked_mut(key) }
+	}
 
-	fn accessor_mut(&'a mut self) -> Untainted<Self::AccessorMut> {
-		unsafe { Untainted::new(SliceAccessorMut::new(self)) }
+	pub fn get_mut<Q>(&'r mut self, key: Q) -> A::Mut
+	where
+		Q: Borrow<A::Key>,
+	{
+		self.try_get_mut(key).unwrap_pretty()
+	}
+
+	pub fn try_get_pair_mut<Q, P>(&'r mut self, a: Q, b: P) -> Result<(A::Mut, A::Mut), A::Error>
+	where
+		Q: Borrow<A::Key>,
+		P: Borrow<A::Key>,
+	{
+		let (a, b) = (a.borrow(), b.borrow());
+		let accessor = self.unwrap_mut();
+		if a == b {
+			panic!("Keys cannot alias!");
+		}
+		unsafe {
+			Ok((
+				accessor.try_get_unchecked_mut(a)?,
+				accessor.try_get_unchecked_mut(a)?,
+			))
+		}
+	}
+
+	pub fn get_pair_mut<Q, P>(&'r mut self, a: Q, b: P) -> (A::Mut, A::Mut)
+	where
+		Q: Borrow<A::Key>,
+		P: Borrow<A::Key>,
+	{
+		self.try_get_pair_mut(a, b).unwrap_pretty()
 	}
 }
 
@@ -251,7 +381,8 @@ mod tests {
 	#[test]
 	fn swaps() {
 		let mut target = vec![0, 1, 2];
-		let (a, b) = target.get_pair_mut(1, 2);
+		let mut target_proxy = target.as_mut_slice().to_accessor();
+		let (a, b) = target_proxy.get_pair_mut(1, 2);
 		std::mem::swap(a, b);
 		assert_eq!(target, &[0, 2, 1]);
 	}
