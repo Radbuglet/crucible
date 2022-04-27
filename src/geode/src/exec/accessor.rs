@@ -1,7 +1,7 @@
 use crate::util::error::ResultExt;
 use derive_where::derive_where;
-use std::borrow::Borrow;
 use std::error::Error;
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -137,19 +137,17 @@ pub trait ToAccessor {
 	fn to_accessor(self) -> Untainted<Self::Accessor, Self::Marker>;
 }
 
-pub trait Accessor: Clone {
-	type Key: TrustedEq;
+pub trait Accessor {
+	type Key: Debug + Copy + TrustedEq;
 	type Error: Error;
 }
 
 pub trait AccessorRef<'r>: 'r + Accessor {
 	type Ref: Bounded<'r> + Clone;
 
-	unsafe fn try_get_unchecked<Q>(&'r self, key: Q) -> Result<Self::Ref, Self::Error>
-	where
-		Q: Borrow<Self::Key>;
+	unsafe fn try_get_unchecked(&'r self, key: Self::Key) -> Result<Self::Ref, Self::Error>;
 
-	unsafe fn get_unchecked<Q: Borrow<Self::Key>>(&'r self, key: Q) -> Self::Ref {
+	unsafe fn get_unchecked(&'r self, key: Self::Key) -> Self::Ref {
 		self.try_get_unchecked(key).unwrap_pretty()
 	}
 }
@@ -157,28 +155,23 @@ pub trait AccessorRef<'r>: 'r + Accessor {
 pub trait AccessorMut<'r>: AccessorRef<'r> {
 	type Mut: Bounded<'r>;
 
-	unsafe fn try_get_unchecked_mut<Q>(&'r self, key: Q) -> Result<Self::Mut, Self::Error>
-	where
-		Q: Borrow<Self::Key>;
+	unsafe fn try_get_unchecked_mut(&'r self, key: Self::Key) -> Result<Self::Mut, Self::Error>;
 
-	unsafe fn get_unchecked_mut<Q: Borrow<Self::Key>>(&'r self, key: Q) -> Self::Mut {
+	unsafe fn get_unchecked_mut(&'r self, key: Self::Key) -> Self::Mut {
 		// Safety: provided by caller
 		self.try_get_unchecked_mut(key).unwrap_pretty()
 	}
 }
 
-impl<T: Clone + Deref<Target = A>, A: Accessor> Accessor for T {
+impl<T: Deref<Target = A>, A: Accessor> Accessor for T {
 	type Key = A::Key;
 	type Error = A::Error;
 }
 
-impl<'r, T: 'r + Clone + Deref<Target = A>, A: AccessorRef<'r>> AccessorRef<'r> for T {
+impl<'r, T: 'r + Deref<Target = A>, A: AccessorRef<'r>> AccessorRef<'r> for T {
 	type Ref = A::Ref;
 
-	unsafe fn try_get_unchecked<Q>(&'r self, key: Q) -> Result<Self::Ref, Self::Error>
-	where
-		Q: Borrow<Self::Key>,
-	{
+	unsafe fn try_get_unchecked(&'r self, key: Self::Key) -> Result<Self::Ref, Self::Error> {
 		// Safety is provided by caller.
 		// `Deref` is not allowed to run unchecked borrows in the meantime since
 		// it lacks the proper guarantees to do so.
@@ -189,10 +182,7 @@ impl<'r, T: 'r + Clone + Deref<Target = A>, A: AccessorRef<'r>> AccessorRef<'r> 
 impl<'r, T: 'r + Clone + Deref<Target = A>, A: AccessorMut<'r>> AccessorMut<'r> for T {
 	type Mut = A::Mut;
 
-	unsafe fn try_get_unchecked_mut<Q>(&'r self, key: Q) -> Result<Self::Mut, Self::Error>
-	where
-		Q: Borrow<Self::Key>,
-	{
+	unsafe fn try_get_unchecked_mut(&'r self, key: Self::Key) -> Result<Self::Mut, Self::Error> {
 		// Safety is provided by caller.
 		// `Deref` is not allowed to run unchecked borrows in the meantime since
 		// it lacks the proper guarantees to do so.
@@ -232,12 +222,7 @@ impl<'m, T: 'm> Accessor for SliceAccessorRef<'m, T> {
 impl<'r, 'm: 'r, T: 'm> AccessorRef<'r> for SliceAccessorRef<'m, T> {
 	type Ref = &'r T;
 
-	unsafe fn try_get_unchecked<Q>(&'r self, key: Q) -> Result<Self::Ref, Self::Error>
-	where
-		Q: Borrow<Self::Key>,
-	{
-		let index = *key.borrow();
-
+	unsafe fn try_get_unchecked(&'r self, index: Self::Key) -> Result<Self::Ref, Self::Error> {
 		self.0.get(index).ok_or(SliceIndexError {
 			index,
 			length: self.0.len(),
@@ -277,11 +262,7 @@ impl<'m, T> Accessor for SliceAccessorMut<'m, T> {
 impl<'r, 'm: 'r, T: 'm> AccessorRef<'r> for SliceAccessorMut<'m, T> {
 	type Ref = &'r T;
 
-	unsafe fn try_get_unchecked<Q>(&self, key: Q) -> Result<Self::Ref, Self::Error>
-	where
-		Q: Borrow<Self::Key>,
-	{
-		let index = *key.borrow();
+	unsafe fn try_get_unchecked(&self, index: Self::Key) -> Result<Self::Ref, Self::Error> {
 		if index < self.length {
 			Ok(&*self.base.add(index))
 		} else {
@@ -296,11 +277,7 @@ impl<'r, 'm: 'r, T: 'm> AccessorRef<'r> for SliceAccessorMut<'m, T> {
 impl<'r, 'm: 'r, T: 'm> AccessorMut<'r> for SliceAccessorMut<'m, T> {
 	type Mut = &'r mut T;
 
-	unsafe fn try_get_unchecked_mut<Q>(&self, key: Q) -> Result<Self::Mut, Self::Error>
-	where
-		Q: Borrow<Self::Key>,
-	{
-		let index = *key.borrow();
+	unsafe fn try_get_unchecked_mut(&self, index: Self::Key) -> Result<Self::Mut, Self::Error> {
 		if index < self.length {
 			Ok(&mut *self.base.add(index))
 		} else {
@@ -315,42 +292,29 @@ impl<'r, 'm: 'r, T: 'm> AccessorMut<'r> for SliceAccessorMut<'m, T> {
 // === Extensions === //
 
 impl<'r, A: AccessorRef<'r>, M: MutabilityMarker> Untainted<A, M> {
-	pub fn try_get<Q>(&'r self, key: Q) -> Result<A::Ref, A::Error>
-	where
-		Q: Borrow<A::Key>,
-	{
+	pub fn try_get(&'r self, key: A::Key) -> Result<A::Ref, A::Error> {
 		unsafe { self.unwrap_ref().try_get_unchecked(key) }
 	}
 
-	pub fn get<Q>(&'r self, key: Q) -> A::Ref
-	where
-		Q: Borrow<A::Key>,
-	{
+	pub fn get(&'r self, key: A::Key) -> A::Ref {
 		self.try_get(key).unwrap_pretty()
 	}
 }
 
 impl<'r, A: AccessorMut<'r>> UntaintedMut<A> {
-	pub fn try_get_mut<Q>(&'r mut self, key: Q) -> Result<A::Mut, A::Error>
-	where
-		Q: Borrow<A::Key>,
-	{
+	pub fn try_get_mut(&'r mut self, key: A::Key) -> Result<A::Mut, A::Error> {
 		unsafe { self.unwrap_mut().try_get_unchecked_mut(key) }
 	}
 
-	pub fn get_mut<Q>(&'r mut self, key: Q) -> A::Mut
-	where
-		Q: Borrow<A::Key>,
-	{
+	pub fn get_mut(&'r mut self, key: A::Key) -> A::Mut {
 		self.try_get_mut(key).unwrap_pretty()
 	}
 
-	pub fn try_get_pair_mut<Q, P>(&'r mut self, a: Q, b: P) -> Result<(A::Mut, A::Mut), A::Error>
-	where
-		Q: Borrow<A::Key>,
-		P: Borrow<A::Key>,
-	{
-		let (a, b) = (a.borrow(), b.borrow());
+	pub fn try_get_pair_mut(
+		&'r mut self,
+		a: A::Key,
+		b: A::Key,
+	) -> Result<(A::Mut, A::Mut), A::Error> {
 		let accessor = self.unwrap_mut();
 		if a == b {
 			panic!("Keys cannot alias!");
@@ -363,13 +327,64 @@ impl<'r, A: AccessorMut<'r>> UntaintedMut<A> {
 		}
 	}
 
-	pub fn get_pair_mut<Q, P>(&'r mut self, a: Q, b: P) -> (A::Mut, A::Mut)
-	where
-		Q: Borrow<A::Key>,
-		P: Borrow<A::Key>,
-	{
+	pub fn get_pair_mut(&'r mut self, a: A::Key, b: A::Key) -> (A::Mut, A::Mut) {
 		self.try_get_pair_mut(a, b).unwrap_pretty()
 	}
+
+	pub fn exclude_one(
+		&'r mut self,
+		excluded: A::Key,
+	) -> (A::Mut, UntaintedMut<ExcludeOne<&'r A>>) {
+		let accessor = self.unwrap_mut();
+
+		let main = unsafe { accessor.get_unchecked_mut(excluded) };
+		let rest = unsafe { UntaintedMut::new(ExcludeOne { accessor, excluded }) };
+		(main, rest)
+	}
+}
+
+pub struct ExcludeOne<A: Accessor> {
+	accessor: A,
+	excluded: A::Key,
+}
+
+impl<A: Accessor> Accessor for ExcludeOne<A> {
+	type Key = A::Key;
+	type Error = ExcludeOneError<A::Key, A::Error>;
+}
+
+impl<'r, A: AccessorRef<'r>> AccessorRef<'r> for ExcludeOne<A> {
+	type Ref = A::Ref;
+
+	unsafe fn try_get_unchecked(&'r self, key: Self::Key) -> Result<Self::Ref, Self::Error> {
+		if key == self.excluded {
+			return Err(ExcludeOneError::Hole(key));
+		}
+
+		// We use `Ok(...?)` syntax to automatically convert user errors to `ExcludeOneError`'s.
+		Ok(self.accessor.try_get_unchecked(key)?)
+	}
+}
+
+impl<'r, A: AccessorMut<'r>> AccessorMut<'r> for ExcludeOne<A> {
+	type Mut = A::Mut;
+
+	unsafe fn try_get_unchecked_mut(&'r self, key: Self::Key) -> Result<Self::Mut, Self::Error> {
+		if key == self.excluded {
+			return Err(ExcludeOneError::Hole(key));
+		}
+
+		// We use `Ok(...?)` syntax to automatically convert user errors to `ExcludeOneError`'s.
+		Ok(self.accessor.try_get_unchecked_mut(key)?)
+	}
+}
+
+#[derive(Debug, Copy, Clone, Error)]
+pub enum ExcludeOneError<K: Debug, E: Error> {
+	#[error("attempted to access excluded entry with key {0:?}")]
+	Hole(K),
+	#[error(transparent)]
+	Underlying(#[from] E),
 }
 
 // === Tests === //
@@ -377,13 +392,18 @@ impl<'r, A: AccessorMut<'r>> UntaintedMut<A> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use std::mem::swap;
 
 	#[test]
 	fn swaps() {
 		let mut target = vec![0, 1, 2];
 		let mut target_proxy = target.as_mut_slice().to_accessor();
-		let (a, b) = target_proxy.get_pair_mut(1, 2);
-		std::mem::swap(a, b);
-		assert_eq!(target, &[0, 2, 1]);
+		let (main, mut rest) = target_proxy.exclude_one(0);
+		let (a, b) = rest.get_pair_mut(1, 2);
+		swap(a, b);
+		*main = 5;
+		swap(a, b);
+		swap(a, b);
+		assert_eq!(target, &[5, 2, 1]);
 	}
 }
