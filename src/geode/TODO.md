@@ -4,9 +4,8 @@
   - [ ] Integrate with `Storages`.
   - [ ] Allow single-threaded `RefCell` tracking via `&mut`.
   - [ ] Bring back the `Provider`.
-  - [ ] Implement non-sync value wrapper available on all targets.
   - [ ] Allow `Obj` to be extended with `&self` (this doesn't impact fetch lifetimes).
-  - [x] Write a single-threaded `Obj` variant.
+  - [ ] Implement mixed `ObjCx` flavors.
 - [ ] ECS:
   - [ ] Fix up `World` spawning semantics (`spawn_now` interferes with `spawn_deferred`).
   - [ ] Fix up `MapStorage` API (there's too many things going on here).
