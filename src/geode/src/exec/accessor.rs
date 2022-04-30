@@ -12,23 +12,16 @@ use thiserror::Error;
 
 pub unsafe trait TrustedEq: Eq {}
 
-macro trusted_eq_for_prim($($ty:ty),*$(,)?) {
-	$(unsafe impl TrustedEq for $ty {})*
-}
-
-#[rustfmt::skip]
-trusted_eq_for_prim!(
-	// Numeric primitives
-	u8,    i8,
-	u16,   i16,
-	u32,   i32,
-	u64,   i64,
-	usize, isize,
-
-	// Simple containers
-	&'_ str,
-	String,
-);
+unsafe impl TrustedEq for u8 {}
+unsafe impl TrustedEq for i8 {}
+unsafe impl TrustedEq for u16 {}
+unsafe impl TrustedEq for i16 {}
+unsafe impl TrustedEq for u32 {}
+unsafe impl TrustedEq for i32 {}
+unsafe impl TrustedEq for u64 {}
+unsafe impl TrustedEq for i64 {}
+unsafe impl TrustedEq for usize {}
+unsafe impl TrustedEq for isize {}
 
 // === ToAccessor === //
 
@@ -125,7 +118,10 @@ impl<'r, A: AccessorBase> AccessorBase for AccessorRefProxy<'r, A> {
 	type Error = A::Error;
 }
 
-impl<'r, A: Accessor<'r>> Accessor<'r> for AccessorRefProxy<'r, A> {
+impl<'i: 'r, 'r, A: Accessor<'i>> Accessor<'r> for AccessorRefProxy<'r, A>
+where
+	A::Value: 'i,
+{
 	unsafe fn try_get_unchecked<Q>(&self, key: Q) -> Result<&'r Self::Value, Self::Error>
 	where
 		Q: Borrow<Self::Key>,
@@ -149,7 +145,10 @@ impl<'r, A: AccessorBase> AccessorBase for AccessorMutProxy<'r, A> {
 	type Error = A::Error;
 }
 
-impl<'r, A: Accessor<'r>> Accessor<'r> for AccessorMutProxy<'r, A> {
+impl<'i: 'r, 'r, A: Accessor<'i>> Accessor<'r> for AccessorMutProxy<'r, A>
+where
+	A::Value: 'i,
+{
 	unsafe fn try_get_unchecked<Q>(&self, key: Q) -> Result<&'r Self::Value, Self::Error>
 	where
 		Q: Borrow<Self::Key>,
@@ -158,7 +157,10 @@ impl<'r, A: Accessor<'r>> Accessor<'r> for AccessorMutProxy<'r, A> {
 	}
 }
 
-impl<'r, A: AccessorMut<'r>> AccessorMut<'r> for AccessorMutProxy<'r, A> {
+impl<'i: 'r, 'r, A: AccessorMut<'i>> AccessorMut<'r> for AccessorMutProxy<'r, A>
+where
+	A::Value: 'i,
+{
 	unsafe fn try_get_unchecked_mut<Q>(&self, key: Q) -> Result<&'r mut Self::Value, Self::Error>
 	where
 		Q: Borrow<Self::Key>,
@@ -414,7 +416,10 @@ impl<A: AccessorBase> AccessorBase for ExcludeOne<A> {
 	type Error = ExcludeOneError<A::Key, A::Error>;
 }
 
-impl<'r, A: Accessor<'r>> Accessor<'r> for ExcludeOne<A> {
+impl<'i: 'r, 'r, A: Accessor<'i>> Accessor<'r> for ExcludeOne<A>
+where
+	A::Value: 'i,
+{
 	unsafe fn try_get_unchecked<Q>(&self, key: Q) -> Result<&'r Self::Value, Self::Error>
 	where
 		Q: Borrow<Self::Key>,
@@ -429,7 +434,10 @@ impl<'r, A: Accessor<'r>> Accessor<'r> for ExcludeOne<A> {
 	}
 }
 
-impl<'r, A: AccessorMut<'r>> AccessorMut<'r> for ExcludeOne<A> {
+impl<'i: 'r, 'r, A: AccessorMut<'i>> AccessorMut<'r> for ExcludeOne<A>
+where
+	A::Value: 'i,
+{
 	unsafe fn try_get_unchecked_mut<Q>(&self, key: Q) -> Result<&'r mut Self::Value, Self::Error>
 	where
 		Q: Borrow<Self::Key>,
@@ -452,8 +460,7 @@ mod tests {
 	fn get_first_three(slice: &mut [i32]) -> (&mut i32, &mut i32, &i32) {
 		let (a, right) = exclude_mut(slice, 0);
 		let (b, right) = exclude_mut(right, 1);
-		// FIXME
-		// println!("Peeking ahead a bit... {}", get(&right, 3));
+		println!("Peeking ahead a bit... {}", get(&right, 3));
 		let c = get(right, 2);
 		(a, b, c)
 	}
