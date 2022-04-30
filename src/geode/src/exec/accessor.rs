@@ -41,6 +41,18 @@ impl<T: AccessorBase> Untainted<T> {
 	pub fn unwrap(self) -> T {
 		self.0
 	}
+
+	pub fn borrow_ref_container(&self) -> Untainted<AccessorRefProxy<'_, T>> {
+		self.to_accessor()
+	}
+
+	pub fn borrow_mut_container(&mut self) -> Untainted<AccessorMutProxy<'_, T>> {
+		self.to_accessor()
+	}
+
+	pub fn to_refs(self) -> AccessorRefWrapper<T> {
+		AccessorRefWrapper::new(self)
+	}
 }
 
 impl<T: AccessorBase> ToAccessor for Untainted<T> {
@@ -169,11 +181,36 @@ where
 	}
 }
 
+#[derive(Clone)]
+pub struct AccessorRefWrapper<A>(A);
+
+impl<A: AccessorBase> AccessorRefWrapper<A> {
+	pub fn new(accessor: Untainted<A>) -> Self {
+		Self(accessor.unwrap())
+	}
+}
+
+impl<'r, A: Accessor<'r>> AccessorRefWrapper<A> {
+	pub fn try_get<Q>(&self, key: Q) -> Result<&'r A::Value, A::Error>
+	where
+		Q: Borrow<A::Key>,
+	{
+		unsafe { self.0.try_get_unchecked(key) }
+	}
+
+	pub fn get<Q>(&self, key: Q) -> &'r A::Value
+	where
+		Q: Borrow<A::Key>,
+	{
+		self.try_get(key).unwrap_pretty()
+	}
+}
+
 // === Standard accessors === //
 
 // Error types
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Error)]
-#[error("index {index} out of the slice bounds (length {length})")]
+#[error("index {index} out of slice bounds (length {length})")]
 pub struct SliceIndexError {
 	index: usize,
 	length: usize,
@@ -272,127 +309,169 @@ impl<'r, T> AccessorMut<'r> for SliceAccessorMut<'r, T> {
 
 // === Extension methods === //
 
-// TODO: Turn these into actual methods... somehow.
+// TODO: Implement `BorrowedAccessorExt` methods.
 
-pub fn try_get<'r, C, A, Q>(container: C, key: Q) -> Result<&'r A::Value, A::Error>
-where
-	C: ToAccessor<Accessor = A>,
-	A: Accessor<'r>,
-	Q: Borrow<A::Key>,
-{
-	unsafe { container.to_accessor().unwrap().try_get_unchecked(key) }
+pub trait OwnedAccessorRefExt<'r> {
+	type Key;
+	type Value: ?Sized;
+	type Error;
+	type Accessor: AccessorBase;
+
+	fn try_take<Q>(self, key: Q) -> Result<&'r Self::Value, Self::Error>
+	where
+		Q: Borrow<Self::Key>;
+
+	fn take<Q>(self, key: Q) -> &'r Self::Value
+	where
+		Q: Borrow<Self::Key>;
 }
 
-pub fn get<'r, C, A, Q>(container: C, key: Q) -> &'r A::Value
-where
-	C: ToAccessor<Accessor = A>,
-	A: Accessor<'r>,
-	Q: Borrow<A::Key>,
-{
-	try_get(container, key).unwrap_pretty()
+pub trait OwnedAccessorMutExt<'r>: OwnedAccessorRefExt<'r> {
+	fn try_take_mut<Q>(self, key: Q) -> Result<&'r mut Self::Value, Self::Error>
+	where
+		Q: Borrow<Self::Key>;
+
+	fn take_mut<Q>(self, key: Q) -> &'r mut Self::Value
+	where
+		Q: Borrow<Self::Key>;
+
+	fn try_take_pair_mut<Q, P>(
+		self,
+		a: Q,
+		b: P,
+	) -> Result<(&'r mut Self::Value, &'r mut Self::Value), Self::Error>
+	where
+		Q: Borrow<Self::Key>,
+		P: Borrow<Self::Key>;
+
+	fn take_pair_mut<Q, P>(self, a: Q, b: P) -> (&'r mut Self::Value, &'r mut Self::Value)
+	where
+		Q: Borrow<Self::Key>,
+		P: Borrow<Self::Key>;
+
+	fn try_take_exclude_mut<Q>(
+		self,
+		key: Q,
+	) -> Result<(&'r mut Self::Value, Untainted<ExcludeOne<Self::Accessor>>), Self::Error>
+	where
+		Q: Borrow<Self::Key>;
+
+	fn take_exclude_mut<Q>(
+		self,
+		key: Q,
+	) -> (&'r mut Self::Value, Untainted<ExcludeOne<Self::Accessor>>)
+	where
+		Q: Borrow<Self::Key>;
 }
 
-pub fn try_get_mut<'r, C, A, Q>(container: C, key: Q) -> Result<&'r mut A::Value, A::Error>
-where
-	C: ToAccessor<Accessor = A>,
-	A: AccessorMut<'r>,
-	Q: Borrow<A::Key>,
-{
-	unsafe { container.to_accessor().unwrap().try_get_unchecked_mut(key) }
-}
+impl<'r, C: ToAccessor<Accessor = A>, A: Accessor<'r>> OwnedAccessorRefExt<'r> for C {
+	type Key = A::Key;
+	type Value = A::Value;
+	type Error = A::Error;
+	type Accessor = A;
 
-pub fn get_mut<'r, C, A, Q>(container: C, key: Q) -> &'r mut A::Value
-where
-	C: ToAccessor<Accessor = A>,
-	A: AccessorMut<'r>,
-	Q: Borrow<A::Key>,
-{
-	try_get_mut(container, key).unwrap_pretty()
-}
+	fn try_take<Q>(self, key: Q) -> Result<&'r Self::Value, Self::Error>
+	where
+		Q: Borrow<Self::Key>,
+	{
+		unsafe { self.to_accessor().unwrap().try_get_unchecked(key) }
+	}
 
-pub fn try_get_pair_mut<'r, C, A, Q, P>(
-	container: C,
-	a: Q,
-	b: P,
-) -> Result<(&'r mut A::Value, &'r mut A::Value), A::Error>
-where
-	C: ToAccessor<Accessor = A>,
-	A: AccessorMut<'r>,
-	Q: Borrow<A::Key>,
-	P: Borrow<A::Key>,
-{
-	let accessor = container.to_accessor().unwrap();
-	let (a, b) = (a.borrow(), b.borrow());
-	assert_ne!(a, b, "keys cannot alias");
-
-	unsafe {
-		Ok((
-			accessor.try_get_unchecked_mut(a)?,
-			accessor.try_get_unchecked_mut(b)?,
-		))
+	fn take<Q>(self, key: Q) -> &'r Self::Value
+	where
+		Q: Borrow<Self::Key>,
+	{
+		self.try_take(key).unwrap_pretty()
 	}
 }
 
-pub fn get_pair_mut<'r, C, A, Q, P>(
-	container: C,
-	a: Q,
-	b: P,
-) -> (&'r mut A::Value, &'r mut A::Value)
-where
-	C: ToAccessor<Accessor = A>,
-	A: AccessorMut<'r>,
-	Q: Borrow<A::Key>,
-	P: Borrow<A::Key>,
-{
-	try_get_pair_mut(container, a, b).unwrap_pretty()
-}
+impl<'r, C: ToAccessor<Accessor = A>, A: AccessorMut<'r>> OwnedAccessorMutExt<'r> for C {
+	fn try_take_mut<Q>(self, key: Q) -> Result<&'r mut Self::Value, Self::Error>
+	where
+		Q: Borrow<Self::Key>,
+	{
+		unsafe { self.to_accessor().unwrap().try_get_unchecked_mut(key) }
+	}
 
-pub fn swap_pair<'r, C, A, Q, P>(container: C, a: Q, b: P)
-where
-	C: ToAccessor<Accessor = A>,
-	A: AccessorMut<'r>,
-	A::Value: 'r + Sized,
-	Q: Borrow<A::Key>,
-	P: Borrow<A::Key>,
-{
-	let (a, b) = get_pair_mut(container, a, b);
-	std::mem::swap(a, b);
-}
+	fn take_mut<Q>(self, key: Q) -> &'r mut Self::Value
+	where
+		Q: Borrow<Self::Key>,
+	{
+		self.try_take_mut(key).unwrap_pretty()
+	}
 
-pub fn try_exclude_mut<'r, C, A, Q>(
-	container: C,
-	key: Q,
-) -> Result<(&'r mut A::Value, Untainted<ExcludeOne<A>>), A::Error>
-where
-	C: ToAccessor<Accessor = A>,
-	A: AccessorMut<'r>,
-	Q: Borrow<A::Key>,
-{
-	let key = key.borrow();
-	let accessor = container.to_accessor().unwrap();
+	fn try_take_pair_mut<Q, P>(
+		self,
+		a: Q,
+		b: P,
+	) -> Result<(&'r mut Self::Value, &'r mut Self::Value), Self::Error>
+	where
+		Q: Borrow<Self::Key>,
+		P: Borrow<Self::Key>,
+	{
+		let accessor = self.to_accessor().unwrap();
+		let (a, b) = (a.borrow(), b.borrow());
+		assert_ne!(a, b, "keys cannot alias");
 
-	unsafe {
-		let removed = accessor.try_get_unchecked_mut(key)?;
-		let other = Untainted::new(ExcludeOne {
-			accessor,
-			excluded_index: key.clone(),
-		});
+		unsafe {
+			Ok((
+				accessor.try_get_unchecked_mut(a)?,
+				accessor.try_get_unchecked_mut(b)?,
+			))
+		}
+	}
 
-		Ok((removed, other))
+	fn take_pair_mut<Q, P>(self, a: Q, b: P) -> (&'r mut Self::Value, &'r mut Self::Value)
+	where
+		Q: Borrow<Self::Key>,
+		P: Borrow<Self::Key>,
+	{
+		self.try_take_pair_mut(a, b).unwrap_pretty()
+	}
+
+	fn try_take_exclude_mut<Q>(
+		self,
+		key: Q,
+	) -> Result<(&'r mut Self::Value, Untainted<ExcludeOne<Self::Accessor>>), Self::Error>
+	where
+		Q: Borrow<Self::Key>,
+	{
+		let key = key.borrow();
+		let accessor = self.to_accessor().unwrap();
+
+		unsafe {
+			let removed = accessor.try_get_unchecked_mut(key)?;
+			let other = Untainted::new(ExcludeOne {
+				accessor,
+				excluded_index: key.clone(),
+			});
+
+			Ok((removed, other))
+		}
+	}
+
+	fn take_exclude_mut<Q>(
+		self,
+		key: Q,
+	) -> (&'r mut Self::Value, Untainted<ExcludeOne<Self::Accessor>>)
+	where
+		Q: Borrow<Self::Key>,
+	{
+		self.try_take_exclude_mut(key).unwrap_pretty()
 	}
 }
 
-pub fn exclude_mut<'r, C, A, Q>(
-	container: C,
-	key: Q,
-) -> (&'r mut A::Value, Untainted<ExcludeOne<A>>)
-where
-	C: ToAccessor<Accessor = A>,
-	A: AccessorMut<'r>,
-	Q: Borrow<A::Key>,
-{
-	try_exclude_mut(container, key).unwrap_pretty()
-}
+// pub fn swap_pair<'r, C, A, Q, P>(container: C, a: Q, b: P)
+// where
+// 	C: ToAccessor<Accessor = A>,
+// 	A: AccessorMut<'r>,
+// 	A::Value: 'r + Sized,
+// 	Q: Borrow<A::Key>,
+// 	P: Borrow<A::Key>,
+// {
+// 	let (a, b) = get_pair_mut(container, a, b);
+// 	std::mem::swap(a, b);
+// }
 
 // === Views === //
 
@@ -457,20 +536,24 @@ where
 mod tests {
 	use super::*;
 
-	fn get_first_three(slice: &mut [i32]) -> (&mut i32, &mut i32, &i32) {
-		let (a, right) = exclude_mut(slice, 0);
-		let (b, right) = exclude_mut(right, 1);
-		println!("Peeking ahead a bit... {}", get(&right, 3));
-		let c = get(right, 2);
-		(a, b, c)
+	fn get_first_three(slice: &mut [i32]) -> (&mut i32, &mut i32, &i32, &i32) {
+		let (a, right) = slice.take_exclude_mut(0);
+		let (b, mut right) = right.take_exclude_mut(1);
+
+		let (k1, k2) = (&mut right).take_pair_mut(3, 4);
+		std::mem::swap(k1, k2);
+
+		let refs = right.to_refs();
+		(a, b, refs.get(2), refs.get(3))
 	}
 
 	#[test]
 	fn swaps() {
 		let mut target = vec![0, 1, 2, 3, 4];
-		let (a, b, c) = get_first_three(&mut target);
+		let (a, b, c, d) = get_first_three(&mut target);
 		std::mem::swap(a, b);
 		assert_eq!(*c, 2);
-		assert_eq!(target.as_slice(), [1, 0, 2, 3, 4]);
+		assert_eq!(*d, 4);
+		assert_eq!(target.as_slice(), [1, 0, 2, 4, 3]);
 	}
 }
