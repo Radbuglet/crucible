@@ -17,7 +17,7 @@
 //! This encoding scheme allows us to pack deletion and storage data in the same buffer and
 //! implement bundles in an efficient manner.
 
-use crate::ecs_next::world::ids::StorageId;
+use crate::ecs::world::ids::StorageId;
 use crate::util::number::{u64_has_mask, u64_msb_mask, OptionalUsize};
 
 #[derive(Debug, Clone, Default)]
@@ -68,7 +68,7 @@ impl<'a> EntityActionDecoder<'a> {
 	pub fn new(actions: &'a [u64]) -> Self {
 		Self {
 			build_to: OptionalUsize::NONE,
-			actions: actions.into_iter(),
+			actions: actions.iter(),
 		}
 	}
 

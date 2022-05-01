@@ -349,6 +349,7 @@ pub trait OwnedAccessorMutExt<'r>: OwnedAccessorRefExt<'r> {
 		Q: Borrow<Self::Key>,
 		P: Borrow<Self::Key>;
 
+	#[allow(clippy::type_complexity)] // there's not really a way to simplify this type
 	fn try_take_exclude_mut<Q>(
 		self,
 		key: Q,

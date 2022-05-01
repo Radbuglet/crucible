@@ -1,6 +1,6 @@
-use crate::ecs_next::world::entities::EntityManager;
-use crate::ecs_next::world::ids::{ArchGen, DirtyId, StorageId, StorageIdGenerator};
-use crate::ecs_next::world::Entity;
+use crate::ecs::world::entities::EntityManager;
+use crate::ecs::world::ids::{ArchGen, DirtyId, StorageId, StorageIdGenerator};
+use crate::ecs::world::Entity;
 use crate::util::error::ResultExt;
 use crate::util::free_list::FreeList;
 use crate::util::iter_ext::{hash_iter, is_sorted, ExcludeSortedIter, MergeSortedIter};
@@ -205,8 +205,8 @@ impl ArchManager {
 		};
 
 		// Generate component list
-		let (comp_list_len, comp_list) = comps_from_arch.make_iter(&original_storages);
-		let comp_list_hash = hash_iter(&mut self.hasher, comp_list.clone());
+		let (comp_list_len, comp_list) = comps_from_arch.make_iter(original_storages);
+		let comp_list_hash = hash_iter(&self.hasher, comp_list.clone());
 
 		// Fetch archetype or register it.
 		if let Some(index) = self.find_arch_raw(comp_list_hash, comp_list.clone(), comp_list_len) {

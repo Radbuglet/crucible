@@ -1,8 +1,8 @@
-use crate::ecs_next::world::arch::{ArchManager, WorldArchetype};
-use crate::ecs_next::world::entities::{EntityDeadError, EntityManager};
-use crate::ecs_next::world::ids::StorageId;
-use crate::ecs_next::world::queue::{EntityActionEncoder, ReshapeAction};
-use crate::ecs_next::world::{
+use crate::ecs::world::arch::{ArchManager, WorldArchetype};
+use crate::ecs::world::entities::{EntityDeadError, EntityManager};
+use crate::ecs::world::ids::StorageId;
+use crate::ecs::world::queue::{EntityActionEncoder, ReshapeAction};
+use crate::ecs::world::{
 	ArchHandle, ArchetypeDeadError, DirtyId, EntityArchLocator, EntityGen,
 };
 use crate::util::error::ResultExt;

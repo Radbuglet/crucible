@@ -477,7 +477,7 @@ impl<'obj, F: ObjFlavor> ObjCx<'_, 'obj, F> {
 		}
 	}
 
-	pub fn clone(&self) -> ObjCx<'static, 'obj, F> {
+	pub fn owned(&self) -> ObjCx<'static, 'obj, F> {
 		ObjCx {
 			backing: ObjCxBacking::Root(self.backing_ref().clone()),
 			length: self.length,

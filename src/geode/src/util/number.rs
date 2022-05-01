@@ -90,7 +90,7 @@ impl NumberGenMut for u64 {
 	fn try_generate_mut(&mut self) -> Result<Self::Value, GenOverflowError<Self>> {
 		Ok(replace(
 			self,
-			self.checked_add(1).ok_or(GenOverflowError::new())?,
+			self.checked_add(1).ok_or_else(GenOverflowError::new)?,
 		))
 	}
 }
@@ -107,7 +107,7 @@ impl NumberGenMut for NonZeroU64 {
 	fn try_generate_mut(&mut self) -> Result<Self::Value, GenOverflowError<Self>> {
 		Ok(replace(
 			self,
-			NonZeroU64::new(self.get().checked_add(1).ok_or(GenOverflowError::new())?).unwrap(),
+			NonZeroU64::new(self.get().checked_add(1).ok_or_else(GenOverflowError::new)?).unwrap(),
 		))
 	}
 }
@@ -138,7 +138,7 @@ impl NumberGenRef for AtomicU64 {
 impl NumberGenMut for AtomicU64 {
 	fn try_generate_mut(&mut self) -> Result<Self::Value, GenOverflowError<Self>> {
 		if *self.get_mut() >= Self::generator_limit() {
-			return Err(GenOverflowError::new());
+			Err(GenOverflowError::new())
 		} else {
 			let next = *self.get_mut() + 1;
 			Ok(replace(self.get_mut(), next))
@@ -179,7 +179,7 @@ impl NumberGenRef for NonZeroU64Generator {
 			.counter
 			.try_generate_ref()
 			.ok()
-			.ok_or(GenOverflowError::new())?;
+			.ok_or_else(GenOverflowError::new)?;
 
 		Ok(NonZeroU64::new(id).unwrap())
 	}
@@ -191,7 +191,7 @@ impl NumberGenMut for NonZeroU64Generator {
 			.counter
 			.try_generate_mut()
 			.ok()
-			.ok_or(GenOverflowError::new())?;
+			.ok_or_else(GenOverflowError::new)?;
 
 		Ok(NonZeroU64::new(id).unwrap())
 	}

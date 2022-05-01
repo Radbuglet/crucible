@@ -26,18 +26,16 @@ impl<T: ?Sized + Error> Display for FormattedError<'_, T> {
 
 		// Write cause chain
 		// (we iterate manually instead of using `anyhow::Chain` because it consumes a `&dyn Error`.
-		{
-			let mut cause_iter = target.source();
-			if cause_iter.is_some() {
-				writeln!(f, "\nCaused by:")?;
-			}
+		let mut cause_iter = target.source();
+		if cause_iter.is_some() {
+			writeln!(f, "\nCaused by:")?;
+		}
 
-			while let Some(cause) = cause_iter {
-				for line in cause.to_string().lines() {
-					writeln!(f, "\t{}", line)?;
-				}
-				cause_iter = cause.source();
+		while let Some(cause) = cause_iter {
+			for line in cause.to_string().lines() {
+				writeln!(f, "\t{}", line)?;
 			}
+			cause_iter = cause.source();
 		}
 
 		Ok(())

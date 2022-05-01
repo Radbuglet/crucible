@@ -1,5 +1,5 @@
-use crate::ecs_next::map_store::MapStorage;
-use crate::ecs_next::world::{ArchHandle, DirtyId, StorageId, World};
+use crate::ecs::map_store::MapStorage;
+use crate::ecs::world::{ArchHandle, DirtyId, StorageId, World};
 use crate::util::free_list::FreeList;
 use std::cell::UnsafeCell;
 

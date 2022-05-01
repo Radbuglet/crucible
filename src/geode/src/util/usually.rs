@@ -105,6 +105,7 @@ impl<T> UsuallySafeCell<T> {
 }
 
 impl<T: ?Sized> UsuallySafeCell<T> {
+	#[allow(clippy::mut_from_ref)]
 	pub unsafe fn unchecked_get_mut(&self) -> &mut T {
 		&mut *self.0.get()
 	}

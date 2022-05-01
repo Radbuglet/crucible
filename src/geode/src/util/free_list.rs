@@ -1,4 +1,5 @@
-use crate::util::bitset::{hibitset_length, is_valid_hibitset_index};
+use crate::exec::accessor::{AccessorMut, ToAccessor};
+use crate::util::bitset::{hibitset_length, hibitset_min_set_bit, is_valid_hibitset_index};
 use hibitset::{BitSet, BitSetLike};
 use std::fmt::{Debug, Formatter};
 use std::iter::repeat_with;
@@ -9,11 +10,13 @@ pub struct FreeList<T> {
 	// A bitset containing the set of all free slots *actively contained within the backing vector*.
 	free: BitSet,
 
-	// A bitset containing the set of all slots reserved in the backing vector.
+	// A bitset containing the set of all slots reserved in the backing vector. Although functionally
+	// equivalent to `BitSetNot(&self.free)`, `BitSetNot` fails to derive layers 1 through 3, making
+	// this complimentary bitset more efficient to iterate than the view.
 	//
-	// Reserved is necessary, even when iteration is not needed by the end user, to find the maximum
-	// index of the storage, and to more efficiently drop the backing values once the free list is
-	// dropped.
+	// This set is necessary, even when value iteration is not needed by the end user, to find the
+	// maximum index of the storage, and to more efficiently drop the backing values once the free
+	// list is dropped.
 	reserved: BitSet,
 
 	// A sparse backing vector of the free list.
@@ -36,7 +39,7 @@ impl<T> FreeList<T> {
 	}
 
 	pub fn reserve(&mut self, value: T) -> u32 {
-		match (&self.free).iter().next() {
+		match hibitset_min_set_bit(&self.free) {
 			Some(index) => {
 				self.reserved.add(index);
 				self.free.remove(index);
@@ -105,6 +108,7 @@ impl<T> FreeList<T> {
 	}
 
 	pub fn iter(&self) -> impl Iterator<Item = (u32, &T)> + '_ {
+		#[allow(clippy::needless_borrow)] // false positive
 		(&self.reserved).iter().map(move |index| {
 			(index, unsafe {
 				self.values.get_unchecked(index as usize).assume_init_ref()
@@ -112,14 +116,13 @@ impl<T> FreeList<T> {
 		})
 	}
 
-	pub fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = (u32, &'a mut T)> + 'a {
-		let root = self.values.as_mut_ptr();
+	pub fn iter_mut(&mut self) -> impl Iterator<Item = (u32, &'_ mut T)> + '_ {
+		let values = self.values.as_mut_slice().to_accessor().unwrap();
 
-		// TODO: Rewrite using `Accessors` once they stabilize because manual pointer arithmetic is
-		//  really un-fun.
+		#[allow(clippy::needless_borrow)] // false positive
 		(&self.reserved).iter().map(move |index| {
 			(index, unsafe {
-				(&mut *root.add(index as usize)).assume_init_mut()
+				values.get_unchecked_mut(index as usize).assume_init_mut()
 			})
 		})
 	}
@@ -185,6 +188,7 @@ impl<T: Clone> Clone for FreeList<T> {
 
 impl<T> Drop for FreeList<T> {
 	fn drop(&mut self) {
+		#[allow(clippy::needless_borrow)] // false positive
 		for index in (&self.reserved).iter() {
 			unsafe {
 				self.values

@@ -15,7 +15,6 @@ const TOO_MANY_REFS_ERROR: &str =
 /// dedicated scheduler to handle critical-section synchronization as using [RwLock]s as a dependency
 /// scheduling primitive directly runs the risk of introducing dead locks for even simple scenarios.
 pub struct ARefCell<T: ?Sized> {
-	// Value
 	rc: UsuallySafeCell<AtomicIsize>,
 	value: UnsafeCell<T>,
 }
@@ -269,7 +268,7 @@ pub struct ARef<'a, T: ?Sized> {
 }
 
 impl<'a, T: ?Sized> ARef<'a, T> {
-	pub fn clone(target: &Self) -> Self {
+	pub fn clone_ref(target: &Self) -> Self {
 		Self {
 			borrow: target.borrow.clone(),
 			value: target.value,
@@ -282,11 +281,10 @@ impl<'a, T: ?Sized> ARef<'a, T> {
 		U: ?Sized,
 	{
 		let Self { borrow, value } = target;
-		let mapped = ARef {
+		ARef {
 			borrow,
 			value: f(value),
-		};
-		mapped
+		}
 	}
 
 	pub fn filter_map<U, F>(target: Self, f: F) -> Result<ARef<'a, U>, ARef<'a, T>>
@@ -370,11 +368,10 @@ impl<'a, T: ?Sized> AMut<'a, T> {
 		U: ?Sized,
 	{
 		let Self { borrow, value } = target;
-		let mapped = AMut {
+		AMut {
 			borrow,
 			value: f(value),
-		};
-		mapped
+		}
 	}
 
 	pub fn filter_map<U, F>(target: Self, f: F) -> Result<AMut<'a, U>, AMut<'a, T>>

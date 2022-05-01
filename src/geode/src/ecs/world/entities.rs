@@ -1,5 +1,5 @@
 use super::{ids::EntityGenGenerator, Entity, EntityGen};
-use crate::ecs_next::world::arch::RawEntityArchLocator;
+use crate::ecs::world::arch::RawEntityArchLocator;
 use crate::util::error::ResultExt;
 use crate::util::number::{NumberGenMut, NumberGenRef};
 use thiserror::Error;
@@ -111,10 +111,10 @@ impl EntityManager {
 	}
 
 	pub fn is_alive(&self, entity: Entity) -> bool {
-		match self.slots.get(entity.index) {
-			Some(Some(slot)) if slot.gen == entity.gen => true,
-			_ => false,
-		}
+		matches!(
+			self.slots.get(entity.index),
+			Some(Some(slot)) if slot.gen == entity.gen
+		)
 	}
 
 	pub fn is_future_entity(&self, entity: Entity) -> bool {

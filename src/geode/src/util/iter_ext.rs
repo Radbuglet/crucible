@@ -67,15 +67,9 @@ impl<T: Ord, IL: Iterator<Item = T>, IR: Iterator<Item = T>> Iterator
 	type Item = T;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		'left_scan: while let Some(next) = self.left.next() {
+		'left_scan: for next in self.left.by_ref() {
 			// Check if the right list contains this element.
-			'contain_chk: loop {
-				let right = match self.right.peek() {
-					Some(right) => right,
-					// Nothing left to exclude; include this element.
-					None => break,
-				};
-
+			'contain_chk: while let Some(right) = self.right.peek() {
 				match right.cmp(&next) {
 					Ordering::Less => {
 						// `right` is still less than `next` so a future element may still equal `next`.

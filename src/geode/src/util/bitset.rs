@@ -29,6 +29,8 @@ pub fn is_valid_hibitset_index(index: usize) -> bool {
 	value <= MAX_HIBITSET_INDEX_EXCLUSIVE
 }
 
+/// Extracts the first set bit of an *optimally defined* [BitSetLike]. Slightly faster than taking
+/// the first element of [BitSetIter].
 pub fn hibitset_min_set_bit(set: &impl BitSetLike) -> Option<u32> {
 	pub fn min_word_bit(word: usize) -> usize {
 		// Words are read in the reverse direction:
@@ -46,23 +48,20 @@ pub fn hibitset_min_set_bit(set: &impl BitSetLike) -> Option<u32> {
 		word.trailing_zeros() as usize
 	}
 
-	// Unfortunately, downstream crates can't rely on `BitSets` to smartly constrict to a minimum size
-	// when bits at the end of the storage have been removed.
-
 	if set.is_empty() {
 		return None;
 	}
 
-	// Compute the index of the last l2 word with a set bit.
+	// Compute the index of the first l2 word with a set bit.
 	// Each bit of l3 corresponds to a word of l2.
 	let l2_min_word_index = min_word_bit(set.layer3());
 
-	// Compute the index of the highest set bit in l2.
+	// Compute the index of the lowest set bit in l2.
 	// Each bit of l2 corresponds to a word of l1.
 	let l1_min_word_index =
 		// Index of the first bit in the word.
 		BitSet::BITS_PER_USIZE * l2_min_word_index +
-			// Index of the highest bit in that word.
+			// Index of the lowest bit in that word.
 			min_word_bit(set.layer2(l2_min_word_index));
 
 	// Repeat the process for l1 to l0
@@ -74,7 +73,13 @@ pub fn hibitset_min_set_bit(set: &impl BitSetLike) -> Option<u32> {
 		BitSet::BITS_PER_USIZE * l0_min_word_index + min_word_bit(set.layer0(l0_min_word_index));
 
 	// BitSet guarantees that its indices will never be greater than u32::MAX.
-	Some(l0_min_bit_index as u32)
+	let l0_min_bit_index = l0_min_bit_index as u32;
+
+	// Sanity check the returned index in debug builds.
+	#[cfg(debug_assertions)]
+	debug_assert_eq!(Some(l0_min_bit_index), set.iter().next());
+
+	Some(l0_min_bit_index)
 }
 
 #[derive(Debug, Clone)]
@@ -112,15 +117,7 @@ pub fn hibitset_iter_rev(set: &impl BitSetLike) -> impl Iterator<Item = u32> + '
 }
 
 pub fn hibitset_max_set_bit(set: &impl BitSetLike) -> Option<u32> {
-	let index = hibitset_min_set_bit(&BitSetRev(set)).map(reverse_hibitset_index);
-
-	#[cfg(debug_assertions)]
-	{
-		let mut iter = hibitset_iter_rev(set);
-		let official_index = iter.next();
-		debug_assert_eq!(index, official_index);
-	}
-	index
+	hibitset_min_set_bit(&BitSetRev(set)).map(reverse_hibitset_index)
 }
 
 pub fn hibitset_length(set: &impl BitSetLike) -> u32 {
@@ -130,7 +127,7 @@ pub fn hibitset_length(set: &impl BitSetLike) -> u32 {
 }
 
 pub fn hibitset_iter_from<A: BitSetLike>(set: A, start_inclusive: u32) -> BitIter<A> {
-	// To understand `masks` and `prefix`, one must understand hibitset's iteration algorithm:
+	// To understand `masks` and `prefix`, we must understand hibitset's iteration algorithm:
 	//
 	// `masks` and `prefix` are ordered as l0, l1, l2, l3, although `prefix` omits l3.
 	//
@@ -164,7 +161,7 @@ pub fn hibitset_iter_from<A: BitSetLike>(set: A, start_inclusive: u32) -> BitIte
 		// (leading) 1111 ... 10 ... 0000 (trailing)
 		//                    ^ index
 		//
-		// We have two (literal) potentially problematic cases: `index == 0` and `index == BITS_PER_USIZE - 1`:
+		// We have two potentially problematic cases: `index == 0` and `index == BITS_PER_USIZE - 1`
 		//
 		// `index == 0` works properly because `!((1 << 0) - 1))` == `!(1-1)` == `0b1111...1111` and
 		// `index == BITS_PER_USIZE - 1` because `(1 << (BITS_PER_USIZE - 1))` does not overflow,
@@ -186,9 +183,9 @@ pub fn hibitset_iter_from<A: BitSetLike>(set: A, start_inclusive: u32) -> BitIte
 	let l2_word_idx = l1_word_idx / BitSet::BITS_PER_USIZE;
 	let l2_bit_idx = l1_word_idx % BitSet::BITS_PER_USIZE;
 
-	// Yes, this behavior is technically different from .iter()'s when iterating from `0`. However,
-	// if we're going to put in all the extra effort of finding all this data, we might as well use
-	// it.
+	// Yes, this behavior is technically different from `BitSetLike::iter()`'s when iterating from
+	// `0`. However, if we're going to put in all the extra effort of finding all this data, we might
+	// as well use it to skip a few seeking operations in hibitset's iteration routine.
 	let masks = [
 		set.layer0(l0_word_idx) & mask_bits_geq(l0_bit_idx),
 		// Higher masks don't need to iterate through their current word again, hence `ge` rather than

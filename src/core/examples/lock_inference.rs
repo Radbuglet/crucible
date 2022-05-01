@@ -12,7 +12,7 @@ fn main() {
 	engine.init_lock(2u16);
 	engine.init_lock(3u32);
 
-	let guard = RwGuard::<(&u8, &u16, &mut u32)>::lock_now((
+	let mut guard = RwGuard::<(&u8, &u16, &mut u32)>::lock_now((
 		engine.get_lock::<u8>(),
 		engine.get_lock::<u16>(),
 		engine.get_lock::<u32>(),
