@@ -1,8 +1,0 @@
-[package]
-name = "crucible-shared"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-cgmath = "0.18.0"
-crucible-core = { path = "../core" }

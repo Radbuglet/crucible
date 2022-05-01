@@ -1,7 +1,0 @@
-[workspace]
-
-members = [
-    "src/arbre",
-    "src/arbre_codegen",
-    "src/arbre_derive"
-]

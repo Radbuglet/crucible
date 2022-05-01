@@ -3,10 +3,5 @@
 resolver = "2"
 members = [
     "src/client",
-    "src/core",
     "src/geode",
-    "src/shared",
-]
-exclude = [
-    "scripting"
 ]

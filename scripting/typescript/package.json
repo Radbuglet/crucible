@@ -1,8 +1,0 @@
-{
-    "name": "crucible-api",
-    "version": "0.1.0",
-    "description": "A prototype implementation of the Crucible userland API in TypeScript",
-    "devDependencies": {},
-    "dependencies": {},
-    "scripts": {}
-}
