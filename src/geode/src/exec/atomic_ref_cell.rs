@@ -381,8 +381,8 @@ impl<'a, T: ?Sized> AMut<'a, T> {
 	{
 		let value = {
 			// We need to make the value reference unbounded because the borrow checker assumes that
-			// the reborrow passed to `f` will have to live for the duration of the function, even if
-			// we end up taking the early return.
+			// the reborrow passed to `f` will have to live for `'a'`, even if we end up taking the
+			// early return.
 			let value_ref_unbounded = unsafe {
 				let ptr = target.value as *mut _;
 				&mut *ptr

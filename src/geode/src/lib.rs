@@ -27,9 +27,9 @@ pub mod prelude {
 	pub use crate::{
 		ecs::prelude::*,
 		exec::atomic_ref_cell::{AMut, ARef, ARefCell},
-		exec::obj::{
-			dyn_key, event_trait, proxy_key, typed_key, Obj, ObjCx, ObjLike, SendObj, StObj,
-		},
+		exec::event::event_trait,
+		exec::key::{dyn_key, proxy_key, typed_key, TypedKey},
+		exec::obj::{Obj, ObjCx, ObjRead, SendObj, StObj},
 	};
 }
 
