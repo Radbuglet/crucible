@@ -1,3 +1,4 @@
+use crate::exec::atomic_ref_cell::ARefCell;
 use crate::exec::key::{typed_key, RawTypedKey, TypedKey};
 use crate::exec::obj::read::{
 	ComponentMissingError, ObjFlavor, ObjFlavorCanOwn, ObjRead, SendFlavor, SendSyncFlavor,
@@ -5,7 +6,6 @@ use crate::exec::obj::read::{
 };
 use crate::util::arity_utils::impl_tuples;
 use crate::util::inline_store::ByteContainer;
-use crate::ARefCell;
 use bumpalo::Bump;
 use derive_where::derive_where;
 use std::alloc::Layout;

@@ -32,5 +32,3 @@ pub mod prelude {
 		exec::obj::{Obj, ObjCx, ObjRead, SendObj, StObj},
 	};
 }
-
-pub use prelude::*;
