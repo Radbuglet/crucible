@@ -6,6 +6,7 @@ use crate::exec::obj::read::{
 };
 use crate::util::arity_utils::impl_tuples;
 use crate::util::inline_store::ByteContainer;
+use crate::util::usually::MakeSync;
 use bumpalo::Bump;
 use derive_where::derive_where;
 use std::alloc::Layout;
@@ -21,7 +22,7 @@ pub type SendObj = Obj<SendFlavor>;
 pub struct Obj<F: ObjFlavor = SendSyncFlavor> {
 	flavor: PhantomData<F>,
 	comps: HashMap<RawTypedKey, ObjEntry>,
-	bump: Bump,
+	bump: MakeSync<Bump>,
 	#[cfg(debug_assertions)]
 	debug_label: Option<String>,
 }
@@ -63,14 +64,14 @@ impl<F: ObjFlavor> Obj<F> {
 		assert!(!self.comps.contains_key(&owning_key));
 
 		// Allocate component
-		let comp = self.bump.alloc_layout(Layout::new::<T>()).cast::<T>();
+		let comp = self.bump.get().alloc_layout(Layout::new::<T>()).cast::<T>();
 		unsafe {
 			comp.as_ptr().write(value);
 		}
 
 		// Register the principal entry
 		#[rustfmt::skip]
-		self.comps.insert(owning_key, ObjEntry::new_owned(comp, &mut self.bump));
+		self.comps.insert(owning_key, ObjEntry::new_owned(comp, self.bump.get()));
 
 		// Register alias entries
 		unsafe {
@@ -248,7 +249,7 @@ where
 		#[rustfmt::skip]
 		map.comps.insert(
 			self.raw(),
-			ObjEntry::new_alias(ptr, &mut map.bump)
+			ObjEntry::new_alias(ptr, map.bump.get())
 		);
 	}
 }

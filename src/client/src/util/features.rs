@@ -1,7 +1,7 @@
 use crate::util::num::OrdF32;
 use crate::util::range::{unwrap_or_unbounded, AnyRange};
 use std::collections::Bound;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 #[derive(Debug, Clone)]
 pub struct FeatureList {
@@ -87,6 +87,10 @@ pub enum FeatureScore {
 		/// may be more effective for this if a given logical feature requires several sub-features.
 		reason: String,
 	},
+
+	/// This feature is not applicable to this given device. This is considered as having met the
+	/// conditions but shows up differently in the troubleshoot menu.
+	NotApplicable { reason: String },
 }
 
 impl FeatureScore {
@@ -109,12 +113,6 @@ impl Default for FeatureList {
 }
 
 impl FeatureList {
-	pub fn import_from(&mut self, other: FeatureList) {
-		for entry in other.entries {
-			self.push_raw(entry);
-		}
-	}
-
 	pub fn push_raw(&mut self, entry: FeatureEntry) {
 		// Count met percentages
 		if entry.mandatory {
@@ -169,23 +167,24 @@ impl FeatureList {
 		self.entries.push(entry);
 	}
 
-	pub fn mandatory_feature<N: Display, D: Display, E: Display>(
+	pub fn import_from(&mut self, other: FeatureList) {
+		for entry in other.entries {
+			self.push_raw(entry);
+		}
+	}
+
+	pub fn mandatory_feature<N: Display, D: Display>(
 		&mut self,
 		desc: FeatureDescriptor<N, D>,
-		support: Result<(), E>,
+		score: FeatureScore,
 	) -> bool {
 		let desc = desc.to_strings();
-		let is_supported = support.is_ok();
+		let is_supported = score.is_met();
 
 		self.push_raw(FeatureEntry {
 			desc,
 			mandatory: true,
-			score: match support {
-				Ok(_) => FeatureScore::BinaryPass,
-				Err(err) => FeatureScore::BinaryFail {
-					reason: err.to_string(),
-				},
-			},
+			score,
 			sub: None,
 		});
 

@@ -7,9 +7,10 @@ edition = "2021"
 anyhow = "1.0.57"
 cgmath = "0.18.0"
 env_logger = "0.9.0"
+fastrand = "1.7.0"
 futures = "0.3.21"
 geode = { path = "../geode" }
 log = "0.4.16"
-fastrand = "1.7.0"
+thiserror = "1.0.30"
 wgpu = { version = "0.12.0" }
 winit = "0.26.1"

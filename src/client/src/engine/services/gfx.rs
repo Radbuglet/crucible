@@ -1,11 +1,11 @@
-use crate::util::features::{FeatureDescriptor, FeatureList};
+use crate::util::features::{FeatureDescriptor, FeatureList, FeatureScore};
 use crate::util::num::OrdF32;
 use anyhow::Context;
 use std::fmt::Display;
 use winit::window::Window;
 
 #[derive(Debug)]
-pub struct GfxContext<T> {
+pub struct GfxContext {
 	pub instance: wgpu::Instance,
 	pub device: wgpu::Device,
 	pub queue: wgpu::Queue,
@@ -13,14 +13,13 @@ pub struct GfxContext<T> {
 	pub adapter_info: AdapterInfoBundle,
 	pub features_req: wgpu::Features,
 	pub limits_req: wgpu::Limits,
-	pub compat_table: T,
 }
 
-impl<T> GfxContext<T> {
-	pub async fn init<D: ?Sized + GfxFeatureDetector<Table = T>>(
+impl GfxContext {
+	pub async fn init<D: ?Sized + GfxFeatureDetector>(
 		main_window: &Window,
 		compat_detector: &mut D,
-	) -> anyhow::Result<(Self, wgpu::Surface)> {
+	) -> anyhow::Result<(Self, D::Table, wgpu::Surface)> {
 		let backends = wgpu::Backends::PRIMARY;
 		let instance = wgpu::Instance::new(backends);
 		let main_surface = unsafe { instance.create_surface(main_window) };
@@ -94,8 +93,8 @@ impl<T> GfxContext<T> {
 				adapter_info: req.adapter_info,
 				features_req: req.descriptor.features,
 				limits_req: req.descriptor.limits,
-				compat_table: req.compat_table,
 			},
+			req.compat_table,
 			main_surface,
 		))
 	}
@@ -147,15 +146,15 @@ impl GfxFeatureDetector for GfxFeatureNeedsScreen {
 
 		features.mandatory_feature(
 			FeatureDescriptor {
-				name: "Can display to screen".to_string(),
-				description:
-					"The specified driver must be capable of rendering to the main window."
-						.to_string(),
+				name: "Can display to screen",
+				description: "The specified driver must be capable of rendering to the main window",
 			},
-			if info.adapter.is_surface_supported(info.main_surface) {
-				Ok(())
+			if info.adapter.is_surface_supported(&info.main_surface) {
+				FeatureScore::BinaryPass
 			} else {
-				Err("main surface is unsupported by adapter")
+				FeatureScore::BinaryFail {
+					reason: "main surface is unsupported by adapter".to_string(),
+				}
 			},
 		);
 
@@ -190,11 +189,14 @@ impl GfxFeatureDetector for GfxFeaturePowerPreference {
 				description: format_args!("For best performance, GPU must be {pref:?}."),
 			},
 			if matches {
-				Ok(())
+				FeatureScore::BinaryPass
 			} else {
-				Err(format!(
-					"expected GPU with {pref:?} power preference; got {mode:?} adapter type, which has the opposite power preference"
-				))
+				FeatureScore::BinaryFail {
+					reason: format!(
+						"expected GPU with {pref:?} power preference; got {mode:?} adapter type, which \
+					 	 has the opposite power preference"
+					),
+				}
 			},
 		);
 

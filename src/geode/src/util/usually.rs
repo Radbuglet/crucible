@@ -1,3 +1,4 @@
+use std::any::type_name;
 use std::cell::UnsafeCell;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
@@ -153,3 +154,24 @@ impl<T: Default> Default for UsuallySafeCell<T> {
 
 unsafe impl<T: Send> Send for UsuallySafeCell<T> {}
 unsafe impl<T: Sync> Sync for UsuallySafeCell<T> {}
+
+// === MakeSync === //
+
+#[derive(Default)]
+pub struct MakeSync<T: ?Sized>(T);
+
+impl<T: ?Sized> Debug for MakeSync<T> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct(format!("MakeSync<{}>", type_name::<T>()).as_str())
+			.finish_non_exhaustive()
+	}
+}
+
+impl<T: ?Sized> MakeSync<T> {
+	pub fn get(&mut self) -> &mut T {
+		&mut self.0
+	}
+}
+
+unsafe impl<T: ?Sized + Send> Send for MakeSync<T> {}
+unsafe impl<T: ?Sized + Send> Sync for MakeSync<T> {}

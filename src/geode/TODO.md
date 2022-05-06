@@ -6,6 +6,10 @@
   - [ ] Bring back the `Provider`.
   - [ ] Allow `Obj` to be extended with `&self` (this doesn't impact fetch lifetimes).
   - [ ] Implement mixed `ObjCx` flavors.
+- [ ] Events:
+  - [ ] Multiplex event traits
+  - [ ] Deferrable event traits
+  - [ ] Common signal types
 - [ ] ECS:
   - [ ] Fix up `World` spawning semantics (`spawn_now` interferes with `spawn_deferred`).
   - [ ] Fix up `MapStorage` API (there's too many things going on here).
@@ -16,7 +20,6 @@
 - [ ] Obj ECS integration:
   - [ ] Implement `ServiceManager`, a way to attach `Obj` to `Entities`.
   - [ ] Implement a thread-exclusive `RefCell`-tracked `ArchStorage`.
-  - [ ] Allow signal multiplexing and storing in queues.
   - [ ] Implement a scheduler.
 - [ ] Polish for release:
   - [ ] Write documentation.
