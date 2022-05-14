@@ -29,6 +29,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "antidote"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34fde25430d87a9388dadbe6e34d7f72a462c8b43ac8d309b42b0a8505d7e2a5"
+
+[[package]]
 name = "anyhow"
 version = "1.0.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -365,8 +371,10 @@ dependencies = [
 name = "crucible-client"
 version = "0.1.0"
 dependencies = [
+ "antidote",
  "anyhow",
  "cgmath",
+ "crucible-common",
  "env_logger",
  "fastrand",
  "futures",
@@ -375,6 +383,14 @@ dependencies = [
  "thiserror",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "crucible-common"
+version = "0.1.0"
+dependencies = [
+ "geode",
+ "log",
 ]
 
 [[package]]
@@ -842,9 +858,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.16"
+version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6389c490849ff5bc16be905ae24bc913a9c8892e19b2341dbc175e14c341c2b8"
+checksum = "abb12e687cfb44aa40f41fc3978ef76448f9b6038cad6aef4259d3c095a2382e"
 dependencies = [
  "cfg-if 1.0.0",
 ]

@@ -1,6 +1,6 @@
 use crate::util::features::{FeatureDescriptor, FeatureList, FeatureScore};
-use crate::util::num::OrdF32;
 use anyhow::Context;
+use crucible_common::math::num::OrdF32;
 use std::fmt::Display;
 use winit::window::Window;
 

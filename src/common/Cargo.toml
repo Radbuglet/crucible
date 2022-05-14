@@ -1,0 +1,8 @@
+[package]
+name = "crucible-common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+geode = { path = "../geode" }
+log = "0.4.17"

@@ -1,4 +1,4 @@
-use crate::engine::services::gfx::GfxContext;
+use crate::engine::gfx::GfxContext;
 use geode::prelude::*;
 use std::collections::HashMap;
 use thiserror::Error;

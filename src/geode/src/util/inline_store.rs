@@ -3,6 +3,7 @@ use std::any::type_name;
 use std::mem::ManuallyDrop;
 use thiserror::Error;
 
+#[derive(Copy, Clone)]
 pub union ByteContainer<H> {
 	zst: (),
 	_never: ManuallyDrop<H>,

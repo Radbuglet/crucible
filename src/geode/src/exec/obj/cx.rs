@@ -23,7 +23,7 @@ impl<'borrow, 'obj, F: ObjFlavor> Debug for ObjCx<'borrow, 'obj, F> {
 }
 
 impl<'obj, F: ObjFlavor> ObjCx<'_, 'obj, F> {
-	pub fn root(root: &'obj Obj<F>) -> Self {
+	pub fn with_root(root: &'obj Obj<F>) -> Self {
 		Self {
 			backing: ObjCxBacking::Root(vec![root]),
 			length: 1,
