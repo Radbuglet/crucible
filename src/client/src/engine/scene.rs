@@ -31,7 +31,7 @@ impl SceneManager {
 
 	pub fn swap_scenes(&mut self) -> Option<Obj> {
 		debug_assert!(
-			self.scene.is_none(),
+			self.scene.is_some(),
 			"Called `swap_scenes` before an initial scene was provided. This was likely unintended."
 		);
 		if let Some(next) = self.next_scene.get_mut().take() {

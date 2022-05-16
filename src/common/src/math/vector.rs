@@ -224,39 +224,53 @@ where
 
 // Core traits
 
+fn unwrap_either<T>(result: Result<T, T>) -> T {
+	match result {
+		Ok(val) => val,
+		Err(val) => val,
+	}
+}
+
 pub trait Arithmetic<R = Self>: ValueType {
-	fn add_wrapping_flag<Q: Borrow<R>>(&self, rhs: Q) -> (Self, bool);
+	fn try_add<Q: Borrow<R>>(&self, rhs: Q) -> Result<Self, Self>;
 
 	fn add_wrapping<Q: Borrow<R>>(&self, rhs: Q) -> Self {
-		self.add_wrapping_flag(rhs).0
+		unwrap_either(self.try_add(rhs))
 	}
 
 	fn add<Q: Borrow<R>>(&self, rhs: Q) -> Self {
-		let (vec, did_wrap) = self.add_wrapping_flag(rhs);
-		debug_assert!(!did_wrap);
-		vec
-	}
-
-	fn try_add<Q: Borrow<R>>(&self, rhs: Q) -> Result<Self, Self> {
-		let (vec, did_wrap) = self.add_wrapping_flag(rhs);
-		if did_wrap {
-			Ok(vec)
-		} else {
-			Err(vec)
-		}
+		let vec = self.try_add(rhs);
+		debug_assert!(vec.is_ok());
+		unwrap_either(vec)
 	}
 
 	fn add_saturating<Q: Borrow<R>>(&self, rhs: Q) -> Self;
 }
 
-pub trait Invertible: ValueType {
-	fn neg(&self) -> Self;
-}
+// Standard implementations
 
-pub trait Scalable<R>: ValueType {
-	fn mul(&self, rhs: R) -> Self;
-	fn div(&self, rhs: R) -> Self;
-}
+// macro impl_for_math_primitives($($ty:ty),*) {
+// 	impl Arithmetic for $ty {
+// 		fn try_add<Q: Borrow<R>>(&self, rhs: Q) -> Result<Self, Self> {
+// 			match self.checked_add(*rhs.borrow()) {
+// 				Some(value) => Ok(value),
+// 				None => self.wrapping_add(*rhs.borrow()),
+// 			}
+// 		}
+//
+// 		fn add_wrapping<Q: Borrow<R>>(&self, rhs: Q) -> Self {
+// 			self.wrapping_add(*rhs.borrow())
+// 		}
+//
+// 		fn add<Q: Borrow<R>>(&self, rhs: Q) -> Self {
+// 			*self + *rhs.borrow()
+// 		}
+//
+// 		fn add_saturating<Q: Borrow<R>>(&self, rhs: Q) -> Self {
+// 			self.saturating_add(*rhs.borrow())
+// 		}
+// 	}
+// }
 
 // Vector derivations
 
@@ -272,19 +286,22 @@ where
 	VR: Vector,
 	LC: Arithmetic<RC>,
 {
-	fn add_wrapping_flag<Q: Borrow<VR>>(&self, rhs: Q) -> (Self, bool) {
+	fn try_add<Q: Borrow<VR>>(&self, rhs: Q) -> Result<Self, Self> {
 		let rhs = rhs.borrow();
 
-		let mut did_any_wrap = false;
+		let mut success = true;
 		let vec = self.map(|lhs: LC, i| {
-			let (val, did_wrap) = lhs.add_wrapping_flag(Self::get_rhs_comp(rhs, i));
-			if did_wrap {
-				did_any_wrap = true;
+			let out = lhs.try_add(Self::get_rhs_comp(rhs, i));
+			if out.is_err() {
+				success = false;
 			}
-			val
+			unwrap_either(out)
 		});
 
-		(vec, did_any_wrap)
+		match success {
+			true => Ok(vec),
+			false => Err(vec),
+		}
 	}
 
 	fn add_wrapping<Q: Borrow<VR>>(&self, rhs: Q) -> Self {
@@ -297,54 +314,9 @@ where
 		self.map(|lhs: LC, i| lhs.add(Self::get_rhs_comp(rhs, i)))
 	}
 
-	fn try_add<Q: Borrow<VR>>(&self, rhs: Q) -> Result<Self, Self> {
-		let rhs = rhs.borrow();
-
-		let mut success = true;
-		let vec = self.map(|lhs: LC, i| {
-			let out = lhs.try_add(Self::get_rhs_comp(rhs, i));
-			match out {
-				Ok(out) => out,
-				Err(out) => {
-					success = false;
-					out
-				}
-			}
-		});
-
-		if success {
-			Ok(vec)
-		} else {
-			Err(vec)
-		}
-	}
-
 	fn add_saturating<Q: Borrow<VR>>(&self, rhs: Q) -> Self {
 		let rhs = rhs.borrow();
 		self.map(|lhs: LC, i| lhs.add_saturating(Self::get_rhs_comp(rhs, i)))
-	}
-}
-
-impl<V: Vector<Comp = C>, C: Invertible> Invertible for V {
-	fn neg(&self) -> Self {
-		self.map(|val: C| val.neg())
-	}
-}
-
-impl<VL, LC, VR, RC> Scalable<VR> for VL
-where
-	VL: DerivesVectorMath<VR, Comp = LC, RhsProxy = RC>,
-	VR: Vector,
-	LC: Scalable<RC>,
-{
-	fn mul(&self, rhs: VR) -> Self {
-		let rhs = rhs.borrow();
-		self.map(|val: LC, i| val.mul(Self::get_rhs_comp(rhs, i)))
-	}
-
-	fn div(&self, rhs: VR) -> Self {
-		let rhs = rhs.borrow();
-		self.map(|val: LC, i| val.div(Self::get_rhs_comp(rhs, i)))
 	}
 }
 

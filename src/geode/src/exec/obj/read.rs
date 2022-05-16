@@ -2,81 +2,107 @@ use crate::exec::atomic_ref_cell::{AMut, ARef, ARefCell, LockError};
 use crate::exec::key::{typed_key, RawTypedKey, TypedKey};
 use crate::util::arity_utils::{impl_tuples, InjectableClosure};
 use crate::util::error::ResultExt;
-use std::cell::UnsafeCell;
+use std::alloc::Layout;
+use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::ptr::NonNull;
+use std::mem::MaybeUninit;
+use std::ptr::{NonNull, Pointee};
 use thiserror::Error;
 
-// === Flavor definitions === //
+// === RawObj === //
 
-pub trait ObjFlavor: Sized {
-	#[doc(hidden)]
-	unsafe fn try_acquire_rw_ref<T: ?Sized>(rw: &ARefCell<T>) -> Result<ARef<T>, LockError>;
-
-	#[doc(hidden)]
-	unsafe fn try_acquire_rw_mut<T: ?Sized>(rw: &ARefCell<T>) -> Result<AMut<T>, LockError>;
+pub trait RawObj: Debug {
+	fn provide_raw<'r>(&'r self, out: &mut ProviderOut<'r>);
 }
 
-pub unsafe trait ObjFlavorCanOwn<T: ?Sized>: ObjFlavor {}
-
-pub struct SendSyncFlavor {
-	// Behaves like POD (i.e. is `Send` + `Sync`)
-	_private: (),
+pub struct ProviderTarget<'r, T: ?Sized> {
+	_ty: PhantomData<&'r T>,
+	inner: ProviderOut<'r>,
+	meta: MaybeUninit<<T as Pointee>::Metadata>,
 }
 
-impl ObjFlavor for SendSyncFlavor {
-	unsafe fn try_acquire_rw_ref<T: ?Sized>(rw: &ARefCell<T>) -> Result<ARef<T>, LockError> {
-		rw.try_borrow()
+impl<'r, T: ?Sized> ProviderTarget<'r, T> {
+	pub fn new(key: TypedKey<T>) -> Self {
+		Self {
+			_ty: PhantomData,
+			inner: ProviderOut {
+				_ty: PhantomData,
+				key: key.raw(),
+				base: None,
+				p_meta: std::ptr::null_mut(),
+				meta_layout: Layout::new::<<T as Pointee>::Metadata>(),
+			},
+			meta: MaybeUninit::uninit(),
+		}
 	}
 
-	unsafe fn try_acquire_rw_mut<T: ?Sized>(rw: &ARefCell<T>) -> Result<AMut<T>, LockError> {
-		rw.try_borrow_mut()
-	}
-}
+	pub fn handle(&mut self) -> &mut ProviderOut<'r> {
+		// This is guaranteed to be pinned for `'_`, hence the creation of a self-referential pointer
+		// without the use of `Pin`.
+		self.inner.p_meta =
+			(&mut self.meta as *mut MaybeUninit<<T as Pointee>::Metadata>).cast::<u8>();
 
-unsafe impl<T: ?Sized + Send + Sync> ObjFlavorCanOwn<T> for SendSyncFlavor {}
-
-pub struct SendFlavor {
-	// Behaves like an `UnsafeCell` (i.e. is `Send` but not `Sync`)
-	_private: PhantomData<UnsafeCell<()>>,
-}
-
-impl ObjFlavor for SendFlavor {
-	unsafe fn try_acquire_rw_ref<T: ?Sized>(rw: &ARefCell<T>) -> Result<ARef<T>, LockError> {
-		// Safety: because `Obj` is not `Sync` user this flavor, only one thread can borrow values
-		// from it at a given time, allowing us to skip synchronization.
-		rw.try_borrow_unsynchronized()
+		// Now, we just return a reference to `inner`. We can still prevent us from promoting `p_meta`
+		// to `&mut ...`.
+		&mut self.inner
 	}
 
-	unsafe fn try_acquire_rw_mut<T: ?Sized>(rw: &ARefCell<T>) -> Result<AMut<T>, LockError> {
-		// Safety: because `Obj` is not `Sync` user this flavor, only one thread can borrow values
-		// from it at a given time, allowing us to skip synchronization.
-		rw.try_borrow_unsynchronized_mut()
-	}
-}
-
-unsafe impl<T: ?Sized + Send> ObjFlavorCanOwn<T> for SendFlavor {}
-
-pub struct SingleThreadedFlavor {
-	// Behaves like a raw pointer (i.e. is neither `Send` nor `Sync`)
-	_private: PhantomData<*const ()>,
-}
-
-impl ObjFlavor for SingleThreadedFlavor {
-	unsafe fn try_acquire_rw_ref<T: ?Sized>(rw: &ARefCell<T>) -> Result<ARef<T>, LockError> {
-		// Safety: because `Obj` is not `Sync` user this flavor, only one thread can borrow values
-		// from it at a given time, allowing us to skip synchronization.
-		rw.try_borrow_unsynchronized()
-	}
-
-	unsafe fn try_acquire_rw_mut<T: ?Sized>(rw: &ARefCell<T>) -> Result<AMut<T>, LockError> {
-		// Safety: because `Obj` is not `Sync` user this flavor, only one thread can borrow values
-		// from it at a given time, allowing us to skip synchronization.
-		rw.try_borrow_unsynchronized_mut()
+	pub fn get(&self) -> Option<&'r T> {
+		if let Some(base) = self.inner.base {
+			let ptr = unsafe {
+				let meta = *self.meta.assume_init_ref();
+				NonNull::from_raw_parts(base, meta).as_ref()
+			};
+			Some(ptr)
+		} else {
+			None
+		}
 	}
 }
 
-unsafe impl<T: ?Sized> ObjFlavorCanOwn<T> for SingleThreadedFlavor {}
+pub struct ProviderOut<'r> {
+	_ty: PhantomData<&'r ()>,
+	key: RawTypedKey,
+	base: Option<NonNull<()>>,
+	p_meta: *mut u8,
+	meta_layout: Layout,
+}
+
+impl<'r> ProviderOut<'r> {
+	pub fn meta_layout(&self) -> Layout {
+		self.meta_layout
+	}
+
+	pub unsafe fn provide_dynamic_unchecked(&mut self, base_ptr: NonNull<()>, p_meta: *const u8) {
+		self.base = Some(base_ptr);
+		self.p_meta
+			.cast::<u8>()
+			.copy_from(p_meta, self.meta_layout.size());
+	}
+
+	pub unsafe fn provide_unchecked<T: ?Sized>(&mut self, value: &'r T) {
+		let (base, meta) = NonNull::from(value).to_raw_parts();
+		self.base = Some(base);
+		self.p_meta.cast::<<T as Pointee>::Metadata>().write(meta);
+	}
+
+	pub fn provide<T: ?Sized>(&mut self, key: TypedKey<T>, ptr: &'r T) -> bool {
+		if self.key == key.raw() {
+			unsafe { self.provide_unchecked(ptr) };
+			true
+		} else {
+			false
+		}
+	}
+
+	pub fn key(&self) -> RawTypedKey {
+		self.key
+	}
+
+	pub fn did_provide(&self) -> bool {
+		self.base.is_some()
+	}
+}
 
 // === Error types === //
 
@@ -101,27 +127,16 @@ pub enum BorrowError {
 	LockError(#[from] ComponentLockError),
 }
 
-// === ObjLike === //
+// === ObjExt === //
 
-pub unsafe trait ObjRead {
-	type AccessFlavor: ObjFlavor;
-
-	// === Basic getters === //
-
-	fn try_get_raw<T: ?Sized + 'static>(
-		&self,
-		key: TypedKey<T>,
-	) -> Result<NonNull<T>, ComponentMissingError>;
-
-	fn get_raw<T: ?Sized + 'static>(&self, key: TypedKey<T>) -> NonNull<T> {
-		self.try_get_raw(key).unwrap_pretty()
-	}
-
+pub trait ObjExt: RawObj {
 	fn try_get_as<T: ?Sized + 'static>(
 		&self,
 		key: TypedKey<T>,
 	) -> Result<&T, ComponentMissingError> {
-		self.try_get_raw(key).map(|value| unsafe { value.as_ref() })
+		let mut target = ProviderTarget::new(key);
+		self.provide_raw(target.handle());
+		target.get().ok_or(ComponentMissingError { key: key.raw() })
 	}
 
 	fn get_as<T: ?Sized + 'static>(&self, key: TypedKey<T>) -> &T {
@@ -142,14 +157,13 @@ pub unsafe trait ObjRead {
 		&self,
 		key: TypedKey<ARefCell<T>>,
 	) -> Result<ARef<T>, BorrowError> {
-		Ok(
-			unsafe { Self::AccessFlavor::try_acquire_rw_ref(self.try_get_as(key)?) }.map_err(
-				|error| ComponentLockError {
-					key: key.raw(),
-					error,
-				},
-			)?,
-		)
+		Ok(self
+			.try_get_as(key)?
+			.try_borrow()
+			.map_err(|error| ComponentLockError {
+				key: key.raw(),
+				error,
+			})?)
 	}
 
 	fn borrow_as<T: ?Sized + 'static>(&self, key: TypedKey<ARefCell<T>>) -> ARef<T> {
@@ -160,14 +174,13 @@ pub unsafe trait ObjRead {
 		&self,
 		key: TypedKey<ARefCell<T>>,
 	) -> Result<AMut<T>, BorrowError> {
-		Ok(
-			unsafe { Self::AccessFlavor::try_acquire_rw_mut(self.try_get_as(key)?) }.map_err(
-				|error| ComponentLockError {
-					key: key.raw(),
-					error,
-				},
-			)?,
-		)
+		Ok(self
+			.try_get_as(key)?
+			.try_borrow_mut()
+			.map_err(|error| ComponentLockError {
+				key: key.raw(),
+				error,
+			})?)
 	}
 
 	fn borrow_mut_as<T: ?Sized + 'static>(&self, key: TypedKey<ARefCell<T>>) -> AMut<T> {
@@ -217,24 +230,26 @@ pub unsafe trait ObjRead {
 	}
 }
 
+impl<T: ?Sized + RawObj> ObjExt for T {}
+
 pub trait MultiBorrowTarget<'a>: Sized {
-	fn try_borrow_from<O: ?Sized + ObjRead>(obj: &'a O) -> Result<Self, BorrowError>;
+	fn try_borrow_from<O: ?Sized + ObjExt>(obj: &'a O) -> Result<Self, BorrowError>;
 }
 
 impl<'a, T: ?Sized + 'static> MultiBorrowTarget<'a> for &'a T {
-	fn try_borrow_from<O: ?Sized + ObjRead>(obj: &'a O) -> Result<Self, BorrowError> {
+	fn try_borrow_from<O: ?Sized + ObjExt>(obj: &'a O) -> Result<Self, BorrowError> {
 		obj.try_get().map_err(From::from)
 	}
 }
 
 impl<'a, T: ?Sized + 'static> MultiBorrowTarget<'a> for ARef<'a, T> {
-	fn try_borrow_from<O: ?Sized + ObjRead>(obj: &'a O) -> Result<Self, BorrowError> {
+	fn try_borrow_from<O: ?Sized + ObjExt>(obj: &'a O) -> Result<Self, BorrowError> {
 		obj.try_borrow()
 	}
 }
 
 impl<'a, T: ?Sized + 'static> MultiBorrowTarget<'a> for AMut<'a, T> {
-	fn try_borrow_from<O: ?Sized + ObjRead>(obj: &'a O) -> Result<Self, BorrowError> {
+	fn try_borrow_from<O: ?Sized + ObjExt>(obj: &'a O) -> Result<Self, BorrowError> {
 		obj.try_borrow_mut()
 	}
 }
@@ -242,7 +257,7 @@ impl<'a, T: ?Sized + 'static> MultiBorrowTarget<'a> for AMut<'a, T> {
 macro impl_tup_obj_borrowable($($name:ident: $field:tt),*) {
 impl<'a, $($name: MultiBorrowTarget<'a>),*> MultiBorrowTarget<'a> for ($($name,)*) {
 		#[allow(unused_variables)]
-		fn try_borrow_from<O: ?Sized + ObjRead>(obj: &'a O) -> Result<Self, BorrowError> {
+		fn try_borrow_from<O: ?Sized + ObjExt>(obj: &'a O) -> Result<Self, BorrowError> {
 			Ok(($($name::try_borrow_from(obj)?,)*))
 		}
 	}

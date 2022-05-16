@@ -12,8 +12,9 @@ const TOO_MANY_REFS_ERROR: &str =
 	"Cannot create more than isize::MAX concurrent references to an `ARefCell`.";
 
 /// An [RwLock](std::sync::RwLock) without blocking capabilities. Users are much better off using a
-/// dedicated scheduler to handle critical-section synchronization as using [RwLock]s as a dependency
-/// scheduling primitive directly runs the risk of introducing dead locks for even simple scenarios.
+/// dedicated scheduler to handle resource access synchronization as blocking [RwLock]s do not provide
+/// the semantics required to implement true resource lock scheduling (system dependencies are expressed
+/// as unordered sets; `Mutexes` and `RwLocks` must have a well defined lock order to avoid dead-locks).
 pub struct ARefCell<T: ?Sized> {
 	rc: UsuallySafeCell<AtomicIsize>,
 	value: UnsafeCell<T>,

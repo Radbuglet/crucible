@@ -1,20 +1,18 @@
-use crate::exec::key::TypedKey;
-use crate::exec::obj::obj::Obj;
-use crate::exec::obj::read::{ComponentMissingError, ObjFlavor, ObjRead, SendSyncFlavor};
+use crate::exec::obj::read::RawObj;
+use crate::exec::obj::ProviderOut;
 use std::fmt::{Debug, Formatter};
-use std::ptr::NonNull;
 
-pub struct ObjCx<'borrow, 'obj, F: ObjFlavor = SendSyncFlavor> {
-	backing: ObjCxBacking<'borrow, 'obj, F>,
+pub struct ObjCx<'borrow, 'obj, O: ?Sized = dyn RawObj> {
+	backing: ObjCxBacking<'borrow, 'obj, O>,
 	length: usize,
 }
 
-enum ObjCxBacking<'borrow, 'obj, F: ObjFlavor> {
-	Root(Vec<&'obj Obj<F>>),
-	Child(&'borrow mut Vec<&'obj Obj<F>>),
+enum ObjCxBacking<'borrow, 'obj, O: ?Sized> {
+	Root(Vec<&'obj O>),
+	Child(&'borrow mut Vec<&'obj O>),
 }
 
-impl<'borrow, 'obj, F: ObjFlavor> Debug for ObjCx<'borrow, 'obj, F> {
+impl<'borrow, 'obj, O: ?Sized + Debug> Debug for ObjCx<'borrow, 'obj, O> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("ObjCx")
 			.field("children", &self.path())
@@ -22,26 +20,26 @@ impl<'borrow, 'obj, F: ObjFlavor> Debug for ObjCx<'borrow, 'obj, F> {
 	}
 }
 
-impl<'obj, F: ObjFlavor> ObjCx<'_, 'obj, F> {
-	pub fn with_root(root: &'obj Obj<F>) -> Self {
+impl<'borrow, 'obj, O: ?Sized> ObjCx<'borrow, 'obj, O> {
+	pub fn with_root(root: &'obj O) -> Self {
 		Self {
 			backing: ObjCxBacking::Root(vec![root]),
 			length: 1,
 		}
 	}
 
-	fn backing_ref(&self) -> &Vec<&'obj Obj<F>> {
+	fn backing_ref(&self) -> &Vec<&'obj O> {
 		match &self.backing {
 			ObjCxBacking::Root(root) => root,
 			ObjCxBacking::Child(root) => *root,
 		}
 	}
 
-	pub fn path(&self) -> &[&'obj Obj<F>] {
+	pub fn path(&self) -> &[&'obj O] {
 		&self.backing_ref()[0..self.length]
 	}
 
-	pub fn ancestors(&self, include_self: bool) -> impl Iterator<Item = &'obj Obj<F>> + '_ {
+	pub fn ancestors(&self, include_self: bool) -> impl Iterator<Item = &'obj O> + '_ {
 		let path = self.path();
 		let path = if include_self {
 			path
@@ -52,11 +50,11 @@ impl<'obj, F: ObjFlavor> ObjCx<'_, 'obj, F> {
 		path.iter().copied().rev()
 	}
 
-	pub fn me(&self) -> &'obj Obj<F> {
+	pub fn me(&self) -> &'obj O {
 		self.path().last().unwrap()
 	}
 
-	pub fn with<'borrow>(&'borrow mut self, child: &'obj Obj<F>) -> ObjCx<'borrow, 'obj, F> {
+	pub fn with<'new_borrow>(&'new_borrow mut self, child: &'obj O) -> ObjCx<'new_borrow, 'obj, O> {
 		let root = match &mut self.backing {
 			ObjCxBacking::Root(root) => root,
 			ObjCxBacking::Child(root) => *root,
@@ -71,7 +69,7 @@ impl<'obj, F: ObjFlavor> ObjCx<'_, 'obj, F> {
 		}
 	}
 
-	pub fn owned(&self) -> ObjCx<'static, 'obj, F> {
+	pub fn owned(&self) -> ObjCx<'static, 'obj, O> {
 		ObjCx {
 			backing: ObjCxBacking::Root(self.backing_ref().clone()),
 			length: self.length,
@@ -79,19 +77,13 @@ impl<'obj, F: ObjFlavor> ObjCx<'_, 'obj, F> {
 	}
 }
 
-unsafe impl<F: ObjFlavor> ObjRead for ObjCx<'_, '_, F> {
-	type AccessFlavor = F;
-
-	fn try_get_raw<T: ?Sized + 'static>(
-		&self,
-		key: TypedKey<T>,
-	) -> Result<NonNull<T>, ComponentMissingError> {
+impl<'borrow, 'obj, O: ?Sized + RawObj> RawObj for ObjCx<'borrow, 'obj, O> {
+	fn provide_raw<'r>(&'r self, out: &mut ProviderOut<'r>) {
 		for ancestor in self.ancestors(true) {
-			if let Ok(value) = ancestor.try_get_raw(key) {
-				return Ok(value);
+			ancestor.provide_raw(out);
+			if out.did_provide() {
+				return;
 			}
 		}
-
-		Err(ComponentMissingError { key: key.raw() })
 	}
 }

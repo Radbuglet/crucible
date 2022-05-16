@@ -4,7 +4,9 @@ use crate::engine::gfx::{
 };
 use crate::engine::scene::SceneManager;
 use crate::engine::viewport::{Viewport, ViewportManager};
+use crate::game::entry::make_game_scene;
 use crate::util::features::FeatureList;
+use crate::util::winit::WinitEventHandler;
 use crate::util::winit::{WinitEventBundle, WinitUserdata};
 use anyhow::Context;
 use futures::executor::block_on;
@@ -32,6 +34,13 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 	event_loop.run(move |event, proxy, flow| {
 		let mut bundle = WinitEventBundle { event, proxy, flow };
+		let sm = root.borrow::<SceneManager>();
+		sm.current_scene()
+			.get::<dyn WinitEventHandler>()
+			.on_winit_event(&mut ObjCx::with_root(&root), &mut bundle);
+		drop(sm);
+		let mut sm = root.borrow_mut::<SceneManager>();
+		sm.swap_scenes();
 	});
 }
 
@@ -68,7 +77,7 @@ async fn make_engine_root(event_loop: &EventLoop<WinitUserdata>) -> anyhow::Resu
 	// Register game subsystems
 	{
 		let mut sm = SceneManager::default();
-		// sm.init_scene(make_game_scene());  TODO
+		sm.init_scene(make_game_scene());
 		root.add_rw(sm);
 	}
 

@@ -29,6 +29,6 @@ pub mod prelude {
 		exec::atomic_ref_cell::{AMut, ARef, ARefCell},
 		exec::event::event_trait,
 		exec::key::{dyn_key, proxy_key, typed_key, TypedKey},
-		exec::obj::{Obj, ObjCx, ObjRead, SendObj, StObj},
+		exec::obj::{Obj, ObjCx, ObjExt, SendObj, StObj},
 	};
 }

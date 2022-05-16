@@ -1,11 +1,9 @@
 use crate::exec::atomic_ref_cell::ARefCell;
 use crate::exec::key::{typed_key, RawTypedKey, TypedKey};
-use crate::exec::obj::read::{
-	ComponentMissingError, ObjFlavor, ObjFlavorCanOwn, ObjRead, SendFlavor, SendSyncFlavor,
-	SingleThreadedFlavor,
-};
+use crate::exec::obj::{ProviderOut, RawObj};
 use crate::util::arity_utils::impl_tuples;
 use crate::util::inline_store::ByteContainer;
+use crate::util::marker::{PhantomNoSendOrSync, PhantomNoSync};
 use crate::util::usually::MakeSync;
 use bumpalo::Bump;
 use derive_where::derive_where;
@@ -14,6 +12,50 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::{PhantomData, Unsize};
 use std::ptr::{NonNull, Pointee};
+
+// === Flavor definitions === //
+
+pub trait ObjFlavor: Sized + sealed::Sealed {}
+
+pub unsafe trait ObjFlavorCanOwn<T: ?Sized>: ObjFlavor {}
+
+pub struct SendSyncFlavor {
+	_private: (),
+}
+
+pub struct SendFlavor {
+	_private: PhantomNoSync,
+}
+
+pub struct SingleThreadedFlavor {
+	_private: PhantomNoSendOrSync,
+}
+
+mod sealed {
+	use super::*;
+
+	pub trait Sealed {}
+
+	// SendSyncFlavor
+	impl Sealed for SendSyncFlavor {}
+	impl ObjFlavor for SendSyncFlavor {}
+	unsafe impl<T: ?Sized + Send + Sync> ObjFlavorCanOwn<T> for SendSyncFlavor {}
+
+	// SendFlavor
+	impl Sealed for SendFlavor {}
+	impl ObjFlavor for SendFlavor {}
+	unsafe impl<T: ?Sized + Send> ObjFlavorCanOwn<T> for SendFlavor {}
+
+	// SingleThreadedFlavor
+	impl Sealed for SingleThreadedFlavor {}
+	impl ObjFlavor for SingleThreadedFlavor {}
+	unsafe impl<T: ?Sized> ObjFlavorCanOwn<T> for SingleThreadedFlavor {}
+}
+
+// === Obj === //
+
+type InlineMetaContainer = ByteContainer<usize>;
+type HeapMetaPtr = NonNull<u8>;
 
 pub type StObj = Obj<SingleThreadedFlavor>;
 pub type SendObj = Obj<SendFlavor>;
@@ -70,8 +112,8 @@ impl<F: ObjFlavor> Obj<F> {
 		}
 
 		// Register the principal entry
-		#[rustfmt::skip]
-		self.comps.insert(owning_key, ObjEntry::new_owned(comp, self.bump.get()));
+		let entry = ObjEntry::new_owned(comp, self.bump.get());
+		self.comps.insert(owning_key, entry);
 
 		// Register alias entries
 		unsafe {
@@ -109,19 +151,22 @@ impl<F: ObjFlavor> Obj<F> {
 	}
 }
 
-unsafe impl<F: ObjFlavor> ObjRead for Obj<F> {
-	type AccessFlavor = F;
+impl<F: ObjFlavor> RawObj for Obj<F> {
+	fn provide_raw<'r>(&'r self, out: &mut ProviderOut<'r>) {
+		let entry = match self.comps.get(&out.key()) {
+			Some(entry) => entry,
+			None => return,
+		};
 
-	fn try_get_raw<T: ?Sized + 'static>(
-		&self,
-		key: TypedKey<T>,
-	) -> Result<NonNull<T>, ComponentMissingError> {
-		let entry = self
-			.comps
-			.get(&key.raw())
-			.ok_or(ComponentMissingError { key: key.raw() })?;
+		let p_meta = if InlineMetaContainer::can_host_dyn("dynamic", out.meta_layout()).is_ok() {
+			// Get meta directly from the inline store
+			entry.ptr_meta.as_bytes_ptr()
+		} else {
+			// Get meta from the bump
+			unsafe { entry.ptr_meta.as_ref::<HeapMetaPtr>() }.as_ptr()
+		};
 
-		Ok(unsafe { entry.target_ptr::<T>() })
+		unsafe { out.provide_dynamic_unchecked(entry.base, p_meta) };
 	}
 }
 
@@ -136,8 +181,8 @@ impl<F: ObjFlavor> Drop for Obj<F> {
 }
 
 struct ObjEntry {
-	ptr: NonNull<()>,
-	ptr_meta: ByteContainer<usize>,
+	base: NonNull<()>,
+	ptr_meta: InlineMetaContainer,
 	drop_fn_or_alias: Option<unsafe fn(*mut ())>,
 	#[cfg(debug_assertions)]
 	comp_name: &'static str,
@@ -160,9 +205,9 @@ impl ObjEntry {
 	pub fn new_common<T: ?Sized>(
 		ptr: NonNull<T>,
 		bump: &mut Bump,
-	) -> (NonNull<()>, ByteContainer<usize>) {
+	) -> (NonNull<()>, InlineMetaContainer) {
 		let (ptr, ptr_meta) = ptr.to_raw_parts();
-		let ptr_meta = if let Ok(inlined) = ByteContainer::<usize>::try_new(ptr_meta) {
+		let ptr_meta = if let Ok(inlined) = InlineMetaContainer::try_new(ptr_meta) {
 			inlined
 		} else {
 			// Reserve space on the bump.
@@ -174,7 +219,7 @@ impl ObjEntry {
 			unsafe { meta_on_heap.as_ptr().write(ptr_meta) }
 
 			// Wrap the pointer to the heap.
-			ByteContainer::<usize>::new(meta_on_heap)
+			ByteContainer::<usize>::new::<HeapMetaPtr>(meta_on_heap.cast::<u8>())
 		};
 
 		(ptr, ptr_meta)
@@ -190,7 +235,7 @@ impl ObjEntry {
 		let drop_fn: unsafe fn(*mut ()) = drop_ptr::<T>;
 
 		Self {
-			ptr,
+			base: ptr,
 			ptr_meta,
 			drop_fn_or_alias: Some(drop_fn),
 			#[cfg(debug_assertions)]
@@ -202,7 +247,7 @@ impl ObjEntry {
 		let (ptr, ptr_meta) = Self::new_common(ptr, bump);
 
 		Self {
-			ptr,
+			base: ptr,
 			ptr_meta,
 			drop_fn_or_alias: None,
 			#[cfg(debug_assertions)]
@@ -210,21 +255,9 @@ impl ObjEntry {
 		}
 	}
 
-	pub unsafe fn target_ptr<T: ?Sized>(&self) -> NonNull<T> {
-		let is_inline = ByteContainer::<usize>::can_host::<<T as Pointee>::Metadata>().is_ok();
-		let ptr_meta = if is_inline {
-			*self.ptr_meta.as_ref::<<T as Pointee>::Metadata>()
-		} else {
-			let ptr_to_meta = self.ptr_meta.as_ref::<NonNull<<T as Pointee>::Metadata>>();
-			*ptr_to_meta.as_ref()
-		};
-
-		NonNull::from_raw_parts(self.ptr, ptr_meta)
-	}
-
 	pub unsafe fn drop_if_owned(&mut self) {
 		if let Some(drop_fn) = self.drop_fn_or_alias {
-			drop_fn(self.ptr.as_ptr())
+			drop_fn(self.base.as_ptr())
 		}
 	}
 }

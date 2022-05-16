@@ -10,13 +10,15 @@ pub union ByteContainer<H> {
 }
 
 impl<H> ByteContainer<H> {
-	pub fn can_host<G>() -> Result<(), ByteContainerError> {
-		let guest_layout = Layout::new::<G>();
+	pub fn can_host_dyn(
+		guest_name: &'static str,
+		guest_layout: Layout,
+	) -> Result<(), ByteContainerError> {
 		let host_layout = Layout::new::<H>();
 
 		if guest_layout.size() > host_layout.size() {
 			return Err(ByteContainerError::Size {
-				guest_name: type_name::<G>(),
+				guest_name,
 				guest_size: guest_layout.size(),
 				host_name: type_name::<H>(),
 				host_size: host_layout.size(),
@@ -26,7 +28,7 @@ impl<H> ByteContainer<H> {
 		// We're comparing powers of two so this properly checks for factorizations.
 		if guest_layout.align() > host_layout.align() {
 			return Err(ByteContainerError::Align {
-				guest_name: type_name::<G>(),
+				guest_name,
 				guest_align: guest_layout.size(),
 				host_name: type_name::<H>(),
 				host_align: host_layout.size(),
@@ -34,6 +36,10 @@ impl<H> ByteContainer<H> {
 		}
 
 		Ok(())
+	}
+
+	pub fn can_host<G>() -> Result<(), ByteContainerError> {
+		Self::can_host_dyn(type_name::<G>(), Layout::new::<G>())
 	}
 
 	pub fn try_new<G>(value: G) -> Result<Self, (G, ByteContainerError)> {
@@ -57,6 +63,10 @@ impl<H> ByteContainer<H> {
 
 	pub fn new<G>(value: G) -> Self {
 		Self::try_new(value).map_err(|(_, err)| err).unwrap()
+	}
+
+	pub fn as_bytes_ptr(&self) -> *const u8 {
+		(self as *const Self).cast::<u8>()
 	}
 
 	pub fn as_const_ptr<G>(&self) -> *const G {
