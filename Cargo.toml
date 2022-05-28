@@ -1,8 +1,11 @@
 [workspace]
-
 resolver = "2"
 members = [
     "src/client",
     "src/common",
     "src/geode",
 ]
+
+[profile.release]
+lto = true
+opt-level = 3

@@ -7,11 +7,11 @@ use crate::util::marker::{PhantomNoSendOrSync, PhantomNoSync};
 use crate::util::usually::MakeSync;
 use bumpalo::Bump;
 use derive_where::derive_where;
+use rustc_hash::FxHashMap;
 use std::alloc::Layout;
-use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::{PhantomData, Unsize};
-use std::ptr::{NonNull, Pointee};
+use std::ptr::NonNull;
 
 // === Flavor definitions === //
 
@@ -54,8 +54,7 @@ mod sealed {
 
 // === Obj === //
 
-type InlineMetaContainer = ByteContainer<usize>;
-type HeapMetaPtr = NonNull<u8>;
+type InlinePtrContainer = ByteContainer<(usize, usize)>;
 
 pub type StObj = Obj<SingleThreadedFlavor>;
 pub type SendObj = Obj<SendFlavor>;
@@ -63,7 +62,7 @@ pub type SendObj = Obj<SendFlavor>;
 #[derive_where(Debug, Default)]
 pub struct Obj<F: ObjFlavor = SendSyncFlavor> {
 	flavor: PhantomData<F>,
-	comps: HashMap<RawTypedKey, ObjEntry>,
+	comps: FxHashMap<RawTypedKey, ObjEntry>,
 	bump: MakeSync<Bump>,
 	#[cfg(debug_assertions)]
 	debug_label: Option<String>,
@@ -74,7 +73,7 @@ impl<F: ObjFlavor> Obj<F> {
 		Default::default()
 	}
 
-	#[allow(unused_variables)] // For "name" in release builds.
+	#[allow(unused_variables)] // "name" is unused in release builds.
 	pub fn labeled<D: Display>(name: D) -> Self {
 		Self {
 			flavor: PhantomData,
@@ -103,22 +102,21 @@ impl<F: ObjFlavor> Obj<F> {
 	{
 		// Ensure that we haven't already registered this key.
 		let owning_key = owning_key.raw();
-		assert!(!self.comps.contains_key(&owning_key));
+		assert!(
+			!self.comps.contains_key(&owning_key),
+			"Obj already contains component with key {owning_key:?}"
+		);
 
 		// Allocate component
 		let comp = self.bump.get().alloc_layout(Layout::new::<T>()).cast::<T>();
-		unsafe {
-			comp.as_ptr().write(value);
-		}
+		unsafe { comp.as_ptr().write(value) };
 
 		// Register the principal entry
-		let entry = ObjEntry::new_owned(comp, self.bump.get());
+		let entry = ObjEntry::new_owned(self.bump.get(), comp);
 		self.comps.insert(owning_key, entry);
 
 		// Register alias entries
-		unsafe {
-			alias_as.push_aliases(self, comp);
-		}
+		unsafe { alias_as.register_aliases(self, comp) };
 	}
 
 	pub fn add_in<T>(&mut self, value: T, owning_key: TypedKey<T>)
@@ -152,21 +150,21 @@ impl<F: ObjFlavor> Obj<F> {
 }
 
 impl<F: ObjFlavor> RawObj for Obj<F> {
-	fn provide_raw<'r>(&'r self, out: &mut ProviderOut<'r>) {
+	fn provide_raw<'t, 'r>(&'r self, out: &mut ProviderOut<'t, 'r>) {
 		let entry = match self.comps.get(&out.key()) {
 			Some(entry) => entry,
 			None => return,
 		};
 
-		let p_meta = if InlineMetaContainer::can_host_dyn("dynamic", out.meta_layout()).is_ok() {
-			// Get meta directly from the inline store
-			entry.ptr_meta.as_bytes_ptr()
+		let ptr = if InlinePtrContainer::can_host_dyn("dynamic", out.ptr_layout()).is_ok() {
+			// Get pointer directly from the inline store
+			entry.ptr.as_bytes_ptr()
 		} else {
-			// Get meta from the bump
-			unsafe { entry.ptr_meta.as_ref::<HeapMetaPtr>() }.as_ptr()
+			// Get pointer from the bump
+			*unsafe { entry.ptr.as_ref::<*const u8>() }
 		};
 
-		unsafe { out.provide_dynamic_unchecked(entry.base, p_meta) };
+		unsafe { out.provide_dynamic_unchecked(ptr) };
 	}
 }
 
@@ -181,9 +179,8 @@ impl<F: ObjFlavor> Drop for Obj<F> {
 }
 
 struct ObjEntry {
-	base: NonNull<()>,
-	ptr_meta: InlineMetaContainer,
-	drop_fn_or_alias: Option<unsafe fn(*mut ())>,
+	ptr: InlinePtrContainer,
+	drop_fn_or_alias: Option<unsafe fn(&mut ObjEntry)>,
 	#[cfg(debug_assertions)]
 	comp_name: &'static str,
 }
@@ -202,53 +199,53 @@ unsafe impl Send for ObjEntry {}
 unsafe impl Sync for ObjEntry {}
 
 impl ObjEntry {
-	pub fn new_common<T: ?Sized>(
-		ptr: NonNull<T>,
-		bump: &mut Bump,
-	) -> (NonNull<()>, InlineMetaContainer) {
-		let (ptr, ptr_meta) = ptr.to_raw_parts();
-		let ptr_meta = if let Ok(inlined) = InlineMetaContainer::try_new(ptr_meta) {
+	pub fn new_common<T: ?Sized>(bump: &mut Bump, ptr: NonNull<T>) -> InlinePtrContainer {
+		if let Ok(inlined) = InlinePtrContainer::try_new(ptr) {
 			inlined
 		} else {
 			// Reserve space on the bump.
-			let meta_on_heap = bump
-				.alloc_layout(Layout::new::<<T as Pointee>::Metadata>())
-				.cast::<<T as Pointee>::Metadata>();
+			let ptr_on_heap = bump
+				.alloc_layout(Layout::new::<NonNull<T>>())
+				.cast::<NonNull<T>>();
 
 			// And initialize it to the over-sized `ptr_meta`.
-			unsafe { meta_on_heap.as_ptr().write(ptr_meta) }
+			unsafe { ptr_on_heap.as_ptr().write(ptr) }
 
 			// Wrap the pointer to the heap.
-			ByteContainer::<usize>::new::<HeapMetaPtr>(meta_on_heap.cast::<u8>())
-		};
-
-		(ptr, ptr_meta)
+			InlinePtrContainer::new::<*mut u8>(ptr_on_heap.as_ptr() as *mut u8)
+		}
 	}
 
-	pub fn new_owned<T: Sized>(ptr: NonNull<T>, bump: &mut Bump) -> Self {
-		let (ptr, ptr_meta) = Self::new_common(ptr, bump);
+	pub fn new_owned<T: Sized>(bump: &mut Bump, ptr: NonNull<T>) -> Self {
+		let ptr = Self::new_common(bump, ptr);
 
-		unsafe fn drop_ptr<T>(ptr: *mut ()) {
-			ptr.cast::<T>().drop_in_place()
+		unsafe fn drop_ptr<T>(entry: &mut ObjEntry) {
+			if InlinePtrContainer::can_host::<NonNull<T>>().is_ok() {
+				entry.ptr.as_ref::<NonNull<T>>().as_ptr().drop_in_place();
+			} else {
+				// `p_ptr` is a pointer to the bytes of the target pointer.
+				let p_ptr = *entry.ptr.as_ref::<*mut u8>();
+				let p_ptr = p_ptr as *mut T;
+
+				p_ptr.drop_in_place();
+			}
 		}
 
-		let drop_fn: unsafe fn(*mut ()) = drop_ptr::<T>;
+		let drop_fn: unsafe fn(&mut ObjEntry) = drop_ptr::<T>;
 
 		Self {
-			base: ptr,
-			ptr_meta,
+			ptr,
 			drop_fn_or_alias: Some(drop_fn),
 			#[cfg(debug_assertions)]
 			comp_name: std::any::type_name::<T>(),
 		}
 	}
 
-	pub fn new_alias<T: ?Sized>(ptr: NonNull<T>, bump: &mut Bump) -> Self {
-		let (ptr, ptr_meta) = Self::new_common(ptr, bump);
+	pub fn new_alias<T: ?Sized>(bump: &mut Bump, ptr: NonNull<T>) -> Self {
+		let ptr = Self::new_common(bump, ptr);
 
 		Self {
-			base: ptr,
-			ptr_meta,
+			ptr,
 			drop_fn_or_alias: None,
 			#[cfg(debug_assertions)]
 			comp_name: std::any::type_name::<T>(),
@@ -257,41 +254,44 @@ impl ObjEntry {
 
 	pub unsafe fn drop_if_owned(&mut self) {
 		if let Some(drop_fn) = self.drop_fn_or_alias {
-			drop_fn(self.base.as_ptr())
+			drop_fn(self)
 		}
 	}
 }
 
 // === Alias lists === //
 
-pub unsafe trait AliasList<T: Sized> {
-	unsafe fn push_aliases<F: ObjFlavor>(self, map: &mut Obj<F>, ptr: NonNull<T>);
+pub trait AliasList<T: Sized> {
+	unsafe fn register_aliases<F: ObjFlavor>(self, map: &mut Obj<F>, ptr: NonNull<T>);
 }
 
-unsafe impl<T, U> AliasList<T> for TypedKey<U>
+impl<T, U> AliasList<T> for TypedKey<U>
 where
 	T: Sized + Unsize<U>,
 	U: ?Sized + 'static,
 {
-	unsafe fn push_aliases<F: ObjFlavor>(self, map: &mut Obj<F>, ptr: NonNull<T>) {
+	unsafe fn register_aliases<F: ObjFlavor>(self, obj: &mut Obj<F>, ptr: NonNull<T>) {
 		// Unsize the value and convert it back into a pointer
 		let ptr = (ptr.as_ref() as &U) as *const U as *mut U;
 		let ptr = NonNull::new_unchecked(ptr);
 
-		// Insert the entry
-		#[rustfmt::skip]
-		map.comps.insert(
-			self.raw(),
-			ObjEntry::new_alias(ptr, map.bump.get())
+		// Insert the entry so long as it doesn't already exist
+		let key = self.raw();
+		assert!(
+			!obj.comps.contains_key(&key),
+			"Obj already contains component with key {key:?}",
 		);
+
+		let entry = ObjEntry::new_alias(obj.bump.get(), ptr);
+		obj.comps.insert(key, entry);
 	}
 }
 
 macro tup_impl_alias_list($($name:ident: $field:tt),*) {
-unsafe impl<_Src: Sized $(,$name: AliasList<_Src>)*> AliasList<_Src> for ($($name,)*) {
+	impl<_Src: Sized $(,$name: AliasList<_Src>)*> AliasList<_Src> for ($($name,)*) {
 		#[allow(unused_variables)]
-		unsafe fn push_aliases<F: ObjFlavor>(self, obj: &mut Obj<F>, ptr: NonNull<_Src>) {
-			$( self.$field.push_aliases(obj, ptr); )*
+		unsafe fn register_aliases<F: ObjFlavor>(self, obj: &mut Obj<F>, ptr: NonNull<_Src>) {
+			$( self.$field.register_aliases(obj, ptr); )*
 		}
 	}
 }

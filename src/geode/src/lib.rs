@@ -3,8 +3,6 @@
 #![feature(unsize)]
 // Makes writing safe macros a bit easier.
 #![feature(decl_macro)]
-// Allows `Obj` to extract metadata from pointers so it can inline them directly in the entry.
-#![feature(ptr_metadata)]
 // Temporary lint suppression. Disable once we begin the process of releasing the crate.
 #![allow(clippy::missing_safety_doc)]
 

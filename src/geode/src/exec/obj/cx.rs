@@ -78,7 +78,7 @@ impl<'borrow, 'obj, O: ?Sized> ObjCx<'borrow, 'obj, O> {
 }
 
 impl<'borrow, 'obj, O: ?Sized + RawObj> RawObj for ObjCx<'borrow, 'obj, O> {
-	fn provide_raw<'r>(&'r self, out: &mut ProviderOut<'r>) {
+	fn provide_raw<'t, 'r>(&'r self, out: &mut ProviderOut<'t, 'r>) {
 		for ancestor in self.ancestors(true) {
 			ancestor.provide_raw(out);
 			if out.did_provide() {
