@@ -1,89 +1,64 @@
 use crate::exec::obj::read::RawObj;
 use crate::exec::obj::ProviderOut;
+use crate::util::iter_ext::DebugListIter;
 use std::fmt::{Debug, Formatter};
 
-pub struct ObjCx<'borrow, 'obj, O: ?Sized = dyn RawObj> {
-	backing: ObjCxBacking<'borrow, 'obj, O>,
-	length: usize,
+pub type ObjCx<'chain, 'obj> = AncestryChain<'chain, 'obj, dyn Send + Sync + RawObj>;
+pub type StObjCx<'chain, 'obj> = AncestryChain<'chain, 'obj, dyn RawObj>;
+pub type SendObjCx<'chain, 'obj> = AncestryChain<'chain, 'obj, dyn Send + RawObj>;
+
+#[derive(Clone)]
+pub struct AncestryChain<'chain, 'obj, O: ?Sized> {
+	pub node: &'obj O,
+	pub parent: Option<&'chain AncestryChain<'chain, 'obj, O>>,
 }
 
-enum ObjCxBacking<'borrow, 'obj, O: ?Sized> {
-	Root(Vec<&'obj O>),
-	Child(&'borrow mut Vec<&'obj O>),
-}
-
-impl<'borrow, 'obj, O: ?Sized + Debug> Debug for ObjCx<'borrow, 'obj, O> {
+impl<'chain, 'obj, O: ?Sized + Debug> Debug for AncestryChain<'chain, 'obj, O> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("ObjCx")
-			.field("children", &self.path())
-			.finish_non_exhaustive()
+			.field("ancestors", &DebugListIter::new(self.ancestors()))
+			.finish()
 	}
 }
 
-impl<'borrow, 'obj, O: ?Sized> ObjCx<'borrow, 'obj, O> {
-	pub fn with_root(root: &'obj O) -> Self {
-		Self {
-			backing: ObjCxBacking::Root(vec![root]),
-			length: 1,
+impl<'chain, 'obj, O: ?Sized> AncestryChain<'chain, 'obj, O> {
+	pub fn new(node: &'obj O) -> Self {
+		Self { node, parent: None }
+	}
+
+	pub fn with(&self, node: &'obj O) -> AncestryChain<O> {
+		AncestryChain {
+			node,
+			parent: Some(self),
 		}
 	}
 
-	fn backing_ref(&self) -> &Vec<&'obj O> {
-		match &self.backing {
-			ObjCxBacking::Root(root) => root,
-			ObjCxBacking::Child(root) => *root,
-		}
-	}
-
-	pub fn path(&self) -> &[&'obj O] {
-		&self.backing_ref()[0..self.length]
-	}
-
-	pub fn ancestors(&self, include_self: bool) -> impl Iterator<Item = &'obj O> + '_ {
-		let path = self.path();
-		let path = if include_self {
-			path
-		} else {
-			&path[0..path.len()]
-		};
-
-		path.iter().copied().rev()
-	}
-
-	pub fn me(&self) -> &'obj O {
-		self.path().last().unwrap()
-	}
-
-	pub fn with<'new_borrow>(&'new_borrow mut self, child: &'obj O) -> ObjCx<'new_borrow, 'obj, O> {
-		let root = match &mut self.backing {
-			ObjCxBacking::Root(root) => root,
-			ObjCxBacking::Child(root) => *root,
-		};
-
-		root.truncate(self.length);
-		root.push(child);
-
-		ObjCx {
-			backing: ObjCxBacking::Child(root),
-			length: self.length + 1,
-		}
-	}
-
-	pub fn owned(&self) -> ObjCx<'static, 'obj, O> {
-		ObjCx {
-			backing: ObjCxBacking::Root(self.backing_ref().clone()),
-			length: self.length,
-		}
+	pub fn ancestors<'a>(&'a self) -> ObjCxAncestryIter<'a, 'obj, O> {
+		ObjCxAncestryIter { next: Some(self) }
 	}
 }
 
-impl<'borrow, 'obj, O: ?Sized + RawObj> RawObj for ObjCx<'borrow, 'obj, O> {
+impl<O: ?Sized + RawObj> RawObj for AncestryChain<'_, '_, O> {
 	fn provide_raw<'t, 'r>(&'r self, out: &mut ProviderOut<'t, 'r>) {
-		for ancestor in self.ancestors(true) {
-			ancestor.provide_raw(out);
+		for ancestor in self.ancestors() {
 			if out.did_provide() {
 				return;
 			}
+			ancestor.provide_raw(out);
 		}
+	}
+}
+
+pub struct ObjCxAncestryIter<'chain, 'obj, O: ?Sized> {
+	pub next: Option<&'chain AncestryChain<'chain, 'obj, O>>,
+}
+
+impl<'chain, 'obj, O: ?Sized> Iterator for ObjCxAncestryIter<'chain, 'obj, O> {
+	type Item = &'obj O;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let next = self.next?;
+		self.next = next.parent;
+		Some(next.node)
 	}
 }

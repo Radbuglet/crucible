@@ -138,3 +138,7 @@ impl Viewport {
 #[derive(Debug, Copy, Clone, Error)]
 #[error("out of device memory")]
 pub struct OutOfDeviceMemoryError;
+
+event_trait! {
+	pub trait ViewportRenderer::on_viewport_render(&self, cx: &ObjCx, frame: wgpu::SurfaceTexture);
+}

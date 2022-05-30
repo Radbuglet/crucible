@@ -1,6 +1,7 @@
 use derive_where::derive_where;
+use std::cell::Cell;
 use std::cmp::Ordering;
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::Peekable;
 
@@ -95,6 +96,29 @@ impl<T: Ord, IL: Iterator<Item = T>, IR: Iterator<Item = T>> Iterator
 		}
 
 		None
+	}
+}
+
+pub struct DebugListIter<I>(Cell<Option<I>>);
+
+impl<I> DebugListIter<I> {
+	pub fn new(iter: I) -> Self {
+		Self(Cell::new(Some(iter)))
+	}
+}
+
+impl<I: IntoIterator<Item = T>, T: Debug> Debug for DebugListIter<I> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let mut builder = f.debug_list();
+		let iter = self
+			.0
+			.replace(None)
+			.expect("`DebugListIter` can only be used once.");
+
+		for item in iter {
+			builder.entry(&item);
+		}
+		builder.finish()
 	}
 }
 

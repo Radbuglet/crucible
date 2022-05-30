@@ -8,176 +8,155 @@ use std::marker::Unsize;
 use std::ops::{CoerceUnsized, Deref, DerefMut};
 use std::sync::atomic::{AtomicIsize, Ordering as AtomicOrdering};
 
+// === Locking === //
+
 const TOO_MANY_REFS_ERROR: &str =
 	"Cannot create more than isize::MAX concurrent references to an `ARefCell`.";
 
-/// An [RwLock](std::sync::RwLock) without blocking capabilities. Users are much better off using a
-/// dedicated scheduler to handle resource access synchronization as blocking [RwLock]s do not provide
-/// the semantics required to implement true resource lock scheduling (system dependencies are expressed
-/// as unordered sets; `Mutexes` and `RwLocks` must have a well defined lock order to avoid dead-locks).
-pub struct ARefCell<T: ?Sized> {
+#[derive(Default)]
+struct LockCounter {
+	// Interpreting the values:
+	// - Positive values mean the lock is mutably locked (there can be more than one active mutable
+	// borrow in the case of split borrows).
+	// - Zero means the lock is unborrowed.
+	// - Negative means the lock is immutably locked.
+	//
+	// This `AtomicIsize` is wrapped in a `UsuallySafeCell` to allow unsafe unsynchronized calls to
+	// promote their `&self` to a `&mut AtomicIsize`. This should allow `ARefCell` to become a drop-in
+	// replacement for `RefCell` without any performance penalty. Unfortunately, we haven't
+	// implemented this for `Obj` yet.
 	rc: UsuallySafeCell<AtomicIsize>,
-	value: UnsafeCell<T>,
 }
 
-impl<T: Debug> Debug for ARefCell<T> {
+impl Debug for LockCounter {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		let mut rw_guard: Option<ARef<T>> = None;
-
-		let value_debug: &dyn Debug = self
-			.try_borrow()
-			.map_or(&"cannot inspect without blocking", |guard| {
-				rw_guard.insert(guard)
-			});
-
-		f.debug_struct("ARefCell")
-			.field("rc", &self.lock_state_snapshot())
-			.field("value", value_debug)
+		f.debug_struct("LockCounter")
+			.field("rc", &self.snapshot())
 			.finish()
 	}
 }
 
-impl<T: Clone> Clone for ARefCell<T> {
-	fn clone(&self) -> Self {
-		Self::new(self.borrow().clone())
-	}
-}
-
-impl<T: Default> Default for ARefCell<T> {
-	fn default() -> Self {
-		Self::new(T::default())
-	}
-}
-
-impl<T, U> CoerceUnsized<ARefCell<U>> for ARefCell<T> where T: CoerceUnsized<U> {}
-
-unsafe impl<T: ?Sized + Send> Send for ARefCell<T> {}
-unsafe impl<T: ?Sized + Sync> Sync for ARefCell<T> {}
-
-impl<T> ARefCell<T> {
-	pub fn new(value: T) -> Self {
-		Self {
-			rc: UsuallySafeCell::new(AtomicIsize::new(0)),
-			value: UnsafeCell::new(value),
-		}
-	}
-
-	pub fn into_inner(self) -> T {
-		self.value.into_inner()
-	}
-}
-
-impl<T: ?Sized> ARefCell<T> {
-	pub fn as_ptr(&self) -> *mut T {
-		self.value.get()
-	}
-
-	pub fn get_mut(&mut self) -> &mut T {
-		self.value.get_mut()
+impl LockCounter {
+	pub fn snapshot(&self) -> LockState {
+		LockState::parse(self.rc.load(AtomicOrdering::Relaxed))
 	}
 
 	pub fn undo_leak(&mut self) {
 		*self.rc.get_mut() = 0;
 	}
+}
 
-	pub fn lock_state_snapshot(&self) -> LockState {
-		LockState::from_state(self.rc.load(AtomicOrdering::Relaxed))
-	}
+type WriteGuard<'a> = LockGuard<'a, true>;
+type ReadGuard<'a> = LockGuard<'a, false>;
 
-	// === Immutable Borrow === //
+struct LockGuard<'a, const IS_WRITE: bool> {
+	target: &'a LockCounter,
+}
 
-	pub unsafe fn try_borrow_unsynchronized(&self) -> Result<ARef<T>, LockError> {
-		let rc = self.rc.unchecked_get_mut().get_mut();
-
-		if *rc <= 0 {
-			*rc = rc.checked_sub(1).expect(TOO_MANY_REFS_ERROR);
-			Ok(ARef {
-				borrow: ABorrow(&self.rc),
-				value: &*self.value.get(),
-			})
-		} else {
-			Err(LockError {
-				state: LockState::from_state(*rc),
-			})
-		}
-	}
-
-	pub unsafe fn borrow_unsynchronized(&self) -> ARef<T> {
-		self.try_borrow_unsynchronized().unwrap_pretty()
-	}
-
-	pub fn try_borrow(&self) -> Result<ARef<T>, LockError> {
-		let result = self
-			.rc
-			.fetch_update(AtomicOrdering::Acquire, AtomicOrdering::Relaxed, |rc| {
-				if rc <= 0 {
-					Some(rc.checked_sub(1).expect(TOO_MANY_REFS_ERROR))
-				} else {
-					None
+impl<'a, const IS_WRITE: bool> LockGuard<'a, IS_WRITE> {
+	/// Attempts to create a new lock over the provided [LockCounter], returning a [LockError] if it
+	/// fails. This is semantically equivalent to locking the entire container, which means that:
+	///
+	/// - mutably borrowed containers cannot be immutably borrowed and vice-versa.
+	/// - mutably borrowed containers cannot be mutably borrowed again, even though multiple concurrent
+	///   mutable borrows are sometimes possible in the case of guard splitting. To handle cases such
+	///   as guard splitting, `clone` the lock guard instead.
+	///
+	pub fn try_lock(target: &'a LockCounter) -> Result<Self, LockError> {
+		let result = target.rc.fetch_update(
+			AtomicOrdering::Acquire, // FIXME: Why is *this* the ordering `rustc` suggests to me?!
+			AtomicOrdering::Relaxed,
+			|val| match IS_WRITE {
+				// Run write behavior
+				true => {
+					if val == 0 {
+						Some(1)
+					} else {
+						None
+					}
 				}
-			});
+				// Run read behavior
+				false => {
+					if val <= 0 {
+						Some(val.checked_sub(1).expect(TOO_MANY_REFS_ERROR))
+					} else {
+						None
+					}
+				}
+			},
+		);
 
 		match result {
-			Ok(_) => Ok(ARef {
-				borrow: ABorrow(&self.rc),
-				value: unsafe { &*self.value.get() },
-			}),
-			Err(rc) => Err(LockError {
-				state: LockState::from_state(rc),
+			Ok(_) => Ok(Self { target }),
+			Err(state) => Err(LockError {
+				state: LockState::parse(state),
 			}),
 		}
 	}
 
-	pub fn borrow(&self) -> ARef<T> {
-		self.try_borrow().unwrap_pretty()
-	}
-
-	// === Mutable Borrow === //
-
-	pub unsafe fn try_borrow_unsynchronized_mut(&self) -> Result<AMut<T>, LockError> {
-		let rc = self.rc.unchecked_get_mut().get_mut();
-
-		if *rc == 0 {
-			*rc = 1;
-			Ok(AMut {
-				borrow: ABorrow(&self.rc),
-				value: &mut *self.value.get(),
-			})
-		} else {
-			Err(LockError {
-				state: LockState::from_state(*rc),
-			})
-		}
-	}
-
-	pub unsafe fn borrow_unsynchronized_mut(&self) -> AMut<T> {
-		self.try_borrow_unsynchronized_mut().unwrap_pretty()
-	}
-
-	pub fn try_borrow_mut(&self) -> Result<AMut<T>, LockError> {
-		let result = self
-			.rc
-			.fetch_update(AtomicOrdering::Acquire, AtomicOrdering::Relaxed, |rc| {
-				if rc == 0 {
-					Some(1)
+	pub unsafe fn try_lock_unsynchronized(target: &'a LockCounter) -> Result<Self, LockError> {
+		let rc = target.rc.unchecked_get_mut().get_mut();
+		let result = match IS_WRITE {
+			// Run write behavior
+			true => {
+				if *rc == 0 {
+					*rc = 1;
+					true
 				} else {
-					None
+					false
 				}
-			});
+			}
+			// Run read behavior
+			false => {
+				if *rc <= 0 {
+					*rc = rc.checked_sub(1).expect(TOO_MANY_REFS_ERROR);
+					true
+				} else {
+					false
+				}
+			}
+		};
 
 		match result {
-			Ok(_) => Ok(AMut {
-				borrow: ABorrow(&self.rc),
-				value: unsafe { &mut *self.value.get() },
-			}),
-			Err(rc) => Err(LockError {
-				state: LockState::from_state(rc),
+			true => Ok(Self { target }),
+			false => Err(LockError {
+				state: LockState::parse(*rc),
 			}),
 		}
 	}
 
-	pub fn borrow_mut(&self) -> AMut<T> {
-		self.try_borrow_mut().unwrap_pretty()
+	const fn acquire_delta() -> isize {
+		if IS_WRITE {
+			1
+		} else {
+			-1
+		}
+	}
+}
+
+impl<const IS_WRITE: bool> Clone for LockGuard<'_, IS_WRITE> {
+	fn clone(&self) -> Self {
+		let success = self
+			.target
+			.rc
+			.fetch_update(AtomicOrdering::Relaxed, AtomicOrdering::Relaxed, |val| {
+				val.checked_add(Self::acquire_delta())
+			})
+			.is_ok();
+
+		assert!(success, "{TOO_MANY_REFS_ERROR}");
+
+		Self {
+			target: self.target,
+		}
+	}
+}
+
+impl<const IS_WRITE: bool> Drop for LockGuard<'_, IS_WRITE> {
+	fn drop(&mut self) {
+		self.target
+			.rc
+			.fetch_sub(Self::acquire_delta(), AtomicOrdering::Release);
 	}
 }
 
@@ -189,7 +168,7 @@ pub enum LockState {
 }
 
 impl LockState {
-	fn from_state(value: isize) -> Self {
+	fn parse(value: isize) -> Self {
 		match 0.cmp(&value) {
 			Ordering::Less => LockState::Immutably(-value as usize),
 			Ordering::Equal => LockState::Unborrowed,
@@ -237,41 +216,144 @@ impl Display for LockError {
 	}
 }
 
-type ABorrowRef<'a> = ABorrow<'a, { -1 }>;
-type ABorrowMut<'a> = ABorrow<'a, 1>;
+// === ARefCell === //
 
-struct ABorrow<'a, const DELTA: isize>(&'a AtomicIsize);
+/// An [RwLock](std::sync::RwLock) without blocking capabilities. Users are much better off using a
+/// dedicated scheduler to handle resource access synchronization because blocking [RwLock]s do not
+/// provide the semantics required to implement true resource lock scheduling (system dependencies are
+/// expressed as unordered sets; `Mutexes` and `RwLocks` must have a well defined lock order to avoid
+/// dead-locks).
+pub struct ARefCell<T: ?Sized> {
+	counter: LockCounter,
+	value: UnsafeCell<T>,
+}
 
-impl<const DELTA: isize> Clone for ABorrow<'_, DELTA> {
-	fn clone(&self) -> Self {
-		let success = self
-			.0
-			.fetch_update(AtomicOrdering::Relaxed, AtomicOrdering::Relaxed, |val| {
-				val.checked_add(DELTA)
-			})
-			.is_ok();
+impl<T: Debug> Debug for ARefCell<T> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let mut rw_guard: Option<ARef<T>> = None;
 
-		assert!(success, "{}", TOO_MANY_REFS_ERROR);
+		let value_debug: &dyn Debug = self
+			.try_borrow()
+			.map_or(&"cannot inspect without blocking", |guard| {
+				rw_guard.insert(guard)
+			});
 
-		Self(self.0)
+		f.debug_struct("ARefCell")
+			.field("counter", &self.counter)
+			.field("value", value_debug)
+			.finish()
 	}
 }
 
-impl<const DELTA: isize> Drop for ABorrow<'_, DELTA> {
-	fn drop(&mut self) {
-		self.0.fetch_sub(DELTA, AtomicOrdering::Release);
+impl<T: Clone> Clone for ARefCell<T> {
+	fn clone(&self) -> Self {
+		Self::new(self.borrow().clone())
+	}
+}
+
+impl<T: Default> Default for ARefCell<T> {
+	fn default() -> Self {
+		Self::new(T::default())
+	}
+}
+
+impl<T, U> CoerceUnsized<ARefCell<U>> for ARefCell<T> where T: CoerceUnsized<U> {}
+
+unsafe impl<T: ?Sized + Send> Send for ARefCell<T> {}
+unsafe impl<T: ?Sized + Sync> Sync for ARefCell<T> {}
+
+impl<T> ARefCell<T> {
+	pub fn new(value: T) -> Self {
+		Self {
+			counter: LockCounter::default(),
+			value: UnsafeCell::new(value),
+		}
+	}
+
+	pub fn into_inner(self) -> T {
+		self.value.into_inner()
+	}
+}
+
+impl<T: ?Sized> ARefCell<T> {
+	pub fn as_ptr(&self) -> *mut T {
+		self.value.get()
+	}
+
+	pub fn get_mut(&mut self) -> &mut T {
+		self.value.get_mut()
+	}
+
+	pub fn undo_leak(&mut self) {
+		self.counter.undo_leak();
+	}
+
+	pub fn lock_state_snapshot(&self) -> LockState {
+		self.counter.snapshot()
+	}
+
+	// === Immutable Borrow === //
+
+	pub unsafe fn try_borrow_unsynchronized(&self) -> Result<ARef<T>, LockError> {
+		let guard = ReadGuard::try_lock_unsynchronized(&self.counter)?;
+		Ok(ARef {
+			guard,
+			value: &*self.value.get(),
+		})
+	}
+
+	pub unsafe fn borrow_unsynchronized(&self) -> ARef<T> {
+		self.try_borrow_unsynchronized().unwrap_pretty()
+	}
+
+	pub fn try_borrow(&self) -> Result<ARef<T>, LockError> {
+		let guard = ReadGuard::try_lock(&self.counter)?;
+		Ok(ARef {
+			guard,
+			value: unsafe { &*self.value.get() },
+		})
+	}
+
+	pub fn borrow(&self) -> ARef<T> {
+		self.try_borrow().unwrap_pretty()
+	}
+
+	// === Mutable Borrow === //
+
+	pub unsafe fn try_borrow_unsynchronized_mut(&self) -> Result<AMut<T>, LockError> {
+		let guard = WriteGuard::try_lock_unsynchronized(&self.counter)?;
+		Ok(AMut {
+			guard,
+			value: &mut *self.value.get(),
+		})
+	}
+
+	pub unsafe fn borrow_unsynchronized_mut(&self) -> AMut<T> {
+		self.try_borrow_unsynchronized_mut().unwrap_pretty()
+	}
+
+	pub fn try_borrow_mut(&self) -> Result<AMut<T>, LockError> {
+		let guard = WriteGuard::try_lock(&self.counter)?;
+		Ok(AMut {
+			guard,
+			value: unsafe { &mut *self.value.get() },
+		})
+	}
+
+	pub fn borrow_mut(&self) -> AMut<T> {
+		self.try_borrow_mut().unwrap_pretty()
 	}
 }
 
 pub struct ARef<'a, T: ?Sized> {
-	borrow: ABorrowRef<'a>,
+	guard: ReadGuard<'a>,
 	value: &'a T,
 }
 
 impl<'a, T: ?Sized> ARef<'a, T> {
 	pub fn clone_ref(target: &Self) -> Self {
 		Self {
-			borrow: target.borrow.clone(),
+			guard: target.guard.clone(),
 			value: target.value,
 		}
 	}
@@ -281,9 +363,9 @@ impl<'a, T: ?Sized> ARef<'a, T> {
 		F: FnOnce(&T) -> &U,
 		U: ?Sized,
 	{
-		let Self { borrow, value } = target;
+		let Self { guard, value } = target;
 		ARef {
-			borrow,
+			guard,
 			value: f(value),
 		}
 	}
@@ -297,9 +379,12 @@ impl<'a, T: ?Sized> ARef<'a, T> {
 			Some(value) => value,
 			None => return Err(target),
 		};
-		let borrow = target.borrow;
+		let borrow = target.guard;
 
-		Ok(ARef { borrow, value })
+		Ok(ARef {
+			guard: borrow,
+			value,
+		})
 	}
 
 	pub fn map_slit<U, V, F>(target: Self, f: F) -> (ARef<'a, U>, ARef<'a, V>)
@@ -308,15 +393,15 @@ impl<'a, T: ?Sized> ARef<'a, T> {
 		U: ?Sized,
 		V: ?Sized,
 	{
-		let Self { borrow, value } = target;
+		let Self { guard, value } = target;
 		let (left, right) = f(value);
 
 		let left = ARef {
-			borrow: borrow.clone(),
+			guard: guard.clone(),
 			value: left,
 		};
 		let right = ARef {
-			borrow,
+			guard,
 			value: right,
 		};
 
@@ -324,8 +409,8 @@ impl<'a, T: ?Sized> ARef<'a, T> {
 	}
 
 	pub fn leak(target: Self) -> &'a T {
-		let Self { borrow, value } = target;
-		std::mem::forget(borrow);
+		let Self { guard, value } = target;
+		std::mem::forget(guard);
 		value
 	}
 }
@@ -358,7 +443,7 @@ impl<T: ?Sized + Display> Display for ARef<'_, T> {
 }
 
 pub struct AMut<'a, T: ?Sized> {
-	borrow: ABorrowMut<'a>,
+	guard: WriteGuard<'a>,
 	value: &'a mut T,
 }
 
@@ -368,9 +453,9 @@ impl<'a, T: ?Sized> AMut<'a, T> {
 		F: FnOnce(&mut T) -> &mut U,
 		U: ?Sized,
 	{
-		let Self { borrow, value } = target;
+		let Self { guard, value } = target;
 		AMut {
-			borrow,
+			guard,
 			value: f(value),
 		}
 	}
@@ -394,9 +479,9 @@ impl<'a, T: ?Sized> AMut<'a, T> {
 				None => return Err(target),
 			}
 		};
-		let borrow = target.borrow;
+		let guard = target.guard;
 
-		Ok(AMut { borrow, value })
+		Ok(AMut { guard, value })
 	}
 
 	pub fn map_slit<U, V, F>(target: Self, f: F) -> (AMut<'a, U>, AMut<'a, V>)
@@ -405,15 +490,15 @@ impl<'a, T: ?Sized> AMut<'a, T> {
 		U: ?Sized,
 		V: ?Sized,
 	{
-		let Self { borrow, value } = target;
+		let Self { guard, value } = target;
 		let (left, right) = f(value);
 
 		let left = AMut {
-			borrow: borrow.clone(),
+			guard: guard.clone(),
 			value: left,
 		};
 		let right = AMut {
-			borrow,
+			guard,
 			value: right,
 		};
 
@@ -421,8 +506,8 @@ impl<'a, T: ?Sized> AMut<'a, T> {
 	}
 
 	pub fn leak(target: Self) -> &'a mut T {
-		let Self { borrow, value } = target;
-		std::mem::forget(borrow);
+		let Self { guard, value } = target;
+		std::mem::forget(guard);
 		value
 	}
 }

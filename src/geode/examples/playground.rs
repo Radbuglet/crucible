@@ -5,7 +5,7 @@ fn main() {
 	let root = make_engine_root();
 
 	root.get::<dyn TickHandler>()
-		.on_tick(&mut ObjCx::with_root(&root));
+		.on_tick(&ObjCx::with_root(&root));
 
 	root.borrow_mut::<MyService>().count();
 	root.borrow_mut::<MyService>().count();
@@ -20,7 +20,7 @@ fn make_engine_root() -> Obj {
 
 	root.add_rw(MyService::default());
 	root.add_alias(
-		|obj: &mut ObjCx| {
+		|obj: &ObjCx| {
 			obj.inject(|mut service: AMut<MyService>| {
 				service.count();
 				service.count();
@@ -47,5 +47,5 @@ impl MyService {
 }
 
 event_trait! {
-	trait TickHandler::on_tick(&self, cx: &mut ObjCx);
+	trait TickHandler::on_tick(&self, cx: &ObjCx);
 }

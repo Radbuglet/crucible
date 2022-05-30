@@ -47,3 +47,7 @@ impl SceneManager {
 			.expect("Called `current_scene` before an initial scene was provided.")
 	}
 }
+
+event_trait! {
+	pub trait UpdateHandler::on_update(&self, cx: &ObjCx);
+}

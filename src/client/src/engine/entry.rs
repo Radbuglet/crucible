@@ -2,17 +2,18 @@ use crate::engine::gfx::{
 	CompatQueryInfo, GfxContext, GfxFeatureDetector, GfxFeatureNeedsScreen,
 	GfxFeaturePowerPreference,
 };
-use crate::engine::scene::SceneManager;
-use crate::engine::viewport::{Viewport, ViewportManager};
+use crate::engine::input::InputTracker;
+use crate::engine::scene::{SceneManager, UpdateHandler};
+use crate::engine::viewport::{Viewport, ViewportManager, ViewportRenderer};
 use crate::game::entry::make_game_scene;
 use crate::util::features::FeatureList;
-use crate::util::winit::WinitEventHandler;
 use crate::util::winit::{WinitEventBundle, WinitUserdata};
 use anyhow::Context;
 use futures::executor::block_on;
 use geode::prelude::*;
 use winit::dpi::LogicalSize;
-use winit::event_loop::EventLoop;
+use winit::event::{Event, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 
 pub fn main_inner() -> anyhow::Result<()> {
@@ -32,15 +33,115 @@ pub fn main_inner() -> anyhow::Result<()> {
 		}
 	});
 
+	// We wrap the root in an optional so we can force the destructors to run at a given time.
+	let mut root = Some(root);
+
 	event_loop.run(move |event, proxy, flow| {
-		let mut bundle = WinitEventBundle { event, proxy, flow };
-		let sm = root.borrow::<SceneManager>();
-		sm.current_scene()
-			.get::<dyn WinitEventHandler>()
-			.on_winit_event(&mut ObjCx::with_root(&root), &mut bundle);
-		drop(sm);
-		let mut sm = root.borrow_mut::<SceneManager>();
-		sm.swap_scenes();
+		// Acquire root context
+		let bundle = WinitEventBundle { event, proxy, flow };
+		let root_ref = root.as_ref().unwrap();
+		let cx = ObjCx::new(root_ref);
+
+		// Acquire services
+		let gfx = root_ref.get::<GfxContext>();
+
+		match &bundle.event {
+			// First, `NewEvents` is triggered.
+			Event::NewEvents(_) => {}
+
+			// Then, window, device, and user events are triggered.
+			Event::WindowEvent { event, window_id } => {
+				let mut viewport_mgr = root_ref.borrow_mut::<ViewportManager>();
+				let viewport = match viewport_mgr.get_viewport(*window_id) {
+					Some(viewport) => viewport,
+					None => {
+						log::warn!("Received WindowEvent for unregistered viewport {window_id:?}. Ignoring.");
+						return;
+					}
+				};
+
+				// Handle inputs
+				viewport
+					.borrow_mut::<InputTracker>()
+					.handle_window_event(event);
+
+				// Handle close requests
+				if let WindowEvent::CloseRequested = event {
+					viewport_mgr.unregister(*window_id);
+
+					if viewport_mgr.viewports().next().is_none() {
+						*bundle.flow = ControlFlow::Exit;
+					}
+				}
+			}
+			Event::DeviceEvent { device_id, event } => {
+				let viewport_mgr = root_ref.borrow::<ViewportManager>();
+				for (_, viewport) in viewport_mgr.viewports() {
+					viewport
+						.borrow_mut::<InputTracker>()
+						.handle_device_event(*device_id, event);
+				}
+			}
+			Event::UserEvent(_) => {}
+
+			// These are also technically window events
+			Event::Suspended => {}
+			Event::Resumed => {}
+
+			// After all user events have been triggered, this event is triggered.
+			Event::MainEventsCleared => {
+				// TODO: This logic is kinda nonsense.
+
+				// Handle scene manager update logic if needed.
+				{
+					let sm = root_ref.get::<ARefCell<SceneManager>>();
+					sm.borrow_mut().swap_scenes();
+
+					let sm = sm.borrow();
+					let current_scene = sm.current_scene();
+					current_scene.get::<dyn UpdateHandler>().on_update(&cx);
+				}
+
+				// Dispatch per-frame viewport logic
+				let viewport_mgr = root_ref.borrow::<ViewportManager>();
+				for (_, viewport) in viewport_mgr.viewports() {
+					viewport.borrow_mut::<InputTracker>().end_tick();
+					viewport.borrow_mut::<Viewport>().window().request_redraw();
+				}
+			}
+
+			// Redraws are processed
+			Event::RedrawRequested(window_id) => {
+				let viewport_mgr = root_ref.borrow::<ViewportManager>();
+				let viewport = match viewport_mgr.get_viewport(*window_id) {
+					Some(viewport) => viewport,
+					None => {
+						log::warn!("Received RedrawRequested for unregistered viewport {window_id:?}. Ignoring.");
+						return;
+					}
+				};
+
+				let frame = match viewport.borrow_mut::<Viewport>().render(gfx).unwrap() {
+					Some(frame) => frame,
+					None => return,
+				};
+
+				viewport
+					.get::<dyn ViewportRenderer>()
+					.on_viewport_render(&cx, frame);
+			}
+			Event::RedrawEventsCleared => {}
+
+			// This is triggered once immediately before the engine terminates.
+			// All remaining destructors will run after this.
+			Event::LoopDestroyed => {
+				// Destroy the engine root to run remaining finalizers
+				root = None;
+
+				// Then, log goodbye.
+				log::info!("Goodbye!");
+			}
+		}
 	});
 }
 
@@ -70,7 +171,21 @@ async fn make_engine_root(event_loop: &EventLoop<WinitUserdata>) -> anyhow::Resu
 		// Setup viewport manager
 		let gfx = root.get::<GfxContext>();
 		let mut vm = ViewportManager::default();
-		vm.register(gfx, Obj::new(), main_window, main_swapchain);
+
+		let mut viewport = Obj::labeled("main viewport");
+		viewport.add_alias(
+			|cx: &ObjCx, frame: wgpu::SurfaceTexture| {
+				cx.borrow::<SceneManager>()
+					.current_scene()
+					.get::<dyn ViewportRenderer>()
+					// TODO: Adjust `cx`
+					.on_viewport_render(cx, frame)
+			},
+			typed_key::<dyn ViewportRenderer>(),
+		);
+		viewport.add_rw(InputTracker::default());
+		vm.register(gfx, viewport, main_window, main_swapchain);
+
 		root.add_rw(vm);
 	};
 

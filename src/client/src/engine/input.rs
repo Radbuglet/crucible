@@ -6,8 +6,8 @@ use winit::event::{
 	DeviceEvent, DeviceId, ElementState, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent,
 };
 
-/// Tracks keyboard & mouse input states. Users may still need to listen for events to detect certain
-/// actions.
+/// Tracks keyboard & mouse input states. Users may still need to listen for events to detect
+/// certain actions.
 pub struct InputTracker {
 	keys: HashMap<VirtualKeyCode, BoolAction>,
 	mouse_buttons: HashMap<MouseButton, BoolAction>,
@@ -92,7 +92,9 @@ impl InputTracker {
 	pub fn handle_device_event(&mut self, _device_id: DeviceId, event: &DeviceEvent) {
 		match event {
 			DeviceEvent::MouseMotion { delta: (dx, dy) } => {
-				self.mouse_delta += Vector2::new(*dx, *dy);
+				if self.has_focus {
+					self.mouse_delta += Vector2::new(*dx, *dy);
+				}
 			}
 			_ => {}
 		}
