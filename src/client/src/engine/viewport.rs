@@ -5,6 +5,7 @@ use thiserror::Error;
 use winit::window::{Window, WindowId};
 
 const DEFAULT_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
+const UNMOUNTED_WINDOW_FETCH_ERR: &'static str = "attempted to get window for unmounted viewport";
 
 #[derive(Debug, Default)]
 pub struct ViewportManager {
@@ -32,7 +33,7 @@ impl ViewportManager {
 		};
 		surface.configure(&gfx.device, &config);
 		target.add_rw(Viewport {
-			window,
+			window: Some(window),
 			surface,
 			config,
 			config_changed: false,
@@ -48,14 +49,19 @@ impl ViewportManager {
 		self.viewports.get(&id)
 	}
 
-	pub fn viewports(&self) -> impl Iterator<Item = (WindowId, &Obj)> {
+	pub fn all_viewports(&self) -> impl Iterator<Item = (WindowId, &Obj)> {
 		self.viewports.iter().map(|(k, v)| (*k, v))
+	}
+
+	pub fn mounted_viewports(&self) -> impl Iterator<Item = (WindowId, &Obj)> {
+		self.all_viewports()
+			.filter(|(_, v)| v.borrow::<Viewport>().is_mounted())
 	}
 }
 
 #[derive(Debug)]
 pub struct Viewport {
-	window: Window,
+	window: Option<Window>,
 	surface: wgpu::Surface,
 	config: wgpu::SurfaceConfiguration,
 	config_changed: bool,
@@ -68,8 +74,10 @@ impl Viewport {
 	) -> Result<Option<wgpu::SurfaceTexture>, OutOfDeviceMemoryError> {
 		use wgpu::SurfaceError::*;
 
+		let window = self.window.as_ref().expect(UNMOUNTED_WINDOW_FETCH_ERR);
+
 		// Ensure that the surface texture matches the window's physical (backing buffer) size
-		let win_size = self.window.inner_size();
+		let win_size = window.inner_size();
 
 		let preferred_format = self
 			.surface
@@ -101,7 +109,7 @@ impl Viewport {
 			Err(Timeout) => {
 				log::warn!(
 					"Request to acquire swap-chain for window {:?} timed out.",
-					self.window.id()
+					window.id()
 				);
 				Ok(None)
 			}
@@ -109,7 +117,7 @@ impl Viewport {
 			Err(Outdated) | Err(Lost) => {
 				log::warn!(
 					"Swap-chain for window {:?} is outdated or was lost.",
-					self.window.id()
+					window.id()
 				);
 
 				// Try to recreate the swap-chain and try again.
@@ -121,7 +129,7 @@ impl Viewport {
 					_ => {
 						log::warn!(
 							"Failed to acquire swap-chain for window {:?} after swap-chain was recreated.",
-							self.window.id()
+							window.id()
 						);
 						Ok(None)
 					}
@@ -130,8 +138,16 @@ impl Viewport {
 		}
 	}
 
-	pub fn window(&self) -> &Window {
-		&self.window
+	pub fn window(&self) -> Option<&Window> {
+		self.window.as_ref()
+	}
+
+	pub fn is_mounted(&self) -> bool {
+		self.window.is_some()
+	}
+
+	pub fn unmount(&mut self) -> Option<Window> {
+		self.window.take()
 	}
 }
 

@@ -2,10 +2,13 @@
 
 - [ ] Obj:
   - [ ] Integrate with `Storages`.
-  - [ ] Allow single-threaded `RefCell` tracking via `&mut`.
-  - [ ] Bring back the `Provider`.
   - [ ] Allow `Obj` to be extended with `&self` (this doesn't impact fetch lifetimes).
-  - [ ] Implement mixed `ObjCx` flavors.
+  - [ ] Allow `Obj` to expose computed parameters.
+  - [ ] Allow `Obj` to expose smart-pointer-guarded components (maybe remove `Bump` entirely?).
+  - [ ] Implement `ReadonlyObj` with contravariant flavor semantics.
+- [ ] Cx:
+  - [ ] Implement a separate tree for context temporaries and nodes.
+  - [ ] Implement dependency suppliers.
 - [ ] Events:
   - [ ] Multiplex event traits
   - [ ] Deferrable event traits

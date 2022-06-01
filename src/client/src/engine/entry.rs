@@ -28,8 +28,12 @@ pub fn main_inner() -> anyhow::Result<()> {
 	// Run engine
 	log::info!("Main loop starting.");
 	root.inject(|vm: ARef<ViewportManager>| {
-		for (_, viewport_obj) in vm.viewports() {
-			viewport_obj.borrow::<Viewport>().window().set_visible(true);
+		for (_, viewport_obj) in vm.mounted_viewports() {
+			viewport_obj
+				.borrow::<Viewport>()
+				.window()
+				.unwrap()
+				.set_visible(true);
 		}
 	});
 
@@ -67,16 +71,19 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 				// Handle close requests
 				if let WindowEvent::CloseRequested = event {
-					viewport_mgr.unregister(*window_id);
+					drop(viewport.borrow_mut::<Viewport>().unmount());
+				}
 
-					if viewport_mgr.viewports().next().is_none() {
+				if let WindowEvent::Destroyed = event {
+					viewport_mgr.unregister(*window_id);
+					if viewport_mgr.mounted_viewports().next().is_none() {
 						*bundle.flow = ControlFlow::Exit;
 					}
 				}
 			}
 			Event::DeviceEvent { device_id, event } => {
 				let viewport_mgr = root_ref.borrow::<ViewportManager>();
-				for (_, viewport) in viewport_mgr.viewports() {
+				for (_, viewport) in viewport_mgr.all_viewports() {
 					viewport
 						.borrow_mut::<InputTracker>()
 						.handle_device_event(*device_id, event);
@@ -104,9 +111,13 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 				// Dispatch per-frame viewport logic
 				let viewport_mgr = root_ref.borrow::<ViewportManager>();
-				for (_, viewport) in viewport_mgr.viewports() {
+				for (_, viewport) in viewport_mgr.mounted_viewports() {
 					viewport.borrow_mut::<InputTracker>().end_tick();
-					viewport.borrow_mut::<Viewport>().window().request_redraw();
+					viewport
+						.borrow_mut::<Viewport>()
+						.window()
+						.unwrap()
+						.request_redraw();
 				}
 			}
 
