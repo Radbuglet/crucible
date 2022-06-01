@@ -18,15 +18,19 @@ compile_error!(
 );
 
 pub mod ecs;
-pub mod exec;
+pub mod oop;
 mod util;
 
 pub mod prelude {
 	pub use crate::{
 		ecs::prelude::*,
-		exec::atomic_ref_cell::{AMut, ARef, ARefCell},
-		exec::event::event_trait,
-		exec::key::{dyn_key, proxy_key, typed_key, TypedKey},
-		exec::obj::{Obj, ObjCx, ObjExt, SendObj, SendObjCx, StObj, StObjCx},
+		oop::atomic_ref_cell::{AMut, ARef, ARefCell},
+		oop::event::event_trait,
+		oop::key::{dyn_key, proxy_key, typed_key, TypedKey},
+		oop::obj::{
+			cx::{ObjCx, SendObjCx, StObjCx},
+			obj::{Obj, SendObj, StObj},
+			raw::{ObjExt, RawObj},
+		},
 	};
 }

@@ -1,6 +1,6 @@
-use crate::exec::atomic_ref_cell::ARefCell;
-use crate::exec::key::{typed_key, RawTypedKey, TypedKey};
-use crate::exec::obj::{ProviderOut, RawObj};
+use crate::oop::atomic_ref_cell::ARefCell;
+use crate::oop::key::{typed_key, RawTypedKey, TypedKey};
+use crate::oop::obj::raw::{ProviderOut, RawObj};
 use crate::util::arity_utils::impl_tuples;
 use crate::util::inline_store::ByteContainer;
 use crate::util::marker::{PhantomNoSendOrSync, PhantomNoSync};

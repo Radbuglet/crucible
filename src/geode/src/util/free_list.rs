@@ -1,4 +1,4 @@
-use crate::exec::accessor::{AccessorMut, ToAccessor};
+use crate::oop::accessor::{AccessorMut, ToAccessor};
 use crate::util::bitset::{hibitset_length, hibitset_min_set_bit, is_valid_hibitset_index};
 use hibitset::{BitSet, BitSetLike};
 use std::fmt::{Debug, Formatter};
