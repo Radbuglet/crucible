@@ -207,12 +207,7 @@ pub fn hibitset_iter_from<A: BitSetLike>(set: A, start_inclusive: u32) -> BitIte
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	fn init_seed() {
-		let seed = fastrand::u64(..);
-		fastrand::seed(seed);
-		println!("Set seed to {seed}.");
-	}
+	use crate::util::test_utils::{init_seed, rand_choice};
 
 	fn bitset_mirror_add(mirror: &mut Vec<u32>, value: u32) {
 		let insert_at = mirror.binary_search(&value).unwrap_err();
@@ -220,31 +215,25 @@ mod tests {
 	}
 
 	fn bitset_random_op(mirror: &mut Vec<u32>, set: &mut BitSet) {
-		loop {
-			match fastrand::bool() {
-				true => {
-					let value = fastrand::u32(0..MAX_HIBITSET_INDEX_EXCLUSIVE);
-					if set.add(value) {
-						continue;
-					}
+		let try_add_at = fastrand::u32(0..MAX_HIBITSET_INDEX_EXCLUSIVE);
 
-					println!("adding {value} to the set.");
+		rand_choice! {
+			// Add entry
+			!set.contains(try_add_at) => {
+				set.add(try_add_at);
 
-					bitset_mirror_add(mirror, value);
-					break;
-				}
-				false => {
-					if mirror.is_empty() {
-						continue;
-					}
+				println!("adding {try_add_at} to the set.");
 
-					let value = mirror.remove(fastrand::usize(0..mirror.len()));
-					set.remove(value);
+				bitset_mirror_add(mirror, try_add_at);
+			},
+			// Remove entry
+			!mirror.is_empty() => {
+				let value = mirror.remove(fastrand::usize(0..mirror.len()));
+				set.remove(value);
 
-					println!("removing {value} from the set.");
-					break;
-				}
-			}
+				println!("removing {value} from the set.");
+			},
+			_ => unreachable!(),
 		}
 	}
 

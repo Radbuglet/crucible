@@ -159,9 +159,6 @@ pub fn main_inner() -> anyhow::Result<()> {
 async fn make_engine_root(event_loop: &EventLoop<WinitUserdata>) -> anyhow::Result<Obj> {
 	let mut root = Obj::labeled("engine root");
 
-	// Create core services
-	root.add_rw(World::new());
-
 	// Create graphics subsystem
 	{
 		// Create context

@@ -23,7 +23,6 @@ mod util;
 
 pub mod prelude {
 	pub use crate::{
-		ecs::prelude::*,
 		oop::atomic_ref_cell::{AMut, ARef, ARefCell},
 		oop::event::event_trait,
 		oop::key::{dyn_key, proxy_key, typed_key, TypedKey},

@@ -1,5 +1,5 @@
 use crate::util::error::ResultExt;
-use crate::util::number::NumberGenRef;
+use crate::util::number::{AtomicU64Generator, NumberGenRef};
 use crate::util::type_id::FancyTypeId;
 use derive_where::derive_where;
 use std::fmt::{Debug, Formatter};
@@ -67,7 +67,9 @@ pub fn proxy_key<T: ?Sized + 'static + ProxyKeyType>() -> TypedKey<T::Provides> 
 }
 
 pub fn dyn_key<T: ?Sized + 'static>() -> TypedKey<T> {
-	static GEN: AtomicU64 = AtomicU64::new(0);
+	static GEN: AtomicU64Generator = AtomicU64Generator {
+		next: AtomicU64::new(0),
+	};
 
 	TypedKey {
 		_ty: PhantomData,

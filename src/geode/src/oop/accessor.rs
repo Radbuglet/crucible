@@ -1,5 +1,3 @@
-// Welcome to the single most rewritten system of the entire project.
-
 use crate::util::error::ResultExt;
 use derive_where::derive_where;
 use std::borrow::Borrow;
@@ -42,16 +40,8 @@ impl<T: AccessorBase> Untainted<T> {
 		self.0
 	}
 
-	pub fn borrow_ref_container(&self) -> Untainted<AccessorRefProxy<'_, T>> {
-		self.to_accessor()
-	}
-
-	pub fn borrow_mut_container(&mut self) -> Untainted<AccessorMutProxy<'_, T>> {
-		self.to_accessor()
-	}
-
-	pub fn to_refs(self) -> AccessorRefWrapper<T> {
-		AccessorRefWrapper::new(self)
+	pub fn to_refs(self) -> AccessorReader<T> {
+		AccessorReader::new(self)
 	}
 }
 
@@ -64,18 +54,18 @@ impl<T: AccessorBase> ToAccessor for Untainted<T> {
 }
 
 impl<'m, T: AccessorBase> ToAccessor for &'m Untainted<T> {
-	type Accessor = AccessorRefProxy<'m, T>;
+	type Accessor = AccessorRefBorrow<'m, T>;
 
 	fn to_accessor(self) -> Untainted<Self::Accessor> {
-		unsafe { Untainted::new(AccessorRefProxy::new(&self.0)) }
+		unsafe { Untainted::new(AccessorRefBorrow::new(&self.0)) }
 	}
 }
 
 impl<'m, T: AccessorBase> ToAccessor for &'m mut Untainted<T> {
-	type Accessor = AccessorMutProxy<'m, T>;
+	type Accessor = AccessorMutBorrow<'m, T>;
 
 	fn to_accessor(self) -> Untainted<Self::Accessor> {
-		unsafe { Untainted::new(AccessorMutProxy::new(&self.0)) }
+		unsafe { Untainted::new(AccessorMutBorrow::new(&self.0)) }
 	}
 }
 
@@ -87,7 +77,10 @@ pub trait AccessorBase: Clone {
 	type Error: Error;
 }
 
-pub trait Accessor<'r>: AccessorBase {
+pub trait Accessor<'r>: AccessorBase
+where
+	Self::Value: 'r,
+{
 	unsafe fn try_get_unchecked<Q>(&self, key: Q) -> Result<&'r Self::Value, Self::Error>
 	where
 		Q: Borrow<Self::Key>;
@@ -100,7 +93,10 @@ pub trait Accessor<'r>: AccessorBase {
 	}
 }
 
-pub trait AccessorMut<'r>: Accessor<'r> {
+pub trait AccessorMut<'r>: Accessor<'r>
+where
+	Self::Value: 'r,
+{
 	unsafe fn try_get_unchecked_mut<Q>(&self, key: Q) -> Result<&'r mut Self::Value, Self::Error>
 	where
 		Q: Borrow<Self::Key>;
@@ -116,21 +112,21 @@ pub trait AccessorMut<'r>: Accessor<'r> {
 // === Accessor Proxies === //
 
 #[derive_where(Clone)]
-pub struct AccessorRefProxy<'r, A>(&'r A);
+pub struct AccessorRefBorrow<'r, A>(&'r A);
 
-impl<'r, A> AccessorRefProxy<'r, A> {
+impl<'r, A> AccessorRefBorrow<'r, A> {
 	pub fn new(accessor: &'r A) -> Self {
 		Self(accessor)
 	}
 }
 
-impl<'r, A: AccessorBase> AccessorBase for AccessorRefProxy<'r, A> {
+impl<'r, A: AccessorBase> AccessorBase for AccessorRefBorrow<'r, A> {
 	type Key = A::Key;
 	type Value = A::Value;
 	type Error = A::Error;
 }
 
-impl<'i: 'r, 'r, A: Accessor<'i>> Accessor<'r> for AccessorRefProxy<'r, A>
+impl<'i: 'r, 'r, A: Accessor<'i>> Accessor<'r> for AccessorRefBorrow<'r, A>
 where
 	A::Value: 'i,
 {
@@ -143,21 +139,21 @@ where
 }
 
 #[derive_where(Clone)]
-pub struct AccessorMutProxy<'r, A>(&'r A);
+pub struct AccessorMutBorrow<'r, A>(&'r A);
 
-impl<'r, A> AccessorMutProxy<'r, A> {
+impl<'r, A> AccessorMutBorrow<'r, A> {
 	pub fn new(accessor: &'r A) -> Self {
 		Self(accessor)
 	}
 }
 
-impl<'r, A: AccessorBase> AccessorBase for AccessorMutProxy<'r, A> {
+impl<'r, A: AccessorBase> AccessorBase for AccessorMutBorrow<'r, A> {
 	type Key = A::Key;
 	type Value = A::Value;
 	type Error = A::Error;
 }
 
-impl<'i: 'r, 'r, A: Accessor<'i>> Accessor<'r> for AccessorMutProxy<'r, A>
+impl<'i: 'r, 'r, A: Accessor<'i>> Accessor<'r> for AccessorMutBorrow<'r, A>
 where
 	A::Value: 'i,
 {
@@ -169,7 +165,7 @@ where
 	}
 }
 
-impl<'i: 'r, 'r, A: AccessorMut<'i>> AccessorMut<'r> for AccessorMutProxy<'r, A>
+impl<'i: 'r, 'r, A: AccessorMut<'i>> AccessorMut<'r> for AccessorMutBorrow<'r, A>
 where
 	A::Value: 'i,
 {
@@ -182,15 +178,18 @@ where
 }
 
 #[derive(Clone)]
-pub struct AccessorRefWrapper<A>(A);
+pub struct AccessorReader<A>(A);
 
-impl<A: AccessorBase> AccessorRefWrapper<A> {
+impl<A: AccessorBase> AccessorReader<A> {
 	pub fn new(accessor: Untainted<A>) -> Self {
 		Self(accessor.unwrap())
 	}
 }
 
-impl<'r, A: Accessor<'r>> AccessorRefWrapper<A> {
+impl<'r, A: Accessor<'r>> AccessorReader<A>
+where
+	A::Value: 'r,
+{
 	pub fn try_get<Q>(&self, key: Q) -> Result<&'r A::Value, A::Error>
 	where
 		Q: Borrow<A::Key>,
@@ -311,7 +310,7 @@ impl<'r, T> AccessorMut<'r> for SliceAccessorMut<'r, T> {
 
 // TODO: Implement `BorrowedAccessorExt` methods.
 
-pub trait OwnedAccessorRefExt<'r> {
+pub trait OwnedAccessorExt<'r>: Sized {
 	type Key;
 	type Value: ?Sized;
 	type Error;
@@ -324,9 +323,13 @@ pub trait OwnedAccessorRefExt<'r> {
 	fn take<Q>(self, key: Q) -> &'r Self::Value
 	where
 		Q: Borrow<Self::Key>;
+
+	fn take_map<F>(self, handler: F) -> Untainted<MapAccessor<Self::Accessor, F>>
+	where
+		F: Clone + AccessorMapRef<Self::Accessor>;
 }
 
-pub trait OwnedAccessorMutExt<'r>: OwnedAccessorRefExt<'r> {
+pub trait OwnedAccessorMutExt<'r>: OwnedAccessorExt<'r> {
 	fn try_take_mut<Q>(self, key: Q) -> Result<&'r mut Self::Value, Self::Error>
 	where
 		Q: Borrow<Self::Key>;
@@ -365,7 +368,12 @@ pub trait OwnedAccessorMutExt<'r>: OwnedAccessorRefExt<'r> {
 		Q: Borrow<Self::Key>;
 }
 
-impl<'r, C: ToAccessor<Accessor = A>, A: Accessor<'r>> OwnedAccessorRefExt<'r> for C {
+impl<'r, C, A> OwnedAccessorExt<'r> for C
+where
+	C: ToAccessor<Accessor = A>,
+	A: Accessor<'r>,
+	A::Value: 'r,
+{
 	type Key = A::Key;
 	type Value = A::Value;
 	type Error = A::Error;
@@ -384,9 +392,24 @@ impl<'r, C: ToAccessor<Accessor = A>, A: Accessor<'r>> OwnedAccessorRefExt<'r> f
 	{
 		self.try_take(key).unwrap_pretty()
 	}
+
+	fn take_map<F>(self, map: F) -> Untainted<MapAccessor<Self::Accessor, F>>
+	where
+		F: Clone + AccessorMapRef<Self::Accessor>,
+	{
+		let accessor = self.to_accessor().unwrap();
+		let accessor = MapAccessor { accessor, map };
+
+		unsafe { Untainted::new(accessor) }
+	}
 }
 
-impl<'r, C: ToAccessor<Accessor = A>, A: AccessorMut<'r>> OwnedAccessorMutExt<'r> for C {
+impl<'r, C, A> OwnedAccessorMutExt<'r> for C
+where
+	C: ToAccessor<Accessor = A>,
+	A: AccessorMut<'r>,
+	A::Value: 'r,
+{
 	fn try_take_mut<Q>(self, key: Q) -> Result<&'r mut Self::Value, Self::Error>
 	where
 		Q: Borrow<Self::Key>,
@@ -476,6 +499,12 @@ impl<'r, C: ToAccessor<Accessor = A>, A: AccessorMut<'r>> OwnedAccessorMutExt<'r
 
 // === Views === //
 
+#[derive(Clone)]
+pub struct ExcludeOne<A: AccessorBase> {
+	accessor: A,
+	excluded_index: A::Key,
+}
+
 #[derive(Debug, Copy, Clone, Error)]
 pub enum ExcludeOneError<K: Debug, E: Error> {
 	#[error("attempted to access excluded entry with key {0:?}")]
@@ -484,20 +513,15 @@ pub enum ExcludeOneError<K: Debug, E: Error> {
 	Underlying(#[from] E),
 }
 
-#[derive(Clone)]
-pub struct ExcludeOne<A: AccessorBase> {
-	accessor: A,
-	excluded_index: A::Key,
-}
-
 impl<A: AccessorBase> AccessorBase for ExcludeOne<A> {
 	type Key = A::Key;
 	type Value = A::Value;
 	type Error = ExcludeOneError<A::Key, A::Error>;
 }
 
-impl<'i: 'r, 'r, A: Accessor<'i>> Accessor<'r> for ExcludeOne<A>
+impl<'i: 'r, 'r, A> Accessor<'r> for ExcludeOne<A>
 where
+	A: Accessor<'i>,
 	A::Value: 'i,
 {
 	unsafe fn try_get_unchecked<Q>(&self, key: Q) -> Result<&'r Self::Value, Self::Error>
@@ -529,6 +553,76 @@ where
 
 		Ok(self.accessor.try_get_unchecked_mut(key)?)
 	}
+}
+
+#[derive_where(Clone; F: Clone)]
+pub struct MapAccessor<A: AccessorBase, F> {
+	accessor: A,
+	map: F,
+}
+
+impl<A: AccessorBase, F: Clone + AccessorMapRef<A>> AccessorBase for MapAccessor<A, F> {
+	type Key = A::Key;
+	type Value = F::Out;
+	type Error = F::Error;
+}
+
+impl<'i: 'r, 'r, A, F> Accessor<'r> for MapAccessor<A, F>
+where
+	A: Accessor<'i>,
+	A::Value: 'i,
+	F: Clone + AccessorMapRef<A>,
+	F::Out: 'r,
+{
+	unsafe fn try_get_unchecked<Q>(&self, key: Q) -> Result<&'r Self::Value, Self::Error>
+	where
+		Q: Borrow<Self::Key>,
+	{
+		let key = key.borrow();
+		let original = match self.accessor.try_get_unchecked(key) {
+			Ok(original) => original,
+			Err(error) => return Err(self.map.wrap_error(error)),
+		};
+
+		self.map.map_ref(key, original)
+	}
+}
+
+impl<'i: 'r, 'r, A, F> AccessorMut<'r> for MapAccessor<A, F>
+where
+	A: AccessorMut<'i>,
+	A::Value: 'i,
+	F: Clone + AccessorMapMut<A>,
+	F::Out: 'r,
+{
+	unsafe fn try_get_unchecked_mut<Q>(&self, key: Q) -> Result<&'r mut Self::Value, Self::Error>
+	where
+		Q: Borrow<Self::Key>,
+	{
+		let key = key.borrow();
+		let original = match self.accessor.try_get_unchecked_mut(key) {
+			Ok(original) => original,
+			Err(error) => return Err(self.map.wrap_error(error)),
+		};
+
+		self.map.map_mut(key, original)
+	}
+}
+
+pub trait AccessorMapRef<A: AccessorBase> {
+	type Out: ?Sized;
+	type Error: Error;
+
+	fn map_ref<'r>(&self, key: &A::Key, input: &'r A::Value) -> Result<&'r Self::Out, Self::Error>;
+	fn wrap_error(&self, error: A::Error) -> Self::Error;
+}
+
+pub trait AccessorMapMut<A: AccessorBase>: AccessorMapRef<A> {
+	fn map_mut<'r>(
+		&self,
+		key: &A::Key,
+		input: &'r mut A::Value,
+	) -> Result<&'r mut Self::Out, Self::Error>;
 }
 
 // === Tests === //

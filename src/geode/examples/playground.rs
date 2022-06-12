@@ -5,7 +5,7 @@ fn main() {
 	let root = make_engine_root();
 
 	root.get::<dyn TickHandler>()
-		.on_tick(&ObjCx::with_root(&root));
+		.on_tick(&ObjCx::new(&root));
 
 	root.borrow_mut::<MyService>().count();
 	root.borrow_mut::<MyService>().count();
@@ -25,8 +25,6 @@ fn make_engine_root() -> Obj {
 				service.count();
 				service.count();
 			});
-
-			dbg!(obj.path());
 		},
 		typed_key::<dyn TickHandler>(),
 	);

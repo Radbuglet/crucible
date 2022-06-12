@@ -4,6 +4,7 @@ target/
 
 # IDEs
 .idea/
+.vscode/
 *.iml
 
 # MacOS

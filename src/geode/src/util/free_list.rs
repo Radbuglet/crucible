@@ -34,11 +34,7 @@ impl<T> Default for FreeList<T> {
 }
 
 impl<T> FreeList<T> {
-	pub fn new() -> Self {
-		Self::default()
-	}
-
-	pub fn reserve(&mut self, value: T) -> u32 {
+	pub fn add(&mut self, value: T) -> u32 {
 		match hibitset_min_set_bit(&self.free) {
 			Some(index) => {
 				self.reserved.add(index);
@@ -100,11 +96,6 @@ impl<T> FreeList<T> {
 		} else {
 			None
 		}
-	}
-
-	pub fn raw_iter(&self) -> impl Iterator<Item = u32> {
-		// FIXME: Gotta love lifetimes.
-		self.free.clone().iter()
 	}
 
 	pub fn iter(&self) -> impl Iterator<Item = (u32, &T)> + '_ {

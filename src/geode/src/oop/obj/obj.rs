@@ -1,6 +1,5 @@
 use crate::oop::atomic_ref_cell::ARefCell;
 use crate::oop::key::{typed_key, RawTypedKey, TypedKey};
-use crate::oop::obj::raw::{ProviderOut, RawObj};
 use crate::util::arity_utils::impl_tuples;
 use crate::util::inline_store::ByteContainer;
 use crate::util::marker::{PhantomNoSendOrSync, PhantomNoSync};
@@ -12,6 +11,8 @@ use std::alloc::Layout;
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::{PhantomData, Unsize};
 use std::ptr::NonNull;
+
+use super::raw::{ProviderOut, RawObj};
 
 // === Flavor definitions === //
 

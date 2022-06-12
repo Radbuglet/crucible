@@ -1,18 +1,29 @@
-use derive_where::derive_where;
+use std::cmp::Ordering as CmpOrdering;
 use std::error::Error;
 use std::fmt::Display;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::hash::Hash;
-use std::marker::PhantomData;
 use std::mem::replace;
 use std::num::NonZeroU64;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::ops::{Bound, RangeBounds};
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+
+use super::error::ResultExt;
 
 // === OptionalUsize === //
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct OptionalUsize {
 	pub raw: usize,
+}
+
+impl Debug for OptionalUsize {
+	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		match self.as_option() {
+			Some(value) => write!(f, "OptionalUsize::Some({value})"),
+			None => write!(f, "OptionalUsize::None"),
+		}
+	}
 }
 
 impl Default for OptionalUsize {
@@ -40,170 +51,224 @@ impl OptionalUsize {
 // === Number Generation === //
 
 // Traits
-pub trait NumberGenBase: Sized {
-	type Value: Sized + Debug;
+pub trait NumberGenRef {
+	type Value;
+	type GenError: Error;
 
-	fn generator_limit() -> Self::Value;
-}
+	fn try_generate_ref(&self) -> Result<Self::Value, Self::GenError>;
 
-pub trait NumberGenRef: NumberGenBase {
-	fn try_generate_ref(&self) -> Result<Self::Value, GenOverflowError<Self>>;
-}
-
-pub trait NumberGenMut: NumberGenBase {
-	fn try_generate_mut(&mut self) -> Result<Self::Value, GenOverflowError<Self>>;
-}
-
-#[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq, Default)]
-pub struct GenOverflowError<D> {
-	_ty: PhantomData<D>,
-}
-
-impl<D> GenOverflowError<D> {
-	pub fn new() -> Self {
-		Self::default()
+	fn generate_ref(&self) -> Self::Value {
+		self.try_generate_ref().unwrap_pretty()
 	}
 }
 
-impl<D: NumberGenBase> Error for GenOverflowError<D> {}
+pub trait NumberGenMut {
+	type Value;
+	type GenError: Error;
 
-impl<D: NumberGenBase> Display for GenOverflowError<D> {
+	fn try_generate_mut(&mut self) -> Result<Self::Value, Self::GenError>;
+
+	fn generate_mut(&mut self) -> Self::Value {
+		self.try_generate_mut().unwrap_pretty()
+	}
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct GenOverflowError<D> {
+	pub limit: D,
+}
+
+impl<D: Debug> Error for GenOverflowError<D> {}
+
+impl<D: Debug> Display for GenOverflowError<D> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
 		writeln!(
 			f,
 			"generator overflowed (more than {:?} identifiers generated)",
-			D::generator_limit(),
+			self.limit,
 		)
 	}
 }
 
 // Primitive generators
-impl NumberGenBase for u64 {
+#[derive(Debug, Clone, Default)]
+pub struct U64Generator {
+	pub next: u64,
+}
+
+impl NumberGenMut for U64Generator {
 	type Value = u64;
+	type GenError = GenOverflowError<u64>;
 
-	fn generator_limit() -> Self::Value {
-		u64::MAX
+	fn try_generate_mut(&mut self) -> Result<Self::Value, Self::GenError> {
+		let subsequent = self
+			.next
+			.checked_add(1)
+			.ok_or(GenOverflowError { limit: u64::MAX })?;
+
+		Ok(replace(&mut self.next, subsequent))
 	}
 }
 
-impl NumberGenMut for u64 {
-	fn try_generate_mut(&mut self) -> Result<Self::Value, GenOverflowError<Self>> {
-		Ok(replace(
-			self,
-			self.checked_add(1).ok_or_else(GenOverflowError::new)?,
-		))
+#[derive(Debug, Clone)]
+pub struct NonZeroU64Generator {
+	pub next: NonZeroU64,
+}
+
+impl Default for NonZeroU64Generator {
+	fn default() -> Self {
+		Self {
+			next: NonZeroU64::new(1).unwrap(),
+		}
 	}
 }
 
-impl NumberGenBase for NonZeroU64 {
+impl NumberGenMut for NonZeroU64Generator {
 	type Value = NonZeroU64;
+	type GenError = GenOverflowError<u64>;
 
-	fn generator_limit() -> Self::Value {
-		NonZeroU64::new(u64::MAX).unwrap()
+	fn try_generate_mut(&mut self) -> Result<Self::Value, Self::GenError> {
+		let subsequent = NonZeroU64::new(
+			self.next
+				.get()
+				.checked_add(1)
+				.ok_or(GenOverflowError { limit: u64::MAX })?,
+		)
+		.unwrap();
+
+		Ok(replace(&mut self.next, subsequent))
 	}
 }
 
-impl NumberGenMut for NonZeroU64 {
-	fn try_generate_mut(&mut self) -> Result<Self::Value, GenOverflowError<Self>> {
-		Ok(replace(
-			self,
-			NonZeroU64::new(self.get().checked_add(1).ok_or_else(GenOverflowError::new)?).unwrap(),
-		))
-	}
+#[derive(Debug, Default)]
+pub struct AtomicU64Generator {
+	pub next: AtomicU64,
 }
 
-impl NumberGenBase for AtomicU64 {
+const ATOMIC_U64_LIMIT: u64 = u64::MAX - 1000;
+
+impl NumberGenRef for AtomicU64Generator {
 	type Value = u64;
+	type GenError = GenOverflowError<u64>;
 
-	fn generator_limit() -> Self::Value {
-		u64::MAX - 1000
-	}
-}
-
-impl NumberGenRef for AtomicU64 {
-	fn try_generate_ref(&self) -> Result<Self::Value, GenOverflowError<Self>> {
-		let id = self.fetch_add(1, Ordering::Relaxed);
+	fn try_generate_ref(&self) -> Result<Self::Value, Self::GenError> {
+		let id = self.next.fetch_add(1, AtomicOrdering::Relaxed);
 
 		// Look, unless we manage to allocate more than `1000` IDs before this check runs, this check
 		// is *perfectly fine*.
-		if id > Self::generator_limit() {
-			self.store(Self::generator_limit(), Ordering::Relaxed);
-			return Err(GenOverflowError::new());
+		if id > ATOMIC_U64_LIMIT {
+			self.next.store(ATOMIC_U64_LIMIT, AtomicOrdering::Relaxed);
+			return Err(GenOverflowError {
+				limit: ATOMIC_U64_LIMIT,
+			});
 		}
 
 		Ok(id)
 	}
 }
 
-impl NumberGenMut for AtomicU64 {
-	fn try_generate_mut(&mut self) -> Result<Self::Value, GenOverflowError<Self>> {
-		if *self.get_mut() >= Self::generator_limit() {
-			Err(GenOverflowError::new())
+impl NumberGenMut for AtomicU64Generator {
+	type Value = u64;
+	type GenError = GenOverflowError<u64>;
+
+	fn try_generate_mut(&mut self) -> Result<Self::Value, Self::GenError> {
+		if *self.next.get_mut() >= ATOMIC_U64_LIMIT {
+			Err(GenOverflowError {
+				limit: ATOMIC_U64_LIMIT,
+			})
 		} else {
-			let next = *self.get_mut() + 1;
-			Ok(replace(self.get_mut(), next))
+			let next = *self.next.get_mut() + 1;
+			Ok(replace(self.next.get_mut(), next))
 		}
 	}
 }
 
 #[derive(Debug)]
-pub struct NonZeroU64Generator {
-	pub counter: AtomicU64,
+pub struct AtomicNZU64Generator {
+	next: AtomicU64Generator,
 }
 
-impl Default for NonZeroU64Generator {
+impl Default for AtomicNZU64Generator {
 	fn default() -> Self {
 		Self {
-			counter: AtomicU64::new(1),
+			next: AtomicU64Generator {
+				next: AtomicU64::new(1),
+			},
 		}
 	}
 }
 
-impl NonZeroU64Generator {
+impl AtomicNZU64Generator {
 	pub fn next_value(&mut self) -> NonZeroU64 {
-		NonZeroU64::new(*self.counter.get_mut()).unwrap()
+		NonZeroU64::new(*self.next.next.get_mut()).unwrap()
 	}
 }
 
-impl NumberGenBase for NonZeroU64Generator {
+impl NumberGenRef for AtomicNZU64Generator {
 	type Value = NonZeroU64;
+	type GenError = GenOverflowError<u64>;
 
-	fn generator_limit() -> Self::Value {
-		NonZeroU64::new(AtomicU64::generator_limit()).unwrap()
-	}
-}
-
-impl NumberGenRef for NonZeroU64Generator {
-	fn try_generate_ref(&self) -> Result<Self::Value, GenOverflowError<Self>> {
-		let id = self
-			.counter
+	fn try_generate_ref(&self) -> Result<Self::Value, Self::GenError> {
+		self.next
 			.try_generate_ref()
-			.ok()
-			.ok_or_else(GenOverflowError::new)?;
-
-		Ok(NonZeroU64::new(id).unwrap())
+			.map(|id| NonZeroU64::new(id).unwrap())
 	}
 }
 
-impl NumberGenMut for NonZeroU64Generator {
-	fn try_generate_mut(&mut self) -> Result<Self::Value, GenOverflowError<Self>> {
-		let id = self
-			.counter
+impl NumberGenMut for AtomicNZU64Generator {
+	type Value = NonZeroU64;
+	type GenError = GenOverflowError<u64>;
+
+	fn try_generate_mut(&mut self) -> Result<Self::Value, Self::GenError> {
+		self.next
 			.try_generate_mut()
-			.ok()
-			.ok_or_else(GenOverflowError::new)?;
-
-		Ok(NonZeroU64::new(id).unwrap())
+			.map(|id| NonZeroU64::new(id).unwrap())
 	}
 }
 
-// === Bit-level fun === //
+// === Range utilities === //
 
-pub const fn u64_msb_mask(offset: u32) -> u64 {
-	debug_assert!(offset < 64);
-	1u64.rotate_right(offset + 1)
+pub fn cmp_to_range<T: Ord, R: RangeBounds<T>>(value: &T, range: &R) -> CmpOrdering {
+	let in_left = cmp_to_left_bound(range.start_bound(), value);
+	let in_right = cmp_to_right_bound(value, range.end_bound());
+
+	match (in_left, in_right) {
+		(true, true) => CmpOrdering::Equal,
+		(true, false) => CmpOrdering::Less,
+		(false, true) => CmpOrdering::Greater,
+
+		// Would require us to be both below a left bound, but somehow above a right bound,
+		// implying an ill-formed range.
+		(false, false) => unreachable!(),
+	}
 }
 
-pub const fn u64_has_mask(value: u64, mask: u64) -> bool {
-	value | mask == value
+/// Roughly equivalent to:
+///
+/// ```ignore
+/// (left..).contains(value)
+/// ```
+///
+/// except that `left` can be an exclusive or unbounded bound.
+fn cmp_to_left_bound<T: Ord>(left: Bound<&T>, value: &T) -> bool {
+	match left {
+		Bound::Included(left) => left.le(value),
+		Bound::Excluded(left) => left.lt(value),
+		Bound::Unbounded => true,
+	}
+}
+
+/// Roughly equivalent to:
+///
+/// ```ignore
+/// (..right).contains(value)
+/// ```
+///
+/// except that `right` can be an inclusive or unbounded bound.
+fn cmp_to_right_bound<T: Ord>(value: &T, right: Bound<&T>) -> bool {
+	match right {
+		Bound::Included(right) => value.le(right),
+		Bound::Excluded(right) => value.lt(right),
+		Bound::Unbounded => true,
+	}
 }

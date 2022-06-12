@@ -1,7 +1,8 @@
-use crate::oop::obj::raw::ProviderOut;
-use crate::oop::obj::raw::RawObj;
 use crate::util::iter_ext::DebugListIter;
 use std::fmt::{Debug, Formatter};
+
+use super::raw::ProviderOut;
+use super::raw::RawObj;
 
 pub type ObjCx<'chain, 'obj> = AncestryChain<'chain, 'obj, dyn Send + Sync + RawObj>;
 pub type StObjCx<'chain, 'obj> = AncestryChain<'chain, 'obj, dyn RawObj>;
