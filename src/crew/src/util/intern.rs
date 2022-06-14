@@ -1,20 +1,19 @@
 use hashbrown::raw::{RawIter, RawTable};
 use std::borrow::Borrow;
 use std::collections::hash_map::{DefaultHasher, RandomState};
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::hash::{BuildHasher, Hasher};
 use std::marker::PhantomData;
-use std::{fmt::Debug, num::NonZeroUsize};
 
+#[derive(Default)]
 pub struct Interner {
 	/// A map from [str] (and its associated hash) to [Intern], with the [str] being derived from
 	/// the [Intern].
 	map: RawTable<(u64, Intern)>,
 
-	/// The backing container for all our strings. A sequence of bytes is valid UTF-8 if and only if
-	/// it is surrounded by `0xFF` bytes (which are guaranteed to never be present in valid Unicode
-	/// streams).
-	data: Vec<u8>,
+	/// The backing container for all our strings.
+	data: String,
 
 	/// The hash builder used to generate hashes for the map.
 	hash_builder: RandomState,
@@ -43,16 +42,6 @@ impl Debug for Interner {
 	}
 }
 
-impl Default for Interner {
-	fn default() -> Self {
-		Self {
-			map: RawTable::new(),
-			data: vec![0xFF],
-			hash_builder: RandomState::new(),
-		}
-	}
-}
-
 impl Interner {
 	pub fn begin_intern(&mut self) -> InternBuilder<'_> {
 		let hasher = self.hash_builder.build_hasher();
@@ -77,26 +66,8 @@ impl Interner {
 		self.begin_intern().with_fmt(text).finish()
 	}
 
-	pub fn decode_bytes(&self, intern: Intern) -> &[u8] {
-		// Validate left delimiter
-		assert_eq!(self.data[intern.start.get() - 1], 0xFF);
-		let bytes = &self.data[intern.start.get()..];
-
-		// Validate right delimiter
-		assert_eq!(bytes[intern.len], 0xFF);
-		let bytes = &bytes[..intern.len];
-
-		bytes
-	}
-
 	pub fn decode(&self, intern: Intern) -> &str {
-		let bytes = self.decode_bytes(intern);
-
-		unsafe {
-			// Safety: structure invariants assert that the `0xFF` delimiters indicate that a section
-			// is valid Unicode.
-			safer_utf8_to_str(bytes)
-		}
+		&self.data[intern.start..(intern.start + intern.len)]
 	}
 
 	pub fn interns(&self) -> InternIter<'_> {
@@ -147,13 +118,7 @@ pub struct InternBuilder<'a>(Option<InternBuilderInner<'a>>);
 impl Debug for InternBuilder<'_> {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		let me = self.0.as_ref().unwrap();
-		let bytes = &me.interner.data[me.start..];
-
-		let text = unsafe {
-			// Safety: We ensure that our intern's Unicode bytestream is valid at all times by pushing
-			// codepoints atomically.
-			safer_utf8_to_str(bytes)
-		};
+		let text = &me.interner.data[me.start..];
 
 		f.debug_struct("InternBuilder")
 			.field("buffer", &text)
@@ -165,32 +130,20 @@ struct InternBuilderInner<'a> {
 	/// A reference to the interner in which we're building our intern.
 	interner: &'a mut Interner,
 
-	/// An index to the first actual byte of our character byte stream (one past the `0xFF` delimiter).
+	/// An index to the first byte of our character byte stream.
 	start: usize,
 
 	/// An ongoing hashing session to hash our string.
 	hasher: DefaultHasher,
 }
 
-impl InternBuilder<'_> {
-	fn internal_push_bytes(&mut self, bytes: &[u8]) {
-		let me = self.0.as_mut().unwrap();
-
-		// Safety: panicking in the middle of an extension would be *really bad*. Luckily,
-		// `extend_from_slice` reserves its capacity up-front so it either fully commits the object
-		// or doesn't at all.
-		me.interner.data.extend_from_slice(bytes);
-
-		// This shouldn't panic either but it honestly doesn't really matter if it does; we've
-		// already preserved all structure invariants. The worst thing it can do is cause an intern
-		// to be duplicated, which isn't all that bad.
-		me.hasher.write(bytes);
+impl<'a> InternBuilder<'a> {
+	fn unwrap_inner_mut(&mut self) -> &mut InternBuilderInner<'a> {
+		self.0.as_mut().unwrap()
 	}
 
 	pub fn push_char(&mut self, char: char) {
-		let mut dst = [0; 4];
-		char.encode_utf8(&mut dst);
-		self.internal_push_bytes(&dst[0..char.len_utf8()]);
+		self.unwrap_inner_mut().interner.data.push(char)
 	}
 
 	pub fn with_char(mut self, char: char) -> Self {
@@ -199,7 +152,7 @@ impl InternBuilder<'_> {
 	}
 
 	pub fn push_str<S: Borrow<str>>(&mut self, str: S) {
-		self.internal_push_bytes(str.borrow().as_bytes());
+		self.unwrap_inner_mut().interner.data.push_str(str.borrow())
 	}
 
 	pub fn with_str<S: Borrow<str>>(mut self, str: S) -> Self {
@@ -224,7 +177,7 @@ impl InternBuilder<'_> {
 		} = self.0.take().unwrap();
 
 		// Ensure that we haven't already interned this string.
-		let bytes = &interner.data[start..];
+		let text = &interner.data[start..];
 		let hash = hasher.finish();
 
 		if let Some((_, intern)) = interner.map.get(hash, |(entry_hash, entry_intern)| {
@@ -232,19 +185,14 @@ impl InternBuilder<'_> {
 				return false;
 			}
 
-			let entry_bytes = interner.decode_bytes(*entry_intern);
-
-			bytes == entry_bytes
+			let entry_text = interner.decode(*entry_intern);
+			text == entry_text
 		}) {
 			interner.data.truncate(start);
 			*intern
 		} else {
-			let len = bytes.len();
-			let intern = Intern {
-				start: NonZeroUsize::new(start).unwrap(),
-				len,
-			};
-			interner.data.push(0xFF);
+			let len = text.len();
+			let intern = Intern { start, len };
 			interner.map.insert(hash, (hash, intern), |(hash, _)| *hash);
 			intern
 		}
@@ -261,18 +209,11 @@ impl Drop for InternBuilder<'_> {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Intern {
-	/// The index of the start byte (one past the `0xFF` delimiter).
-	start: NonZeroUsize,
+	/// The index of the start byte.
+	start: usize,
 
-	/// The length in bytes of the inner character sequence (does not include either delimiter).
+	/// The length in bytes of the character sequence.
 	len: usize,
-}
-
-unsafe fn safer_utf8_to_str(bytes: &[u8]) -> &str {
-	debug_assert!(std::str::from_utf8(bytes).is_ok());
-
-	// Safety: provided by caller
-	std::str::from_utf8_unchecked(bytes)
 }
 
 #[cfg(test)]
