@@ -55,7 +55,14 @@ impl Entity {
 
 		let comp_ref = stage.bump.alloc(value);
 		let comp_ptr = comp_ref as *mut T as *mut ();
-		let comp_ref = &*comp_ref; // TODO: Check against stacked borrows.
+
+		// Safety: Reborrowing raw pointers as references does not strip them of their mutable
+		// powers. Logically, when we drop the `Stage`, we're borrowing the raw pointer as mutable,
+		// killing off any remaining immutable references. However, all of these references are
+		// limited to the lifetime of the stage anyways, so users can never use these dead references.
+		//
+		// Thanks, stacked borrows!
+		let comp_ref = &*comp_ref;
 
 		unsafe fn drop<T>(ptr: *mut ()) {
 			(ptr as *mut T).drop_in_place()
