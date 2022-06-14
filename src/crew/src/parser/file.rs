@@ -1,7 +1,9 @@
+use super::generic::ForkableCursor;
 use crate::parser::generic::{Atom, Cursor};
 use crate::util::iter_magic::limit_len;
 use crate::util::obj::Entity;
 use std::cmp::Ordering;
+use std::ops::{Bound, Range, RangeBounds};
 use std::str::from_utf8 as str_from_utf8;
 use thiserror::Error;
 
@@ -15,13 +17,26 @@ pub struct SourceFileInfo {
 
 /// Optional object span metadata to help users find the location of the element in its source file.
 #[derive(Debug, Clone)]
-pub struct Spanned {}
+pub struct Spanned {
+	pub span: Span,
+}
 
 /// A file whose contents have been loaded into memory.
 #[derive(Debug, Clone)]
 pub struct LoadedFile {
 	pub file_desc: Entity,
 	pub contents: Vec<u8>,
+}
+
+impl LoadedFile {
+	pub fn reader(&self) -> FileReader<'_> {
+		FileReader {
+			file_desc: self.file_desc,
+			codepoints: CodepointReader::new(&self.contents),
+			latest_pos: (0, FilePos::START),
+			next_pos: FilePos::START,
+		}
+	}
 }
 
 // === Codepoint reader === //
@@ -42,10 +57,20 @@ pub struct CodepointReader<'a> {
 
 impl<'a> CodepointReader<'a> {
 	pub fn new(contents: &'a [u8]) -> Self {
+		Self::new_range(contents, ..)
+	}
+
+	pub fn new_range<R: RangeBounds<usize>>(contents: &'a [u8], range: R) -> Self {
+		let offset = match range.start_bound() {
+			Bound::Unbounded => 0,
+			Bound::Included(index) => *index,
+			Bound::Excluded(index) => *index + 1,
+		};
+
 		Self {
-			contents,
-			latest_index: 0,
-			next_index: 0,
+			contents: &contents[(Bound::Unbounded, range.end_bound().cloned())],
+			latest_index: offset,
+			next_index: offset,
 		}
 	}
 }
@@ -165,7 +190,38 @@ pub struct FileReader<'a> {
 	latest_pos: (usize, FilePos),
 
 	/// The next position to return.
+	///
+	/// The head location is different from the prev location because we want to return the starting
+	/// positions of our atoms, not the ending positions. (e.g. `\n` should be the last character on
+	/// a line, not the first)
 	next_pos: FilePos,
+}
+
+fn fr_read_atom_untracked(codepoints: &mut CodepointReader<'_>) -> FileAtom {
+	let first = match codepoints.consume_atom() {
+		Ok(Some(first)) => first,
+		Ok(None) => return FileAtom::Eof,
+		Err(_) => return FileAtom::Malformed,
+	};
+
+	match first {
+		'\n' => FileAtom::Newline {
+			kind: NewlineKind::Lf,
+		},
+		'\r' => {
+			let has_lf = codepoints
+				.lookahead(|codepoints| matches!(codepoints.consume_atom(), Ok(Some('\n'))));
+
+			let kind = if has_lf {
+				NewlineKind::Crlf
+			} else {
+				NewlineKind::Cr
+			};
+
+			FileAtom::Newline { kind }
+		}
+		char @ _ => FileAtom::Codepoint(char),
+	}
 }
 
 impl Cursor for FileReader<'_> {
@@ -173,11 +229,44 @@ impl Cursor for FileReader<'_> {
 	type Atom = FileAtom;
 
 	fn latest(&self) -> (Self::Loc, Self::Atom) {
-		todo!()
+		let loc = FileLoc {
+			file_desc: self.file_desc,
+			byte_index: self.latest_pos.0,
+			pos: self.latest_pos.1,
+		};
+
+		let atom = fr_read_atom_untracked(&mut CodepointReader::new(
+			&self.codepoints.contents[loc.byte_index..],
+		));
+
+		(loc, atom)
 	}
 
 	fn consume(&mut self) -> (Self::Loc, Self::Atom) {
-		todo!()
+		// Our head at the start of this routine is what we will return by the end.
+		self.latest_pos = (self.codepoints.peek_loc(), self.next_pos);
+
+		// Now, let's consume some atoms.
+		let atom = fr_read_atom_untracked(&mut self.codepoints);
+
+		// ...and update the cursor location.
+		match &atom {
+			FileAtom::Newline { kind: _ } => {
+				self.next_pos.ln += 1;
+				self.next_pos.col = 0;
+			}
+			_ => {
+				self.next_pos.col += 1;
+			}
+		}
+
+		// Finally, let's build our loc-atom pair.
+		let loc = FileLoc {
+			file_desc: self.file_desc,
+			byte_index: self.latest_pos.0,
+			pos: self.latest_pos.1,
+		};
+		(loc, atom)
 	}
 }
 
@@ -212,18 +301,73 @@ pub enum NewlineKind {
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Span {
 	pub file_desc: Entity,
+	pub start_byte: usize,
+	pub start_pos: FilePos,
+	pub end_byte: usize,
+	pub end_pos: FilePos,
+}
+
+impl Span {
+	pub fn new(a: FileLoc, b: FileLoc) -> Self {
+		assert_eq!(a.file_desc, b.file_desc);
+
+		let [start_loc, end_loc] = {
+			let mut locs = [a, b];
+			locs.sort();
+			locs
+		};
+
+		Self {
+			file_desc: start_loc.file_desc,
+			start_byte: start_loc.byte_index,
+			start_pos: start_loc.pos,
+			end_byte: end_loc.byte_index,
+			end_pos: end_loc.pos,
+		}
+	}
+
+	pub fn start_loc(&self) -> FileLoc {
+		FileLoc {
+			file_desc: self.file_desc,
+			byte_index: self.start_byte,
+			pos: self.start_pos,
+		}
+	}
+
+	pub fn end_loc(&self) -> FileLoc {
+		FileLoc {
+			file_desc: self.file_desc,
+			byte_index: self.end_byte,
+			pos: self.end_pos,
+		}
+	}
+
+	pub fn byte_range(&self) -> Range<usize> {
+		self.start_byte..self.end_byte
+	}
+
+	pub fn reader<'f>(&self, file: &'f LoadedFile) -> FileReader<'f> {
+		assert_eq!(file.file_desc, self.file_desc);
+
+		FileReader {
+			file_desc: self.file_desc,
+			codepoints: CodepointReader::new_range(&file.contents, self.byte_range()),
+			latest_pos: (self.start_byte, self.start_pos),
+			next_pos: self.start_pos,
+		}
+	}
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct FileLoc {
 	pub file_desc: Entity,
-	pub index: usize,
+	pub byte_index: usize,
 	pub pos: FilePos,
 }
 
 impl Ord for FileLoc {
 	fn cmp(&self, other: &Self) -> Ordering {
-		let ord = self.index.cmp(&other.index);
+		let ord = self.byte_index.cmp(&other.byte_index);
 		debug_assert_eq!(ord, self.pos.cmp(&other.pos));
 		ord
 	}
@@ -237,8 +381,14 @@ impl PartialOrd for FileLoc {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct FilePos {
+	/// The zero-indexed line of the codepoint in the file.
 	pub ln: usize,
+	/// The zero-indexed column of the codepoint in the file.
 	pub col: usize,
+}
+
+impl FilePos {
+	pub const START: Self = Self { ln: 0, col: 0 };
 }
 
 impl Ord for FilePos {

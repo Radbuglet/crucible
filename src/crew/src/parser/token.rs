@@ -1,4 +1,6 @@
+use super::file::Span;
 use crate::util::{intern::Intern, obj::Entity};
+use smallvec::SmallVec;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TokenKind {
@@ -7,11 +9,12 @@ pub enum TokenKind {
 	StringLit,
 	NumberLit,
 	Comment,
-	Formatting,
 }
 
 #[derive(Debug, Clone)]
-pub struct TokenIdent {}
+pub struct TokenIdent {
+	pub text: Intern,
+}
 
 #[derive(Debug, Clone)]
 pub enum TokenGroupDelimiter {
@@ -39,16 +42,18 @@ pub enum TokenGroupDelimiter {
 
 #[derive(Debug, Clone)]
 pub struct TokenGroup {
-	delimiter: TokenGroupDelimiter,
-	tokens: Vec<Entity>,
+	pub delimiter: TokenGroupDelimiter,
+	pub tokens: Vec<Entity>,
 }
 
 #[derive(Debug, Clone)]
-pub struct TokenStringLit {}
+pub struct TokenStringLit {
+	pub parts: SmallVec<[TokenStringLitPart; 1]>,
+}
 
 #[derive(Debug, Clone)]
 pub enum TokenStringLitPart {
-	Literal(Intern),
+	Literal { text: Intern, span: Span },
 	Group(Entity),
 }
 
@@ -56,7 +61,47 @@ pub enum TokenStringLitPart {
 pub struct TokenNumberLit {}
 
 #[derive(Debug, Clone)]
-pub struct TokenComment {}
+pub struct TokenComment {
+	pub kind: CommentKind,
+	pub text: Intern,
+}
 
-#[derive(Debug, Clone)]
-pub struct TokenFormatting {}
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum CommentKind {
+	DocsLine,
+	DocsBlock,
+	RegularLine,
+	RegularBlock,
+	Region,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct TokenPunct {
+	pub kind: TokenPunctKind,
+	pub glued: bool,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum TokenPunctKind {
+	Backtick,
+	Tilde,
+	Exclamation,
+	At,
+	Pound,
+	Dollar,
+	Percent,
+	Caret,
+	Ampersand,
+	Dash,
+	Plus,
+	Equals,
+	Bar,
+	Semicolon,
+	Colon,
+	Comma,
+	Period,
+	Question,
+	Slash,
+	Less,
+	Greater,
+}

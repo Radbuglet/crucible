@@ -300,6 +300,7 @@ dependencies = [
  "bumpalo",
  "hashbrown 0.12.1",
  "sealed",
+ "smallvec",
  "thiserror",
 ]
 
