@@ -4,13 +4,13 @@ use std::hash::{Hash, Hasher};
 
 /// A fancy [TypeId] that records type names in debug builds.
 #[derive(Copy, Clone)]
-pub struct FancyTypeId {
+pub struct NamedTypeId {
 	id: TypeId,
 	#[cfg(debug_assertions)]
 	name: &'static str,
 }
 
-impl FancyTypeId {
+impl NamedTypeId {
 	pub fn of<T: ?Sized + 'static>() -> Self {
 		Self {
 			id: TypeId::of::<T>(),
@@ -35,29 +35,29 @@ impl FancyTypeId {
 	}
 }
 
-impl Debug for FancyTypeId {
+impl Debug for NamedTypeId {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		#[cfg(debug_assertions)]
 		{
-			f.debug_tuple(format!("FancyTypeId<{}>", self.name).as_str())
+			f.debug_tuple(format!("NamedTypeId<{}>", self.name).as_str())
 				.finish()
 		}
 		#[cfg(not(debug_assertions))]
 		{
-			f.debug_tuple("FancyTypeId").field(&self.id).finish()
+			f.debug_tuple("NamedTypeId").field(&self.id).finish()
 		}
 	}
 }
 
-impl Hash for FancyTypeId {
+impl Hash for NamedTypeId {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		self.id.hash(state)
 	}
 }
 
-impl Eq for FancyTypeId {}
+impl Eq for NamedTypeId {}
 
-impl PartialEq for FancyTypeId {
+impl PartialEq for NamedTypeId {
 	fn eq(&self, other: &Self) -> bool {
 		self.id == other.id
 	}

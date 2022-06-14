@@ -1,6 +1,6 @@
 use crate::util::error::ResultExt;
 use crate::util::number::{AtomicU64Generator, NumberGenRef};
-use crate::util::type_id::FancyTypeId;
+use crate::util::type_id::NamedTypeId;
 use derive_where::derive_where;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
@@ -47,22 +47,22 @@ impl Debug for RawTypedKey {
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 enum TypedKeyRawInner {
-	Static(FancyTypeId),
-	Proxy(FancyTypeId),
+	Static(NamedTypeId),
+	Proxy(NamedTypeId),
 	Runtime(u64),
 }
 
 pub fn typed_key<T: ?Sized + 'static>() -> TypedKey<T> {
 	TypedKey {
 		_ty: PhantomData,
-		raw: RawTypedKey(TypedKeyRawInner::Static(FancyTypeId::of::<T>())),
+		raw: RawTypedKey(TypedKeyRawInner::Static(NamedTypeId::of::<T>())),
 	}
 }
 
 pub fn proxy_key<T: ?Sized + 'static + ProxyKeyType>() -> TypedKey<T::Provides> {
 	TypedKey {
 		_ty: PhantomData,
-		raw: RawTypedKey(TypedKeyRawInner::Proxy(FancyTypeId::of::<T>())),
+		raw: RawTypedKey(TypedKeyRawInner::Proxy(NamedTypeId::of::<T>())),
 	}
 }
 
