@@ -1,8 +1,9 @@
-use crate::parser::generic::Cursor;
+use crate::parser::generic::{Atom, Cursor};
 use crate::util::iter_magic::limit_len;
 use crate::util::obj::Entity;
 use std::cmp::Ordering;
 use std::str::from_utf8 as str_from_utf8;
+use thiserror::Error;
 
 // === Source file representations === //
 
@@ -11,6 +12,10 @@ use std::str::from_utf8 as str_from_utf8;
 pub struct SourceFileInfo {
 	pub name: String,
 }
+
+/// Optional object span metadata to help users find the location of the element in its source file.
+#[derive(Debug, Clone)]
+pub struct Spanned {}
 
 /// A file whose contents have been loaded into memory.
 #[derive(Debug, Clone)]
@@ -36,12 +41,17 @@ pub struct CodepointReader<'a> {
 }
 
 impl<'a> CodepointReader<'a> {
-	pub fn new(contents: &'a [u8], ) -> Self {
-
+	pub fn new(contents: &'a [u8]) -> Self {
+		Self {
+			contents,
+			latest_index: 0,
+			next_index: 0,
+		}
 	}
 }
 
 impl<'a> Cursor for CodepointReader<'a> {
+	type Loc = usize;
 	type Atom = Result<Option<char>, UnicodeParseError<'a>>;
 
 	fn latest(&self) -> (Self::Loc, Self::Atom) {
@@ -53,7 +63,7 @@ impl<'a> Cursor for CodepointReader<'a> {
 		let atom = match str_from_utf8(bytes) {
 			Ok(str) => Ok(str.chars().next()),
 			Err(err) => Err(UnicodeParseError {
-				bytes: match err.error_len() {
+				offending: match err.error_len() {
 					Some(err_len) => &bytes[..err_len],
 					None => bytes,
 				},
@@ -94,7 +104,7 @@ impl<'a> Cursor for CodepointReader<'a> {
 				if err.valid_up_to() == 0 {
 					// Case 1: The first codepoint is not valid.
 					// Let's skip it and return a codepoint parse error.
-					let relevant_bytes = if let Some(err_len) = err.error_len() {
+					let offending = if let Some(err_len) = err.error_len() {
 						// A value of `Some` tells us that the codepoint was ended by what appears
 						// to be the start of another codepoint. Let's synchronize to it and continue!
 						self.next_index += err_len;
@@ -110,12 +120,7 @@ impl<'a> Cursor for CodepointReader<'a> {
 						remaining
 					};
 
-					(
-						self.latest_index,
-						Err(UnicodeParseError {
-							bytes: relevant_bytes,
-						}),
-					)
+					(self.latest_index, Err(UnicodeParseError { offending }))
 				} else {
 					// Case 2: A subsequent codepoint is malformed.
 					// Let's truncate it off and parse the original codepoint
@@ -133,6 +138,18 @@ impl<'a> Cursor for CodepointReader<'a> {
 	}
 }
 
+#[derive(Debug, Copy, Clone, Error)]
+#[error("failed to parse portion of unicode byte stream. Offending byte stream: {offending:?}")]
+pub struct UnicodeParseError<'a> {
+	offending: &'a [u8],
+}
+
+impl Atom for Result<Option<char>, UnicodeParseError<'_>> {
+	fn is_eof(&self) -> bool {
+		matches!(self, Ok(Some(_)))
+	}
+}
+
 // === File Reader === //
 
 /// A reader that reads logical atoms from a byte stream.
@@ -140,7 +157,7 @@ impl<'a> Cursor for CodepointReader<'a> {
 pub struct FileReader<'a> {
 	/// The descriptor of the file we're reading. Used to form `FileLocs`.
 	file_desc: Entity,
-	
+
 	/// The underlying file codepoint reader.
 	codepoints: CodepointReader<'a>,
 
@@ -160,14 +177,7 @@ impl Cursor for FileReader<'_> {
 	}
 
 	fn consume(&mut self) -> (Self::Loc, Self::Atom) {
-		// Our latest position becomes our next position
-		self.latest_pos = self.next_pos;
-
-		let (first_loc, first_char) = self.codepoints.consume();
-		let first_char = match first_char {
-			Ok(Some(char)) => char,
-			Ok(None) => ()
-		}
+		todo!()
 	}
 }
 
@@ -177,6 +187,12 @@ pub enum FileAtom {
 	Codepoint(char),
 	Malformed,
 	Newline { kind: NewlineKind },
+}
+
+impl Atom for FileAtom {
+	fn is_eof(&self) -> bool {
+		matches!(self, FileAtom::Eof)
+	}
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
