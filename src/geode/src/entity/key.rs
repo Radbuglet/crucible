@@ -1,8 +1,8 @@
-use crate::util::type_id::NamedTypeId;
+use crate::util::number::{AtomicU64Generator, NumberGenRef};
+use crate::util::reflect::NamedTypeId;
 use derive_where::derive_where;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 #[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct TypedKey<T: ?Sized> {
@@ -65,13 +65,11 @@ pub fn proxy_key<T: ?Sized + 'static + ProxyKeyType>() -> TypedKey<T::Provides> 
 }
 
 pub fn dyn_key<T: ?Sized + 'static>() -> TypedKey<T> {
-	static GEN: AtomicU64 = AtomicU64::new(0);
+	static GEN: AtomicU64Generator = AtomicU64Generator::new(1);
 
 	TypedKey {
 		_ty: PhantomData,
-		raw: RawTypedKey(TypedKeyRawInner::Runtime(
-			GEN.fetch_add(1, AtomicOrdering::Relaxed),
-		)),
+		raw: RawTypedKey(TypedKeyRawInner::Runtime(GEN.generate_ref())),
 	}
 }
 

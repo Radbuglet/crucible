@@ -1,6 +1,5 @@
-use crate::util::cell::UsuallySafeCell;
+use crate::util::cell::{SyncUnsafeCell, UsuallySafeCell};
 use crate::util::error::ResultExt;
-use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
@@ -225,7 +224,7 @@ impl Display for LockError {
 /// dead-locks).
 pub struct ARefCell<T: ?Sized> {
 	counter: LockCounter,
-	value: UnsafeCell<T>,
+	value: SyncUnsafeCell<T>,
 }
 
 impl<T: Debug> Debug for ARefCell<T> {
@@ -259,14 +258,11 @@ impl<T: Default> Default for ARefCell<T> {
 
 impl<T, U> CoerceUnsized<ARefCell<U>> for ARefCell<T> where T: CoerceUnsized<U> {}
 
-unsafe impl<T: ?Sized + Send> Send for ARefCell<T> {}
-unsafe impl<T: ?Sized + Sync> Sync for ARefCell<T> {}
-
 impl<T> ARefCell<T> {
 	pub fn new(value: T) -> Self {
 		Self {
 			counter: LockCounter::default(),
-			value: UnsafeCell::new(value),
+			value: SyncUnsafeCell::new(value),
 		}
 	}
 
@@ -298,7 +294,7 @@ impl<T: ?Sized> ARefCell<T> {
 		let guard = ReadGuard::try_lock_unsynchronized(&self.counter)?;
 		Ok(ARef {
 			guard,
-			value: &*self.value.get(),
+			value: self.value.get_ref_unchecked(),
 		})
 	}
 
@@ -310,7 +306,7 @@ impl<T: ?Sized> ARefCell<T> {
 		let guard = ReadGuard::try_lock(&self.counter)?;
 		Ok(ARef {
 			guard,
-			value: unsafe { &*self.value.get() },
+			value: unsafe { self.value.get_ref_unchecked() },
 		})
 	}
 
@@ -324,7 +320,7 @@ impl<T: ?Sized> ARefCell<T> {
 		let guard = WriteGuard::try_lock_unsynchronized(&self.counter)?;
 		Ok(AMut {
 			guard,
-			value: &mut *self.value.get(),
+			value: self.value.get_mut_unchecked(),
 		})
 	}
 
@@ -336,7 +332,7 @@ impl<T: ?Sized> ARefCell<T> {
 		let guard = WriteGuard::try_lock(&self.counter)?;
 		Ok(AMut {
 			guard,
-			value: unsafe { &mut *self.value.get() },
+			value: unsafe { self.value.get_mut_unchecked() },
 		})
 	}
 

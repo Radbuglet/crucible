@@ -2,7 +2,7 @@ use std::any::type_name;
 use std::cell::UnsafeCell;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
+use std::ops::{CoerceUnsized, Deref, DerefMut};
 use std::ptr::NonNull;
 
 // === UsuallySafeCell === //
@@ -69,28 +69,36 @@ impl<T: Default> Default for UsuallySafeCell<T> {
 unsafe impl<T: Send> Send for UsuallySafeCell<T> {}
 unsafe impl<T: Sync> Sync for UsuallySafeCell<T> {}
 
-// === MakeSync === //
+impl<T, U> CoerceUnsized<UsuallySafeCell<U>> for UsuallySafeCell<T> where T: CoerceUnsized<U> {}
+
+// === OnlyMut === //
 
 #[derive(Default)]
-pub struct MakeSync<T: ?Sized>(T);
+pub struct OnlyMut<T: ?Sized>(T);
 
-impl<T: ?Sized> Debug for MakeSync<T> {
+impl<T> OnlyMut<T> {
+	pub fn new(value: T) -> Self {
+		Self(value)
+	}
+}
+
+impl<T: ?Sized> Debug for OnlyMut<T> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct(format!("MakeSync<{}>", type_name::<T>()).as_str())
 			.finish_non_exhaustive()
 	}
 }
 
-impl<T: ?Sized> MakeSync<T> {
+impl<T: ?Sized> OnlyMut<T> {
 	pub fn get(&mut self) -> &mut T {
 		&mut self.0
 	}
 }
 
-unsafe impl<T: ?Sized + Send> Send for MakeSync<T> {}
-
 // Safe because we only give out mutable references to the contents.
-unsafe impl<T: ?Sized + Send> Sync for MakeSync<T> {}
+unsafe impl<T: ?Sized + Send> Sync for OnlyMut<T> {}
+
+impl<T, U> CoerceUnsized<OnlyMut<U>> for OnlyMut<T> where T: CoerceUnsized<U> {}
 
 // === SyncUnsafeCell === //
 
@@ -120,6 +128,10 @@ impl<T> SyncUnsafeCell<T> {
 }
 
 impl<T: ?Sized> SyncUnsafeCell<T> {
+	pub fn get(&self) -> *mut T {
+		self.0.get()
+	}
+
 	pub fn get_mut(&mut self) -> &mut T {
 		self.0.get_mut()
 	}
@@ -133,6 +145,8 @@ impl<T: ?Sized> SyncUnsafeCell<T> {
 		&mut *self.0.get()
 	}
 }
+
+impl<T, U> CoerceUnsized<SyncUnsafeCell<U>> for SyncUnsafeCell<T> where T: CoerceUnsized<U> {}
 
 // === SyncUnsafeCellMut === //
 
@@ -171,6 +185,8 @@ impl<T: ?Sized> SyncUnsafeCellMut<T> {
 		&mut *self.0.get()
 	}
 }
+
+impl<T, U> CoerceUnsized<SyncUnsafeCellMut<U>> for SyncUnsafeCellMut<T> where T: CoerceUnsized<U> {}
 
 // === SyncPtr === //
 

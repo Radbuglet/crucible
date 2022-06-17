@@ -1,3 +1,7 @@
+use std::{fmt::Debug, num::NonZeroU64};
+
+use crate::util::number::{bit_mask, free_bit, reserve_bit, NonZeroNumExt};
+
 /// An byte-sized ID allocator that treats `255` as a sentinel value. Used to allocate session and
 /// lock IDs.
 pub struct IdAlloc([u64; 4]);
@@ -16,7 +20,7 @@ impl IdAlloc {
 			.find_map(|(i, word)| {
 				let rel_pos = reserve_bit(word);
 				if rel_pos != 64 {
-					Some(i as u8 * 64 + rel_pos)
+					Some(i as u8 * 64 + rel_pos) // FIXME
 				} else {
 					None
 				}
@@ -27,26 +31,6 @@ impl IdAlloc {
 	pub fn free(&mut self, pos: u8) {
 		free_bit(&mut self.0[(pos >> 6) as usize], pos & 0b111111)
 	}
-}
-
-/// Reserves a zero bit from the `target`, marks it as a `1`, and returns its index from the LSB.
-/// Returns `64` if no bits could be allocated.
-fn reserve_bit(target: &mut u64) -> u8 {
-	let pos = target.trailing_ones() as u8;
-	*target |= bit_mask(pos);
-	pos
-}
-
-/// Sets the specified bit to `0`, marking it as free. `free_bit` uses the same indexing convention
-/// as [reserve_bit], i.e. its offset from the LSB. Indices greater than 63 are ignored.
-fn free_bit(target: &mut u64, pos: u8) {
-	*target &= !bit_mask(pos);
-}
-
-/// Constructs a bit mask with only the bit at position `pos` set. `bit_mask` uses the same indexing
-/// convention as [reserve_bit], i.e. its offset from the LSB. Indices greater than 63 are ignored.
-fn bit_mask(pos: u8) -> u64 {
-	1u64.wrapping_shl(pos as u32)
 }
 
 /// We combine the generation and lock/session field into one `u64` to reduce memory consumption and
@@ -68,11 +52,28 @@ fn bit_mask(pos: u8) -> u64 {
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct ExtendedGen(u64);
 
-impl ExtendedGen {
-	pub fn new(meta: u8, gen: u64) -> Self {
-		debug_assert!(gen < 2u64.pow(64 - 8));
+impl Debug for ExtendedGen {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("ExtendedGen")
+			.field("gen", &self.gen())
+			.field("meta", &self.meta())
+			.finish()
+	}
+}
 
-		Self(meta as u64 + gen << 8)
+impl ExtendedGen {
+	pub fn new(meta: u8, gen: Option<NonZeroU64>) -> Self {
+		debug_assert!(gen.prim() < 2u64.pow(64 - 8));
+
+		Self(meta as u64 + gen.prim() << 8)
+	}
+
+	pub fn raw(&self) -> u64 {
+		self.0
+	}
+
+	pub fn from_raw(id: u64) -> Self {
+		Self(id)
 	}
 
 	pub fn gen(&self) -> u64 {
@@ -117,7 +118,7 @@ impl SessionLocks {
 		self.lock_states[lock_id as usize] = !lock_id;
 	}
 
-	pub fn can_lock(&self, ptr_gen: ExtendedGen, slot_gen: ExtendedGen) -> bool {
+	pub fn check(&self, ptr_gen: ExtendedGen, slot_gen: ExtendedGen) -> bool {
 		debug_assert_eq!(ptr_gen.meta(), 0xFF);
 
 		let lock_mask = self.lock_states[slot_gen.meta() as usize];
