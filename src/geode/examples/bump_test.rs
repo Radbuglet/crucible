@@ -1,8 +1,8 @@
 #![feature(allocator_api)]
 
 use bumpalo::Bump;
-use hashbrown::HashMap;
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn main() {

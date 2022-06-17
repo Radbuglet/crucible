@@ -1,9 +1,9 @@
 use crate::oop::atomic_ref_cell::ARefCell;
 use crate::oop::key::{typed_key, RawTypedKey, TypedKey};
 use crate::util::arity_utils::impl_tuples;
+use crate::util::cell::MakeSync;
 use crate::util::inline_store::ByteContainer;
 use crate::util::marker::{PhantomNoSendOrSync, PhantomNoSync};
-use crate::util::usually::MakeSync;
 use bumpalo::Bump;
 use derive_where::derive_where;
 use rustc_hash::FxHashMap;

@@ -1,5 +1,5 @@
+use crate::util::cell::UsuallySafeCell;
 use crate::util::error::ResultExt;
-use crate::util::usually::UsuallySafeCell;
 use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::error::Error;
