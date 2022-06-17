@@ -1,6 +1,6 @@
 #![feature(bench_black_box)]
 
-use geode::prelude::ARefCell;
+use geode::atomic_ref_cell::ARefCell;
 use std::{cell::RefCell, time::Instant};
 
 fn main() {
