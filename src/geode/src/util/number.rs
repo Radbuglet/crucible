@@ -22,7 +22,7 @@ impl NonZeroNumExt for Option<NonZeroU64> {
 	}
 }
 
-// === Bit free list utilities === //
+// === Free bit-list utilities === //
 
 /// Reserves a zero bit from the `target`, marks it as a `1`, and returns its index from the LSB.
 /// Returns `64` if no bits could be allocated.

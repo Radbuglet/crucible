@@ -65,7 +65,7 @@ impl ExtendedGen {
 	pub fn new(meta: u8, gen: Option<NonZeroU64>) -> Self {
 		debug_assert!(gen.prim() < 2u64.pow(64 - 8));
 
-		Self(meta as u64 + gen.prim() << 8)
+		Self(meta as u64 + (gen.prim() << 8))
 	}
 
 	pub fn raw(&self) -> u64 {

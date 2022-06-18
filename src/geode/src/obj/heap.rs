@@ -1,7 +1,8 @@
 use super::gen::{ExtendedGen, SessionLocks};
+use super::ObjGetError;
 use crate::util::{bump::LeakyBump, reflect::TypeMeta};
 use bumpalo::Bump;
-use std::ptr::{null_mut, NonNull};
+use std::ptr::null;
 use std::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
 
 // === SlotManager === //
@@ -38,32 +39,36 @@ pub struct Slot {
 }
 
 impl Slot {
-	pub fn acquire(&self, new_gen: ExtendedGen, new_ptr: NonNull<()>) {
+	pub fn acquire(&self, new_gen: ExtendedGen, new_base: *const ()) {
 		debug_assert_ne!(new_gen.gen(), 0);
-		self.acquire_raw(new_gen.raw(), new_ptr.as_ptr());
+		self.acquire_raw(new_gen.raw(), new_base);
 	}
 
 	pub fn release(&self) {
-		self.acquire_raw(ExtendedGen::new(0, None).raw(), null_mut());
+		self.acquire_raw(ExtendedGen::new(0, None).raw(), null());
 	}
 
-	fn acquire_raw(&self, new_gen: u64, new_ptr: *mut ()) {
+	fn acquire_raw(&self, new_gen: u64, new_base: *const ()) {
 		// We first ensure that the new `lock_and_gen` is visible to other threads before modifying
 		// the pointer. That way, even if they load the stale pointer, they'll see that the `gen`
 		// has been changed and prevent the unsafe fetch.
 		self.lock_and_gen.store(new_gen, Ordering::Relaxed);
-		self.base_ptr.store(new_ptr, Ordering::Release); // Forces other cores to see `lock_and_gen`
+		self.base_ptr.store(new_base as *mut (), Ordering::Release); // Forces other cores to see `lock_and_gen`
 	}
 
-	pub fn try_get(&self, locks: &SessionLocks, ptr_gen: ExtendedGen) -> Option<NonNull<()>> {
+	pub fn try_get_base(
+		&self,
+		locks: &SessionLocks,
+		ptr_gen: ExtendedGen,
+	) -> Result<*const (), ObjGetError> {
 		let base_ptr = self.base_ptr.load(Ordering::Acquire); // Forces other cores to see `lock_and_gen` and `base_ptr`.
 		let slot_gen = self.lock_and_gen.load(Ordering::Relaxed);
 		let slot_gen = ExtendedGen::from_raw(slot_gen);
 
 		if locks.check(ptr_gen, slot_gen) {
-			NonNull::new(base_ptr)
+			Ok(base_ptr)
 		} else {
-			None
+			Err(ObjGetError {})
 		}
 	}
 }
@@ -78,14 +83,14 @@ pub struct GcHeap {
 
 struct GcEntry {
 	slot: &'static Slot,
-	base_ptr: NonNull<()>,
+	base_ptr: *const (),
 	meta: &'static TypeMeta,
 }
 
 impl GcHeap {
-	pub fn alloc<T>(&mut self, slot: &'static Slot, gen: ExtendedGen, value: T) -> NonNull<T> {
-		let full_ptr = NonNull::from(self.bump.alloc(value));
-		let base_ptr = full_ptr.cast::<()>();
+	pub fn alloc<T>(&mut self, slot: &'static Slot, gen: ExtendedGen, value: T) -> *const T {
+		let full_ptr = self.bump.alloc(value) as *const T;
+		let base_ptr = full_ptr as *const ();
 		let meta = TypeMeta::of::<T>();
 
 		self.entries.push(GcEntry {

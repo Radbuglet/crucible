@@ -2,6 +2,7 @@ use super::gen::{ExtendedGen, IdAlloc, SessionLocks};
 use super::heap::{GcHeap, Slot, SlotManager};
 use crate::atomic_ref_cell::{ARef, ARefCell};
 use crate::util::cell::{OnlyMut, SyncUnsafeCellMut};
+use crate::util::error::ResultExt;
 use crate::util::marker::PhantomNoSync;
 use crate::util::number::{AtomicNZU64Generator, NumberGenRef};
 use antidote::Mutex;
@@ -11,6 +12,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ptr::Pointee;
 use std::sync::Arc;
+use thiserror::Error;
 
 // === Globals === //
 
@@ -25,8 +27,8 @@ struct ObjectDB {
 	/// collection.
 	gc_data: ARefCell<OnlyMut<GcData>>,
 
-	/// Global state to help manage sessions. This should only ever be locked when we hold a reference
-	/// lock to `gc_data`.
+	/// Global state to help manage sessions. This should only ever be acquired after we acquire a
+	/// read-only lock to `gc_data`.
 	sess_data: Mutex<SessData>,
 }
 
@@ -71,7 +73,7 @@ thread_local! {
 pub struct Session<'a> {
 	_lt: PhantomData<&'a ()>,
 	_no_sync: PhantomNoSync,
-	gc_guard: ARef<'static, OnlyMut<GcData>>,
+	_gc_guard: ARef<'static, OnlyMut<GcData>>,
 	id: u8,
 	thread: DbThreadPtr,
 	lock_ids: SessionLocks,
@@ -111,7 +113,7 @@ impl<'a> Session<'a> {
 		Self {
 			_lt: PhantomData,
 			_no_sync: PhantomNoSync::default(),
-			gc_guard,
+			_gc_guard: gc_guard,
 			id,
 			thread,
 			lock_ids,
@@ -183,6 +185,10 @@ impl<T: Sized + ObjPointee + Sync> Obj<T> {
 }
 
 impl<T: Sized + ObjPointee> Obj<T> {
+	pub fn new_in(session: &Session, lock: Lock, value: T) -> Self {
+		Self::new_in_raw(session, lock.0, value)
+	}
+
 	fn new_in_raw(session: &Session, lock: u8, value: T) -> Self {
 		let thread_data = unsafe { session.thread.get_mut_unchecked() };
 
@@ -191,14 +197,46 @@ impl<T: Sized + ObjPointee> Obj<T> {
 
 		// Generate a `gen` ID
 		let gen = object_db().generation_gen.generate_ref();
-		let gen = ExtendedGen::new(lock, Some(gen));
 
 		// Allocate the object
-		let p_data = thread_data.heap.alloc(slot, gen, value);
-		let (_base_ptr, meta) = p_data.to_raw_parts();
+		let meta = {
+			// We need to create a separate gen for the slot allocation as we do for the `Obj`.
+			let gen_and_lock = ExtendedGen::new(lock, Some(gen));
+
+			let p_data = thread_data.heap.alloc(slot, gen_and_lock, value);
+			let (_base_ptr, meta) = p_data.to_raw_parts();
+			meta
+		};
+
+		// Create the proper `gen` ID
+		let gen = ExtendedGen::new(0xFF, Some(gen));
 
 		// And construct the obj
 		Self { slot, gen, meta }
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Obj<T> {
+	pub fn try_get<'a>(&self, session: &'a Session) -> Result<&'a T, ObjGetError> {
+		let base = self.slot.try_get_base(&session.lock_ids, self.gen)?;
+		let ptr = std::ptr::from_raw_parts::<T>(base, self.meta);
+
+		Ok(unsafe { &*ptr })
+	}
+
+	pub fn get<'a>(&self, session: &'a Session) -> &'a T {
+		self.try_get(session).unwrap_pretty()
+	}
+
+	pub fn destroy<'a>(&self, session: &'a Session) {
+		let thread_data = unsafe { session.thread.get_mut_unchecked() };
+
+		self.slot.release();
+		thread_data.slot_manager.unreserve(self.slot);
+	}
+
+	pub fn is_alive(&self, session: &Session) -> bool {
+		self.slot.try_get_base(&session.lock_ids, self.gen).is_ok()
 	}
 }
 
@@ -216,3 +254,8 @@ impl<T: ?Sized + ObjPointee> Hash for Obj<T> {
 		self.gen.hash(state);
 	}
 }
+
+#[derive(Debug, Copy, Clone, Error)]
+#[error("failed to fetch `Obj`")]
+// TODO: Give better reasons
+pub struct ObjGetError {}

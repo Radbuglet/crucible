@@ -30,8 +30,21 @@ pub trait InjectableClosure<A, D> {
 	fn call_injected(&mut self, args: A, deps: D) -> Self::Return;
 }
 
-macro tup_impl_closure_call_derive_for_fn($($left_name:ident: $left_field: tt),* ~ $($right_name:ident: $right_field: tt),*) {
-	impl<ZZClosure: FnMut($($left_name,)* $($right_name,)*) -> ZZRet, ZZRet, $($left_name,)* $($right_name),*> InjectableClosure<($($left_name,)*), ($($right_name,)*)> for ZZClosure {
+macro tup_impl_closure_call_derive_for_fn(
+	$($left_name:ident: $left_field: tt),* ~
+	$($right_name:ident: $right_field: tt),*
+) {
+	impl<
+		ZZClosure: FnMut($($left_name,)* $($right_name,)*) -> ZZRet,
+		ZZRet,
+		$($left_name,)*
+		$($right_name),*
+	> InjectableClosure<
+		($($left_name,)*),
+		($($right_name,)*)
+	>
+	for ZZClosure
+	{
 		type Return = ZZRet;
 
 		#[allow(unused_variables)]

@@ -9,7 +9,7 @@ use thiserror::Error;
 
 // === RawEntity === //
 
-pub trait RawEntity: Debug {
+pub trait Provider: Debug {
 	fn provide_raw<'t, 'r>(&'r self, out: &mut ProviderOut<'t, 'r>);
 }
 
@@ -83,7 +83,7 @@ impl<'t, 'r> ProviderOut<'t, 'r> {
 // === Error types === //
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Error)]
-#[error("component {key:?} missing from `Entity`")]
+#[error("component {key:?} missing from `Provider`")]
 pub struct ComponentMissingError {
 	pub key: RawTypedKey,
 }
@@ -97,15 +97,15 @@ pub struct ComponentLockError {
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Error)]
 pub enum BorrowError {
-	#[error("failed to find component in `Entity`")]
+	#[error("failed to find component in `Provider`")]
 	ComponentMissing(#[from] ComponentMissingError),
-	#[error("failed to borrow component from `Entity`")]
+	#[error("failed to borrow component from `Provider`")]
 	LockError(#[from] ComponentLockError),
 }
 
 // === ObjExt === //
 
-pub trait EntityExt: RawEntity {
+pub trait ProviderExt: Provider {
 	fn try_get_as<T: ?Sized + 'static>(
 		&self,
 		key: TypedKey<T>,
@@ -206,26 +206,26 @@ pub trait EntityExt: RawEntity {
 	}
 }
 
-impl<T: ?Sized + RawEntity> EntityExt for T {}
+impl<T: ?Sized + Provider> ProviderExt for T {}
 
 pub trait MultiBorrowTarget<'a>: Sized {
-	fn try_borrow_from<O: ?Sized + EntityExt>(entity: &'a O) -> Result<Self, BorrowError>;
+	fn try_borrow_from<O: ?Sized + ProviderExt>(entity: &'a O) -> Result<Self, BorrowError>;
 }
 
 impl<'a, T: ?Sized + 'static> MultiBorrowTarget<'a> for &'a T {
-	fn try_borrow_from<O: ?Sized + EntityExt>(entity: &'a O) -> Result<Self, BorrowError> {
+	fn try_borrow_from<O: ?Sized + ProviderExt>(entity: &'a O) -> Result<Self, BorrowError> {
 		entity.try_get().map_err(From::from)
 	}
 }
 
 impl<'a, T: ?Sized + 'static> MultiBorrowTarget<'a> for ARef<'a, T> {
-	fn try_borrow_from<O: ?Sized + EntityExt>(entity: &'a O) -> Result<Self, BorrowError> {
+	fn try_borrow_from<O: ?Sized + ProviderExt>(entity: &'a O) -> Result<Self, BorrowError> {
 		entity.try_borrow()
 	}
 }
 
 impl<'a, T: ?Sized + 'static> MultiBorrowTarget<'a> for AMut<'a, T> {
-	fn try_borrow_from<O: ?Sized + EntityExt>(entity: &'a O) -> Result<Self, BorrowError> {
+	fn try_borrow_from<O: ?Sized + ProviderExt>(entity: &'a O) -> Result<Self, BorrowError> {
 		entity.try_borrow_mut()
 	}
 }
@@ -233,7 +233,7 @@ impl<'a, T: ?Sized + 'static> MultiBorrowTarget<'a> for AMut<'a, T> {
 macro impl_tup_entity_borrowable($($name:ident: $field:tt),*) {
 impl<'a, $($name: MultiBorrowTarget<'a>),*> MultiBorrowTarget<'a> for ($($name,)*) {
 		#[allow(unused_variables)]
-		fn try_borrow_from<O: ?Sized + EntityExt>(entity: &'a O) -> Result<Self, BorrowError> {
+		fn try_borrow_from<O: ?Sized + Provider>(entity: &'a O) -> Result<Self, BorrowError> {
 			Ok(($($name::try_borrow_from(entity)?,)*))
 		}
 	}
