@@ -1,13 +1,14 @@
-use super::gen::{ExtendedGen, IdAlloc, SessionLocks};
+use super::gen::{ExtendedGen, SessionLocks};
 use super::heap::{GcHeap, Slot, SlotManager};
 use crate::atomic_ref_cell::{ARef, ARefCell};
 use crate::util::cell::{OnlyMut, SyncUnsafeCellMut};
 use crate::util::error::ResultExt;
-use crate::util::marker::PhantomNoSync;
-use crate::util::number::{AtomicNZU64Generator, NumberGenRef};
+use crate::util::marker::PhantomNoSendOrSync;
+use crate::util::number::{AtomicNZU64Generator, NumberGenRef, U8Alloc};
 use antidote::Mutex;
 use derive_where::derive_where;
 use once_cell::sync::OnceCell;
+use std::cell::{Ref, RefCell, RefMut};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ptr::Pointee;
@@ -39,8 +40,8 @@ fn object_db() -> &'static ObjectDB {
 		generation_gen: AtomicNZU64Generator::default(),
 		gc_data: ARefCell::new(OnlyMut::new(GcData {})),
 		sess_data: Mutex::new(SessData {
-			free_sessions: IdAlloc::default(),
-			free_locks: IdAlloc::default(),
+			free_sessions: U8Alloc::default(),
+			free_locks: U8Alloc::default(),
 		}),
 	})
 }
@@ -50,8 +51,8 @@ struct GcData {
 }
 
 struct SessData {
-	free_sessions: IdAlloc,
-	free_locks: IdAlloc,
+	free_sessions: U8Alloc,
+	free_locks: U8Alloc,
 }
 
 /// A pointer to a database thread. Can only be promoted by either the GC routine or by the thread
@@ -72,7 +73,10 @@ thread_local! {
 
 pub struct Session<'a> {
 	_lt: PhantomData<&'a ()>,
-	_no_sync: PhantomNoSync,
+	// Can't be `Sync` because we real on the thread unsafety of `Session` to allow us to assert
+	// that a thread's session owns a lock. Can't be `Send` either because `Sessions` acquire thread
+	// local data and use it in an unsynchronized manner.
+	_no_threading: PhantomNoSendOrSync,
 	_gc_guard: ARef<'static, OnlyMut<GcData>>,
 	id: u8,
 	thread: DbThreadPtr,
@@ -112,7 +116,7 @@ impl<'a> Session<'a> {
 		// Construct the service
 		Self {
 			_lt: PhantomData,
-			_no_sync: PhantomNoSync::default(),
+			_no_threading: PhantomNoSendOrSync::default(),
 			_gc_guard: gc_guard,
 			id,
 			thread,
@@ -167,9 +171,14 @@ impl Drop for LockToken {
 
 // === Obj === //
 
+#[derive(Debug, Copy, Clone, Error)]
+#[error("failed to fetch `Obj`")]
+// TODO: Give better reasons
+pub struct ObjGetError {}
+
 pub unsafe trait ObjPointee: 'static + Send {}
 
-unsafe impl<T: 'static + Send> ObjPointee for T {}
+unsafe impl<T: ?Sized + 'static + Send> ObjPointee for T {}
 
 #[derive_where(Copy, Clone)]
 pub struct Obj<T: ?Sized + ObjPointee> {
@@ -235,8 +244,8 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 		thread_data.slot_manager.unreserve(self.slot);
 	}
 
-	pub fn is_alive(&self, session: &Session) -> bool {
-		self.slot.try_get_base(&session.lock_ids, self.gen).is_ok()
+	pub fn is_alive(&self, _session: &Session) -> bool {
+		self.slot.is_alive(self.gen)
 	}
 }
 
@@ -255,7 +264,39 @@ impl<T: ?Sized + ObjPointee> Hash for Obj<T> {
 	}
 }
 
-#[derive(Debug, Copy, Clone, Error)]
-#[error("failed to fetch `Obj`")]
-// TODO: Give better reasons
-pub struct ObjGetError {}
+pub type ObjRw<T> = Obj<RefCell<T>>;
+
+impl<T: ObjPointee> ObjRw<T> {
+	pub fn new_rw(session: &Session, lock: Lock, value: T) -> Self {
+		Self::new_in(session, lock, RefCell::new(value))
+	}
+}
+
+impl<T: ?Sized + ObjPointee> ObjRw<T> {
+	pub fn borrow<'a>(&self, session: &'a Session) -> Ref<'a, T> {
+		self.get(session).borrow()
+	}
+
+	pub fn borrow_mut<'a>(&self, session: &'a Session) -> RefMut<'a, T> {
+		self.get(session).borrow_mut()
+	}
+}
+
+pub trait ObjCtorExt: Sized + ObjPointee {
+	fn as_obj(self, session: &Session) -> Obj<Self>
+	where
+		Self: Sync,
+	{
+		Obj::new(session, self)
+	}
+
+	fn as_obj_in(self, session: &Session, lock: Lock) -> Obj<Self> {
+		Obj::new_in(session, lock, self)
+	}
+
+	fn as_obj_rw(self, session: &Session, lock: Lock) -> Obj<RefCell<Self>> {
+		Obj::new_rw(session, lock, self)
+	}
+}
+
+impl<T: Sized + ObjPointee> ObjCtorExt for T {}

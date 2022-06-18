@@ -44,6 +44,31 @@ pub fn bit_mask(pos: u8) -> u64 {
 	1u64.wrapping_shl(pos as u32)
 }
 
+/// An byte-sized ID allocator that properly reuses free bits.
+#[derive(Default)]
+pub struct U8Alloc([u64; 4]);
+
+impl U8Alloc {
+	pub fn alloc(&mut self) -> u8 {
+		self.0
+			.iter_mut()
+			.enumerate()
+			.find_map(|(i, word)| {
+				let rel_pos = reserve_bit(word);
+				if rel_pos != 64 {
+					Some(i as u8 * 64 + rel_pos)
+				} else {
+					None
+				}
+			})
+			.unwrap_or(255)
+	}
+
+	pub fn free(&mut self, pos: u8) {
+		free_bit(&mut self.0[(pos >> 6) as usize], pos & 0b111111)
+	}
+}
+
 // === Number Generation === //
 
 // Traits

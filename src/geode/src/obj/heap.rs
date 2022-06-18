@@ -71,6 +71,12 @@ impl Slot {
 			Err(ObjGetError {})
 		}
 	}
+
+	pub fn is_alive(&self, ptr_gen: ExtendedGen) -> bool {
+		let curr_gen = self.lock_and_gen.load(Ordering::Relaxed);
+		let curr_gen = ExtendedGen::from_raw(curr_gen);
+		ptr_gen.gen() == curr_gen.gen()
+	}
 }
 
 // === GcHeap === //
@@ -84,20 +90,23 @@ pub struct GcHeap {
 struct GcEntry {
 	slot: &'static Slot,
 	base_ptr: *const (),
-	meta: &'static TypeMeta,
+	ty_meta: &'static TypeMeta,
 }
 
 impl GcHeap {
 	pub fn alloc<T>(&mut self, slot: &'static Slot, gen: ExtendedGen, value: T) -> *const T {
 		let full_ptr = self.bump.alloc(value) as *const T;
 		let base_ptr = full_ptr as *const ();
-		let meta = TypeMeta::of::<T>();
+		let ty_meta = TypeMeta::of::<T>();
 
-		self.entries.push(GcEntry {
-			slot,
-			base_ptr,
-			meta,
-		});
+		// TODO: For some reason, uncommenting this line makes the allocation routine run 6 times
+		// slower. We need to find a better way to query the allocations in a heap (e.g. storing the
+		// meta in-band)
+		// self.entries.push(GcEntry {
+		// 	slot,
+		// 	base_ptr,
+		// 	ty_meta,
+		// });
 		slot.acquire(gen, base_ptr);
 		full_ptr
 	}

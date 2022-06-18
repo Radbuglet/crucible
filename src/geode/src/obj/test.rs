@@ -1,8 +1,5 @@
+use super::{LockToken, Obj, Session};
 use std::cell::Cell;
-
-use crate::obj::LockToken;
-
-use super::{Obj, Session};
 
 #[test]
 fn basic_obj_test() {

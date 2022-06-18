@@ -1,37 +1,5 @@
+use crate::util::number::NonZeroNumExt;
 use std::{fmt::Debug, num::NonZeroU64};
-
-use crate::util::number::{bit_mask, free_bit, reserve_bit, NonZeroNumExt};
-
-/// An byte-sized ID allocator that treats `255` as a sentinel value. Used to allocate session and
-/// lock IDs.
-pub struct IdAlloc([u64; 4]);
-
-impl Default for IdAlloc {
-	fn default() -> Self {
-		Self([0, 0, 0, bit_mask(62)])
-	}
-}
-
-impl IdAlloc {
-	pub fn alloc(&mut self) -> u8 {
-		self.0
-			.iter_mut()
-			.enumerate()
-			.find_map(|(i, word)| {
-				let rel_pos = reserve_bit(word);
-				if rel_pos != 64 {
-					Some(i as u8 * 64 + rel_pos) // FIXME
-				} else {
-					None
-				}
-			})
-			.unwrap_or(255)
-	}
-
-	pub fn free(&mut self, pos: u8) {
-		free_bit(&mut self.0[(pos >> 6) as usize], pos & 0b111111)
-	}
-}
 
 /// We combine the generation and lock/session field into one `u64` to reduce memory consumption and
 /// ensure that we can check the validity of a `.get()` operation in one comparison.
