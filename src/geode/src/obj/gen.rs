@@ -1,6 +1,8 @@
 use crate::util::number::NonZeroNumExt;
 use std::{fmt::Debug, num::NonZeroU64};
 
+pub const MAX_OBJ_GEN_EXCLUSIVE: u64 = 2u64.pow(64 - 8);
+
 /// We combine the generation and lock/session field into one `u64` to reduce memory consumption and
 /// ensure that we can check the validity of a `.get()` operation in one comparison.
 ///
@@ -31,7 +33,7 @@ impl Debug for ExtendedGen {
 
 impl ExtendedGen {
 	pub fn new(meta: u8, gen: Option<NonZeroU64>) -> Self {
-		debug_assert!(gen.prim() < 2u64.pow(64 - 8));
+		debug_assert!(gen.prim() < MAX_OBJ_GEN_EXCLUSIVE);
 
 		Self(meta as u64 + (gen.prim() << 8))
 	}

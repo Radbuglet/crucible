@@ -1,10 +1,10 @@
-use super::gen::{ExtendedGen, SessionLocks};
+use super::gen::{ExtendedGen, SessionLocks, MAX_OBJ_GEN_EXCLUSIVE};
 use super::heap::{GcHeap, Slot, SlotManager};
 use crate::atomic_ref_cell::{ARef, ARefCell};
 use crate::util::cell::{OnlyMut, SyncUnsafeCellMut};
 use crate::util::error::ResultExt;
 use crate::util::marker::PhantomNoSendOrSync;
-use crate::util::number::{AtomicNZU64Generator, NumberGenRef, U8Alloc};
+use crate::util::number::{LocalBatchAllocator, U8Alloc};
 use antidote::Mutex;
 use arr_macro::arr;
 use derive_where::derive_where;
@@ -14,11 +14,15 @@ use std::cell::{Ref, RefCell, RefMut};
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
+use std::num::NonZeroU64;
 use std::ptr::{NonNull, Pointee};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use thiserror::Error;
 
 // === Globals === //
+
+const ID_GEN_BATCH_SIZE: u64 = 4096;
 
 /// Application-global static data. Because cross-thread synchronization is costly, almost everything
 /// is either thread-local or [Session]-local ([Slot] is a significant exception, but it uses
@@ -35,9 +39,8 @@ use thiserror::Error;
 /// `gc_data` implicitly locks [DbThread] state as well!), just so long as you don't continue to lock
 /// `gc_data` afterwards.
 struct ObjectDB {
-	/// A generator for `Obj` generations.
-	// TODO: Move to `ThreadDb`.
-	generation_gen: AtomicNZU64Generator,
+	/// A generator for `Obj` generation batches.
+	generation_batch_gen: AtomicU64,
 
 	/// A lock indicating whether we're collecting garbage. Read references indicate that we have
 	/// ongoing [Sessions](Session) while a write reference indicates that we're collecting garbage.
@@ -53,7 +56,7 @@ fn object_db() -> &'static ObjectDB {
 	static SINGLETON: OnceCell<ObjectDB> = OnceCell::new();
 
 	SINGLETON.get_or_init(|| ObjectDB {
-		generation_gen: AtomicNZU64Generator::default(),
+		generation_batch_gen: AtomicU64::new(1),
 		gc_data: ARefCell::new(OnlyMut::new(GcData {})),
 		sess_data: Mutex::new(SessData {
 			free_sessions: U8Alloc::default(),
@@ -77,14 +80,20 @@ struct SessData {
 /// owning it.
 type DbThreadPtr = Arc<SyncUnsafeCellMut<DbThread>>;
 
-#[derive(Default)]
 struct DbThread {
+	object_db: &'static ObjectDB,
 	slot_manager: SlotManager,
 	heap: GcHeap,
+	id_gen: LocalBatchAllocator,
 }
 
 thread_local! {
-	static THREAD_DB: DbThreadPtr = Default::default();
+	static THREAD_DB: DbThreadPtr = Arc::new(SyncUnsafeCellMut::new(DbThread {
+		object_db: object_db(),
+		slot_manager: SlotManager::default(),
+		heap: GcHeap::default(),
+		id_gen: LocalBatchAllocator::default(),
+	}));
 }
 
 // === Sessions === //
@@ -102,7 +111,7 @@ pub struct Session<'a> {
 }
 
 impl<'a> Session<'a> {
-	pub fn acquire<I>(locks: I) -> Self
+	pub fn new<I>(locks: I) -> Self
 	where
 		I: IntoIterator<Item = &'a mut LockToken>,
 	{
@@ -153,7 +162,7 @@ impl Drop for Session<'_> {
 // === Lock === //
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Lock(pub(super) u8);
+pub struct Lock(u8);
 
 impl Lock {
 	pub fn debug_name(&self) -> Option<String> {
@@ -255,8 +264,8 @@ impl ObjGetError {
 
 #[derive(Copy, Clone)]
 pub struct RawObj {
-	pub(super) slot: &'static Slot,
-	pub(super) gen: ExtendedGen,
+	slot: &'static Slot,
+	gen: ExtendedGen,
 }
 
 impl Debug for RawObj {
@@ -301,7 +310,12 @@ impl RawObj {
 		let slot = thread_data.slot_manager.reserve();
 
 		// Generate a `gen` ID
-		let gen = object_db().generation_gen.generate_ref();
+		let gen = NonZeroU64::new(thread_data.id_gen.generate(
+			&thread_data.object_db.generation_batch_gen,
+			MAX_OBJ_GEN_EXCLUSIVE,
+			ID_GEN_BATCH_SIZE,
+		))
+		.unwrap();
 
 		// Allocate the object
 		let p_data = {
@@ -320,7 +334,24 @@ impl RawObj {
 	}
 
 	pub fn try_get_ptr(&self, session: &Session) -> Result<*const (), ObjGetError> {
-		Slot::try_get_base(*self, &session.lock_ids)
+		match self.slot.try_get_base(&session.lock_ids, self.gen) {
+			Ok(ptr) => Ok(ptr),
+			Err(slot_gen) => {
+				let lock_id = slot_gen.meta();
+				if !session.lock_ids.check_lock(lock_id) {
+					return Err(ObjGetError::Locked(ObjLockedError {
+						requested: *self,
+						lock: Lock(lock_id),
+					}));
+				}
+
+				debug_assert_ne!(slot_gen.gen(), self.gen.gen());
+				Err(ObjGetError::Dead(ObjDeadError {
+					requested: *self,
+					new_gen: self.gen.gen(),
+				}))
+			}
+		}
 	}
 
 	pub fn get_ptr(&self, session: &Session) -> *const () {
@@ -367,6 +398,8 @@ impl<T: Sized + ObjPointee> Obj<T> {
 	}
 
 	fn new_in_raw(session: &Session, lock: u8, value: T) -> Self {
+		// TODO: De-duplicate constructor
+
 		let thread_data = unsafe {
 			// Safety: `new_in_raw` is non-reentrant (we never make calls to userland code, nor do
 			// any library methods already acquiring this object) and `session`s holding pointers
@@ -378,7 +411,12 @@ impl<T: Sized + ObjPointee> Obj<T> {
 		let slot = thread_data.slot_manager.reserve();
 
 		// Generate a `gen` ID
-		let gen = object_db().generation_gen.generate_ref();
+		let gen = NonZeroU64::new(thread_data.id_gen.generate(
+			&thread_data.object_db.generation_batch_gen,
+			MAX_OBJ_GEN_EXCLUSIVE,
+			ID_GEN_BATCH_SIZE,
+		))
+		.unwrap();
 
 		// Allocate the object
 		let meta = {
@@ -386,7 +424,7 @@ impl<T: Sized + ObjPointee> Obj<T> {
 			let gen_and_lock = ExtendedGen::new(lock, Some(gen));
 
 			let p_data = thread_data.heap.alloc_static(slot, gen_and_lock, value);
-			let (_base_ptr, meta) = p_data.to_raw_parts();
+			let (_, meta) = p_data.to_raw_parts();
 			meta
 		};
 

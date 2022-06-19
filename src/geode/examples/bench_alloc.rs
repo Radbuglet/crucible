@@ -30,7 +30,7 @@ fn main() {
 	// Geode allocator
 	{
 		let mut accum = Duration::ZERO;
-		let session = Session::acquire([]);
+		let session = Session::new([]);
 
 		// Grow the session free list by allocating a bunch of entities and promptly deleting them.
 		let mut objects = Vec::new();

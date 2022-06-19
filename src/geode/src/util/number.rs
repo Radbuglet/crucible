@@ -274,3 +274,43 @@ impl NumberGenMut for AtomicNZU64Generator {
 			.map(|id| NonZeroU64::new(id).unwrap())
 	}
 }
+
+// === Batch allocator === //
+
+#[derive(Debug, Clone, Default)]
+pub struct LocalBatchAllocator {
+	id_generator: u64,
+	max_id_batch_exclusive: u64,
+}
+
+impl LocalBatchAllocator {
+	pub fn generate(&mut self, gen: &AtomicU64, max_id_exclusive: u64, batch_size: u64) -> u64 {
+		assert!(batch_size > 0);
+
+		self.id_generator += 1;
+
+		if self.id_generator < self.max_id_batch_exclusive {
+			// Fast path
+			self.id_generator
+		} else {
+			self.generate_slow(gen, max_id_exclusive, batch_size)
+		}
+	}
+
+	#[inline(never)]
+	fn generate_slow(&mut self, gen: &AtomicU64, max_id_exclusive: u64, batch_size: u64) -> u64 {
+		const TOO_MANY_IDS_ERROR: &str = "failed to allocate a new batch of IDs: ran out of IDs";
+
+		let start_id = gen
+			.fetch_update(AtomicOrdering::Relaxed, AtomicOrdering::Relaxed, |f| {
+				f.checked_add(batch_size)
+			})
+			.expect(TOO_MANY_IDS_ERROR);
+
+		assert!(start_id < max_id_exclusive, "{}", TOO_MANY_IDS_ERROR);
+
+		self.id_generator = start_id;
+		self.max_id_batch_exclusive = start_id.saturating_add(batch_size).min(max_id_exclusive);
+		self.id_generator
+	}
+}

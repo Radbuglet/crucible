@@ -37,7 +37,7 @@ fn main() {
 	// Geode allocator
 	{
 		// Setup dependencies
-		let session = Session::acquire([]);
+		let session = Session::new([]);
 		let s = &session;
 
 		let foo = Obj::new(s, 1);

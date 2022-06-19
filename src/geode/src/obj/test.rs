@@ -3,7 +3,7 @@ use std::cell::Cell;
 
 #[test]
 fn basic_obj_test() {
-	let session = Session::acquire([]);
+	let session = Session::new([]);
 	let s = &session;
 
 	let foo = Obj::new(s, 42);
@@ -16,7 +16,7 @@ fn basic_obj_test() {
 	let bar = Obj::new_in(s, my_lock, Cell::new(0));
 	let _ = dbg!(bar.try_get(s));
 
-	let session = Session::acquire([&mut my_lock_token]);
+	let session = Session::new([&mut my_lock_token]);
 	let s = &session;
 
 	dbg!(bar.get(s).get());
