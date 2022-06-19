@@ -6,17 +6,34 @@ use crate::util::error::ResultExt;
 use crate::util::marker::PhantomNoSendOrSync;
 use crate::util::number::{AtomicNZU64Generator, NumberGenRef, U8Alloc};
 use antidote::Mutex;
+use arr_macro::arr;
 use derive_where::derive_where;
 use once_cell::sync::OnceCell;
+use std::alloc::Layout;
 use std::cell::{Ref, RefCell, RefMut};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
-use std::ptr::Pointee;
+use std::ptr::{NonNull, Pointee};
 use std::sync::Arc;
 use thiserror::Error;
 
 // === Globals === //
 
+/// Application-global static data. Because cross-thread synchronization is costly, almost everything
+/// is either thread-local or [Session]-local ([Slot] is a significant exception, but it uses
+/// relatively lightweight `Relaxed` and `Acquire` fetches for its fast-path operations). This
+/// singleton is mainly used to register and reuse [DbThread] instances, generate and manage IDs for
+/// long-lived objects, and by the garbage collector to store heaps.
+///
+/// The lock order is as follows:
+///
+/// - `gc_data`
+/// - `sess_data`
+///
+/// It is perfectly acceptible to just lock `sess_data` without locking `gc_data` (just remember that
+/// `gc_data` implicitly locks [DbThread] state as well!), just so long as you don't continue to lock
+/// `gc_data` afterwards.
 struct ObjectDB {
 	/// A generator for `Obj` generations.
 	// TODO: Move to `ThreadDb`.
@@ -28,8 +45,7 @@ struct ObjectDB {
 	/// collection.
 	gc_data: ARefCell<OnlyMut<GcData>>,
 
-	/// Global state to help manage sessions. This should only ever be acquired after we acquire a
-	/// read-only lock to `gc_data`.
+	/// Global state to help manage sessions. See item docs for lock order.
 	sess_data: Mutex<SessData>,
 }
 
@@ -42,6 +58,7 @@ fn object_db() -> &'static ObjectDB {
 		sess_data: Mutex::new(SessData {
 			free_sessions: U8Alloc::default(),
 			free_locks: U8Alloc::default(),
+			lock_names: Box::new(arr![None; 256]),
 		}),
 	})
 }
@@ -53,6 +70,7 @@ struct GcData {
 struct SessData {
 	free_sessions: U8Alloc,
 	free_locks: U8Alloc,
+	lock_names: Box<[Option<String>; 256]>,
 }
 
 /// A pointer to a database thread. Can only be promoted by either the GC routine or by the thread
@@ -134,8 +152,25 @@ impl Drop for Session<'_> {
 
 // === Lock === //
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Lock(u8);
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+pub struct Lock(pub(super) u8);
+
+impl Lock {
+	pub fn debug_name(&self) -> Option<String> {
+		object_db().sess_data.lock().lock_names[self.0 as usize].clone()
+	}
+}
+
+impl Debug for Lock {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let sess_data = object_db().sess_data.lock();
+
+		f.debug_struct("Lock")
+			.field("id", &self.0)
+			.field("debug_name", &sess_data.lock_names[self.0 as usize])
+			.finish()
+	}
+}
 
 #[derive(Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct LockToken(Lock);
@@ -151,10 +186,21 @@ impl Default for LockToken {
 }
 
 impl LockToken {
-	pub fn new() -> (Self, Lock) {
+	pub fn new(name: Option<String>) -> (Self, Lock) {
 		let token = Self::default();
 		let handle = token.handle();
+
+		object_db().sess_data.lock().lock_names[handle.0 as usize] = name;
+
 		(token, handle)
+	}
+
+	pub fn debug_name(&self) -> Option<String> {
+		self.handle().debug_name()
+	}
+
+	pub fn set_debug_name(&self, name: Option<String>) {
+		object_db().sess_data.lock().lock_names[self.handle().0 as usize] = name;
 	}
 
 	pub fn handle(&self) -> Lock {
@@ -169,12 +215,135 @@ impl Drop for LockToken {
 	}
 }
 
-// === Obj === //
+// === Error types === //
+
+#[derive(Debug, Copy, Clone, Error)]
+#[error("Obj with handle {requested:?} is dead, and has been replaced by an entity with generation {new_gen:?}")]
+pub struct ObjDeadError {
+	pub requested: RawObj,
+	pub new_gen: u64,
+}
+
+#[derive(Debug, Copy, Clone, Error)]
+#[error("Obj with handle {requested:?} is locked under {lock:?}—a lock the fetch `Session` hasn't acquired")]
+pub struct ObjLockedError {
+	pub requested: RawObj,
+	pub lock: Lock,
+}
 
 #[derive(Debug, Copy, Clone, Error)]
 #[error("failed to fetch `Obj`")]
-// TODO: Give better reasons
-pub struct ObjGetError {}
+pub enum ObjGetError {
+	Dead(#[from] ObjDeadError),
+	Locked(#[from] ObjLockedError),
+}
+
+impl ObjGetError {
+	pub fn weak(self) -> Result<ObjDeadError, ObjLockedError> {
+		match self {
+			Self::Dead(value) => Ok(value),
+			Self::Locked(locked) => Err(locked),
+		}
+	}
+
+	pub fn unwrap_weak<T>(result: Result<T, Self>) -> Result<T, ObjDeadError> {
+		result.map_err(|err| err.weak().unwrap_pretty())
+	}
+}
+
+// === RawObj === //
+
+#[derive(Copy, Clone)]
+pub struct RawObj {
+	pub(super) slot: &'static Slot,
+	pub(super) gen: ExtendedGen,
+}
+
+impl Debug for RawObj {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("RawObj")
+			.field("slot", &(self.slot as *const Slot))
+			.field("gen", &self.gen)
+			.finish()
+	}
+}
+
+impl Hash for RawObj {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		(self.slot as *const Slot).hash(state);
+		self.gen.hash(state);
+	}
+}
+
+impl Eq for RawObj {}
+
+impl PartialEq for RawObj {
+	fn eq(&self, other: &Self) -> bool {
+		// Generations are never repeated.
+		self.gen == other.gen
+	}
+}
+
+impl RawObj {
+	pub fn new_dynamic(
+		session: &Session,
+		lock: Option<Lock>,
+		layout: Layout,
+	) -> (Self, NonNull<u8>) {
+		let thread_data = unsafe {
+			// Safety: `new_in_raw` is non-reentrant (we never make calls to userland code, nor do
+			// any library methods already acquiring this object) and `session`s holding pointers
+			// to this thread's `ThreadDb` instance are non `Send`.
+			session.thread.get_mut_unchecked()
+		};
+
+		// Reserve a slot for us
+		let slot = thread_data.slot_manager.reserve();
+
+		// Generate a `gen` ID
+		let gen = object_db().generation_gen.generate_ref();
+
+		// Allocate the object
+		let p_data = {
+			// We need to create a separate gen for the slot allocation as we do for the `Obj`.
+			let gen_and_lock = ExtendedGen::new(lock.map_or(255, |lock| lock.0), Some(gen));
+
+			let p_data = thread_data.heap.alloc_dynamic(slot, gen_and_lock, layout);
+			p_data
+		};
+
+		// Create the proper `gen` ID
+		let gen = ExtendedGen::new(0xFF, Some(gen));
+
+		// And construct the obj
+		(Self { slot, gen }, p_data)
+	}
+
+	pub fn try_get_ptr(&self, session: &Session) -> Result<*const (), ObjGetError> {
+		Slot::try_get_base(*self, &session.lock_ids)
+	}
+
+	pub fn get_ptr(&self, session: &Session) -> *const () {
+		self.try_get_ptr(session).unwrap_pretty()
+	}
+
+	pub fn weak_get_ptr(&self, session: &Session) -> Result<*const (), ObjDeadError> {
+		ObjGetError::unwrap_weak(self.try_get_ptr(session))
+	}
+
+	pub fn is_alive_now(&self, _session: &Session) -> bool {
+		self.slot.is_alive(self.gen)
+	}
+
+	pub fn destroy(&self, session: &Session) {
+		let thread_data = unsafe { session.thread.get_mut_unchecked() };
+
+		self.slot.release();
+		thread_data.slot_manager.unreserve(self.slot);
+	}
+}
+
+// === Obj === //
 
 pub unsafe trait ObjPointee: 'static + Send {}
 
@@ -182,8 +351,7 @@ unsafe impl<T: ?Sized + 'static + Send> ObjPointee for T {}
 
 #[derive_where(Copy, Clone)]
 pub struct Obj<T: ?Sized + ObjPointee> {
-	slot: &'static Slot,
-	gen: ExtendedGen,
+	raw: RawObj,
 	meta: <T as Pointee>::Metadata,
 }
 
@@ -199,7 +367,12 @@ impl<T: Sized + ObjPointee> Obj<T> {
 	}
 
 	fn new_in_raw(session: &Session, lock: u8, value: T) -> Self {
-		let thread_data = unsafe { session.thread.get_mut_unchecked() };
+		let thread_data = unsafe {
+			// Safety: `new_in_raw` is non-reentrant (we never make calls to userland code, nor do
+			// any library methods already acquiring this object) and `session`s holding pointers
+			// to this thread's `ThreadDb` instance are non `Send`.
+			session.thread.get_mut_unchecked()
+		};
 
 		// Reserve a slot for us
 		let slot = thread_data.slot_manager.reserve();
@@ -212,7 +385,7 @@ impl<T: Sized + ObjPointee> Obj<T> {
 			// We need to create a separate gen for the slot allocation as we do for the `Obj`.
 			let gen_and_lock = ExtendedGen::new(lock, Some(gen));
 
-			let p_data = thread_data.heap.alloc(slot, gen_and_lock, value);
+			let p_data = thread_data.heap.alloc_static(slot, gen_and_lock, value);
 			let (_base_ptr, meta) = p_data.to_raw_parts();
 			meta
 		};
@@ -221,13 +394,16 @@ impl<T: Sized + ObjPointee> Obj<T> {
 		let gen = ExtendedGen::new(0xFF, Some(gen));
 
 		// And construct the obj
-		Self { slot, gen, meta }
+		Self {
+			raw: RawObj { slot, gen },
+			meta,
+		}
 	}
 }
 
 impl<T: ?Sized + ObjPointee> Obj<T> {
 	pub fn try_get<'a>(&self, session: &'a Session) -> Result<&'a T, ObjGetError> {
-		let base = self.slot.try_get_base(&session.lock_ids, self.gen)?;
+		let base = self.raw.try_get_ptr(session)?;
 		let ptr = std::ptr::from_raw_parts::<T>(base, self.meta);
 
 		Ok(unsafe { &*ptr })
@@ -237,15 +413,28 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 		self.try_get(session).unwrap_pretty()
 	}
 
-	pub fn destroy<'a>(&self, session: &'a Session) {
-		let thread_data = unsafe { session.thread.get_mut_unchecked() };
-
-		self.slot.release();
-		thread_data.slot_manager.unreserve(self.slot);
+	pub fn weak_get<'a>(&self, session: &'a Session) -> Result<&'a T, ObjDeadError> {
+		ObjGetError::unwrap_weak(self.try_get(session))
 	}
 
-	pub fn is_alive(&self, _session: &Session) -> bool {
-		self.slot.is_alive(self.gen)
+	pub fn is_alive_now(&self, session: &Session) -> bool {
+		self.raw.is_alive_now(session)
+	}
+
+	pub fn destroy<'a>(&self, session: &'a Session) {
+		self.raw.destroy(session)
+	}
+
+	pub fn raw(&self) -> RawObj {
+		self.raw
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Debug for Obj<T> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("Obj")
+			.field("raw", &self.raw)
+			.finish_non_exhaustive()
 	}
 }
 
@@ -253,16 +442,17 @@ impl<T: ?Sized + ObjPointee> Eq for Obj<T> {}
 
 impl<T: ?Sized + ObjPointee> PartialEq for Obj<T> {
 	fn eq(&self, other: &Self) -> bool {
-		self.slot as *const Slot == other.slot as *const Slot && self.gen == other.gen
+		self.raw == other.raw
 	}
 }
 
 impl<T: ?Sized + ObjPointee> Hash for Obj<T> {
 	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-		(self.slot as *const Slot).hash(state);
-		self.gen.hash(state);
+		self.raw.hash(state);
 	}
 }
+
+// === Obj extensions === //
 
 pub type ObjRw<T> = Obj<RefCell<T>>;
 

@@ -12,7 +12,7 @@ pub struct NamedTypeId {
 }
 
 impl NamedTypeId {
-	pub fn of<T: ?Sized + 'static>() -> Self {
+	pub const fn of<T: ?Sized + 'static>() -> Self {
 		Self {
 			id: TypeId::of::<T>(),
 			#[cfg(debug_assertions)]
@@ -66,20 +66,22 @@ impl PartialEq for NamedTypeId {
 
 #[derive(Debug, Copy, Clone)]
 pub struct TypeMeta {
+	pub id: NamedTypeId,
 	pub layout: Layout,
 	pub drop_fn: Option<unsafe fn(*mut ())>,
 }
 
 impl TypeMeta {
-	pub fn of<T>() -> &'static TypeMeta {
+	pub const fn of<T: 'static>() -> &'static TypeMeta {
 		unsafe fn drop_raw_ptr<T>(value: *mut ()) {
 			std::ptr::drop_in_place(value as *mut T)
 		}
 
 		struct MetaProvider<T>(T);
 
-		impl<T> MetaProvider<T> {
+		impl<T: 'static> MetaProvider<T> {
 			const META: TypeMeta = TypeMeta {
+				id: NamedTypeId::of::<T>(),
 				layout: Layout::new::<T>(),
 				drop_fn: if std::mem::needs_drop::<T>() {
 					Some(drop_raw_ptr::<T>)

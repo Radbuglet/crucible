@@ -15,7 +15,7 @@ use std::{fmt::Debug, num::NonZeroU64};
 /// - By keeping the session IDs the same size as our lock ID, we can define the bytes comprising
 ///   a [SessionLocks] collection as being XOR masks from the associated lock+gen ID to the
 ///   associated `ONE+gen` ID, which we can then directly compare against the [ExtendedGen]
-///   present in the [Obj].
+///   present in the [Obj](super::Obj).
 ///
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct ExtendedGen(u64);
@@ -86,11 +86,15 @@ impl SessionLocks {
 		self.lock_states[lock_id as usize] = !lock_id;
 	}
 
-	pub fn check(&self, ptr_gen: ExtendedGen, slot_gen: ExtendedGen) -> bool {
+	pub fn check_gen_and_lock(&self, ptr_gen: ExtendedGen, slot_gen: ExtendedGen) -> bool {
 		debug_assert_eq!(ptr_gen.meta(), 0xFF);
 
 		let lock_mask = self.lock_states[slot_gen.meta() as usize];
 		let slot_gen = slot_gen.xor_meta(lock_mask);
 		slot_gen == ptr_gen
+	}
+
+	pub fn check_lock(&self, lock: u8) -> bool {
+		self.lock_states[lock as usize] ^ lock == 0xFF
 	}
 }

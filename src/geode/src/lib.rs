@@ -1,6 +1,8 @@
 #![feature(coerce_unsized)]
-#![feature(unsize)]
+#![feature(const_type_id)]
+#![feature(const_type_name)]
 #![feature(decl_macro)]
+#![feature(unsize)]
 #![feature(negative_impls)]
 #![feature(ptr_metadata)]
 

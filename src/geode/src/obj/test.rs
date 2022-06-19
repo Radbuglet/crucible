@@ -10,9 +10,9 @@ fn basic_obj_test() {
 	foo.get(s);
 	dbg!(foo.get(s));
 	foo.destroy(s);
-	dbg!(foo.is_alive(s));
+	dbg!(foo.is_alive_now(s));
 
-	let (mut my_lock_token, my_lock) = LockToken::new();
+	let (mut my_lock_token, my_lock) = LockToken::new(None);
 	let bar = Obj::new_in(s, my_lock, Cell::new(0));
 	let _ = dbg!(bar.try_get(s));
 
@@ -22,7 +22,7 @@ fn basic_obj_test() {
 	dbg!(bar.get(s).get());
 	bar.get(s).set(42);
 	dbg!(bar.get(s).get());
-	dbg!(bar.is_alive(s));
+	dbg!(bar.is_alive_now(s));
 	bar.destroy(s);
-	dbg!(bar.is_alive(s));
+	dbg!(bar.is_alive_now(s));
 }

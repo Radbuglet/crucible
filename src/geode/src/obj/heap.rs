@@ -1,8 +1,10 @@
 use super::gen::{ExtendedGen, SessionLocks};
-use super::ObjGetError;
-use crate::util::{bump::LeakyBump, reflect::TypeMeta};
+use super::{Lock, ObjGetError, ObjLockedError, RawObj};
+use crate::obj::ObjDeadError;
+use crate::util::bump::LeakyBump;
 use bumpalo::Bump;
-use std::ptr::null;
+use std::alloc::Layout;
+use std::ptr::{null, NonNull};
 use std::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
 
 // === SlotManager === //
@@ -56,19 +58,33 @@ impl Slot {
 		self.base_ptr.store(new_base as *mut (), Ordering::Release); // Forces other cores to see `lock_and_gen`
 	}
 
-	pub fn try_get_base(
-		&self,
-		locks: &SessionLocks,
-		ptr_gen: ExtendedGen,
-	) -> Result<*const (), ObjGetError> {
-		let base_ptr = self.base_ptr.load(Ordering::Acquire); // Forces other cores to see `lock_and_gen` and `base_ptr`.
-		let slot_gen = self.lock_and_gen.load(Ordering::Relaxed);
+	pub fn try_get_base(raw: RawObj, locks: &SessionLocks) -> Result<*const (), ObjGetError> {
+		let RawObj { slot, gen: ptr_gen } = raw;
+
+		let base_ptr = slot.base_ptr.load(Ordering::Acquire); // Forces other cores to see `lock_and_gen` and `base_ptr`.
+		let slot_gen = slot.lock_and_gen.load(Ordering::Relaxed);
 		let slot_gen = ExtendedGen::from_raw(slot_gen);
 
-		if locks.check(ptr_gen, slot_gen) {
+		if locks.check_gen_and_lock(ptr_gen, slot_gen) {
 			Ok(base_ptr)
 		} else {
-			Err(ObjGetError {})
+			// It is possible for both the lock and liveness checks to fail. However, because lock
+			// errors are typically indicative of a bug while liveness are regular events, we want
+			// to give locks priority.
+			if !locks.check_lock(slot_gen.meta()) {
+				return Err(ObjGetError::Locked(ObjLockedError {
+					requested: raw,
+					lock: Lock(slot_gen.meta()),
+				}));
+			}
+
+			// Because locks weren't at fault, the generation should be.
+			debug_assert_ne!(slot_gen.gen(), ptr_gen.gen());
+
+			Err(ObjGetError::Dead(ObjDeadError {
+				requested: raw,
+				new_gen: slot_gen.gen(),
+			}))
 		}
 	}
 
@@ -84,34 +100,30 @@ impl Slot {
 #[derive(Default)]
 pub struct GcHeap {
 	bump: Bump,
-	entries: Vec<GcEntry>,
-}
-
-struct GcEntry {
-	slot: &'static Slot,
-	base_ptr: *const (),
-	ty_meta: &'static TypeMeta,
 }
 
 impl GcHeap {
-	pub fn alloc<T>(&mut self, slot: &'static Slot, gen: ExtendedGen, value: T) -> *const T {
+	pub fn alloc_static<T>(
+		&mut self,
+		slot: &'static Slot,
+		gen_and_lock: ExtendedGen,
+		value: T,
+	) -> *const T {
 		let full_ptr = self.bump.alloc(value) as *const T;
 		let base_ptr = full_ptr as *const ();
-		let ty_meta = TypeMeta::of::<T>();
 
-		// TODO: For some reason, uncommenting this line makes the allocation routine run 6 times
-		// slower. We need to find a better way to query the allocations in a heap (e.g. storing the
-		// meta in-band)
-		// self.entries.push(GcEntry {
-		// 	slot,
-		// 	base_ptr,
-		// 	ty_meta,
-		// });
-		slot.acquire(gen, base_ptr);
+		slot.acquire(gen_and_lock, base_ptr);
 		full_ptr
 	}
 
-	pub fn collect_garbage(&mut self) {
-		todo!()
+	pub fn alloc_dynamic(
+		&mut self,
+		slot: &'static Slot,
+		gen_and_lock: ExtendedGen,
+		layout: Layout,
+	) -> NonNull<u8> {
+		let full_ptr = self.bump.alloc_layout(layout);
+		slot.acquire(gen_and_lock, full_ptr.as_ptr() as *const ());
+		full_ptr
 	}
 }

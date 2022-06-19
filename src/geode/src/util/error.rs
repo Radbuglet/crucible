@@ -3,8 +3,14 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
-pub trait ErrorFormatExt {
+use derive_where::derive_where;
+
+pub trait ErrorFormatExt: Error {
 	fn format_error(&self) -> FormattedError<Self>;
+
+	fn panic(&self) -> ! {
+		panic!("{}", self.format_error());
+	}
 }
 
 impl<T: ?Sized + Error> ErrorFormatExt for T {
@@ -13,6 +19,7 @@ impl<T: ?Sized + Error> ErrorFormatExt for T {
 	}
 }
 
+#[derive_where(Clone)]
 pub struct FormattedError<'a, T: ?Sized> {
 	target: &'a T,
 }
@@ -51,7 +58,7 @@ impl<T, E: Error> ResultExt<T, E> for Result<T, E> {
 	fn unwrap_pretty(self) -> T {
 		match self {
 			Ok(val) => val,
-			Err(err) => panic!("{}", err.format_error()),
+			Err(err) => err.panic(),
 		}
 	}
 }
