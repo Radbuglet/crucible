@@ -22,8 +22,8 @@ struct LockCounter {
 	//
 	// This `AtomicIsize` is wrapped in a `UsuallySafeCell` to allow unsafe unsynchronized calls to
 	// promote their `&self` to a `&mut AtomicIsize`. This should allow `ARefCell` to become a drop-in
-	// replacement for `RefCell` without any performance penalty. Unfortunately, we haven't
-	// implemented this for `Obj` yet.
+	// replacement for `RefCell` without any performance penalty if one can prove that its calls are
+	// synchronized.
 	rc: UsuallySafeCell<AtomicIsize>,
 }
 

@@ -1,3 +1,5 @@
+use crate::obj::NoLabel;
+
 use super::{LockToken, Obj, Session};
 use std::cell::Cell;
 
@@ -12,7 +14,7 @@ fn basic_obj_test() {
 	foo.destroy(s);
 	dbg!(foo.is_alive_now(s));
 
-	let (mut my_lock_token, my_lock) = LockToken::new(None);
+	let (mut my_lock_token, my_lock) = LockToken::new(NoLabel);
 	let bar = Obj::new_in(s, my_lock, Cell::new(0));
 	let _ = dbg!(bar.try_get(s));
 

@@ -1,5 +1,6 @@
 use super::gen::{ExtendedGen, SessionLocks};
 use crate::util::bump::LeakyBump;
+use crate::util::reflect::TypeMeta;
 use bumpalo::Bump;
 use std::alloc::Layout;
 use std::ptr::{null, NonNull};
@@ -84,15 +85,17 @@ impl Slot {
 #[derive(Default)]
 pub struct GcHeap {
 	bump: Bump,
+	other_bump: Bump,
 }
 
 impl GcHeap {
-	pub fn alloc_static<T>(
+	pub fn alloc_static<T: 'static>(
 		&mut self,
 		slot: &'static Slot,
 		gen_and_lock: ExtendedGen,
 		value: T,
 	) -> *const T {
+		self.other_bump.alloc((slot, TypeMeta::of::<T>()));
 		let full_ptr = self.bump.alloc(value) as *const T;
 		let base_ptr = full_ptr as *const ();
 

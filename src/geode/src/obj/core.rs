@@ -13,9 +13,9 @@ use std::alloc::Layout;
 use std::cell::{Ref, RefCell, RefMut};
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::marker::PhantomData;
+use std::marker::{PhantomData, Unsize};
 use std::num::NonZeroU64;
-use std::ptr::{NonNull, Pointee};
+use std::ptr::{self, NonNull, Pointee};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use thiserror::Error;
@@ -195,11 +195,11 @@ impl Default for LockToken {
 }
 
 impl LockToken {
-	pub fn new(name: Option<String>) -> (Self, Lock) {
+	pub fn new<D: DebugLabel>(name: D) -> (Self, Lock) {
 		let token = Self::default();
 		let handle = token.handle();
 
-		object_db().sess_data.lock().lock_names[handle.0 as usize] = name;
+		object_db().sess_data.lock().lock_names[handle.0 as usize] = name.to_debug_label();
 
 		(token, handle)
 	}
@@ -221,6 +221,45 @@ impl Drop for LockToken {
 	fn drop(&mut self) {
 		let mut sess_data = object_db().sess_data.lock();
 		sess_data.free_sessions.free(self.handle().0);
+	}
+}
+
+// === Label trait === //
+
+pub trait DebugLabel {
+	fn to_debug_label(self) -> Option<String>;
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct NoLabel;
+
+impl DebugLabel for NoLabel {
+	fn to_debug_label(self) -> Option<String> {
+		None
+	}
+}
+
+impl DebugLabel for String {
+	fn to_debug_label(self) -> Option<String> {
+		Some(self)
+	}
+}
+
+impl DebugLabel for &'_ str {
+	fn to_debug_label(self) -> Option<String> {
+		Some(self.to_string())
+	}
+}
+
+impl DebugLabel for Option<String> {
+	fn to_debug_label(self) -> Option<String> {
+		self
+	}
+}
+
+impl DebugLabel for Option<&'_ str> {
+	fn to_debug_label(self) -> Option<String> {
+		self.map(ToString::to_string)
 	}
 }
 
@@ -465,6 +504,20 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 
 	pub fn raw(&self) -> RawObj {
 		self.raw
+	}
+
+	pub fn unsize<U>(&self) -> Obj<U>
+	where
+		T: Unsize<U>,
+		U: ?Sized + ObjPointee,
+	{
+		let ptr = ptr::from_raw_parts::<T>(ptr::null(), self.meta) as *const U;
+		let (_, meta) = ptr.to_raw_parts();
+
+		Obj {
+			raw: self.raw,
+			meta,
+		}
 	}
 }
 
