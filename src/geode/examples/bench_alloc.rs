@@ -1,7 +1,7 @@
 #![feature(bench_black_box)]
 
 use bumpalo::Bump;
-use geode::obj::{ObjCtorExt, Session};
+use geode::{ObjCtorExt, Session};
 use std::time::{Duration, Instant};
 
 fn main() {

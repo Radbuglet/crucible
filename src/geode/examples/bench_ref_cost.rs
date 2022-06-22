@@ -1,6 +1,6 @@
 #![feature(bench_black_box)]
 
-use geode::obj::{Obj, Session};
+use geode::{Obj, Session};
 use std::{
 	hint::black_box,
 	time::{Duration, Instant},

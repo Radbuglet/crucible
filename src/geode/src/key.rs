@@ -1,8 +1,10 @@
-use crate::util::number::{AtomicU64Generator, NumberGenRef};
 use crate::util::reflect::NamedTypeId;
 use derive_where::derive_where;
-use std::fmt::{Debug, Formatter};
-use std::marker::PhantomData;
+use std::{
+	fmt,
+	marker::PhantomData,
+	sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
+};
 
 #[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct TypedKey<T: ?Sized> {
@@ -26,9 +28,9 @@ impl<T: ?Sized> TypedKey<T> {
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct RawTypedKey(TypedKeyRawInner);
 
-impl Debug for RawTypedKey {
+impl fmt::Debug for RawTypedKey {
 	#[rustfmt::skip]
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
 		match &self.0 {
 			TypedKeyRawInner::Static(key) => {
 				f.debug_tuple("RawTypedKey::Static").field(key).finish()
@@ -65,11 +67,16 @@ pub fn proxy_key<T: ?Sized + 'static + ProxyKeyType>() -> TypedKey<T::Provides> 
 }
 
 pub fn dyn_key<T: ?Sized + 'static>() -> TypedKey<T> {
-	static GEN: AtomicU64Generator = AtomicU64Generator::new(1);
+	static GEN: AtomicU64 = AtomicU64::new(1);
 
 	TypedKey {
 		_ty: PhantomData,
-		raw: RawTypedKey(TypedKeyRawInner::Runtime(GEN.generate_ref())),
+		raw: RawTypedKey(TypedKeyRawInner::Runtime(
+			GEN.fetch_update(AtomicOrdering::Relaxed, AtomicOrdering::Relaxed, |gen| {
+				Some(gen.checked_add(1).expect("allocated too many IDs"))
+			})
+			.unwrap(),
+		)),
 	}
 }
 
