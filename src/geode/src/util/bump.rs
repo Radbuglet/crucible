@@ -1,4 +1,4 @@
-use super::lock::OnlyMut;
+use super::cell::OnlyMut;
 use bumpalo::Bump;
 use std::mem::ManuallyDrop;
 

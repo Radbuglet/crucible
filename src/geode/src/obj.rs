@@ -6,14 +6,13 @@ use crate::{
 	},
 	session::{Session, SessionStorage},
 	util::{
+		cell::{lot_new_mutex, MutexedUnsafeCell},
 		error::ResultExt,
-		lock::LockGuardExt,
 		number::{LocalBatchAllocator, U8Alloc},
 	},
 };
-use arr_macro::arr;
 use derive_where::derive_where;
-use once_cell::sync::OnceCell;
+use parking_lot::{Mutex, MutexGuard};
 use std::{
 	alloc::Layout,
 	borrow::Cow,
@@ -22,7 +21,7 @@ use std::{
 	marker::Unsize,
 	num::NonZeroU64,
 	ptr::{self, NonNull, Pointee},
-	sync::{atomic::AtomicU64, Mutex, MutexGuard},
+	sync::atomic::AtomicU64,
 };
 use thiserror::Error;
 
@@ -35,59 +34,31 @@ struct GlobalData {
 	sess_data: Mutex<GlobalSessData>,
 }
 
-impl Default for GlobalData {
-	fn default() -> Self {
-		Self {
-			id_batch_gen: AtomicU64::new(1),
-			sess_data: Default::default(),
-		}
-	}
-}
-
 struct GlobalSessData {
 	lock_alloc: U8Alloc,
-	lock_names: Box<[Option<Cow<'static, str>>; 256]>,
+	lock_names: Vec<Option<Cow<'static, str>>>,
 }
 
-impl Default for GlobalSessData {
-	fn default() -> Self {
-		Self {
-			lock_alloc: Default::default(),
-			lock_names: Box::new(arr![None; 256]),
-		}
-	}
-}
-
-fn global_data() -> &'static GlobalData {
-	static INSTANCE: OnceCell<GlobalData> = OnceCell::new();
-
-	INSTANCE.get_or_init(Default::default)
-}
+static GLOBAL_DATA: GlobalData = GlobalData {
+	id_batch_gen: AtomicU64::new(1),
+	sess_data: lot_new_mutex(GlobalSessData {
+		lock_alloc: U8Alloc::new(),
+		lock_names: Vec::new(),
+	}),
+};
 
 fn global_sess_data() -> MutexGuard<'static, GlobalSessData> {
-	global_data().sess_data.lock().unpoison()
+	GLOBAL_DATA.sess_data.lock()
 }
 
-static SESSION_DATA: SessionStorage<RefCell<SessionData>> = SessionStorage::new();
+static SESSION_DATA: SessionStorage<MutexedUnsafeCell<SessionData>> = SessionStorage::new();
 
+#[derive(Default)]
 struct SessionData {
 	heap: GcHeap,
 	slots: SlotManager,
 	locks: SessionLocks,
 	generation_gen: LocalBatchAllocator,
-	global_data: &'static GlobalData,
-}
-
-impl Default for SessionData {
-	fn default() -> Self {
-		Self {
-			heap: Default::default(),
-			slots: Default::default(),
-			locks: Default::default(),
-			generation_gen: Default::default(),
-			global_data: &global_data(),
-		}
-	}
 }
 
 // === Session Extension === //
@@ -255,19 +226,26 @@ impl RawObj {
 		lock: Option<Lock>,
 		layout: Layout,
 	) -> (Self, NonNull<u8>) {
-		let mut sess_data = SESSION_DATA.get_or_init(session).borrow_mut();
+		let sess_data = unsafe {
+			// Safety: TODO
+			SESSION_DATA
+				.get(session)
+				.unwrap_unchecked()
+				.get_mut_unchecked()
+		};
 
 		// Reserve a slot for us
 		let slot = sess_data.slots.reserve();
 
 		// Generate a `gen` ID
-		let id_batch_gen = &sess_data.global_data.id_batch_gen;
-		let gen = NonZeroU64::new(sess_data.generation_gen.generate(
-			id_batch_gen,
-			MAX_OBJ_GEN_EXCLUSIVE,
-			ID_GEN_BATCH_SIZE,
-		))
-		.unwrap();
+		let gen = unsafe {
+			// Safety: TODO
+			NonZeroU64::new_unchecked(sess_data.generation_gen.generate(
+				&GLOBAL_DATA.id_batch_gen,
+				MAX_OBJ_GEN_EXCLUSIVE,
+				ID_GEN_BATCH_SIZE,
+			))
+		};
 
 		// Allocate the object
 		let p_data = {
@@ -291,7 +269,13 @@ impl RawObj {
 
 	// Fetching
 	pub fn try_get_ptr(&self, session: &Session) -> Result<*const (), ObjGetError> {
-		let sess_data = SESSION_DATA.get_or_init(session).borrow();
+		let sess_data = unsafe {
+			// Safety: TODO
+			SESSION_DATA
+				.get(session)
+				.unwrap_unchecked()
+				.get_mut_unchecked()
+		};
 
 		match self.slot.try_get_base(&sess_data.locks, self.gen) {
 			Ok(ptr) => Ok(ptr),
@@ -326,7 +310,10 @@ impl RawObj {
 	}
 
 	pub fn destroy(&self, session: &Session) {
-		let mut sess_data = SESSION_DATA.get_or_init(session).borrow_mut();
+		let sess_data = unsafe {
+			// Safety: TODO
+			&mut *SESSION_DATA.get(session).unwrap_unchecked().get()
+		};
 
 		self.slot.release();
 		sess_data.slots.unreserve(self.slot);
@@ -359,19 +346,26 @@ impl<T: Sized + ObjPointee> Obj<T> {
 	fn new_in_raw(session: &Session, lock: u8, value: T) -> Self {
 		// TODO: De-duplicate constructor
 
-		let mut sess_data = SESSION_DATA.get_or_init(session).borrow_mut();
+		let sess_data = unsafe {
+			// Safety: TODO
+			SESSION_DATA
+				.get(session)
+				.unwrap_unchecked()
+				.get_mut_unchecked()
+		};
 
 		// Reserve a slot for us
 		let slot = sess_data.slots.reserve();
 
 		// Generate a `gen` ID
-		let id_batch_gen = &sess_data.global_data.id_batch_gen;
-		let gen = NonZeroU64::new(sess_data.generation_gen.generate(
-			id_batch_gen,
-			MAX_OBJ_GEN_EXCLUSIVE,
-			ID_GEN_BATCH_SIZE,
-		))
-		.unwrap();
+		let gen = unsafe {
+			// Safety: TODO
+			NonZeroU64::new_unchecked(sess_data.generation_gen.generate(
+				&GLOBAL_DATA.id_batch_gen,
+				MAX_OBJ_GEN_EXCLUSIVE,
+				ID_GEN_BATCH_SIZE,
+			))
+		};
 
 		// Allocate the object
 		let meta = {

@@ -1,26 +1,20 @@
 use crate::util::{
-	lock::{CellLike, LockGuardExt, MutexedUnsafeCell},
+	cell::{lot_new_mutex, MutexedUnsafeCell},
 	marker::PhantomNoSendOrSync,
 	number::U8Alloc,
 };
 use arr_macro::arr;
-use once_cell::sync::OnceCell;
-use std::{
-	cell::Cell,
-	marker::PhantomData,
-	sync::{Mutex, MutexGuard},
-};
+use parking_lot::Mutex;
+use std::{cell::Cell, marker::PhantomData};
 
 #[derive(Default)]
 struct SessionDB {
 	session_ids: U8Alloc,
 }
 
-fn session_db() -> MutexGuard<'static, SessionDB> {
-	static INSTANCE: OnceCell<Mutex<SessionDB>> = OnceCell::new();
-
-	INSTANCE.get_or_init(Default::default).lock().unpoison()
-}
+static SESSION_DB: Mutex<SessionDB> = lot_new_mutex(SessionDB {
+	session_ids: U8Alloc::new(),
+});
 
 thread_local! {
 	static LOCAL_SESSION_ID: Cell<Option<SessionId>> = Default::default();
@@ -53,7 +47,7 @@ impl Session<'_> {
 			"Cannot create more than one `Session` on a given thread."
 		);
 
-		let id = session_db().session_ids.alloc();
+		let id = SESSION_DB.lock().session_ids.alloc();
 		assert_ne!(
 			id, 0xFF,
 			"Cannot create more than `255` concurrent sessions."
@@ -75,7 +69,7 @@ impl Session<'_> {
 
 impl Drop for Session<'_> {
 	fn drop(&mut self) {
-		session_db().session_ids.free(self.id.slot());
+		SESSION_DB.lock().session_ids.free(self.id.slot());
 		LOCAL_SESSION_ID.with(|thread_id| thread_id.set(None));
 	}
 }
@@ -169,3 +163,6 @@ impl<T: Default> SessionStorage<T> {
 		self.get_mut_or_init_using(session, Default::default)
 	}
 }
+
+// TODO: Add support for auto-init and auto-drop `SessionStorages` to make proving the validity of
+//  certain operations easier and to move initialization routines out of the fast path.

@@ -1,22 +1,22 @@
 use std::{
-    num::NonZeroU64,
-    sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
+	num::NonZeroU64,
+	sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
 };
 
 // === NonZeroU64 utilities === //
 
 pub trait NonZeroNumExt {
-    type Primitive;
+	type Primitive;
 
-    fn prim(self) -> Self::Primitive;
+	fn prim(self) -> Self::Primitive;
 }
 
 impl NonZeroNumExt for Option<NonZeroU64> {
-    type Primitive = u64;
+	type Primitive = u64;
 
-    fn prim(self) -> Self::Primitive {
-        self.map_or(0, NonZeroU64::get)
-    }
+	fn prim(self) -> Self::Primitive {
+		self.map_or(0, NonZeroU64::get)
+	}
 }
 
 // === Free bit-list utilities === //
@@ -24,84 +24,96 @@ impl NonZeroNumExt for Option<NonZeroU64> {
 /// Reserves a zero bit from the `target`, marks it as a `1`, and returns its index from the LSB.
 /// Returns `64` if no bits could be allocated.
 pub fn reserve_bit(target: &mut u64) -> u8 {
-    let pos = target.trailing_ones() as u8;
-    *target |= bit_mask(pos);
-    pos
+	let pos = target.trailing_ones() as u8;
+	*target |= bit_mask(pos);
+	pos
 }
 
 /// Sets the specified bit to `0`, marking it as free. `free_bit` uses the same indexing convention
 /// as [reserve_bit], i.e. its offset from the LSB. Indices greater than 63 are ignored.
 pub fn free_bit(target: &mut u64, pos: u8) {
-    *target &= !bit_mask(pos);
+	*target &= !bit_mask(pos);
 }
 
 /// Constructs a bit mask with only the bit at position `pos` set. `bit_mask` uses the same indexing
 /// convention as [reserve_bit], i.e. its offset from the LSB. Indices greater than 63 are ignored.
 pub fn bit_mask(pos: u8) -> u64 {
-    1u64.wrapping_shl(pos as u32)
+	1u64.wrapping_shl(pos as u32)
 }
 
 /// An byte-sized ID allocator that properly reuses free bits.
-#[derive(Default)]
 pub struct U8Alloc([u64; 4]);
 
-impl U8Alloc {
-    pub fn alloc(&mut self) -> u8 {
-        self.0
-            .iter_mut()
-            .enumerate()
-            .find_map(|(i, word)| {
-                let rel_pos = reserve_bit(word);
-                if rel_pos != 64 {
-                    Some(i as u8 * 64 + rel_pos)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(255)
-    }
+impl Default for U8Alloc {
+	fn default() -> Self {
+		Self::new()
+	}
+}
 
-    pub fn free(&mut self, pos: u8) {
-        free_bit(&mut self.0[(pos >> 6) as usize], pos & 0b111111)
-    }
+impl U8Alloc {
+	pub const fn new() -> Self {
+		Self([0; 4])
+	}
+
+	pub fn alloc(&mut self) -> u8 {
+		self.0
+			.iter_mut()
+			.enumerate()
+			.find_map(|(i, word)| {
+				let rel_pos = reserve_bit(word);
+				if rel_pos != 64 {
+					Some(i as u8 * 64 + rel_pos)
+				} else {
+					None
+				}
+			})
+			.unwrap_or(255)
+	}
+
+	pub fn free(&mut self, pos: u8) {
+		free_bit(&mut self.0[(pos >> 6) as usize], pos & 0b111111)
+	}
 }
 
 // === Batch allocator === //
 
 #[derive(Debug, Clone, Default)]
 pub struct LocalBatchAllocator {
-    id_generator: u64,
-    max_id_batch_exclusive: u64,
+	id_generator: u64,
+	max_id_batch_exclusive: u64,
 }
 
 impl LocalBatchAllocator {
-    pub fn generate(&mut self, gen: &AtomicU64, max_id_exclusive: u64, batch_size: u64) -> u64 {
-        assert!(batch_size > 0);
+	pub fn generate(&mut self, gen: &AtomicU64, max_id_exclusive: u64, batch_size: u64) -> u64 {
+		assert!(batch_size > 0);
 
-        self.id_generator += 1;
+		self.id_generator += 1;
 
-        if self.id_generator < self.max_id_batch_exclusive {
-            // Fast path
-            self.id_generator
-        } else {
-            self.generate_slow(gen, max_id_exclusive, batch_size)
-        }
-    }
+		if self.id_generator < self.max_id_batch_exclusive {
+			// Fast path
+			self.id_generator
+		} else {
+			self.generate_slow(gen, max_id_exclusive, batch_size)
+		}
+	}
 
-    #[inline(never)]
-    fn generate_slow(&mut self, gen: &AtomicU64, max_id_exclusive: u64, batch_size: u64) -> u64 {
-        const TOO_MANY_IDS_ERROR: &str = "failed to allocate a new batch of IDs: ran out of IDs";
+	#[cold]
+	fn generate_slow(&mut self, gen: &AtomicU64, max_id_exclusive: u64, batch_size: u64) -> u64 {
+		let start_id = gen
+			.fetch_update(AtomicOrdering::Relaxed, AtomicOrdering::Relaxed, |f| {
+				Some(f.saturating_add(batch_size))
+			})
+			.unwrap();
 
-        let start_id = gen
-            .fetch_update(AtomicOrdering::Relaxed, AtomicOrdering::Relaxed, |f| {
-                f.checked_add(batch_size)
-            })
-            .expect(TOO_MANY_IDS_ERROR);
+		self.id_generator = start_id;
+		self.max_id_batch_exclusive = start_id.saturating_add(batch_size).min(max_id_exclusive);
 
-        assert!(start_id < max_id_exclusive, "{}", TOO_MANY_IDS_ERROR);
+		assert!(
+			self.id_generator < self.max_id_batch_exclusive,
+			"{}",
+			"failed to allocate a new batch of IDs: ran out of IDs"
+		);
 
-        self.id_generator = start_id;
-        self.max_id_batch_exclusive = start_id.saturating_add(batch_size).min(max_id_exclusive);
-        self.id_generator
-    }
+		self.id_generator
+	}
 }
