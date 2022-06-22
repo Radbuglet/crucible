@@ -1,18 +1,3 @@
-use crate::{
-	debug::{DebugLabel, NoLabel},
-	internals::{
-		gen::{ExtendedGen, SessionLocks, MAX_OBJ_GEN_EXCLUSIVE},
-		heap::{GcHeap, Slot, SlotManager},
-	},
-	session::{Session, SessionStorage},
-	util::{
-		cell::{lot_new_mutex, MutexedUnsafeCell},
-		error::ResultExt,
-		number::{LocalBatchAllocator, U8Alloc},
-	},
-};
-use derive_where::derive_where;
-use parking_lot::{Mutex, MutexGuard};
 use std::{
 	alloc::Layout,
 	borrow::Cow,
@@ -23,7 +8,25 @@ use std::{
 	ptr::{self, NonNull, Pointee},
 	sync::atomic::AtomicU64,
 };
+
+use derive_where::derive_where;
+use parking_lot::{Mutex, MutexGuard};
 use thiserror::Error;
+
+use crate::util::{
+	cell::{lot_new_mutex, MutexedUnsafeCell},
+	error::ResultExt,
+	number::{LocalBatchAllocator, U8Alloc},
+};
+
+use super::{
+	debug::{DebugLabel, NoLabel},
+	internals::{
+		gen::{ExtendedGen, SessionLocks, MAX_OBJ_GEN_EXCLUSIVE},
+		heap::{GcHeap, Slot, SlotManager},
+	},
+	session::{Session, SessionStorage},
+};
 
 // === Singleton data === //
 

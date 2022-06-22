@@ -1,10 +1,12 @@
-use crate::util::reflect::NamedTypeId;
-use derive_where::derive_where;
 use std::{
 	fmt,
 	marker::PhantomData,
 	sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
 };
+
+use derive_where::derive_where;
+
+use crate::core::reflect::NamedTypeId;
 
 #[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct TypedKey<T: ?Sized> {

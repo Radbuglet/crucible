@@ -1,7 +1,6 @@
-use std::alloc::Layout;
-use std::any::TypeId;
-use std::fmt::{Debug, Formatter};
-use std::hash::{Hash, Hasher};
+use std::{alloc::Layout, any::TypeId, fmt, hash};
+
+use super::session::Session;
 
 /// A fancy [TypeId] that records type names in debug builds.
 #[derive(Copy, Clone)]
@@ -36,8 +35,8 @@ impl NamedTypeId {
 	}
 }
 
-impl Debug for NamedTypeId {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for NamedTypeId {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		#[cfg(debug_assertions)]
 		{
 			f.debug_tuple(format!("NamedTypeId<{}>", self.name).as_str())
@@ -50,8 +49,8 @@ impl Debug for NamedTypeId {
 	}
 }
 
-impl Hash for NamedTypeId {
-	fn hash<H: Hasher>(&self, state: &mut H) {
+impl hash::Hash for NamedTypeId {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
 		self.id.hash(state)
 	}
 }
@@ -64,16 +63,31 @@ impl PartialEq for NamedTypeId {
 	}
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct TypeMeta {
-	pub id: NamedTypeId,
-	pub layout: Layout,
-	pub drop_fn: Option<unsafe fn(*mut ())>,
+	pub id: Option<NamedTypeId>,
+	pub layout: TypeMetaLayout,
+	pub drop_fn: Option<for<'a> unsafe fn(*mut (), &'a Session)>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum TypeMetaLayout {
+	Static(Layout),
+	Dynamic,
+}
+
+impl fmt::Debug for TypeMeta {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("TypeMeta")
+			.field("id", &self.id)
+			.field("layout", &self.layout)
+			.finish_non_exhaustive()
+	}
 }
 
 impl TypeMeta {
 	pub const fn of<T: 'static>() -> &'static TypeMeta {
-		unsafe fn drop_raw_ptr<T>(value: *mut ()) {
+		unsafe fn drop_raw_ptr<T>(value: *mut (), _session: &Session) {
 			std::ptr::drop_in_place(value as *mut T)
 		}
 
@@ -81,8 +95,8 @@ impl TypeMeta {
 
 		impl<T: 'static> MetaProvider<T> {
 			const META: TypeMeta = TypeMeta {
-				id: NamedTypeId::of::<T>(),
-				layout: Layout::new::<T>(),
+				id: Some(NamedTypeId::of::<T>()),
+				layout: TypeMetaLayout::Static(Layout::new::<T>()),
 				drop_fn: if std::mem::needs_drop::<T>() {
 					Some(drop_raw_ptr::<T>)
 				} else {

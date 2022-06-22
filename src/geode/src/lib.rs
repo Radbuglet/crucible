@@ -4,25 +4,18 @@
 #![feature(unsize)]
 #![feature(ptr_metadata)]
 
-mod internals;
 mod util;
 
-pub mod debug;
+pub mod core;
 pub mod entity;
-pub mod event;
-pub mod key;
-pub mod obj;
-pub mod session;
 
 pub mod prelude {
-    pub use crate::{
-        debug::NoLabel,
-        entity::{},
-        event::event_trait,
-        key::typed_key,
-        obj::{Lock, LockToken, ObjCtorExt, RawObj, Obj, ObjRw},
-        session::Session,
-    };
+	pub use crate::core::{
+		debug::NoLabel,
+		obj::{Lock, LockToken, Obj, ObjCtorExt, ObjRw, RawObj},
+		reflect::TypeMeta,
+		session::Session,
+	};
 }
 
 pub use prelude::*;
