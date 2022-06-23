@@ -10,11 +10,18 @@ pub mod core;
 pub mod entity;
 
 pub mod prelude {
-	pub use crate::core::{
-		debug::NoLabel,
-		obj::{Lock, LockToken, Obj, ObjCtorExt, ObjRw, RawObj},
-		reflect::TypeMeta,
-		session::Session,
+	pub use crate::{
+		core::{
+			debug::NoLabel,
+			obj::{Lock, LockToken, Obj, ObjCtorExt, ObjRw, RawObj},
+			reflect::TypeMeta,
+			session::Session,
+		},
+		entity::{
+			entity::{Entity, ExposeAs},
+			event::event_trait,
+			key::typed_key,
+		},
 	};
 }
 

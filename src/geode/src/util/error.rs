@@ -62,3 +62,23 @@ impl<T, E: Error> ResultExt<T, E> for Result<T, E> {
 		}
 	}
 }
+
+pub trait UnwrapExt<T, E> {
+	fn unwrap_using<F, EF>(self, f: F) -> T
+	where
+		F: FnMut(E) -> EF,
+		EF: Display;
+}
+
+impl<T> UnwrapExt<T, ()> for Option<T> {
+	fn unwrap_using<F, EF>(self, mut f: F) -> T
+	where
+		F: FnMut(()) -> EF,
+		EF: Display,
+	{
+		match self {
+			Some(value) => value,
+			None => panic!("{}", f(())),
+		}
+	}
+}

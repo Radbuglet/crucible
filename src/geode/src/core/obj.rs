@@ -9,12 +9,14 @@ use std::{
 	sync::atomic::AtomicU64,
 };
 
+use arr_macro::arr;
 use derive_where::derive_where;
+use once_cell::sync::OnceCell;
 use parking_lot::{Mutex, MutexGuard};
 use thiserror::Error;
 
 use crate::util::{
-	cell::{lot_new_mutex, MutexedUnsafeCell},
+	cell::MutexedUnsafeCell,
 	error::ResultExt,
 	number::{LocalBatchAllocator, U8Alloc},
 };
@@ -34,24 +36,29 @@ const ID_GEN_BATCH_SIZE: u64 = 4096;
 
 struct GlobalData {
 	id_batch_gen: AtomicU64,
-	sess_data: Mutex<GlobalSessData>,
+	sess_data: OnceCell<Mutex<GlobalSessData>>,
 }
 
 struct GlobalSessData {
 	lock_alloc: U8Alloc,
-	lock_names: Vec<Option<Cow<'static, str>>>,
+	lock_names: Box<[Option<Cow<'static, str>>; 256]>,
 }
 
 static GLOBAL_DATA: GlobalData = GlobalData {
 	id_batch_gen: AtomicU64::new(1),
-	sess_data: lot_new_mutex(GlobalSessData {
-		lock_alloc: U8Alloc::new(),
-		lock_names: Vec::new(),
-	}),
+	sess_data: OnceCell::new(),
 };
 
 fn global_sess_data() -> MutexGuard<'static, GlobalSessData> {
-	GLOBAL_DATA.sess_data.lock()
+	GLOBAL_DATA
+		.sess_data
+		.get_or_init(|| {
+			Mutex::new(GlobalSessData {
+				lock_alloc: U8Alloc::new(),
+				lock_names: Box::new(arr![None; 256]),
+			})
+		})
+		.lock()
 }
 
 static SESSION_DATA: SessionStorage<MutexedUnsafeCell<SessionData>> = SessionStorage::new();
@@ -477,18 +484,18 @@ impl<T: ?Sized + ObjPointee> ObjRw<T> {
 }
 
 pub trait ObjCtorExt: Sized + ObjPointee {
-	fn as_obj(self, session: &Session) -> Obj<Self>
+	fn box_obj(self, session: &Session) -> Obj<Self>
 	where
 		Self: Sync,
 	{
 		Obj::new(session, self)
 	}
 
-	fn as_obj_in(self, session: &Session, lock: Lock) -> Obj<Self> {
+	fn box_obj_in(self, session: &Session, lock: Lock) -> Obj<Self> {
 		Obj::new_in(session, lock, self)
 	}
 
-	fn as_obj_rw(self, session: &Session, lock: Lock) -> Obj<RefCell<Self>> {
+	fn box_obj_rw(self, session: &Session, lock: Lock) -> Obj<RefCell<Self>> {
 		Obj::new_rw(session, lock, self)
 	}
 }

@@ -36,7 +36,7 @@ fn main() {
 		let mut objects = Vec::new();
 		for _ in 0..repeats {
 			for _ in 0..times {
-				objects.push(1.as_obj(&session));
+				objects.push(1.box_obj(&session));
 			}
 		}
 
@@ -49,7 +49,7 @@ fn main() {
 			let start = Instant::now();
 
 			for _ in 0..times {
-				let _b = 1.as_obj(&session);
+				let _b = 1.box_obj(&session);
 			}
 
 			accum += dbg!(start.elapsed());

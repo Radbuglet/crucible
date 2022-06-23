@@ -8,10 +8,22 @@ use derive_where::derive_where;
 
 use crate::core::reflect::NamedTypeId;
 
-#[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive_where(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct TypedKey<T: ?Sized> {
 	_ty: PhantomData<fn(T) -> T>,
 	raw: RawTypedKey,
+}
+
+impl<T: ?Sized> fmt::Debug for TypedKey<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match &self.raw.0 {
+			TypedKeyRawInner::Static(key) => f.debug_tuple("TypedKey::Static").field(key).finish(),
+			TypedKeyRawInner::Proxy(key) => f.debug_tuple("TypedKey::Proxy").field(key).finish(),
+			TypedKeyRawInner::Runtime(key) => {
+				f.debug_tuple("TypedKey::Runtime").field(key).finish()
+			}
+		}
+	}
 }
 
 impl<T: ?Sized> TypedKey<T> {
