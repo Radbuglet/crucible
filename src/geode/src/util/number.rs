@@ -21,7 +21,9 @@ impl NonZeroNumExt for Option<NonZeroU64> {
 
 // === Free bit-list utilities === //
 
-/// Reserves a zero bit from the `target`, marks it as a `1`, and returns its index from the LSB.
+/// Reserves the least significant zero bit from the `target`, marks it as a `1`, and returns its
+/// index from the LSB.
+///
 /// Returns `64` if no bits could be allocated.
 pub fn reserve_bit(target: &mut u64) -> u8 {
 	let pos = target.trailing_ones() as u8;
@@ -39,6 +41,11 @@ pub fn free_bit(target: &mut u64, pos: u8) {
 /// convention as [reserve_bit], i.e. its offset from the LSB. Indices greater than 63 are ignored.
 pub fn bit_mask(pos: u8) -> u64 {
 	1u64.wrapping_shl(pos as u32)
+}
+
+/// Constructs a bit mask that masks out `count` LSBs.
+pub fn mask_out_lsb(count: u8) -> u64 {
+	u64::MAX.wrapping_shl(count as u32)
 }
 
 /// An byte-sized ID allocator that properly reuses free bits.
@@ -72,6 +79,25 @@ impl U8Alloc {
 
 	pub fn free(&mut self, pos: u8) {
 		free_bit(&mut self.0[(pos >> 6) as usize], pos & 0b111111)
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.0.iter().all(|word| *word == 0)
+	}
+
+	pub fn alloc_all(&mut self) {
+		for word in &mut self.0 {
+			*word = u64::MAX;
+		}
+	}
+
+	pub fn free_all_geq(&mut self, min: u8) {
+		let min_word_idx = (min / 64) as usize;
+		self.0[min_word_idx] &= mask_out_lsb(min % 64);
+
+		for word in &mut self.0[(min_word_idx + 1)..] {
+			*word = 0;
+		}
 	}
 }
 

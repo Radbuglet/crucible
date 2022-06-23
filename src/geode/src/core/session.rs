@@ -5,7 +5,9 @@ use crate::util::{
 };
 use arr_macro::arr;
 use parking_lot::Mutex;
-use std::{cell::Cell, marker::PhantomData};
+use std::marker::PhantomData;
+
+// === Global === //
 
 #[derive(Default)]
 struct SessionDB {
@@ -16,18 +18,12 @@ static SESSION_DB: Mutex<SessionDB> = lot_new_mutex(SessionDB {
 	session_ids: U8Alloc::new(),
 });
 
-thread_local! {
-	static LOCAL_SESSION_ID: Cell<Option<SessionId>> = Default::default();
-}
+// === Session definition === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SessionId(u8);
 
 impl SessionId {
-	pub fn current() -> Option<Self> {
-		LOCAL_SESSION_ID.with(|cell| cell.get())
-	}
-
 	pub fn slot(self) -> u8 {
 		self.0
 	}
@@ -41,12 +37,6 @@ pub struct Session<'d> {
 
 impl Session<'_> {
 	pub(crate) fn new_raw() -> Self {
-		assert_eq!(
-			SessionId::current(),
-			None,
-			"Cannot create more than one `Session` on a given thread."
-		);
-
 		let id = SESSION_DB.lock().session_ids.alloc();
 		assert_ne!(
 			id, 0xFF,
@@ -54,11 +44,21 @@ impl Session<'_> {
 		);
 
 		let id = SessionId(id);
-		LOCAL_SESSION_ID.with(|thread_id| thread_id.set(Some(id)));
 		Self {
 			_ty: PhantomData,
 			_no_send_or_sync: PhantomData,
 			id,
+		}
+	}
+
+	pub fn acquire_all<'d>() -> AllSessionsIter<'d> {
+		let gen = &mut SESSION_DB.lock().session_ids;
+		assert!(gen.is_empty());
+		gen.alloc_all();
+
+		AllSessionsIter {
+			_ty: PhantomData,
+			next_returned_id: 0,
 		}
 	}
 
@@ -70,9 +70,45 @@ impl Session<'_> {
 impl Drop for Session<'_> {
 	fn drop(&mut self) {
 		SESSION_DB.lock().session_ids.free(self.id.slot());
-		LOCAL_SESSION_ID.with(|thread_id| thread_id.set(None));
 	}
 }
+
+// === Session iterator === //
+
+pub struct AllSessionsIter<'d> {
+	_ty: PhantomData<&'d mut ()>,
+	next_returned_id: u8,
+}
+
+impl<'d> Iterator for AllSessionsIter<'d> {
+	type Item = Session<'d>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if self.next_returned_id < 0xFF {
+			let id = SessionId(self.next_returned_id);
+			self.next_returned_id += 1;
+
+			Some(Session {
+				_ty: PhantomData,
+				_no_send_or_sync: PhantomData,
+				id,
+			})
+		} else {
+			None
+		}
+	}
+}
+
+impl Drop for AllSessionsIter<'_> {
+	fn drop(&mut self) {
+		SESSION_DB
+			.lock()
+			.session_ids
+			.free_all_geq(self.next_returned_id);
+	}
+}
+
+// === Session storage === //
 
 pub struct SessionStorage<T> {
 	slots: [MutexedUnsafeCell<Option<T>>; 256],
