@@ -1,6 +1,6 @@
 #![feature(bench_black_box)]
 
-use geode::{Obj, Session};
+use geode::prelude::*;
 use std::{
 	hint::black_box,
 	time::{Duration, Instant},
@@ -40,7 +40,7 @@ fn main() {
 		let session = Session::new([]);
 		let s = &session;
 
-		let foo = Obj::new(s, 1);
+		let foo = Obj::new(s, 1).defuse();
 
 		// Setup & run test
 		let mut accum = Duration::ZERO;

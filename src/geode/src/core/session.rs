@@ -199,6 +199,3 @@ impl<T: Default> SessionStorage<T> {
 		self.get_mut_or_init_using(session, Default::default)
 	}
 }
-
-// TODO: Add support for auto-init and auto-drop `SessionStorages` to make proving the validity of
-//  certain operations easier and to move initialization routines out of the fast path.

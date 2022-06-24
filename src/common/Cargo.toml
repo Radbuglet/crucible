@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bytemuck = { version = "1.9.1", features = ["derive"] }
 geode = { path = "../geode" }
 log = "0.4.17"

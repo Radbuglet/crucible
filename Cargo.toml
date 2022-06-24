@@ -1,8 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
-#   "src/client",
-#   "src/common",
+    "src/client",
+    "src/common",
     "src/crew",
     "src/geode",
 ]

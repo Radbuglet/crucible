@@ -2,7 +2,8 @@ use std::{
 	alloc::Layout,
 	borrow::Cow,
 	cell::{Ref, RefCell, RefMut},
-	fmt, hash,
+	fmt::{self, Write},
+	hash,
 	marker::Unsize,
 	num::NonZeroU64,
 	ptr::{self, NonNull, Pointee},
@@ -27,6 +28,7 @@ use super::{
 		gen::{ExtendedGen, SessionLocks, MAX_OBJ_GEN_EXCLUSIVE},
 		heap::{GcHeap, Slot, SlotManager},
 	},
+	owned::{Destructible, Owned},
 	session::{Session, SessionStorage},
 };
 
@@ -165,10 +167,25 @@ impl Drop for LockToken {
 // === Obj Errors === //
 
 #[derive(Debug, Copy, Clone, Error)]
-#[error("Obj with handle {requested:?} is dead, and has been replaced by an entity with generation {new_gen:?}")]
 pub struct ObjDeadError {
 	pub requested: RawObj,
 	pub new_gen: u64,
+}
+
+impl fmt::Display for ObjDeadError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "`Obj` with handle {:?} is dead", self.requested)?;
+		if self.new_gen != 0 {
+			write!(
+				f,
+				", and has been replaced by an entity with generation {:?}.",
+				self.new_gen
+			)?;
+		} else {
+			f.write_char('.')?;
+		}
+		Ok(())
+	}
 }
 
 #[derive(Debug, Copy, Clone, Error)]
@@ -235,7 +252,7 @@ impl RawObj {
 		session: &Session,
 		lock: Option<Lock>,
 		layout: Layout,
-	) -> (Self, NonNull<u8>) {
+	) -> (Owned<Self>, NonNull<u8>) {
 		let sess_data = unsafe {
 			// Safety: TODO
 			SESSION_DATA
@@ -270,10 +287,10 @@ impl RawObj {
 		let gen = ExtendedGen::new(0xFF, Some(gen));
 
 		// And construct the obj
-		(Self { slot, gen }, p_data)
+		(Owned::new(Self { slot, gen }), p_data)
 	}
 
-	pub fn new_dynamic(session: &Session, layout: Layout) -> (Self, NonNull<u8>) {
+	pub fn new_dynamic(session: &Session, layout: Layout) -> (Owned<Self>, NonNull<u8>) {
 		Self::new_dynamic_in(session, None, layout)
 	}
 
@@ -287,23 +304,31 @@ impl RawObj {
 				.get_mut_unchecked()
 		};
 
+		#[cold]
+		#[inline(never)]
+		fn decode_error(
+			sess_data: &SessionData,
+			requested: RawObj,
+			slot_gen: ExtendedGen,
+		) -> ObjGetError {
+			let lock_id = slot_gen.meta();
+			if !sess_data.locks.check_lock(lock_id) {
+				return ObjGetError::Locked(ObjLockedError {
+					requested,
+					lock: Lock(lock_id),
+				});
+			}
+
+			debug_assert_ne!(slot_gen.gen(), requested.gen.gen());
+			ObjGetError::Dead(ObjDeadError {
+				requested: requested,
+				new_gen: slot_gen.gen(),
+			})
+		}
+
 		match self.slot.try_get_base(&sess_data.locks, self.gen) {
 			Ok(ptr) => Ok(ptr),
-			Err(slot_gen) => {
-				let lock_id = slot_gen.meta();
-				if !sess_data.locks.check_lock(lock_id) {
-					return Err(ObjGetError::Locked(ObjLockedError {
-						requested: *self,
-						lock: Lock(lock_id),
-					}));
-				}
-
-				debug_assert_ne!(slot_gen.gen(), self.gen.gen());
-				Err(ObjGetError::Dead(ObjDeadError {
-					requested: *self,
-					new_gen: self.gen.gen(),
-				}))
-			}
+			Err(slot_gen) => Err(decode_error(&sess_data, *self, slot_gen)),
 		}
 	}
 
@@ -330,6 +355,12 @@ impl RawObj {
 	}
 }
 
+impl Destructible for RawObj {
+	fn destruct(self) {
+		self.destroy(&Session::new([]))
+	}
+}
+
 // === Obj === //
 
 pub unsafe trait ObjPointee: 'static + Send {}
@@ -343,17 +374,17 @@ pub struct Obj<T: ?Sized + ObjPointee> {
 }
 
 impl<T: Sized + ObjPointee + Sync> Obj<T> {
-	pub fn new(session: &Session, value: T) -> Self {
+	pub fn new(session: &Session, value: T) -> Owned<Self> {
 		Self::new_in_raw(session, 0xFF, value)
 	}
 }
 
 impl<T: Sized + ObjPointee> Obj<T> {
-	pub fn new_in(session: &Session, lock: Lock, value: T) -> Self {
+	pub fn new_in(session: &Session, lock: Lock, value: T) -> Owned<Self> {
 		Self::new_in_raw(session, lock.0, value)
 	}
 
-	fn new_in_raw(session: &Session, lock: u8, value: T) -> Self {
+	fn new_in_raw(session: &Session, lock: u8, value: T) -> Owned<Self> {
 		// TODO: De-duplicate constructor
 
 		let sess_data = unsafe {
@@ -391,10 +422,10 @@ impl<T: Sized + ObjPointee> Obj<T> {
 		let gen = ExtendedGen::new(0xFF, Some(gen));
 
 		// And construct the obj
-		Self {
+		Owned::new(Self {
 			raw: RawObj { slot, gen },
 			meta,
-		}
+		})
 	}
 }
 
@@ -463,12 +494,19 @@ impl<T: ?Sized + ObjPointee> hash::Hash for Obj<T> {
 	}
 }
 
+impl<T: ?Sized + ObjPointee> Destructible for Obj<T> {
+	fn destruct(self) {
+		// TODO: We want a better destructor that works well during garbage collection.
+		self.destroy(&Session::new([]))
+	}
+}
+
 // === Obj extensions === //
 
 pub type ObjRw<T> = Obj<RefCell<T>>;
 
 impl<T: ObjPointee> ObjRw<T> {
-	pub fn new_rw(session: &Session, lock: Lock, value: T) -> Self {
+	pub fn new_rw(session: &Session, lock: Lock, value: T) -> Owned<Self> {
 		Self::new_in(session, lock, RefCell::new(value))
 	}
 }
@@ -484,18 +522,18 @@ impl<T: ?Sized + ObjPointee> ObjRw<T> {
 }
 
 pub trait ObjCtorExt: Sized + ObjPointee {
-	fn box_obj(self, session: &Session) -> Obj<Self>
+	fn box_obj(self, session: &Session) -> Owned<Obj<Self>>
 	where
 		Self: Sync,
 	{
 		Obj::new(session, self)
 	}
 
-	fn box_obj_in(self, session: &Session, lock: Lock) -> Obj<Self> {
+	fn box_obj_in(self, session: &Session, lock: Lock) -> Owned<Obj<Self>> {
 		Obj::new_in(session, lock, self)
 	}
 
-	fn box_obj_rw(self, session: &Session, lock: Lock) -> Obj<RefCell<Self>> {
+	fn box_obj_rw(self, session: &Session, lock: Lock) -> Owned<Obj<RefCell<Self>>> {
 		Obj::new_rw(session, lock, self)
 	}
 }

@@ -8,7 +8,11 @@ use derive_where::derive_where;
 use parking_lot::Mutex;
 
 use crate::{
-	core::{obj::ObjPointee, session::Session},
+	core::{
+		obj::ObjPointee,
+		owned::{Destructible, Owned},
+		session::Session,
+	},
 	util::{arity::impl_tuples, error::UnwrapExt},
 	Obj,
 };
@@ -26,10 +30,10 @@ struct EntityInner {
 }
 
 impl Entity {
-	pub fn new(session: &Session) -> Self {
-		Self {
-			obj: Obj::new(session, Default::default()),
-		}
+	pub fn new(session: &Session) -> Owned<Self> {
+		Owned::new(Self {
+			obj: Obj::new(session, Default::default()).defuse(),
+		})
 	}
 
 	pub fn add<L: ComponentList>(&self, session: &Session, components: L) {
@@ -64,6 +68,16 @@ impl Entity {
 	pub fn borrow_mut<'a, T: ?Sized + ObjPointee>(&self, session: &'a Session) -> RefMut<'a, T> {
 		self.get::<RefCell<T>>(session).borrow_mut()
 	}
+
+	pub fn destroy(&self, session: &Session) {
+		self.obj.destroy(session)
+	}
+}
+
+impl Destructible for Entity {
+	fn destruct(self) {
+		self.destroy(&Session::new([]))
+	}
 }
 
 pub struct ComponentAttachTarget<'a> {
@@ -83,6 +97,12 @@ pub trait ComponentList: Sized {
 impl<T: ?Sized + ObjPointee> ComponentList for Obj<T> {
 	fn push_values(self, registry: &mut ComponentAttachTarget) {
 		registry.add(typed_key::<T>(), self);
+	}
+}
+
+impl<T: ?Sized + ObjPointee> ComponentList for Owned<Obj<T>> {
+	fn push_values(self, registry: &mut ComponentAttachTarget) {
+		registry.add(typed_key::<T>(), self.defuse());
 	}
 }
 

@@ -14,6 +14,7 @@ pub mod prelude {
 		core::{
 			debug::NoLabel,
 			obj::{Lock, LockToken, Obj, ObjCtorExt, ObjRw, RawObj},
+			owned::Owned,
 			reflect::TypeMeta,
 			session::Session,
 		},

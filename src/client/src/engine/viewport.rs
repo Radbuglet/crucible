@@ -1,6 +1,7 @@
 use crate::engine::gfx::GfxContext;
+use crucible_common::polyfill::cell::filter_map_ref;
 use geode::prelude::*;
-use std::collections::HashMap;
+use std::{cell::Ref, collections::HashMap};
 use thiserror::Error;
 use winit::window::{Window, WindowId};
 
@@ -9,14 +10,16 @@ const UNMOUNTED_WINDOW_FETCH_ERR: &'static str = "attempted to get window for un
 
 #[derive(Debug, Default)]
 pub struct ViewportManager {
-	viewports: HashMap<WindowId, Obj>,
+	viewports: HashMap<WindowId, Owned<Entity>>,
 }
 
 impl ViewportManager {
 	pub fn register(
 		&mut self,
+		s: &Session,
+		main_lock: Lock,
 		gfx: &GfxContext,
-		mut target: Obj,
+		target: Owned<Entity>,
 		window: Window,
 		surface: wgpu::Surface,
 	) {
@@ -32,30 +35,41 @@ impl ViewportManager {
 			present_mode: wgpu::PresentMode::Fifo,
 		};
 		surface.configure(&gfx.device, &config);
-		target.add_rw(Viewport {
-			window: Some(window),
-			surface,
-			config,
-			config_changed: false,
-		});
+		target.add(
+			s,
+			Viewport {
+				window: Some(window),
+				surface,
+				config,
+				config_changed: false,
+			}
+			.box_obj_rw(s, main_lock),
+		);
 		self.viewports.insert(win_id, target);
 	}
 
-	pub fn unregister(&mut self, id: WindowId) -> Option<Obj> {
+	pub fn unregister(&mut self, id: WindowId) -> Option<Owned<Entity>> {
 		self.viewports.remove(&id)
 	}
 
-	pub fn get_viewport(&self, id: WindowId) -> Option<&Obj> {
-		self.viewports.get(&id)
+	pub fn get_viewport(&self, id: WindowId) -> Option<Entity> {
+		self.viewports.get(&id).map(|viewport| **viewport)
 	}
 
-	pub fn all_viewports(&self) -> impl Iterator<Item = (WindowId, &Obj)> {
-		self.viewports.iter().map(|(k, v)| (*k, v))
+	pub fn all_viewports(&self) -> impl Iterator<Item = (WindowId, Entity)> + '_ {
+		self.viewports.iter().map(|(k, v)| (*k, **v))
 	}
 
-	pub fn mounted_viewports(&self) -> impl Iterator<Item = (WindowId, &Obj)> {
-		self.all_viewports()
-			.filter(|(_, v)| v.borrow::<Viewport>().is_mounted())
+	pub fn mounted_viewports<'a>(
+		&'a self,
+		s: &'a Session,
+	) -> impl Iterator<Item = (WindowId, Entity, Ref<'a, Window>)> + 'a {
+		self.all_viewports().filter_map(|(window_id, entity)| {
+			let viewport = entity.borrow::<Viewport>(s);
+			let window = filter_map_ref(viewport, |viewport| viewport.window()).ok()?;
+
+			Some((window_id, entity, window))
+		})
 	}
 }
 
@@ -142,10 +156,6 @@ impl Viewport {
 		self.window.as_ref()
 	}
 
-	pub fn is_mounted(&self) -> bool {
-		self.window.is_some()
-	}
-
 	pub fn unmount(&mut self) -> Option<Window> {
 		self.window.take()
 	}
@@ -154,7 +164,3 @@ impl Viewport {
 #[derive(Debug, Copy, Clone, Error)]
 #[error("out of device memory")]
 pub struct OutOfDeviceMemoryError;
-
-event_trait! {
-	pub trait ViewportRenderer::on_viewport_render(&self, cx: &ObjCx, frame: wgpu::SurfaceTexture);
-}

@@ -4,20 +4,20 @@ use std::{fmt::Debug, num::NonZeroU64};
 pub const MAX_OBJ_GEN_EXCLUSIVE: u64 = 2u64.pow(64 - 8);
 
 /// We combine the generation and lock/session field into one `u64` to reduce memory consumption and
-/// ensure that we can check the validity of a `.get()` operation in one comparison.
+/// to ensure that we can check the validity of a `.get()` operation in one comparison.
 ///
 /// ## Format
 ///
 /// - Both lock IDs and session IDs (the meta of this ID) are 8 bits long. `meta` takes the least
 ///   significant byte of the word.
 /// - Session and lock IDs of `255` are treated as sentinel `None` values.
-/// - By limiting the lock ID size to 8 bits, we make it really easy to fetch the session owner for
+/// - By limiting the lock ID size to 8 bits, we make it really easy to fetch the owning session for
 ///   a given lock ID (just take the LSB of the ID and use it to index into an array with 256 bytes)
 ///   at the expense of limiting the granularity of our locks.
 /// - By keeping the session IDs the same size as our lock ID, we can define the bytes comprising
 ///   a [SessionLocks] collection as being XOR masks from the associated lock+gen ID to the
 ///   associated `ONE+gen` ID, which we can then directly compare against the [ExtendedGen]
-///   present in the [Obj](super::Obj).
+///   present in the [Obj](crate::Obj).
 ///
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct ExtendedGen(u64);

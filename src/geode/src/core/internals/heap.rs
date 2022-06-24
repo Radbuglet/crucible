@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
 
 // === SlotManager === //
 
+/// An object responsible for allocating [Slots](Slot). The backing memory of every slot will be
+/// allocated forever. It is therefore critical to ensure that you are reusing these instances.
 #[derive(Default)]
 pub struct SlotManager {
 	/// A `Bump` allocator from which we allocate slots on this thread. The memory owned by the bump
@@ -44,11 +46,22 @@ pub struct Slot {
 }
 
 impl Slot {
+	/// Acquires a [Slot] by atomically assigning it a new generation and base.
+	///
+	/// ## Safety
+	///
+	/// While the object guarantees that a wrong pointer-generation pair cannot be observed, this
+	/// guarantee only applies if you `acquire` the [Slot] from exactly one thread.
 	pub fn acquire(&self, new_gen: ExtendedGen, new_base: *const ()) {
 		debug_assert_ne!(new_gen.gen(), 0);
 		self.update(new_gen, new_base);
 	}
 
+	/// Atomically releases the [Slot], invalidating both its generation and its pointer.
+	///
+	/// ## Safety
+	///
+	/// The same synchronization caveats as [Slot::acquire] apply here as well.
 	pub fn release(&self) {
 		self.update(ExtendedGen::new(0, None), null());
 	}
@@ -61,12 +74,27 @@ impl Slot {
 		self.base_ptr.store(new_base as *mut (), Ordering::Release); // Forces other cores to see `lock_and_gen`
 	}
 
+	// /// Attempts a best-effort repointing of the slot without invalidating the generation.
+	// ///
+	// /// ## Safety
+	// ///
+	// /// Note that this is distinct from a "reallocation" because you are not expected to invalidate
+	// /// the previous version of the object. Indeed, because this is a "best-effort" repointing, other
+	// /// threads might not even see the moved base pointer before the memory is deallocated. And
+	// /// generally, in this model, we don't deallocate memory until garbage collection anyways.
+	// pub fn repoint(&self, new_base: *const ()) {
+	// 	self.base_ptr.store(new_base as *mut (), Ordering::Relaxed);
+	// }
+
+	/// Attempts to get the current base pointer for the [Slot]. Fails and returns the existing
+	/// generation-lock pair if we either lack lock permission or if the slot has been generationally
+	/// invalidated.
 	pub fn try_get_base(
 		&self,
 		locks: &SessionLocks,
 		ptr_gen: ExtendedGen,
 	) -> Result<*const (), ExtendedGen> {
-		let base_ptr = self.base_ptr.load(Ordering::Acquire); // Forces other cores to see `lock_and_gen` and `base_ptr`.
+		let base_ptr = self.base_ptr.load(Ordering::Acquire); // Forces us to see `lock_and_gen` and `base_ptr`.
 		let slot_gen = self.lock_and_gen.load(Ordering::Relaxed);
 		let slot_gen = ExtendedGen::from_raw(slot_gen);
 
@@ -77,6 +105,12 @@ impl Slot {
 		}
 	}
 
+	/// Checks if the [Slot] is currently alive but makes zero guarantees about the future.
+	///
+	/// ## Safety
+	///
+	/// Specifically, we have no clue if the slot will remain alive when we run [Slot::try_get_base].
+	/// This is purely just a heuristic.
 	pub fn is_alive(&self, ptr_gen: ExtendedGen) -> bool {
 		let curr_gen = self.lock_and_gen.load(Ordering::Relaxed);
 		let curr_gen = ExtendedGen::from_raw(curr_gen);
@@ -86,6 +120,7 @@ impl Slot {
 
 // === GcHeap === //
 
+/// A garbage collected heap.
 #[derive(Default)]
 pub struct GcHeap {
 	bump: Bump,

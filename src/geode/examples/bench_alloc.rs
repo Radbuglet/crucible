@@ -1,7 +1,7 @@
 #![feature(bench_black_box)]
 
 use bumpalo::Bump;
-use geode::{ObjCtorExt, Session};
+use geode::prelude::*;
 use std::time::{Duration, Instant};
 
 fn main() {
@@ -16,7 +16,7 @@ fn main() {
 			let start = Instant::now();
 
 			for _ in 0..times {
-				let b = Box::new(1);
+				let b = Box::new(1u64);
 				std::mem::forget(std::hint::black_box(b));
 			}
 
@@ -36,20 +36,18 @@ fn main() {
 		let mut objects = Vec::new();
 		for _ in 0..repeats {
 			for _ in 0..times {
-				objects.push(1.box_obj(&session));
+				objects.push(1u64.box_obj(&session));
 			}
 		}
 
-		for obj in objects {
-			obj.destroy(&session);
-		}
+		drop(objects);
 
 		// Run the actual test
 		for _ in 0..repeats {
 			let start = Instant::now();
 
 			for _ in 0..times {
-				let _b = 1.box_obj(&session);
+				let _b = 1.box_obj(&session).defuse();
 			}
 
 			accum += dbg!(start.elapsed());

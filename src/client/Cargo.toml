@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-antidote = "1.0.0"
 anyhow = "1.0.57"
 cgmath = "0.18.0"
 crucible-common = { path = "../common" }
@@ -13,6 +12,7 @@ fastrand = "1.7.0"
 futures = "0.3.21"
 geode = { path = "../geode" }
 log = "0.4.17"
+parking_lot = "0.12.1"
 thiserror = "1.0.31"
 wgpu = { version = "0.12.0" }
 winit = "0.26.1"

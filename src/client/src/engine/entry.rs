@@ -1,225 +1,101 @@
-use crate::engine::gfx::{
-	CompatQueryInfo, GfxContext, GfxFeatureDetector, GfxFeatureNeedsScreen,
-	GfxFeaturePowerPreference,
-};
-use crate::engine::input::InputTracker;
-use crate::engine::scene::{SceneManager, UpdateHandler};
-use crate::engine::viewport::{Viewport, ViewportManager, ViewportRenderer};
-use crate::game::entry::make_game_scene;
-use crate::util::features::FeatureList;
-use crate::util::winit::{WinitEventBundle, WinitUserdata};
 use anyhow::Context;
-use futures::executor::block_on;
 use geode::prelude::*;
-use winit::dpi::LogicalSize;
-use winit::event::{Event, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::WindowBuilder;
+use winit::{dpi::LogicalSize, event_loop::EventLoop, window::WindowBuilder};
+
+use crate::{game::entry::make_game_entry, util::features::FeatureList};
+
+use super::{
+	gfx::{
+		CompatQueryInfo, GfxContext, GfxFeatureDetector, GfxFeatureNeedsScreen,
+		GfxFeaturePowerPreference,
+	},
+	input::InputTracker,
+	scene::SceneManager,
+	viewport::ViewportManager,
+};
 
 pub fn main_inner() -> anyhow::Result<()> {
-	// Initialize logger
-	env_logger::init();
-	log::info!("Hello!");
+	// Create main thread lock.
+	let (mut main_lock_token, main_lock) = LockToken::new("main thread");
 
-	// Initialize engine
+	// Create our main session.
+	let session = Session::new([&mut main_lock_token]);
+	let s = &session;
+
+	// Create the main window for which we'll create our main surface.
 	let event_loop = EventLoop::new();
-	let root = block_on(make_engine_root(&event_loop)).context("failed to initialize engine")?;
+	let main_window = WindowBuilder::new()
+		.with_title("Crucible")
+		.with_inner_size(LogicalSize::new(1920u32, 1080u32))
+		.with_visible(false)
+		.build(&event_loop)
+		.context("failed to create main window")?;
 
-	// Run engine
-	log::info!("Main loop starting.");
-	root.inject(|vm: ARef<ViewportManager>| {
-		for (_, viewport_obj) in vm.mounted_viewports() {
-			viewport_obj
-				.borrow::<Viewport>()
-				.window()
-				.unwrap()
-				.set_visible(true);
-		}
-	});
+	// Initialize a graphics context.
+	let (gfx, _table, main_surface) =
+		futures::executor::block_on(GfxContext::init(&main_window, &mut MyFeatureList))
+			.context("failed to create graphics context")?;
 
-	// We wrap the root in an optional so we can force the destructors to run at a given time.
-	let mut root = Some(root);
+	let gfx = gfx.box_obj(s);
 
-	event_loop.run(move |event, proxy, flow| {
-		// Acquire root context
-		let bundle = WinitEventBundle { event, proxy, flow };
-		let root_ref = root.as_ref().unwrap();
-		let cx = ObjCx::new(root_ref);
-
-		// Acquire services
-		let gfx = root_ref.get::<GfxContext>();
-
-		match &bundle.event {
-			// First, `NewEvents` is triggered.
-			Event::NewEvents(_) => {}
-
-			// Then, window, device, and user events are triggered.
-			Event::WindowEvent { event, window_id } => {
-				let mut viewport_mgr = root_ref.borrow_mut::<ViewportManager>();
-				let viewport = match viewport_mgr.get_viewport(*window_id) {
-					Some(viewport) => viewport,
-					None => {
-						log::warn!("Received WindowEvent for unregistered viewport {window_id:?}. Ignoring.");
-						return;
-					}
-				};
-
-				// Handle inputs
-				viewport
-					.borrow_mut::<InputTracker>()
-					.handle_window_event(event);
-
-				// Handle close requests
-				if let WindowEvent::CloseRequested = event {
-					drop(viewport.borrow_mut::<Viewport>().unmount());
-				}
-
-				if let WindowEvent::Destroyed = event {
-					viewport_mgr.unregister(*window_id);
-					if viewport_mgr.mounted_viewports().next().is_none() {
-						*bundle.flow = ControlFlow::Exit;
-					}
-				}
-			}
-			Event::DeviceEvent { device_id, event } => {
-				let viewport_mgr = root_ref.borrow::<ViewportManager>();
-				for (_, viewport) in viewport_mgr.all_viewports() {
-					viewport
-						.borrow_mut::<InputTracker>()
-						.handle_device_event(*device_id, event);
-				}
-			}
-			Event::UserEvent(_) => {}
-
-			// These are also technically window events
-			Event::Suspended => {}
-			Event::Resumed => {}
-
-			// After all user events have been triggered, this event is triggered.
-			Event::MainEventsCleared => {
-				// TODO: This logic is kinda nonsense.
-
-				// Handle scene manager update logic if needed.
-				{
-					let sm = root_ref.get::<ARefCell<SceneManager>>();
-					sm.borrow_mut().swap_scenes();
-
-					let sm = sm.borrow();
-					let current_scene = sm.current_scene();
-					current_scene.get::<dyn UpdateHandler>().on_update(&cx);
-				}
-
-				// Dispatch per-frame viewport logic
-				let viewport_mgr = root_ref.borrow::<ViewportManager>();
-				for (_, viewport) in viewport_mgr.mounted_viewports() {
-					viewport.borrow_mut::<InputTracker>().end_tick();
-					viewport
-						.borrow_mut::<Viewport>()
-						.window()
-						.unwrap()
-						.request_redraw();
-				}
-			}
-
-			// Redraws are processed
-			Event::RedrawRequested(window_id) => {
-				let viewport_mgr = root_ref.borrow::<ViewportManager>();
-				let viewport = match viewport_mgr.get_viewport(*window_id) {
-					Some(viewport) => viewport,
-					None => {
-						log::warn!("Received RedrawRequested for unregistered viewport {window_id:?}. Ignoring.");
-						return;
-					}
-				};
-
-				let frame = match viewport.borrow_mut::<Viewport>().render(gfx).unwrap() {
-					Some(frame) => frame,
-					None => return,
-				};
-
-				viewport
-					.get::<dyn ViewportRenderer>()
-					.on_viewport_render(&cx, frame);
-			}
-			Event::RedrawEventsCleared => {}
-
-			// This is triggered once immediately before the engine terminates.
-			// All remaining destructors will run after this.
-			Event::LoopDestroyed => {
-				// Destroy the engine root to run remaining finalizers
-				root = None;
-
-				// Then, log goodbye.
-				log::info!("Goodbye!");
-			}
-		}
-	});
-}
-
-async fn make_engine_root(event_loop: &EventLoop<WinitUserdata>) -> anyhow::Result<Obj> {
-	let mut root = Obj::labeled("engine root");
-
-	// Create graphics subsystem
+	// Create `ViewportManager`
+	let viewport_mgr = ViewportManager::default().box_obj_rw(s, main_lock);
 	{
-		// Create context
-		let main_window = WindowBuilder::new()
-			.with_title("Crucible")
-			.with_inner_size(LogicalSize::new(1920u32, 1080u32))
-			.with_visible(false)
-			.build(event_loop)
-			.context("failed to create main window")?;
+		let mut viewport_mgr_p = viewport_mgr.borrow_mut(s);
+		let gfx_p = gfx.get(s);
 
-		let (gfx, _gfx_features, main_swapchain) =
-			GfxContext::init(&main_window, &mut CustomFeatureListValidator)
-				.await
-				.context("failed to create graphics context")?;
+		let main_viewport = Entity::new(s);
 
-		root.add(gfx);
-
-		// Setup viewport manager
-		let gfx = root.get::<GfxContext>();
-		let mut vm = ViewportManager::default();
-
-		let mut viewport = Obj::labeled("main viewport");
-		viewport.add_alias(
-			|cx: &ObjCx, frame: wgpu::SurfaceTexture| {
-				cx.borrow::<SceneManager>()
-					.current_scene()
-					.get::<dyn ViewportRenderer>()
-					// TODO: Adjust `cx`
-					.on_viewport_render(cx, frame)
-			},
-			typed_key::<dyn ViewportRenderer>(),
+		viewport_mgr_p.register(
+			s,
+			main_lock,
+			gfx_p,
+			main_viewport,
+			main_window,
+			main_surface,
 		);
-		viewport.add_rw(InputTracker::default());
-		vm.register(gfx, viewport, main_window, main_swapchain);
-
-		root.add_rw(vm);
-	};
-
-	// Register game subsystems
-	{
-		let mut sm = SceneManager::default();
-		sm.init_scene(make_game_scene());
-		root.add_rw(sm);
 	}
 
-	Ok(root)
+	// Create `InputTracker`
+	let input_mgr = InputTracker::default().box_obj_rw(s, main_lock);
+
+	// Create `SceneManager`
+	let scene_mgr = SceneManager::default().box_obj_rw(s, main_lock);
+	scene_mgr
+		.borrow_mut(s)
+		.init_scene(make_game_entry(s, main_lock));
+
+	// Create root entity
+	let root = Entity::new(s);
+	root.add(s, (gfx, viewport_mgr, input_mgr, scene_mgr));
+
+	// Start engine
+	{
+		let viewport_mgr_p = root.borrow::<ViewportManager>(s);
+
+		for (_, _viewport, window) in viewport_mgr_p.mounted_viewports(s) {
+			window.set_visible(true);
+		}
+	}
+
+	event_loop.run(move |_event, _proxy, _flow| {});
 }
 
-struct CustomFeatureListValidator;
+struct MyFeatureList;
 
-impl GfxFeatureDetector for CustomFeatureListValidator {
+impl GfxFeatureDetector for MyFeatureList {
 	type Table = ();
 
 	fn query_compat(&mut self, info: &mut CompatQueryInfo) -> (FeatureList, Option<Self::Table>) {
-		let mut features = FeatureList::default();
-		features.import_from(GfxFeatureNeedsScreen.query_compat(info).0);
-		features.import_from(
+		let mut feature_list = FeatureList::default();
+
+		feature_list.import_from(GfxFeatureNeedsScreen.query_compat(info).0);
+		feature_list.import_from(
 			GfxFeaturePowerPreference(wgpu::PowerPreference::HighPerformance)
 				.query_compat(info)
 				.0,
 		);
-		features.wrap_user_table(())
+
+		feature_list.wrap_user_table(())
 	}
 }

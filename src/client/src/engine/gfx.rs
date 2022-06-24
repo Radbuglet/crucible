@@ -6,13 +6,26 @@ use winit::window::Window;
 
 #[derive(Debug)]
 pub struct GfxContext {
+	/// Our WebGPU instance from which everything was derived.
 	pub instance: wgpu::Instance,
+
+	/// Our WebGPU device.
 	pub device: wgpu::Device,
+
+	/// Our WebGPU queue.
 	pub queue: wgpu::Queue,
+
+	/// Our WebGPU adapter from which our device and queue were derived.
 	pub adapter: wgpu::Adapter,
+
+	/// Our WebGPU adapter's real features and limits.
 	pub adapter_info: AdapterInfoBundle,
-	pub features_req: wgpu::Features,
-	pub limits_req: wgpu::Limits,
+
+	/// Our device's requested feature set.
+	pub requested_features: wgpu::Features,
+
+	/// Our device's requested limits.
+	pub requested_limits: wgpu::Limits,
 }
 
 impl GfxContext {
@@ -22,7 +35,11 @@ impl GfxContext {
 	) -> anyhow::Result<(Self, D::Table, wgpu::Surface)> {
 		let backends = wgpu::Backends::PRIMARY;
 		let instance = wgpu::Instance::new(backends);
-		let main_surface = unsafe { instance.create_surface(main_window) };
+		let main_surface = unsafe {
+			// TODO: Windows can still be destroyed unexpectedly. We need tighter integration between
+			// the viewport manager and our `GfxContext`.
+			instance.create_surface(main_window)
+		};
 
 		struct ValidatedAdapter<'a, T> {
 			adapter: wgpu::Adapter,
@@ -36,7 +53,7 @@ impl GfxContext {
 			.enumerate_adapters(backends)
 			.filter_map(|adapter| {
 				// Get info about the adapter
-				let adapter_info = AdapterInfoBundle::get(&adapter);
+				let adapter_info = AdapterInfoBundle::new_for(&adapter);
 
 				// Query support and config
 				let mut descriptor = wgpu::DeviceDescriptor::default();
@@ -91,8 +108,8 @@ impl GfxContext {
 				queue,
 				adapter: req.adapter,
 				adapter_info: req.adapter_info,
-				features_req: req.descriptor.features,
-				limits_req: req.descriptor.limits,
+				requested_features: req.descriptor.features,
+				requested_limits: req.descriptor.limits,
 			},
 			req.compat_table,
 			main_surface,
@@ -108,7 +125,7 @@ pub struct AdapterInfoBundle {
 }
 
 impl AdapterInfoBundle {
-	pub fn get(adapter: &wgpu::Adapter) -> Self {
+	pub fn new_for(adapter: &wgpu::Adapter) -> Self {
 		Self {
 			info: adapter.get_info(),
 			limits: adapter.limits(),
@@ -123,19 +140,36 @@ impl AdapterInfoBundle {
 
 #[derive(Debug)]
 pub struct CompatQueryInfo<'a, 'l> {
+	/// The descriptor being modified by the [GfxFeatureDetector] to define our requested device.
 	pub descriptor: &'a mut wgpu::DeviceDescriptor<'l>,
+
+	/// Our WebGPU instance.
 	pub instance: &'a wgpu::Instance,
+
+	/// The main surface against which we're creating our [GfxContext].
 	pub main_surface: &'a wgpu::Surface,
+
+	/// The adapter against which we're trying to create our [GfxContext].
 	pub adapter: &'a wgpu::Adapter,
+
+	/// The adapter's limits and features.
 	pub adapter_info: &'a AdapterInfoBundle,
 }
 
 pub trait GfxFeatureDetector {
+	/// A userdata table describing the features the rest of the engine can depend upon.
 	type Table;
 
+	/// Queries the provided adapter for compatibility. Produces a [FeatureList] describing the
+	/// justification for which a given configuration is supported, partially supported, or rejected
+	/// as well as a userland table of type [GfxFeatureDetector::Table], which describes the actual
+	/// set of logical engine features which are supported is also returned. The userland table of
+	/// type [GfxFeatureDetector::Table] is `Some` if and only if the [FeatureList] passes
+	/// (i.e. the adapter is declared valid).
 	fn query_compat(&mut self, info: &mut CompatQueryInfo) -> (FeatureList, Option<Self::Table>);
 }
 
+/// Asserts that the adapter must be capable of presenting to the primary surface.
 pub struct GfxFeatureNeedsScreen;
 
 impl GfxFeatureDetector for GfxFeatureNeedsScreen {
@@ -162,6 +196,8 @@ impl GfxFeatureDetector for GfxFeatureNeedsScreen {
 	}
 }
 
+/// Asserts that the adapter must be have the proper power preference. This can be turned into a soft
+/// requirement by nesting `FeatureLists`.
 #[derive(Debug, Clone)]
 pub struct GfxFeaturePowerPreference(pub wgpu::PowerPreference);
 
