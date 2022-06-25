@@ -65,11 +65,9 @@ pub fn main_inner() -> anyhow::Result<()> {
 			let mut viewport_mgr_p = viewport_mgr.borrow_mut(s);
 			let gfx_p = gfx.get(s);
 
-			// Construct viewport userdata
-			let main_viewport = Entity::new(s);
-
+			// Construct main viewport
 			let input_mgr = InputTracker::default().box_obj_rw(s, main_lock);
-			main_viewport.add(s, input_mgr);
+			let main_viewport = Entity::new_with(s, input_mgr);
 
 			// Register main viewport
 			viewport_mgr_p.register(
@@ -89,8 +87,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			.init_scene(make_game_entry(s, main_lock));
 
 		// Create root entity
-		let root = Entity::new(s).manually_manage();
-		root.add(
+		let root = Entity::new_with(
 			s,
 			(
 				gfx,
@@ -99,7 +96,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 				ExposeUsing(main_lock.box_obj(s), MainLockKey::key()),
 			),
 		);
-		root
+		root.manually_manage()
 	};
 
 	// Start engine

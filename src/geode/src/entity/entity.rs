@@ -35,6 +35,18 @@ impl Entity {
 		})
 	}
 
+	pub fn new_with<L: ComponentList>(session: &Session, components: L) -> Owned<Self> {
+		let mut inner = EntityInner::default();
+
+		components.push_values(&mut ComponentAttachTarget {
+			map: &mut inner.map,
+		});
+
+		Owned::new(Self {
+			obj: Obj::new(session, Mutex::new(inner)).manually_manage(),
+		})
+	}
+
 	pub fn add<L: ComponentList>(&self, session: &Session, components: L) {
 		let map = &mut self.obj.get(session).lock().map;
 		components.push_values(&mut ComponentAttachTarget { map });
