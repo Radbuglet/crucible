@@ -47,7 +47,7 @@ fn main() {
 			let start = Instant::now();
 
 			for _ in 0..times {
-				let _b = 1.box_obj(&session).defuse();
+				let _b = 1.box_obj(&session).manually_manage();
 			}
 
 			accum += dbg!(start.elapsed());

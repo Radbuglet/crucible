@@ -40,7 +40,7 @@ fn main() {
 		let session = Session::new([]);
 		let s = &session;
 
-		let foo = Obj::new(s, 1).defuse();
+		let foo = Obj::new(s, 1).manually_manage();
 
 		// Setup & run test
 		let mut accum = Duration::ZERO;

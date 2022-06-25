@@ -49,3 +49,7 @@ impl SceneManager {
 			.expect("Called `current_scene` before an initial scene was provided.")
 	}
 }
+
+event_trait! {
+	pub trait SceneUpdateHandler::on_update(&self, s: &Session, me: Entity, engine_root: Entity);
+}

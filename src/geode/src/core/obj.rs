@@ -453,11 +453,11 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 		self.raw.destroy(session)
 	}
 
-	pub fn raw(&self) -> RawObj {
+	pub fn as_raw(&self) -> RawObj {
 		self.raw
 	}
 
-	pub fn unsize<U>(&self) -> Obj<U>
+	pub fn as_unsized<U>(&self) -> Obj<U>
 	where
 		T: Unsize<U>,
 		U: ?Sized + ObjPointee,
@@ -539,3 +539,17 @@ pub trait ObjCtorExt: Sized + ObjPointee {
 }
 
 impl<T: Sized + ObjPointee> ObjCtorExt for T {}
+
+impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
+	pub fn to_unsized<U>(self) -> Owned<Obj<U>>
+	where
+		T: Unsize<U>,
+		U: ?Sized + ObjPointee,
+	{
+		Owned::new(self.manually_manage().as_unsized::<U>())
+	}
+
+	pub fn to_raw(self) -> Owned<RawObj> {
+		Owned::new(self.manually_manage().as_raw())
+	}
+}

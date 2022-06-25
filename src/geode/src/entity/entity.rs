@@ -4,7 +4,6 @@ use std::{
 	collections::HashMap,
 };
 
-use derive_where::derive_where;
 use parking_lot::Mutex;
 
 use crate::{
@@ -32,7 +31,7 @@ struct EntityInner {
 impl Entity {
 	pub fn new(session: &Session) -> Owned<Self> {
 		Owned::new(Self {
-			obj: Obj::new(session, Default::default()).defuse(),
+			obj: Obj::new(session, Default::default()).manually_manage(),
 		})
 	}
 
@@ -51,7 +50,7 @@ impl Entity {
 			.lock()
 			.map
 			.get(&key.raw())
-			.unwrap_using(|_| format!("Failed to get component {key:?}"))
+			.unwrap_using(|_| format!("Missing component under key {key:?}"))
 			.downcast_ref::<Obj<T>>()
 			.unwrap()
 			.get(session)
@@ -80,6 +79,28 @@ impl Destructible for Entity {
 	}
 }
 
+pub trait RegisterObj: Sized {
+	type Value: ?Sized + ObjPointee;
+
+	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>);
+}
+
+impl<T: ?Sized + ObjPointee> RegisterObj for Obj<T> {
+	type Value = T;
+
+	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
+		registry.add(key, self);
+	}
+}
+
+impl<T: ?Sized + ObjPointee> RegisterObj for Owned<Obj<T>> {
+	type Value = T;
+
+	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
+		registry.add(key, self.manually_manage());
+	}
+}
+
 pub struct ComponentAttachTarget<'a> {
 	map: &'a mut HashMap<RawTypedKey, Box<dyn Any + Send>>,
 }
@@ -94,24 +115,18 @@ pub trait ComponentList: Sized {
 	fn push_values(self, registry: &mut ComponentAttachTarget);
 }
 
-impl<T: ?Sized + ObjPointee> ComponentList for Obj<T> {
+impl<T: RegisterObj> ComponentList for T {
 	fn push_values(self, registry: &mut ComponentAttachTarget) {
-		registry.add(typed_key::<T>(), self);
+		self.push_value_under(registry, typed_key::<T::Value>());
 	}
 }
 
-impl<T: ?Sized + ObjPointee> ComponentList for Owned<Obj<T>> {
-	fn push_values(self, registry: &mut ComponentAttachTarget) {
-		registry.add(typed_key::<T>(), self.defuse());
-	}
-}
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct ExposeUsing<T: RegisterObj>(pub T, pub TypedKey<T::Value>);
 
-#[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct ExposeAs<T: ?Sized + ObjPointee>(pub Obj<T>, pub TypedKey<T>);
-
-impl<T: ?Sized + ObjPointee> ComponentList for ExposeAs<T> {
+impl<T: RegisterObj> ComponentList for ExposeUsing<T> {
 	fn push_values(self, registry: &mut ComponentAttachTarget) {
-		registry.add(self.1, self.0);
+		self.0.push_value_under(registry, self.1);
 	}
 }
 

@@ -73,7 +73,7 @@ pub fn typed_key<T: ?Sized + 'static>() -> TypedKey<T> {
 	}
 }
 
-pub fn proxy_key<T: ?Sized + 'static + ProxyKeyType>() -> TypedKey<T::Provides> {
+pub fn proxy_key<T: ?Sized + ProxyKeyType>() -> TypedKey<T::Provides> {
 	TypedKey {
 		_ty: PhantomData,
 		raw: RawTypedKey(TypedKeyRawInner::Proxy(NamedTypeId::of::<T>())),
@@ -95,13 +95,17 @@ pub fn dyn_key<T: ?Sized + 'static>() -> TypedKey<T> {
 }
 
 #[doc(hidden)]
-pub trait ProxyKeyType {
+pub trait ProxyKeyType: 'static {
 	type Provides: ?Sized + 'static;
+
+	fn key() -> TypedKey<Self::Provides> {
+		proxy_key::<Self>()
+	}
 }
 
 pub macro proxy_key($(
 	$(#[$macro_meta:meta])*
-	$vis:vis proxy $name:ident($target:ty);
+	$vis:vis struct $name:ident of $target:ty;
 )*) {$(
 	$(#[$macro_meta])*
 	$vis struct $name;

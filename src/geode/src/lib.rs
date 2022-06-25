@@ -19,9 +19,9 @@ pub mod prelude {
 			session::Session,
 		},
 		entity::{
-			entity::{Entity, ExposeAs},
+			entity::{Entity, ExposeUsing},
 			event::event_trait,
-			key::typed_key,
+			key::{proxy_key, typed_key, ProxyKeyType},
 		},
 	};
 }
