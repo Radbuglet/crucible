@@ -21,6 +21,13 @@ pub struct SlotManager {
 }
 
 impl SlotManager {
+	pub fn reserve_capacity(&mut self, amount: usize) {
+		let extra = amount - self.free.len();
+
+		self.free
+			.extend(std::iter::repeat_with(|| self.bump.alloc(Slot::default())).take(extra));
+	}
+
 	pub fn reserve(&mut self) -> &'static Slot {
 		if let Some(free) = self.free.pop() {
 			free

@@ -203,6 +203,15 @@ impl Session<'_> {
 			local_sess_data.session_locks.lock(slot);
 		}
 	}
+
+	pub fn reserve_slot_capacity(self, amount: usize) {
+		let local_sess_data = unsafe {
+			// Safety: TODO
+			SESSION_DATA.get(self).as_ref().get_mut_unchecked()
+		};
+
+		local_sess_data.slots.reserve_capacity(amount);
+	}
 }
 
 // === Obj Errors === //

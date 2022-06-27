@@ -1,14 +1,29 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use std::time::Instant;
+
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use geode::prelude::*;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
+	println!("Finished initializaing!");
+
 	c.bench_function("obj_alloc", |b| {
 		let session = LocalSessionGuard::new();
 		let s = session.handle();
 
-		let _ = Obj::new(s, 4u32);
+		b.iter_custom(|iters| {
+			let iters = usize::try_from(iters)
+				.expect("That bench request isn't even satisfiable on this platform!");
 
-		b.iter(|| Obj::new(s, 4u32).manually_manage())
+			s.reserve_slot_capacity(iters as usize);
+
+			let start = Instant::now();
+
+			for _ in 0..iters {
+				black_box(Obj::new(s, 4u32)).manually_manage();
+			}
+
+			start.elapsed()
+		})
 	});
 }
 
