@@ -35,7 +35,7 @@ use super::{
 
 // === Singleton data === //
 
-const ID_GEN_BATCH_SIZE: u64 = 4096;
+const ID_GEN_BATCH_SIZE: u64 = 4096 * 4096;
 
 struct GlobalData {
 	id_batch_gen: AtomicU64,

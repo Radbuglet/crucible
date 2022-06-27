@@ -21,23 +21,23 @@ impl NonZeroNumExt for Option<NonZeroU64> {
 
 // === Bitset utilities === //
 
-/// Reserves the least significant one bit from the `target`, marks it as a `0`, and returns its
-/// index from the LSB.
-///
-/// Returns `64` if no bits could be allocated.
-pub fn reserve_one_bit(target: &mut u64) -> u8 {
-	let pos = target.trailing_zeros() as u8;
-	unset_bit(target, pos);
-	pos
-}
-
 /// Reserves the least significant zero bit from the `target`, marks it as a `1`, and returns its
 /// index from the LSB.
 ///
 /// Returns `64` if no bits could be allocated.
-pub fn reserve_zero_bit(target: &mut u64) -> u8 {
+pub fn reserve_unset_bit(target: &mut u64) -> u8 {
 	let pos = target.trailing_ones() as u8;
 	set_bit(target, pos);
+	pos
+}
+
+/// Reserves the least significant one bit from the `target`, marks it as a `0`, and returns its
+/// index from the LSB.
+///
+/// Returns `64` if no bits could be allocated.
+pub fn reserve_set_bit(target: &mut u64) -> u8 {
+	let pos = target.trailing_zeros() as u8;
+	unset_bit(target, pos);
 	pos
 }
 
@@ -51,6 +51,7 @@ pub fn unset_bit(target: &mut u64, pos: u8) {
 	*target &= !bit_mask(pos);
 }
 
+/// Checks if a bitmask contains a specific bit.
 pub fn contains_bit(target: u64, pos: u8) -> bool {
 	target & bit_mask(pos) > 0
 }
@@ -83,7 +84,7 @@ impl U8BitSet {
 	/// Find the least significant zero bit and sets it to `1`.
 	pub fn reserve_zero_bit(&mut self) -> Option<u8> {
 		self.0.iter_mut().enumerate().find_map(|(i, word)| {
-			let rel_pos = reserve_zero_bit(word);
+			let rel_pos = reserve_unset_bit(word);
 			if rel_pos != 64 {
 				Some(i as u8 * 64 + rel_pos)
 			} else {
@@ -95,7 +96,7 @@ impl U8BitSet {
 	/// Find the least significant one bit and sets it to `0`.
 	pub fn reserve_set_bit(&mut self) -> Option<u8> {
 		self.0.iter_mut().enumerate().find_map(|(i, word)| {
-			let rel_pos = reserve_one_bit(word);
+			let rel_pos = reserve_set_bit(word);
 			if rel_pos != 64 {
 				Some(i as u8 * 64 + rel_pos)
 			} else {
@@ -179,6 +180,7 @@ pub struct LocalBatchAllocator {
 }
 
 impl LocalBatchAllocator {
+	#[inline(always)]
 	pub fn generate(&mut self, gen: &AtomicU64, max_id_exclusive: u64, batch_size: u64) -> u64 {
 		assert!(batch_size > 0);
 
@@ -193,6 +195,7 @@ impl LocalBatchAllocator {
 	}
 
 	#[cold]
+	#[inline(never)]
 	fn generate_slow(&mut self, gen: &AtomicU64, max_id_exclusive: u64, batch_size: u64) -> u64 {
 		let start_id = gen
 			.fetch_update(AtomicOrdering::Relaxed, AtomicOrdering::Relaxed, |f| {
@@ -205,7 +208,6 @@ impl LocalBatchAllocator {
 
 		assert!(
 			self.id_generator < self.max_id_batch_exclusive,
-			"{}",
 			"failed to allocate a new batch of IDs: ran out of IDs"
 		);
 
