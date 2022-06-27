@@ -12,24 +12,25 @@ use std::{
 
 use arr_macro::arr;
 use derive_where::derive_where;
-use once_cell::sync::OnceCell;
-use parking_lot::{Mutex, MutexGuard};
+use parking_lot::Mutex;
 use thiserror::Error;
 
 use crate::util::{
 	cell::MutexedUnsafeCell,
 	error::ResultExt,
-	number::{LocalBatchAllocator, U8Alloc},
+	number::{LocalBatchAllocator, U8BitSet},
+	ptr::unsize_meta,
+	threading::new_lot_mutex,
 };
 
 use super::{
-	debug::{DebugLabel, NoLabel},
+	debug::DebugLabel,
 	internals::{
 		gen::{ExtendedGen, SessionLocks, MAX_OBJ_GEN_EXCLUSIVE},
 		heap::{GcHeap, Slot, SlotManager},
 	},
 	owned::{Destructible, Owned},
-	session::{Session, SessionStorage},
+	session::{InitSessionStorage, LocalSessionGuard, Session},
 };
 
 // === Singleton data === //
@@ -38,58 +39,74 @@ const ID_GEN_BATCH_SIZE: u64 = 4096;
 
 struct GlobalData {
 	id_batch_gen: AtomicU64,
-	sess_data: OnceCell<Mutex<GlobalSessData>>,
+	sess_data: Mutex<GlobalSessData>,
 }
 
 struct GlobalSessData {
-	lock_alloc: U8Alloc,
-	lock_names: Box<[Option<Cow<'static, str>>; 256]>,
+	lock_alloc: U8BitSet,
+	held_locks: U8BitSet,
+	lock_names: [Option<Cow<'static, str>>; 256],
 }
 
 static GLOBAL_DATA: GlobalData = GlobalData {
 	id_batch_gen: AtomicU64::new(1),
-	sess_data: OnceCell::new(),
+	sess_data: new_lot_mutex(GlobalSessData {
+		lock_alloc: U8BitSet::new(),
+		held_locks: U8BitSet::new(),
+		lock_names: arr![None; 256],
+	}),
 };
 
-fn global_sess_data() -> MutexGuard<'static, GlobalSessData> {
-	GLOBAL_DATA
-		.sess_data
-		.get_or_init(|| {
-			Mutex::new(GlobalSessData {
-				lock_alloc: U8Alloc::new(),
-				lock_names: Box::new(arr![None; 256]),
-			})
-		})
-		.lock()
+/// Per-session data to manage [Obj] allocation.
+///
+/// ## Safety
+///
+/// For best performance, we use a [MutexedUnsafeCell] instead of a [RefCell]. However, this means
+/// that we have to be very careful with reentracy. All public methods can assume that their corresponding
+/// [SESSION_DATA] is unborrowed by the time they are called. To enforce this invariant, users borrowing
+/// state from here must ensure that they never call untrusted (i.e. user) code.
+///
+/// TODO: Maybe we should have debug-only tracking in `MutexedUnsafeCell` so we can find bugs easier.
+///  Same applies to `AssumeInit` and all other unsafe wrappers.
+///
+static SESSION_DATA: InitSessionStorage<MutexedUnsafeCell<SessionData>> = unsafe {
+	// Safety: this is intialized in `init_session_states`.
+	InitSessionStorage::new()
+};
+
+pub(crate) fn init_session_states(session: Session) {
+	let session_data = unsafe {
+		// Safety: Users can only get access to their session data so long as the session guard is
+		// alive. Since we're effectively the first user of this session, we can borrow it mutably
+		// until we release the session to the userland.
+		SESSION_DATA.get_mut_unchecked(session)
+	};
+
+	session_data.write(Default::default());
 }
 
-static SESSION_DATA: SessionStorage<MutexedUnsafeCell<SessionData>> = SessionStorage::new();
+pub(crate) fn deinit_session_states(session: Session) {
+	let mut global_session_data = GLOBAL_DATA.sess_data.lock();
+
+	let local_session_data = unsafe {
+		// Safety: TODO
+		SESSION_DATA.get(session).as_ref().get_mut_unchecked()
+	};
+
+	for lock in local_session_data.lock_set.iter_set() {
+		local_session_data.lock_set.unset(lock);
+		local_session_data.session_locks.unlock(lock);
+		global_session_data.held_locks.unset(lock);
+	}
+}
 
 #[derive(Default)]
 struct SessionData {
 	heap: GcHeap,
 	slots: SlotManager,
-	locks: SessionLocks,
+	session_locks: SessionLocks,
 	generation_gen: LocalBatchAllocator,
-}
-
-// === Session Extension === //
-
-impl<'d> Session<'d> {
-	pub fn new<I>(locks: I) -> Self
-	where
-		I: IntoIterator<Item = &'d mut LockToken>,
-	{
-		let mut session = Session::new_raw();
-		let sess_data = SESSION_DATA.get_mut_or_init(&mut session).get_mut();
-		sess_data.locks = SessionLocks::default();
-
-		for lock in locks {
-			sess_data.locks.lock(lock.handle().0);
-		}
-
-		session
-	}
+	lock_set: U8BitSet,
 }
 
 // === Locks === //
@@ -103,33 +120,18 @@ impl fmt::Debug for Lock {
 			.field("id", &self.0)
 			.field(
 				"debug_name",
-				&global_sess_data().lock_names[self.0 as usize],
+				&GLOBAL_DATA.sess_data.lock().lock_names[self.0 as usize],
 			)
 			.finish()
 	}
 }
 
 impl Lock {
-	pub fn raw(self) -> u8 {
-		self.0
-	}
-}
-
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct LockToken(Lock);
-
-impl Default for LockToken {
-	fn default() -> Self {
-		Self::new(NoLabel).0
-	}
-}
-
-impl LockToken {
-	pub fn new<L: DebugLabel>(label: L) -> (Self, Lock) {
-		let mut global = global_sess_data();
+	pub fn new<L: DebugLabel>(label: L) -> Owned<Self> {
+		let mut global = GLOBAL_DATA.sess_data.lock();
 
 		// Allocate ID
-		let id = global.lock_alloc.alloc();
+		let id = global.lock_alloc.reserve_zero_bit().unwrap_or(0xFF);
 		assert_ne!(
 			id, 0xFF,
 			"Cannot allocate more than 255 locks continuously."
@@ -139,28 +141,67 @@ impl LockToken {
 		global.lock_names[id as usize] = label.to_debug_label();
 
 		// Produce wrappers
-		let id = Lock(id);
-		(LockToken(id), id)
+		Owned::new(Self(id))
 	}
 
-	pub fn handle(&self) -> Lock {
+	pub fn is_held(self) -> bool {
+		GLOBAL_DATA.sess_data.lock().held_locks.contains(self.0)
+	}
+
+	pub fn slot(self) -> u8 {
 		self.0
-	}
-
-	pub fn debug_name(&self) -> Option<Cow<'static, str>> {
-		match global_sess_data().lock_names[self.handle().0 as usize].as_ref()? {
-			Cow::Owned(instance) => Some(Cow::Owned(instance.clone())),
-			Cow::Borrowed(instance) => Some(Cow::Borrowed(instance)),
-		}
 	}
 }
 
-impl Drop for LockToken {
-	fn drop(&mut self) {
-		let mut global = global_sess_data();
+impl Destructible for Lock {
+	fn destruct(self) {
+		let mut global = GLOBAL_DATA.sess_data.lock();
 
-		global.lock_names[self.handle().0 as usize] = None;
-		global.lock_alloc.free(self.handle().0);
+		global.lock_names[self.slot() as usize] = None;
+		global.lock_alloc.unset(self.slot());
+	}
+}
+
+// === Session extensions === //
+
+impl Session<'_> {
+	pub fn acquire_locks<I: IntoIterator<Item = Lock>>(self, locks: I) {
+		// We collect our locks before we enter the critical section because we really don't want
+		// users running any code in the critical section. For one, it's necessary for us to prove
+		// the validity of `get_mut_unchecked`. We're also paranoid of people (e.g. me) doing stupid
+		// things with mutexes.
+		let locks = locks.into_iter().collect::<Vec<_>>();
+
+		// Acquire dependencies once
+		let mut global_sess_data = GLOBAL_DATA.sess_data.lock();
+		let local_sess_data = unsafe {
+			// Safety: TODO
+			SESSION_DATA.get(self).as_ref().get_mut_unchecked()
+		};
+
+		for lock in locks {
+			let slot = lock.slot();
+
+			// Ignore locks that we already have.
+			if local_sess_data.lock_set.contains(slot) {
+				continue;
+			}
+
+			// Ensure that no one else has the lock.
+			if global_sess_data.held_locks.contains(slot) {
+				// Needed to avoid implicit dead-locks.
+				drop(global_sess_data);
+				panic!("Cannot lock {lock:?} in more than one session.");
+			}
+
+			// Register it globally.
+			global_sess_data.held_locks.set(slot);
+
+			// Register it in both the bit set and the `session_locks` container.
+			local_sess_data.lock_set.set(slot);
+
+			local_sess_data.session_locks.lock(slot);
+		}
 	}
 }
 
@@ -249,16 +290,13 @@ impl PartialEq for RawObj {
 impl RawObj {
 	// Constructors
 	pub fn new_dynamic_in(
-		session: &Session,
+		session: Session,
 		lock: Option<Lock>,
 		layout: Layout,
 	) -> (Owned<Self>, NonNull<u8>) {
 		let sess_data = unsafe {
-			// Safety: TODO
-			SESSION_DATA
-				.get(session)
-				.unwrap_unchecked()
-				.get_mut_unchecked()
+			// Safety: We never call into userland within this function.
+			SESSION_DATA.get(session).as_ref().get_mut_unchecked()
 		};
 
 		// Reserve a slot for us
@@ -290,18 +328,15 @@ impl RawObj {
 		(Owned::new(Self { slot, gen }), p_data)
 	}
 
-	pub fn new_dynamic(session: &Session, layout: Layout) -> (Owned<Self>, NonNull<u8>) {
+	pub fn new_dynamic(session: Session, layout: Layout) -> (Owned<Self>, NonNull<u8>) {
 		Self::new_dynamic_in(session, None, layout)
 	}
 
 	// Fetching
-	pub fn try_get_ptr(&self, session: &Session) -> Result<*const (), ObjGetError> {
+	pub fn try_get_ptr(&self, session: Session) -> Result<*const (), ObjGetError> {
 		let sess_data = unsafe {
 			// Safety: TODO
-			SESSION_DATA
-				.get(session)
-				.unwrap_unchecked()
-				.get_mut_unchecked()
+			SESSION_DATA.get(session).as_ref().get_mut_unchecked()
 		};
 
 		#[cold]
@@ -312,7 +347,7 @@ impl RawObj {
 			slot_gen: ExtendedGen,
 		) -> ObjGetError {
 			let lock_id = slot_gen.meta();
-			if !sess_data.locks.check_lock(lock_id) {
+			if !sess_data.session_locks.check_lock(lock_id) {
 				return ObjGetError::Locked(ObjLockedError {
 					requested,
 					lock: Lock(lock_id),
@@ -326,28 +361,28 @@ impl RawObj {
 			})
 		}
 
-		match self.slot.try_get_base(&sess_data.locks, self.gen) {
+		match self.slot.try_get_base(&sess_data.session_locks, self.gen) {
 			Ok(ptr) => Ok(ptr),
 			Err(slot_gen) => Err(decode_error(&sess_data, *self, slot_gen)),
 		}
 	}
 
-	pub fn get_ptr(&self, session: &Session) -> *const () {
+	pub fn get_ptr(&self, session: Session) -> *const () {
 		self.try_get_ptr(session).unwrap_pretty()
 	}
 
-	pub fn weak_get_ptr(&self, session: &Session) -> Result<*const (), ObjDeadError> {
+	pub fn weak_get_ptr(&self, session: Session) -> Result<*const (), ObjDeadError> {
 		ObjGetError::unwrap_weak(self.try_get_ptr(session))
 	}
 
-	pub fn is_alive_now(&self, _session: &Session) -> bool {
+	pub fn is_alive_now(&self, _session: Session) -> bool {
 		self.slot.is_alive(self.gen)
 	}
 
-	pub fn destroy(&self, session: &Session) {
+	pub fn destroy(&self, session: Session) {
 		let sess_data = unsafe {
 			// Safety: TODO
-			&mut *SESSION_DATA.get(session).unwrap_unchecked().get()
+			SESSION_DATA.get(session).as_ref().get_mut_unchecked()
 		};
 
 		self.slot.release();
@@ -357,7 +392,9 @@ impl RawObj {
 
 impl Destructible for RawObj {
 	fn destruct(self) {
-		self.destroy(&Session::new([]))
+		LocalSessionGuard::with_new(|session| {
+			self.destroy(session.handle());
+		});
 	}
 }
 
@@ -374,25 +411,22 @@ pub struct Obj<T: ?Sized + ObjPointee> {
 }
 
 impl<T: Sized + ObjPointee + Sync> Obj<T> {
-	pub fn new(session: &Session, value: T) -> Owned<Self> {
+	pub fn new(session: Session, value: T) -> Owned<Self> {
 		Self::new_in_raw(session, 0xFF, value)
 	}
 }
 
 impl<T: Sized + ObjPointee> Obj<T> {
-	pub fn new_in(session: &Session, lock: Lock, value: T) -> Owned<Self> {
+	pub fn new_in(session: Session, lock: Lock, value: T) -> Owned<Self> {
 		Self::new_in_raw(session, lock.0, value)
 	}
 
-	fn new_in_raw(session: &Session, lock: u8, value: T) -> Owned<Self> {
+	fn new_in_raw(session: Session, lock: u8, value: T) -> Owned<Self> {
 		// TODO: De-duplicate constructor
 
 		let sess_data = unsafe {
 			// Safety: TODO
-			SESSION_DATA
-				.get(session)
-				.unwrap_unchecked()
-				.get_mut_unchecked()
+			SESSION_DATA.get(session).as_ref().get_mut_unchecked()
 		};
 
 		// Reserve a slot for us
@@ -430,26 +464,26 @@ impl<T: Sized + ObjPointee> Obj<T> {
 }
 
 impl<T: ?Sized + ObjPointee> Obj<T> {
-	pub fn try_get<'a>(&self, session: &'a Session) -> Result<&'a T, ObjGetError> {
+	pub fn try_get<'a>(&self, session: Session<'a>) -> Result<&'a T, ObjGetError> {
 		let base = self.raw.try_get_ptr(session)?;
 		let ptr = ptr::from_raw_parts::<T>(base, self.meta);
 
 		Ok(unsafe { &*ptr })
 	}
 
-	pub fn get<'a>(&self, session: &'a Session) -> &'a T {
+	pub fn get<'a>(&self, session: Session<'a>) -> &'a T {
 		self.try_get(session).unwrap_pretty()
 	}
 
-	pub fn weak_get<'a>(&self, session: &'a Session) -> Result<&'a T, ObjDeadError> {
+	pub fn weak_get<'a>(&self, session: Session<'a>) -> Result<&'a T, ObjDeadError> {
 		ObjGetError::unwrap_weak(self.try_get(session))
 	}
 
-	pub fn is_alive_now(&self, session: &Session) -> bool {
+	pub fn is_alive_now(&self, session: Session) -> bool {
 		self.raw.is_alive_now(session)
 	}
 
-	pub fn destroy<'a>(&self, session: &'a Session) {
+	pub fn destroy<'a>(&self, session: Session<'a>) {
 		self.raw.destroy(session)
 	}
 
@@ -462,12 +496,9 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 		T: Unsize<U>,
 		U: ?Sized + ObjPointee,
 	{
-		let ptr = ptr::from_raw_parts::<T>(ptr::null(), self.meta) as *const U;
-		let (_, meta) = ptr.to_raw_parts();
-
 		Obj {
 			raw: self.raw,
-			meta,
+			meta: unsize_meta::<T, U>(self.meta),
 		}
 	}
 }
@@ -496,8 +527,9 @@ impl<T: ?Sized + ObjPointee> hash::Hash for Obj<T> {
 
 impl<T: ?Sized + ObjPointee> Destructible for Obj<T> {
 	fn destruct(self) {
-		// TODO: We want a better destructor that works well during garbage collection.
-		self.destroy(&Session::new([]))
+		LocalSessionGuard::with_new(|session| {
+			self.destroy(session.handle());
+		})
 	}
 }
 
@@ -506,34 +538,34 @@ impl<T: ?Sized + ObjPointee> Destructible for Obj<T> {
 pub type ObjRw<T> = Obj<RefCell<T>>;
 
 impl<T: ObjPointee> ObjRw<T> {
-	pub fn new_rw(session: &Session, lock: Lock, value: T) -> Owned<Self> {
+	pub fn new_rw(session: Session, lock: Lock, value: T) -> Owned<Self> {
 		Self::new_in(session, lock, RefCell::new(value))
 	}
 }
 
 impl<T: ?Sized + ObjPointee> ObjRw<T> {
-	pub fn borrow<'a>(&self, session: &'a Session) -> Ref<'a, T> {
+	pub fn borrow<'a>(&self, session: Session<'a>) -> Ref<'a, T> {
 		self.get(session).borrow()
 	}
 
-	pub fn borrow_mut<'a>(&self, session: &'a Session) -> RefMut<'a, T> {
+	pub fn borrow_mut<'a>(&self, session: Session<'a>) -> RefMut<'a, T> {
 		self.get(session).borrow_mut()
 	}
 }
 
 pub trait ObjCtorExt: Sized + ObjPointee {
-	fn box_obj(self, session: &Session) -> Owned<Obj<Self>>
+	fn box_obj(self, session: Session) -> Owned<Obj<Self>>
 	where
 		Self: Sync,
 	{
 		Obj::new(session, self)
 	}
 
-	fn box_obj_in(self, session: &Session, lock: Lock) -> Owned<Obj<Self>> {
+	fn box_obj_in(self, session: Session, lock: Lock) -> Owned<Obj<Self>> {
 		Obj::new_in(session, lock, self)
 	}
 
-	fn box_obj_rw(self, session: &Session, lock: Lock) -> Owned<Obj<RefCell<Self>>> {
+	fn box_obj_rw(self, session: Session, lock: Lock) -> Owned<Obj<RefCell<Self>>> {
 		Obj::new_rw(session, lock, self)
 	}
 }

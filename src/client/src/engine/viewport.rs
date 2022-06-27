@@ -16,7 +16,7 @@ pub struct ViewportManager {
 impl ViewportManager {
 	pub fn register(
 		&mut self,
-		s: &Session,
+		s: Session,
 		main_lock: Lock,
 		gfx: &GfxContext,
 		target: Owned<Entity>,
@@ -62,9 +62,9 @@ impl ViewportManager {
 
 	pub fn mounted_viewports<'a>(
 		&'a self,
-		s: &'a Session,
+		s: Session<'a>,
 	) -> impl Iterator<Item = (WindowId, Entity, Ref<'a, Window>)> + 'a {
-		self.all_viewports().filter_map(|(window_id, entity)| {
+		self.all_viewports().filter_map(move |(window_id, entity)| {
 			let viewport = entity.borrow::<Viewport>(s);
 			let window = filter_map_ref(viewport, |viewport| viewport.window()).ok()?;
 

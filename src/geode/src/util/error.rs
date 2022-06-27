@@ -8,7 +8,7 @@ use derive_where::derive_where;
 pub trait ErrorFormatExt: Error {
 	fn format_error(&self) -> FormattedError<Self>;
 
-	fn panic(&self) -> ! {
+	fn raise(&self) -> ! {
 		panic!("{}", self.format_error());
 	}
 }
@@ -49,7 +49,6 @@ impl<T: ?Sized + Error> Display for FormattedError<'_, T> {
 	}
 }
 
-/// A version of [anyhow::Context] for [Result] only. Supports producing context from an error value.
 pub trait ResultExt<T, E: Error> {
 	fn unwrap_pretty(self) -> T;
 }
@@ -58,7 +57,7 @@ impl<T, E: Error> ResultExt<T, E> for Result<T, E> {
 	fn unwrap_pretty(self) -> T {
 		match self {
 			Ok(val) => val,
-			Err(err) => err.panic(),
+			Err(err) => err.raise(),
 		}
 	}
 }
@@ -79,6 +78,19 @@ impl<T> UnwrapExt<T, ()> for Option<T> {
 		match self {
 			Some(value) => value,
 			None => panic!("{}", f(())),
+		}
+	}
+}
+
+impl<T, E> UnwrapExt<T, E> for Result<T, E> {
+	fn unwrap_using<F, EF>(self, mut f: F) -> T
+	where
+		F: FnMut(E) -> EF,
+		EF: Display,
+	{
+		match self {
+			Ok(value) => value,
+			Err(err) => panic!("{}", f(err)),
 		}
 	}
 }

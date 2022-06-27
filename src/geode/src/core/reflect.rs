@@ -1,4 +1,4 @@
-use std::{alloc::Layout, any::TypeId, fmt, hash};
+use std::{alloc::Layout, any::TypeId, fmt, hash, marker::PhantomData};
 
 use super::session::Session;
 
@@ -67,7 +67,7 @@ impl PartialEq for NamedTypeId {
 pub struct TypeMeta {
 	pub id: Option<NamedTypeId>,
 	pub layout: TypeMetaLayout,
-	pub drop_fn: Option<for<'a> unsafe fn(*mut (), &'a Session)>,
+	pub drop_fn: Option<for<'a> unsafe fn(*mut (), Layout, Session)>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -87,7 +87,7 @@ impl fmt::Debug for TypeMeta {
 
 impl TypeMeta {
 	pub const fn of<T: 'static>() -> &'static TypeMeta {
-		unsafe fn drop_raw_ptr<T>(value: *mut (), _session: &Session) {
+		unsafe fn drop_raw_ptr<T>(value: *mut (), _layout: Layout, _session: Session) {
 			std::ptr::drop_in_place(value as *mut T)
 		}
 
@@ -106,5 +106,46 @@ impl TypeMeta {
 		}
 
 		&MetaProvider::<T>::META
+	}
+
+	pub const fn dynamic_no_drop() -> &'static TypeMeta {
+		const INSTANCE: TypeMeta = TypeMeta {
+			id: None,
+			layout: TypeMetaLayout::Dynamic,
+			drop_fn: None,
+		};
+
+		&INSTANCE
+	}
+
+	pub const fn dynamic_with_drop<D>() -> &'static TypeMeta
+	where
+		// lol, trivially bypassed feature gate
+		// (do we even need this? why the heck did I make this const-compatible in the first place?)
+		(D,): CustomDropHandler,
+	{
+		struct MetaProvider<D: CustomDropHandler> {
+			_ty: PhantomData<D>,
+		}
+
+		impl<D: CustomDropHandler> MetaProvider<D> {
+			const META: TypeMeta = TypeMeta {
+				id: None,
+				layout: TypeMetaLayout::Dynamic,
+				drop_fn: Some(D::destruct),
+			};
+		}
+
+		&MetaProvider::<(D,)>::META
+	}
+}
+
+pub trait CustomDropHandler {
+	unsafe fn destruct(alloc_base: *mut (), layout: Layout, session: Session);
+}
+
+impl<T: CustomDropHandler> CustomDropHandler for (T,) {
+	unsafe fn destruct(alloc_base: *mut (), layout: Layout, session: Session) {
+		T::destruct(alloc_base, layout, session)
 	}
 }

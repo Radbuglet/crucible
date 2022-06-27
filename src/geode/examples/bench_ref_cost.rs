@@ -1,6 +1,6 @@
 #![feature(bench_black_box)]
 
-use geode::prelude::*;
+use geode::{core::session::LocalSessionGuard, prelude::*};
 use std::{
 	hint::black_box,
 	time::{Duration, Instant},
@@ -37,8 +37,8 @@ fn main() {
 	// Geode allocator
 	{
 		// Setup dependencies
-		let session = Session::new([]);
-		let s = &session;
+		let session = LocalSessionGuard::new();
+		let s = session.handle();
 
 		let foo = Obj::new(s, 1).manually_manage();
 

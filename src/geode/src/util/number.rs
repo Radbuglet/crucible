@@ -19,26 +19,43 @@ impl NonZeroNumExt for Option<NonZeroU64> {
 	}
 }
 
-// === Free bit-list utilities === //
+// === Bitset utilities === //
+
+/// Reserves the least significant one bit from the `target`, marks it as a `0`, and returns its
+/// index from the LSB.
+///
+/// Returns `64` if no bits could be allocated.
+pub fn reserve_one_bit(target: &mut u64) -> u8 {
+	let pos = target.trailing_zeros() as u8;
+	unset_bit(target, pos);
+	pos
+}
 
 /// Reserves the least significant zero bit from the `target`, marks it as a `1`, and returns its
 /// index from the LSB.
 ///
 /// Returns `64` if no bits could be allocated.
-pub fn reserve_bit(target: &mut u64) -> u8 {
+pub fn reserve_zero_bit(target: &mut u64) -> u8 {
 	let pos = target.trailing_ones() as u8;
-	*target |= bit_mask(pos);
+	set_bit(target, pos);
 	pos
 }
 
-/// Sets the specified bit to `0`, marking it as free. `free_bit` uses the same indexing convention
-/// as [reserve_bit], i.e. its offset from the LSB. Indices greater than 63 are ignored.
-pub fn free_bit(target: &mut u64, pos: u8) {
+/// Sets the specified bit to `1`.
+pub fn set_bit(target: &mut u64, pos: u8) {
+	*target |= bit_mask(pos);
+}
+
+/// Sets the specified bit to `0`.
+pub fn unset_bit(target: &mut u64, pos: u8) {
 	*target &= !bit_mask(pos);
 }
 
-/// Constructs a bit mask with only the bit at position `pos` set. `bit_mask` uses the same indexing
-/// convention as [reserve_bit], i.e. its offset from the LSB. Indices greater than 63 are ignored.
+pub fn contains_bit(target: u64, pos: u8) -> bool {
+	target & bit_mask(pos) > 0
+}
+
+/// Constructs a bit mask with only the bit at position `pos` set.
 pub fn bit_mask(pos: u8) -> u64 {
 	1u64.wrapping_shl(pos as u32)
 }
@@ -49,36 +66,69 @@ pub fn mask_out_lsb(count: u8) -> u64 {
 }
 
 /// An byte-sized ID allocator that properly reuses free bits.
-pub struct U8Alloc([u64; 4]);
+#[derive(Debug, Clone)]
+pub struct U8BitSet([u64; 4]);
 
-impl Default for U8Alloc {
+impl Default for U8BitSet {
 	fn default() -> Self {
 		Self::new()
 	}
 }
 
-impl U8Alloc {
+impl U8BitSet {
 	pub const fn new() -> Self {
 		Self([0; 4])
 	}
 
-	pub fn alloc(&mut self) -> u8 {
-		self.0
-			.iter_mut()
-			.enumerate()
-			.find_map(|(i, word)| {
-				let rel_pos = reserve_bit(word);
-				if rel_pos != 64 {
-					Some(i as u8 * 64 + rel_pos)
-				} else {
-					None
-				}
-			})
-			.unwrap_or(255)
+	/// Find the least significant zero bit and sets it to `1`.
+	pub fn reserve_zero_bit(&mut self) -> Option<u8> {
+		self.0.iter_mut().enumerate().find_map(|(i, word)| {
+			let rel_pos = reserve_zero_bit(word);
+			if rel_pos != 64 {
+				Some(i as u8 * 64 + rel_pos)
+			} else {
+				None
+			}
+		})
 	}
 
-	pub fn free(&mut self, pos: u8) {
-		free_bit(&mut self.0[(pos >> 6) as usize], pos & 0b111111)
+	/// Find the least significant one bit and sets it to `0`.
+	pub fn reserve_set_bit(&mut self) -> Option<u8> {
+		self.0.iter_mut().enumerate().find_map(|(i, word)| {
+			let rel_pos = reserve_one_bit(word);
+			if rel_pos != 64 {
+				Some(i as u8 * 64 + rel_pos)
+			} else {
+				None
+			}
+		})
+	}
+
+	fn word_of(pos: u8) -> usize {
+		(pos >> 6) as usize
+	}
+
+	fn bit_of(pos: u8) -> u8 {
+		pos & 0b111111
+	}
+
+	fn decompose_pos(pos: u8) -> (usize, u8) {
+		(Self::word_of(pos), Self::bit_of(pos))
+	}
+
+	pub fn set(&mut self, pos: u8) {
+		let (word, bit) = Self::decompose_pos(pos);
+		set_bit(&mut self.0[word], bit)
+	}
+
+	pub fn unset(&mut self, pos: u8) {
+		let (word, bit) = Self::decompose_pos(pos);
+		unset_bit(&mut self.0[word], bit)
+	}
+
+	pub fn contains(&self, pos: u8) -> bool {
+		let (word, bit) = Self::decompose_pos(pos);
+		contains_bit(self.0[word], bit)
 	}
 
 	pub fn is_empty(&self) -> bool {
@@ -98,6 +148,25 @@ impl U8Alloc {
 		for word in &mut self.0[(min_word_idx + 1)..] {
 			*word = 0;
 		}
+	}
+
+	pub fn iter_set(&self) -> U8BitSetIter {
+		U8BitSetIter {
+			target: self.clone(),
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct U8BitSetIter {
+	target: U8BitSet,
+}
+
+impl Iterator for U8BitSetIter {
+	type Item = u8;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.target.reserve_set_bit()
 	}
 }
 

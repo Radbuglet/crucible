@@ -51,5 +51,5 @@ impl SceneManager {
 }
 
 event_trait! {
-	pub trait SceneUpdateHandler::on_update(&self, s: &Session, me: Entity, engine_root: Entity);
+	pub trait SceneUpdateHandler::on_update(&self, s: Session, me: Entity, engine_root: Entity);
 }

@@ -10,7 +10,7 @@ use crate::{
 	core::{
 		obj::ObjPointee,
 		owned::{Destructible, Owned},
-		session::Session,
+		session::{LocalSessionGuard, Session},
 	},
 	util::{arity::impl_tuples, error::UnwrapExt},
 	Obj,
@@ -29,13 +29,13 @@ struct EntityInner {
 }
 
 impl Entity {
-	pub fn new(session: &Session) -> Owned<Self> {
+	pub fn new(session: Session) -> Owned<Self> {
 		Owned::new(Self {
 			obj: Obj::new(session, Default::default()).manually_manage(),
 		})
 	}
 
-	pub fn new_with<L: ComponentList>(session: &Session, components: L) -> Owned<Self> {
+	pub fn new_with<L: ComponentList>(session: Session, components: L) -> Owned<Self> {
 		let mut inner = EntityInner::default();
 
 		components.push_values(&mut ComponentAttachTarget {
@@ -47,14 +47,14 @@ impl Entity {
 		})
 	}
 
-	pub fn add<L: ComponentList>(&self, session: &Session, components: L) {
+	pub fn add<L: ComponentList>(&self, session: Session, components: L) {
 		let map = &mut self.obj.get(session).lock().map;
 		components.push_values(&mut ComponentAttachTarget { map });
 	}
 
 	pub fn get_in<'a, T: ?Sized + ObjPointee>(
 		&self,
-		session: &'a Session,
+		session: Session<'a>,
 		key: TypedKey<T>,
 	) -> &'a T {
 		self.obj
@@ -68,26 +68,28 @@ impl Entity {
 			.get(session)
 	}
 
-	pub fn get<'a, T: ?Sized + ObjPointee>(&self, session: &'a Session) -> &'a T {
+	pub fn get<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> &'a T {
 		self.get_in(session, typed_key::<T>())
 	}
 
-	pub fn borrow<'a, T: ?Sized + ObjPointee>(&self, session: &'a Session) -> Ref<'a, T> {
+	pub fn borrow<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> Ref<'a, T> {
 		self.get::<RefCell<T>>(session).borrow()
 	}
 
-	pub fn borrow_mut<'a, T: ?Sized + ObjPointee>(&self, session: &'a Session) -> RefMut<'a, T> {
+	pub fn borrow_mut<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> RefMut<'a, T> {
 		self.get::<RefCell<T>>(session).borrow_mut()
 	}
 
-	pub fn destroy(&self, session: &Session) {
+	pub fn destroy(&self, session: Session) {
 		self.obj.destroy(session)
 	}
 }
 
 impl Destructible for Entity {
 	fn destruct(self) {
-		self.destroy(&Session::new([]))
+		LocalSessionGuard::with_new(|session| {
+			self.destroy(session.handle());
+		});
 	}
 }
 

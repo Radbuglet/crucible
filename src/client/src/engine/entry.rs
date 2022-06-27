@@ -25,7 +25,7 @@ use super::{
 };
 
 proxy_key! {
-	pub struct MainLockKey of Lock;
+	pub struct MainLockKey of Owned<Lock>;
 }
 
 pub fn main_inner() -> anyhow::Result<()> {
@@ -33,11 +33,13 @@ pub fn main_inner() -> anyhow::Result<()> {
 	env_logger::init();
 
 	// Create main thread lock.
-	let (mut main_lock_token, main_lock) = LockToken::new("main thread");
+	let main_lock_token = Lock::new("main thread");
+	let main_lock = *main_lock_token;
 
 	// Create our main session.
-	let session = Session::new([&mut main_lock_token]);
-	let s = &session;
+	let session = LocalSessionGuard::new();
+	let s = session.handle();
+	s.acquire_locks([main_lock]);
 
 	// Initialize services
 	let event_loop = EventLoop::new();
@@ -93,7 +95,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 				gfx,
 				viewport_mgr,
 				scene_mgr,
-				ExposeUsing(main_lock.box_obj(s), MainLockKey::key()),
+				ExposeUsing(main_lock_token.box_obj(s), MainLockKey::key()),
 			),
 		);
 		root.manually_manage()
@@ -110,10 +112,13 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 	drop(session);
 
+	log::info!("Entering main loop!");
+
 	event_loop.run(move |event, proxy, flow| {
 		// Acquire new session
-		let session = Session::new([&mut main_lock_token]);
-		let s = &session;
+		let session = LocalSessionGuard::new();
+		let s = session.handle();
+		s.acquire_locks([main_lock]);
 
 		// Acquire root context
 		let bundle = WinitEventBundle { event, proxy, flow };

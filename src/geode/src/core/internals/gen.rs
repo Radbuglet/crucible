@@ -88,6 +88,10 @@ impl SessionLocks {
 		self.lock_states[lock_id as usize] = !lock_id;
 	}
 
+	pub fn unlock(&mut self, lock_id: u8) {
+		self.lock_states[lock_id as usize] = 0;
+	}
+
 	pub fn check_gen_and_lock(&self, ptr_gen: ExtendedGen, slot_gen: ExtendedGen) -> bool {
 		debug_assert_eq!(ptr_gen.meta(), 0xFF);
 

@@ -3,6 +3,7 @@
 #![feature(decl_macro)]
 #![feature(unsize)]
 #![feature(ptr_metadata)]
+#![feature(thread_local)]
 
 mod util;
 
@@ -13,10 +14,10 @@ pub mod prelude {
 	pub use crate::{
 		core::{
 			debug::NoLabel,
-			obj::{Lock, LockToken, Obj, ObjCtorExt, ObjRw, RawObj},
+			obj::{Lock, Obj, ObjCtorExt, ObjRw, RawObj},
 			owned::Owned,
 			reflect::TypeMeta,
-			session::Session,
+			session::{LocalSessionGuard, Session},
 		},
 		entity::{
 			entity::{Entity, ExposeUsing},

@@ -1,18 +1,11 @@
-use std::{any::type_name, cell::UnsafeCell, fmt};
+use std::{any::type_name, cell::UnsafeCell, fmt, hash, mem::MaybeUninit};
 
-use parking_lot::{lock_api::RawMutex, Mutex};
-
-// === Parking Lot Utils === //
-
-pub const fn lot_new_mutex<T>(value: T) -> Mutex<T> {
-	Mutex::const_new(RawMutex::INIT, value)
-}
-
-// === Unsafe Cell === //
+// === MutexedUnsafeCell === //
 
 /// A type of [UnsafeCell] that asserts that the given cell will only be accessed by one thread at a
 /// given time.
 #[derive(Default)]
+#[repr(transparent)]
 pub struct MutexedUnsafeCell<T: ?Sized>(UnsafeCell<T>);
 
 // Safety: Users can't get an immutable reference to this value without using `unsafe`. They take full
@@ -80,3 +73,90 @@ impl<T: ?Sized> OnlyMut<T> {
 unsafe impl<T: ?Sized + Send> Sync for OnlyMut<T> {}
 
 // impl<T, U> CoerceUnsized<OnlyMut<U>> for OnlyMut<T> where T: CoerceUnsized<U> {}
+
+// === AssumeInit === //
+
+/// An object that's usually initialized... except when it isn't.
+///
+/// Specifically, the value may be temporarily uninitialized during some internal invariant-breaking
+/// procedures but the slot is assumed to be initialized during the rest of the time and thus,
+///
+/// - The destructor assumes that the inner value is initialized.
+/// - Users can safely access the contents, even if the value is actually uninitialized.
+///
+/// In other words, we're emulating intuitive C-style "this value may be uninitialized but we'll
+/// still assume that it is initialized if you try and access it" behavior.
+///
+/// Good luck, code review.
+#[repr(transparent)]
+pub struct AssumeInit<T>(MaybeUninit<T>);
+
+impl<T> AssumeInit<T> {
+	pub const fn new(value: T) -> Self {
+		Self(MaybeUninit::new(value))
+	}
+
+	pub const unsafe fn uninit() -> Self {
+		Self(MaybeUninit::uninit())
+	}
+
+	pub fn as_ptr(&self) -> *const T {
+		self.0.as_ptr()
+	}
+
+	pub fn as_mut_ptr(&mut self) -> *mut T {
+		self.0.as_mut_ptr()
+	}
+
+	pub fn as_ref(&self) -> &T {
+		unsafe { self.0.assume_init_ref() }
+	}
+
+	pub fn as_mut(&mut self) -> &mut T {
+		unsafe { self.0.assume_init_mut() }
+	}
+
+	pub unsafe fn read(&self) -> T {
+		self.0.assume_init_read()
+	}
+
+	pub fn write(&mut self, value: T) {
+		self.0.write(value);
+	}
+
+	pub fn unwrap(self) -> T {
+		unsafe { self.0.assume_init_read() }
+	}
+}
+
+impl<T: fmt::Debug> fmt::Debug for AssumeInit<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		self.as_ref().fmt(f)
+	}
+}
+
+impl<T: Clone> Clone for AssumeInit<T> {
+	fn clone(&self) -> Self {
+		Self::new(self.as_ref().clone())
+	}
+}
+
+impl<T: hash::Hash> hash::Hash for AssumeInit<T> {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		self.as_ref().hash(state);
+	}
+}
+
+impl<T: Eq> Eq for AssumeInit<T> {}
+
+impl<T: PartialEq> PartialEq for AssumeInit<T> {
+	fn eq(&self, other: &Self) -> bool {
+		self.as_ref().eq(other.as_ref())
+	}
+}
+
+impl<T> Drop for AssumeInit<T> {
+	fn drop(&mut self) {
+		unsafe { self.0.assume_init_drop() }
+	}
+}
