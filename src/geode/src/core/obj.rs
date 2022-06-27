@@ -30,7 +30,7 @@ use super::{
 		heap::{GcHeap, Slot, SlotManager},
 	},
 	owned::{Destructible, Owned},
-	session::{InitSessionStorage, LocalSessionGuard, Session},
+	session::{LocalSessionGuard, Session, StaticStorage, StaticStorageHandler},
 };
 
 // === Singleton data === //
@@ -69,44 +69,39 @@ static GLOBAL_DATA: GlobalData = GlobalData {
 /// TODO: Maybe we should have debug-only tracking in `MutexedUnsafeCell` so we can find bugs easier.
 ///  Same applies to `AssumeInit` and all other unsafe wrappers.
 ///
-static SESSION_DATA: InitSessionStorage<MutexedUnsafeCell<SessionData>> = unsafe {
-	// Safety: this is intialized in `init_session_states`.
-	InitSessionStorage::new()
-};
-
-pub(crate) fn init_session_states(session: Session) {
-	let session_data = unsafe {
-		// Safety: Users can only get access to their session data so long as the session guard is
-		// alive. Since we're effectively the first user of this session, we can borrow it mutably
-		// until we release the session to the userland.
-		SESSION_DATA.get_mut_unchecked(session)
-	};
-
-	session_data.write(Default::default());
-}
-
-pub(crate) fn deinit_session_states(session: Session) {
-	let mut global_session_data = GLOBAL_DATA.sess_data.lock();
-
-	let local_session_data = unsafe {
-		// Safety: TODO
-		SESSION_DATA.get(session).as_ref().get_mut_unchecked()
-	};
-
-	for lock in local_session_data.lock_set.iter_set() {
-		local_session_data.lock_set.unset(lock);
-		local_session_data.session_locks.unlock(lock);
-		global_session_data.held_locks.unset(lock);
-	}
-}
-
 #[derive(Default)]
-struct SessionData {
+pub(crate) struct LocalSessData {
 	heap: GcHeap,
 	slots: SlotManager,
 	session_locks: SessionLocks,
 	generation_gen: LocalBatchAllocator,
 	lock_set: U8BitSet,
+}
+
+impl StaticStorageHandler for LocalSessData {
+	type Comp = MutexedUnsafeCell<Self>;
+
+	fn init_comp(target: &mut Option<Self::Comp>) {
+		if target.is_none() {
+			*target = Some(Default::default());
+		}
+	}
+
+	fn deinit_comp(target: &mut Option<Self::Comp>) {
+		let mut global_session_data = GLOBAL_DATA.sess_data.lock();
+
+		let local_session_data = target.as_mut().unwrap();
+		let local_session_data = unsafe {
+			// Safety: TODO
+			local_session_data.get_mut_unchecked()
+		};
+
+		for lock in local_session_data.lock_set.iter_set() {
+			local_session_data.lock_set.unset(lock);
+			local_session_data.session_locks.unlock(lock);
+			global_session_data.held_locks.unset(lock);
+		}
+	}
 }
 
 // === Locks === //
@@ -176,7 +171,7 @@ impl Session<'_> {
 		let mut global_sess_data = GLOBAL_DATA.sess_data.lock();
 		let local_sess_data = unsafe {
 			// Safety: TODO
-			SESSION_DATA.get(self).as_ref().get_mut_unchecked()
+			LocalSessData::get(self).get_mut_unchecked()
 		};
 
 		for lock in locks {
@@ -207,7 +202,7 @@ impl Session<'_> {
 	pub fn reserve_slot_capacity(self, amount: usize) {
 		let local_sess_data = unsafe {
 			// Safety: TODO
-			SESSION_DATA.get(self).as_ref().get_mut_unchecked()
+			LocalSessData::get(self).get_mut_unchecked()
 		};
 
 		local_sess_data.slots.reserve_capacity(amount);
@@ -304,8 +299,8 @@ impl RawObj {
 		layout: Layout,
 	) -> (Owned<Self>, NonNull<u8>) {
 		let sess_data = unsafe {
-			// Safety: We never call into userland within this function.
-			SESSION_DATA.get(session).as_ref().get_mut_unchecked()
+			// Safety: TODO
+			LocalSessData::get(session).get_mut_unchecked()
 		};
 
 		// Reserve a slot for us
@@ -345,13 +340,13 @@ impl RawObj {
 	pub fn try_get_ptr(&self, session: Session) -> Result<*const (), ObjGetError> {
 		let sess_data = unsafe {
 			// Safety: TODO
-			SESSION_DATA.get(session).as_ref().get_mut_unchecked()
+			LocalSessData::get(session).get_mut_unchecked()
 		};
 
 		#[cold]
 		#[inline(never)]
 		fn decode_error(
-			sess_data: &SessionData,
+			sess_data: &LocalSessData,
 			requested: RawObj,
 			slot_gen: ExtendedGen,
 		) -> ObjGetError {
@@ -391,7 +386,7 @@ impl RawObj {
 	pub fn destroy(&self, session: Session) {
 		let sess_data = unsafe {
 			// Safety: TODO
-			SESSION_DATA.get(session).as_ref().get_mut_unchecked()
+			LocalSessData::get(session).get_mut_unchecked()
 		};
 
 		self.slot.release();
@@ -435,7 +430,7 @@ impl<T: Sized + ObjPointee> Obj<T> {
 
 		let sess_data = unsafe {
 			// Safety: TODO
-			SESSION_DATA.get(session).as_ref().get_mut_unchecked()
+			LocalSessData::get(session).get_mut_unchecked()
 		};
 
 		// Reserve a slot for us

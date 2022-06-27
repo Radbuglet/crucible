@@ -4,8 +4,6 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use geode::prelude::*;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
-	println!("Finished initializaing!");
-
 	c.bench_function("obj_alloc", |b| {
 		let session = LocalSessionGuard::new();
 		let s = session.handle();
