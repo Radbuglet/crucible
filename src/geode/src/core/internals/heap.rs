@@ -69,6 +69,10 @@ impl Slot {
 	/// ## Safety
 	///
 	/// The same synchronization caveats as [Slot::acquire] apply here as well.
+	///
+	/// FIXME: Except... no. This method *is* sometimes called on several threads simultaneously
+	///  and we need to handle that!
+	///
 	pub fn release(&self) {
 		self.update(ExtendedGen::new(0, None), null());
 	}

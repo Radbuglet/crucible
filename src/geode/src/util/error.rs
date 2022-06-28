@@ -32,7 +32,6 @@ impl<T: ?Sized + Error> Display for FormattedError<'_, T> {
 		writeln!(f, "Error: {}", target)?;
 
 		// Write cause chain
-		// (we iterate manually instead of using `anyhow::Chain` because it consumes a `&dyn Error`.
 		let mut cause_iter = target.source();
 		if cause_iter.is_some() {
 			writeln!(f, "\nCaused by:")?;

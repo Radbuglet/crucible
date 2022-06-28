@@ -21,7 +21,22 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 			}
 
 			start.elapsed()
-		})
+		});
+	});
+
+	c.bench_function("obj_deref", |b| {
+		let session = LocalSessionGuard::new();
+		let s = session.handle();
+
+		let my_obj = Obj::new(s, 3u32).manually_manage();
+
+		b.iter(|| *my_obj.get(s));
+	});
+
+	c.bench_function("regular_deref", |b| {
+		let my_box = Box::new(3u32);
+
+		b.iter(|| *my_box);
 	});
 }
 

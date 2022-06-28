@@ -469,6 +469,7 @@ name = "crucible-common"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "cgmath",
  "geode",
  "log",
 ]

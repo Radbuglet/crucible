@@ -10,6 +10,7 @@ use winit::{
 };
 
 use crate::{
+	engine::viewport::ViewportRenderHandler,
 	game::entry::make_game_entry,
 	util::{features::FeatureList, winit::WinitEventBundle},
 };
@@ -45,6 +46,8 @@ pub fn main_inner() -> anyhow::Result<()> {
 	let event_loop = EventLoop::new();
 
 	let engine_root = {
+		let engine_root = Entity::new(s).manually_manage();
+
 		// Create the main window for which we'll create our main surface.
 		let main_window = WindowBuilder::new()
 			.with_title("Crucible")
@@ -64,18 +67,32 @@ pub fn main_inner() -> anyhow::Result<()> {
 		let viewport_mgr = ViewportManager::default().box_obj_rw(s, main_lock);
 		{
 			// Acquire services
-			let mut viewport_mgr_p = viewport_mgr.borrow_mut(s);
-			let gfx_p = gfx.get(s);
+			let mut p_viewport_mgr = viewport_mgr.borrow_mut(s);
+			let p_gfx = gfx.get(s);
 
 			// Construct main viewport
 			let input_mgr = InputTracker::default().box_obj_rw(s, main_lock);
-			let main_viewport = Entity::new_with(s, input_mgr);
+			let render_handler = Obj::new(s, move |frame, s: Session, _me, viewport, engine| {
+				let p_scene_mgr = engine_root.borrow::<SceneManager>(s);
+				let current_scene = p_scene_mgr.current_scene();
+
+				current_scene.get::<dyn ViewportRenderHandler>(s).on_render(
+					frame,
+					s,
+					current_scene,
+					viewport,
+					engine,
+				);
+			})
+			.to_unsized::<dyn ViewportRenderHandler>();
+
+			let main_viewport = Entity::new_with(s, (render_handler, input_mgr));
 
 			// Register main viewport
-			viewport_mgr_p.register(
+			p_viewport_mgr.register(
 				s,
 				main_lock,
-				gfx_p,
+				p_gfx,
 				main_viewport,
 				main_window,
 				main_surface,
@@ -89,7 +106,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			.init_scene(make_game_entry(s, main_lock));
 
 		// Create root entity
-		let root = Entity::new_with(
+		engine_root.add(
 			s,
 			(
 				gfx,
@@ -98,14 +115,14 @@ pub fn main_inner() -> anyhow::Result<()> {
 				ExposeUsing(main_lock_token.box_obj(s), MainLockKey::key()),
 			),
 		);
-		root.manually_manage()
+		engine_root
 	};
 
 	// Start engine
 	{
-		let viewport_mgr_p = engine_root.borrow::<ViewportManager>(s);
+		let p_viewport_mgr = engine_root.borrow::<ViewportManager>(s);
 
-		for (_, _viewport, window) in viewport_mgr_p.mounted_viewports(s) {
+		for (_, _viewport, window) in p_viewport_mgr.mounted_viewports(s) {
 			window.set_visible(true);
 		}
 	}
@@ -124,7 +141,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 		let bundle = WinitEventBundle { event, proxy, flow };
 
 		// Acquire services
-		let _gfx = engine_root.get::<GfxContext>(s);
+		let p_gfx = engine_root.get::<GfxContext>(s);
 
 		match &bundle.event {
 			// First, `NewEvents` is triggered.
@@ -206,8 +223,23 @@ pub fn main_inner() -> anyhow::Result<()> {
 			}
 
 			// Redraws are processed
-			Event::RedrawRequested(_window_id) => {
-				// TODO
+			Event::RedrawRequested(window_id) => {
+				let viewport_mgr = engine_root.borrow::<ViewportManager>(s);
+				let viewport = match viewport_mgr.get_viewport(*window_id) {
+					Some(viewport) => viewport,
+					None => return,
+				};
+
+				let mut p_viewport = viewport.borrow_mut::<Viewport>(s);
+				let frame = p_viewport.render(p_gfx).expect("failed to get frame");
+
+				viewport.get::<dyn ViewportRenderHandler>(s).on_render(
+					frame,
+					s,
+					viewport,
+					viewport,
+					engine_root,
+				);
 			}
 			Event::RedrawEventsCleared => {}
 

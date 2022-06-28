@@ -1,3 +1,3 @@
 pub mod num;
 pub mod range;
-pub mod vector;
+// pub mod vector;
