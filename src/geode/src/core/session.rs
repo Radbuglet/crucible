@@ -1,5 +1,3 @@
-// FIXME: This is still a mess of super unsafe code.
-
 use std::{cell::Cell, hint::unreachable_unchecked, marker::PhantomData};
 
 use arr_macro::arr;
@@ -18,19 +16,69 @@ use crate::util::{
 /// Session ID allocator.
 static ID_ALLOC: Mutex<U8BitSet> = new_lot_mutex(U8BitSet::new());
 
-/// Deallocates an existing session.
-fn dealloc_session(id: u8) {
+struct UnregisterGuard(u8);
+
+impl Drop for UnregisterGuard {
+	fn drop(&mut self) {
+		ID_ALLOC.lock().unset(self.0);
+	}
+}
+
+/// Allocates a new session.
+///
+/// ## Panics
+///
+/// Panics if a session initializer panics or too many sessions have been created. If it panics
+/// during initialization, no IDs will be leaked.
+///
+fn allocate_session() -> u8 {
+	// Allocate ID
+	let id = ID_ALLOC.lock().reserve_zero_bit().unwrap_or(0xFF);
+	assert_ne!(id, 0xFF, "Cannot create more than 255 sessions!");
+
+	// Setup guard to unregister ID if something goes poorly.
+	// We complete the transaction before knowing whether it is valid because `init_session` can call
+	// to `allocate_session`.
+	let unregister_guard = UnregisterGuard(id);
+
+	// Initialize all critical session info instances.
 	unsafe {
-		// Safety: this is an old session to which everyone has given up access.
-		<() as StaticStorageHygieneBreak>::deinit_session(Session::new_internal(id));
+		// Safety: this is a new session to which no one else has access.
+		<() as StaticStorageHygieneBreak>::init_session(id);
 	}
 
-	// We unset the lock at the end to ensure that users don't accidentally initialize a session
-	// while deinitializing it.
-	ID_ALLOC.lock().unset(id);
+	// Defuse the `unregister_guard`—we don't need it anymore.
+	std::mem::forget(unregister_guard);
+
+	id
+}
+
+/// Deallocates an existing session.
+fn dealloc_session(id: u8) {
+	// We set up a guard to unregister the session `id` once `deinit_session` finishes or panics.
+	// We cannot unregister the session until `deinit_session` has stopped because the handler might
+	// then allocate a session with that free ID that is simultaneously being initialized and
+	// deinitialized, which would cause the *big bad*.
+	let unregister_guard = UnregisterGuard(id);
+
+	unsafe {
+		// Safety: this is an old session to which everyone has given up access.
+		<() as StaticStorageHygieneBreak>::deinit_session(id);
+	}
+
+	drop(unregister_guard);
 }
 
 // === Sessions === //
+
+#[thread_local]
+static LOCAL_SESSION: Cell<LocalSessionInfo> = Cell::new(LocalSessionInfo { id: 0xFF, rc: 0 });
+
+#[derive(Copy, Clone)]
+struct LocalSessionInfo {
+	id: u8,
+	rc: u64,
+}
 
 // Movable
 #[derive(Debug)]
@@ -41,20 +89,9 @@ pub struct MovableSessionGuard {
 
 impl MovableSessionGuard {
 	pub fn new() -> Self {
-		// Allocate ID
-		let id = ID_ALLOC.lock().reserve_zero_bit().unwrap_or(0xFF);
-		assert_ne!(id, 0xFF, "Cannot create more than 255 sessions!");
-
-		// Initialize all critical session info instances.
-		unsafe {
-			// Safety: this is a new session to which no one else has access.
-			<() as StaticStorageHygieneBreak>::init_session(Session::new_internal(id));
-		}
-
-		// Construct guard
 		Self {
 			_no_sync: PhantomData,
-			id,
+			id: allocate_session(),
 		}
 	}
 
@@ -75,7 +112,7 @@ impl MovableSessionGuard {
 		LOCAL_SESSION.set(LocalSessionInfo { id, rc: 1 });
 
 		// Ensure that we don't run our destructor since we're effectively transforming this
-		// session's type.
+		// session instance into a `LocalSessionGuard`.
 		std::mem::forget(self);
 
 		// Construct handle
@@ -93,15 +130,6 @@ impl Drop for MovableSessionGuard {
 }
 
 // Local
-#[thread_local]
-static LOCAL_SESSION: Cell<LocalSessionInfo> = Cell::new(LocalSessionInfo { id: 0xFF, rc: 0 });
-
-#[derive(Copy, Clone)]
-struct LocalSessionInfo {
-	id: u8,
-	rc: u64,
-}
-
 #[derive(Debug)]
 pub struct LocalSessionGuard {
 	_no_threading: PhantomNoSendOrSync,
@@ -316,22 +344,81 @@ impl<T: Default> LazySessionStorage<T> {
 
 // === Session Init Registry === //
 
+/// An internal macro hygiene-break trait that [register_static_storages] implements on `()`. Doing
+/// things this way also ensures that we can only run the macro once.
+///
+/// ## Safety
+///
+/// Only [register_static_storages] can safely implement this trait.
+///
 unsafe trait StaticStorageHygieneBreak {
-	unsafe fn init_session(session: Session<'_>);
+	/// Runs all session initializers for a session with the specified `id`.
+	///
+	/// ## Panics
+	///
+	/// Panics if one of the user-supplied session initializers panics.
+	///
+	/// ## Safety
+	///
+	/// Only supply a session for which no [Session] handles are available to untrusted code.
+	///
+	unsafe fn init_session(id: u8);
 
-	unsafe fn deinit_session(session: Session<'_>);
+	/// Runs all session initializers for a session with the specified `id`.
+	///
+	/// ## Panics
+	///
+	/// Panics if one of the user-supplied session initializers panics.
+	///
+	/// ## Safety
+	///
+	/// Only supply a session for which no [Session] handles are available to untrusted code and
+	/// which has been fully initialized by [init_session](StaticStorageHygieneBreak::init_session)
+	/// without panicking.
+	///
+	unsafe fn deinit_session(id: u8);
 }
 
+/// A project-internal trait specifying that a given struct should be turned into a greedily
+/// initialized [SessionStorage]. Access to the underlying storage is provided by the unsafe
+/// [StaticStorage] trait, which can only be implemented by registering the target struct using the
+/// [register_static_storages] macro.
+///
+/// ## Reentrancy and Panics
+///
+/// [init_comp] and [deinit_comp] run on the thread that created the session and are free to perform
+/// session management of their own. If either of them panic, the panic will be forwarded to the user.
+///
+/// [init_comp]: StaticStorageHandler::init_comp
+/// [deinit_comp]: StaticStorageHandler::deinit_comp
 pub(crate) trait StaticStorageHandler {
+	/// The type of the component stored in the storage.
 	type Comp: Sized + 'static;
 
+	/// Initializes the provided component slot. `target` must be set to `Some(_)` by the time the
+	/// function returns. `target` will start out as `None` when the program starts up but may be
+	/// `Some(_)` if [deinit_comp](StaticStorageHandler::deinit_comp) failed to set the target to
+	/// `None` (either because it chose to do so or because a prior [StaticStorageHandler] panicked
+	/// while deinitializing its own component slot).
 	fn init_comp(target: &mut Option<Self::Comp>);
 
+	/// Deinitializes the provided component slot. `target` does *not* have to be set to `None` by
+	/// the time the function returns, and doing so may be helpful when implementing session reuse.
+	/// The deinitializer may not run if a prior deinitializer panics.
+	///
+	/// TODO: We might need stronger semantics here (e.g. a try-catch-finally system) to ensure that
+	/// leaks in other systems don't cause leaks in ours.
 	fn deinit_comp(_target: &mut Option<Self::Comp>) {
 		// (no op)
 	}
 }
 
+/// A trait providing static methods to access the statically-initialized [SessionStorage] attached
+/// to the item on which the trait is implemented.
+///
+/// **This trait is not to be implemented manually.** Rather, users should implement [StaticStorageHandler]
+/// to define the actual storage's properties and then derive this trait by registering the struct in
+/// the singleton call to [register_static_storages].
 pub(crate) unsafe trait StaticStorage: StaticStorageHandler {
 	unsafe fn backing_storage() -> &'static SessionStorage<Option<Self::Comp>>;
 
@@ -346,9 +433,9 @@ pub(crate) unsafe trait StaticStorage: StaticStorageHandler {
 	}
 }
 
-macro register_static_storages($($target:path),*) {
+macro register_static_storages($($target:path),*$(,)?) {
 	unsafe impl StaticStorageHygieneBreak for () {
-		unsafe fn init_session(session: Session<'_>) {
+		unsafe fn init_session(id: u8) {
 			$({
 				// Safety: trust us, we're professionals. (this method is unsafe just to make sure
 				// that external users keep away from our stuff)
@@ -356,7 +443,7 @@ macro register_static_storages($($target:path),*) {
 
 				// Safety: We're accessing this state before anyone else even has access to this
 				// session and we release the reference before anyone else gets to read it.
-				let state = storage.get_mut_unchecked(session);
+				let state = storage.get_mut_unchecked(Session::new_internal(id));
 
 				// Initialize the state and ensure that the user hasn't messed anything up.
 				<$target as StaticStorageHandler>::init_comp(state);
@@ -364,14 +451,14 @@ macro register_static_storages($($target:path),*) {
 			};)*
 		}
 
-		unsafe fn deinit_session(session: Session<'_>) {
+		unsafe fn deinit_session(id: u8) {
 			$({
 				// Safety: trust us, we're professionals. (this method is unsafe just to make sure
 				// that external users keep away from our stuff)
 				let storage = <$target as StaticStorage>::backing_storage();
 
 				// Safety: We're accessing this state after everyone else has given up access to it.
-				let state = storage.get_mut_unchecked(session);
+				let state = storage.get_mut_unchecked(Session::new_internal(id));
 
 				// As a gesture of kindness, we tell the compiler that the state is not `None` at this
 				// point so the user can unwrap it for free.
