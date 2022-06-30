@@ -10,10 +10,10 @@
   - [ ] `event_trait` multiplexing, packing, conversions, and forwarding.
   - [ ] `InstantSignal` and `DeferredSignal` object (once `Storage` becomes available)
 - [ ] GC prep:
-  - [ ] Clean up `Sessions` implementation (i.e. clarify invariants)
+  - [x] Clean up `Sessions` implementation (i.e. clarify invariants)
   - [ ] Put non-reentrant methods in their own layer to avoid recursive calls.
   - [ ] Unify `Obj` and `RawObj` with `ReflectType`. We can force the compiler to inline the underlying
-    generation code to keep codegen equivalent.
+        generation code to keep codegen equivalent.
   - [ ] Improve bad `ExtendedGen` typing (it's currently a massive footgun)
   - [ ] Fix the `Slot` release routine (the free slot can only be added to the list of the thread
         that deleted it)

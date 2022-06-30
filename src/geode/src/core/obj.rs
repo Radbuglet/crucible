@@ -43,15 +43,20 @@ struct GlobalData {
 }
 
 struct GlobalSessData {
-	lock_alloc: U8BitSet,
+	/// A bit set of reserved locks.
+	reserved_locks: U8BitSet,
+
+	/// A bit set of locks held by a session. A lock can be held without being reserved.
 	held_locks: U8BitSet,
+
+	/// Debug names for the various locks.
 	lock_names: [Option<Cow<'static, str>>; 256],
 }
 
 static GLOBAL_DATA: GlobalData = GlobalData {
 	id_batch_gen: AtomicU64::new(1),
 	sess_data: new_lot_mutex(GlobalSessData {
-		lock_alloc: U8BitSet::new(),
+		reserved_locks: U8BitSet::new(),
 		held_locks: U8BitSet::new(),
 		lock_names: arr![None; 256],
 	}),
@@ -62,19 +67,30 @@ static GLOBAL_DATA: GlobalData = GlobalData {
 /// ## Safety
 ///
 /// For best performance, we use a [MutexedUnsafeCell] instead of a [RefCell]. However, this means
-/// that we have to be very careful with reentracy. All public methods can assume that their corresponding
-/// [SESSION_DATA] is unborrowed by the time they are called. To enforce this invariant, users borrowing
-/// state from here must ensure that they never call untrusted (i.e. user) code.
+/// that we have to be very careful about avoiding reentracy. All public methods can assume that their
+/// corresponding [LocalSessData] is unborrowed by the time they are called. To enforce this invariant,
+/// users borrowing state from here must ensure that they never call untrusted (i.e. user) code while
+/// the borrow is ongoing.
 ///
-/// TODO: Maybe we should have debug-only tracking in `MutexedUnsafeCell` so we can find bugs easier.
-///  Same applies to `AssumeInit` and all other unsafe wrappers.
+/// TODO: Maybe we should have debug-only tracking in `MutexedUnsafeCell` to make it easier to catch
+///  bugs.
 ///
 #[derive(Default)]
 pub(crate) struct LocalSessData {
+	/// Our local garbage-collected heap that serves as both a nursery for new allocations and the
+	/// primary heap for objects that don't belong in a specific global heap.
 	heap: GcHeap,
+
+	/// A free stack of [Slot]s to be reused.
 	slots: SlotManager,
+
+	/// Our session's actively held lock set.
 	session_locks: SessionLocks,
+
+	/// Our session's thread-local generation allocator.
 	generation_gen: LocalBatchAllocator,
+
+	/// The set of all locks acquired in our [SessionLocks] set.
 	lock_set: U8BitSet,
 }
 
@@ -89,12 +105,7 @@ impl StaticStorageHandler for LocalSessData {
 
 	fn deinit_comp(target: &mut Option<Self::Comp>) {
 		let mut global_session_data = GLOBAL_DATA.sess_data.lock();
-
-		let local_session_data = target.as_mut().unwrap();
-		let local_session_data = unsafe {
-			// Safety: TODO
-			local_session_data.get_mut_unchecked()
-		};
+		let local_session_data = target.as_mut().unwrap().get_mut();
 
 		for lock in local_session_data.lock_set.iter_set() {
 			local_session_data.lock_set.unset(lock);
@@ -109,15 +120,30 @@ impl StaticStorageHandler for LocalSessData {
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Lock(u8);
 
-impl fmt::Debug for Lock {
+struct LockFormatter<'a> {
+	lock: Lock,
+	sess_data: &'a GlobalSessData,
+}
+
+impl fmt::Debug for LockFormatter<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct("Lock")
-			.field("id", &self.0)
+			.field("id", &self.lock.0)
 			.field(
 				"debug_name",
-				&GLOBAL_DATA.sess_data.lock().lock_names[self.0 as usize],
+				&self.sess_data.lock_names[self.lock.0 as usize],
 			)
 			.finish()
+	}
+}
+
+impl fmt::Debug for Lock {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		LockFormatter {
+			lock: *self,
+			sess_data: &*GLOBAL_DATA.sess_data.lock(),
+		}
+		.fmt(f)
 	}
 }
 
@@ -126,7 +152,7 @@ impl Lock {
 		let mut global = GLOBAL_DATA.sess_data.lock();
 
 		// Allocate ID
-		let id = global.lock_alloc.reserve_zero_bit().unwrap_or(0xFF);
+		let id = global.reserved_locks.reserve_zero_bit().unwrap_or(0xFF);
 		assert_ne!(
 			id, 0xFF,
 			"Cannot allocate more than 255 locks continuously."
@@ -153,7 +179,7 @@ impl Destructible for Lock {
 		let mut global = GLOBAL_DATA.sess_data.lock();
 
 		global.lock_names[self.slot() as usize] = None;
-		global.lock_alloc.unset(self.slot());
+		global.reserved_locks.unset(self.slot());
 	}
 }
 
@@ -163,8 +189,7 @@ impl Session<'_> {
 	pub fn acquire_locks<I: IntoIterator<Item = Lock>>(self, locks: I) {
 		// We collect our locks before we enter the critical section because we really don't want
 		// users running any code in the critical section. For one, it's necessary for us to prove
-		// the validity of `get_mut_unchecked`. We're also paranoid of people (e.g. me) doing stupid
-		// things with mutexes.
+		// the validity of `get_mut_unchecked`. We also want to avoid deadlocks.
 		let locks = locks.into_iter().collect::<Vec<_>>();
 
 		// Acquire dependencies once
@@ -183,18 +208,21 @@ impl Session<'_> {
 			}
 
 			// Ensure that no one else has the lock.
-			if global_sess_data.held_locks.contains(slot) {
+			assert!(
+				!global_sess_data.held_locks.contains(slot),
+				"Cannot lock {:?} in more than one session.",
 				// Needed to avoid implicit dead-locks.
-				drop(global_sess_data);
-				panic!("Cannot lock {lock:?} in more than one session.");
-			}
+				LockFormatter {
+					lock,
+					sess_data: &*global_sess_data,
+				},
+			);
 
 			// Register it globally.
 			global_sess_data.held_locks.set(slot);
 
 			// Register it in both the bit set and the `session_locks` container.
 			local_sess_data.lock_set.set(slot);
-
 			local_sess_data.session_locks.lock(slot);
 		}
 	}
@@ -389,8 +417,9 @@ impl RawObj {
 			LocalSessData::get(session).get_mut_unchecked()
 		};
 
-		self.slot.release();
-		sess_data.slots.unreserve(self.slot);
+		if self.slot.release() {
+			sess_data.slots.unreserve(self.slot);
+		}
 	}
 }
 

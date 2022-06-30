@@ -64,17 +64,18 @@ impl Slot {
 		self.update(new_gen, new_base);
 	}
 
-	/// Atomically releases the [Slot], invalidating both its generation and its pointer.
+	/// Atomically releases the [Slot], invalidating both its generation and its pointer. Returns
+	/// `true` if the active thread was uniquely responsible for invalidating the [Slot].
 	///
 	/// ## Safety
 	///
-	/// The same synchronization caveats as [Slot::acquire] apply here as well.
+	/// Can be called on multiple threads simultaneously but only one thread will be considered as
+	/// having been responsible for the deletion.
 	///
-	/// FIXME: Except... no. This method *is* sometimes called on several threads simultaneously
-	///  and we need to handle that!
-	///
-	pub fn release(&self) {
+	pub fn release(&self) -> bool {
+		// FIXME: This is not a legal implementation.
 		self.update(ExtendedGen::new(0, None), null());
+		true
 	}
 
 	fn update(&self, new_gen: ExtendedGen, new_base: *const ()) {
