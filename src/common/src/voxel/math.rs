@@ -4,9 +4,23 @@ use cgmath::{num_traits::Signed, BaseNum, Vector3};
 
 use crate::polyfill::c_enum::c_enum;
 
+pub const CHUNK_EDGE: u8 = 16;
+
 pub type WorldPos = Vector3<i64>;
 pub type ChunkPos = Vector3<i64>;
 pub type BlockPos = Vector3<u8>;
+
+pub fn chunk_pos_of(pos: WorldPos) -> ChunkPos {
+	pos.map(|val| val.div_euclid(CHUNK_EDGE.into()))
+}
+
+pub fn block_pos_of(pos: WorldPos) -> BlockPos {
+	pos.map(|val| val.rem_euclid(CHUNK_EDGE.into()) as u8)
+}
+
+pub fn decompose_world_pos(pos: WorldPos) -> (ChunkPos, BlockPos) {
+	(chunk_pos_of(pos), block_pos_of(pos))
+}
 
 c_enum! {
 	pub enum BlockFace {
@@ -111,6 +125,16 @@ impl<T> Index<Axis3> for Vector3<T> {
 
 // Sign
 impl Sign {
+	pub fn of<T: Signed>(val: T) -> Option<Self> {
+		if val.is_positive() {
+			Some(Self::Positive)
+		} else if val.is_negative() {
+			Some(Self::Negative)
+		} else {
+			None
+		}
+	}
+
 	pub fn invert(self) -> Self {
 		use Sign::*;
 

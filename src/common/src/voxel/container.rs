@@ -1,11 +1,12 @@
-use std::{cell::Cell, collections::HashMap};
+use std::{cell::Cell, collections::HashMap, hash};
 
 use geode::prelude::*;
 
-use super::math::{BlockFace, ChunkPos};
+use super::math::{chunk_pos_of, Axis3, BlockFace, ChunkPos, Sign, WorldPos};
 
 use crate::polyfill::c_enum::ExposesVariants;
 
+#[derive(Debug)]
 pub struct VoxelWorldData {
 	chunks: HashMap<ChunkPos, Owned<Entity>>,
 }
@@ -56,8 +57,13 @@ impl VoxelWorldData {
 
 		replaced
 	}
+
+	pub fn get_chunk(&self, pos: ChunkPos) -> Option<Entity> {
+		self.chunks.get(&pos).map(|chunk| **chunk)
+	}
 }
 
+#[derive(Debug)]
 pub struct VoxelChunkData {
 	world: Cell<Option<Entity>>,
 	neighbors: [Cell<Option<Entity>>; BlockFace::COUNT],
@@ -83,5 +89,118 @@ impl Drop for VoxelChunkData {
 		if let Some(_world) = self.world() {
 			// TODO
 		}
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct VoxelPointer {
+	chunk_cache: Option<Entity>,
+	pos: WorldPos,
+}
+
+impl hash::Hash for VoxelPointer {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		self.pos.hash(state);
+	}
+}
+
+impl Eq for VoxelPointer {}
+
+impl PartialEq for VoxelPointer {
+	fn eq(&self, other: &Self) -> bool {
+		self.pos == other.pos
+	}
+}
+
+impl VoxelPointer {
+	pub fn new_cached(world: &VoxelWorldData, pos: WorldPos) -> Self {
+		let chunk_pos = chunk_pos_of(pos);
+		let chunk_cache = world.get_chunk(chunk_pos);
+		Self { chunk_cache, pos }
+	}
+
+	pub fn new_uncached(pos: WorldPos) -> Self {
+		Self {
+			chunk_cache: None,
+			pos,
+		}
+	}
+
+	pub fn get_absolute(self, s: Session, pos: WorldPos) -> Self {
+		self.get_relative(s, pos - self.pos)
+	}
+
+	pub fn get_relative(mut self, s: Session, delta: WorldPos) -> Self {
+		for axis in Axis3::variants() {
+			if let Some(sign) = Sign::of(delta[axis]) {
+				self = self.get_neighbor_with_stride(
+					s,
+					BlockFace::compose(axis, sign),
+					delta[axis].abs(),
+				);
+			}
+		}
+		self
+	}
+
+	pub fn get_neighbor(self, s: Session, face: BlockFace) -> Self {
+		self.get_neighbor_with_stride(s, face, 1)
+	}
+
+	pub fn get_neighbor_with_stride(mut self, s: Session, face: BlockFace, stride: i64) -> Self {
+		debug_assert!(stride >= 0);
+
+		// Update position, keeping track of our chunk positions.
+		let old_chunk_pos = chunk_pos_of(self.pos);
+		self.pos += face.unit() * stride as i64;
+		let new_chunk_pos = chunk_pos_of(self.pos);
+
+		// Attempt to update the chunk cache.
+		let chunks_moved = (new_chunk_pos[face.axis()] - old_chunk_pos[face.axis()]).abs();
+
+		if chunks_moved < 4 {
+			// While we're still holding on to a cached chunk handle, navigate through its neighbors.
+			for _ in 0..chunks_moved {
+				let chunk_cache = match self.chunk_cache {
+					Some(chunk_cache) => chunk_cache,
+					None => break,
+				};
+
+				self.chunk_cache = chunk_cache.get::<VoxelChunkData>(s).neighbor(face);
+			}
+		} else {
+			// We've moved too far. Invalidate the chunk cache.
+			self.chunk_cache = None;
+		}
+
+		self
+	}
+
+	pub fn recompute_cache(&mut self, s: Session, world: Entity, world_data: &VoxelWorldData) {
+		// Ensure that our cached chunk is actually in the world.
+		if let Some(chunk_cache) = self.chunk_cache {
+			if chunk_cache.get::<VoxelChunkData>(s).world() != Some(world) {
+				self.chunk_cache = None;
+			}
+		}
+
+		// Try to attach to the world if our chunk cache is stale.
+		if self.chunk_cache.is_none() {
+			self.chunk_cache = world_data.get_chunk(chunk_pos_of(self.pos));
+		}
+	}
+
+	pub fn chunk(
+		&mut self,
+		s: Session,
+		world: Entity,
+		world_data: &VoxelWorldData,
+	) -> Option<Entity> {
+		self.recompute_cache(s, world, world_data);
+		self.chunk_cache
+	}
+
+	pub fn pos(self) -> WorldPos {
+		self.pos
 	}
 }
