@@ -1,5 +1,4 @@
-use crate::util::number::NonZeroNumExt;
-use std::{fmt::Debug, num::NonZeroU64};
+use std::fmt::Debug;
 
 pub const MAX_OBJ_GEN_EXCLUSIVE: u64 = 2u64.pow(64 - 8);
 
@@ -10,7 +9,7 @@ pub const MAX_OBJ_GEN_EXCLUSIVE: u64 = 2u64.pow(64 - 8);
 ///
 /// - Both lock IDs and session IDs (the meta of this ID) are 8 bits long. `meta` takes the least
 ///   significant byte of the word.
-/// - Session and lock IDs of `255` are treated as sentinel `None` values.
+/// - Session and lock IDs of `0xFF` are treated as sentinel `None` values.
 /// - By limiting the lock ID size to 8 bits, we make it really easy to fetch the owning session for
 ///   a given lock ID (just take the LSB of the ID and use it to index into an array with 256 bytes)
 ///   at the expense of limiting the granularity of our locks.
@@ -32,10 +31,10 @@ impl Debug for ExtendedGen {
 }
 
 impl ExtendedGen {
-	pub fn new(meta: u8, gen: Option<NonZeroU64>) -> Self {
-		debug_assert!(gen.prim() < MAX_OBJ_GEN_EXCLUSIVE);
+	pub fn new(meta: u8, gen: u64) -> Self {
+		debug_assert!(gen < MAX_OBJ_GEN_EXCLUSIVE);
 
-		Self(meta as u64 + (gen.prim() << 8))
+		Self(meta as u64 + (gen << 8))
 	}
 
 	pub fn raw(&self) -> u64 {
@@ -63,7 +62,7 @@ impl ExtendedGen {
 pub struct SessionLocks {
 	/// Each lock ID gets its own slot in this array. If the ID is acquired by this session, XOR'ing
 	/// the slot's metadata (i.e. the lock ID) with the byte should yield all ones. Otherwise, it
-	/// should yield something else. The lock with ID `255` should always be considered acquired.
+	/// should yield something else. The lock with ID `0xFF` should always be considered acquired.
 	lock_states: [u8; 256],
 }
 
@@ -98,9 +97,5 @@ impl SessionLocks {
 		let lock_mask = self.lock_states[slot_gen.meta() as usize];
 		let slot_gen = slot_gen.xor_meta(lock_mask);
 		slot_gen == ptr_gen
-	}
-
-	pub fn check_lock(&self, lock: u8) -> bool {
-		self.lock_states[lock as usize] ^ lock == 0xFF
 	}
 }

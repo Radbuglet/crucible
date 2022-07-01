@@ -1,172 +1,38 @@
 use std::{
 	alloc::Layout,
-	borrow::Cow,
 	cell::{Ref, RefCell, RefMut},
 	fmt::{self, Write},
 	hash,
 	marker::Unsize,
-	num::NonZeroU64,
-	ptr::{self, NonNull, Pointee},
-	sync::atomic::AtomicU64,
+	ptr::Pointee,
 };
 
-use arr_macro::arr;
 use derive_where::derive_where;
-use parking_lot::Mutex;
 use thiserror::Error;
 
-use crate::util::{
-	cell::MutexedUnsafeCell,
-	error::ResultExt,
-	number::{LocalBatchAllocator, U8BitSet},
-	ptr::unsize_meta,
-	threading::new_lot_mutex,
-};
+use crate::util::{error::ResultExt, ptr::unsize_meta};
 
 use super::{
 	debug::DebugLabel,
-	internals::{
-		gen::{ExtendedGen, SessionLocks, MAX_OBJ_GEN_EXCLUSIVE},
-		heap::{GcHeap, Slot, SlotManager},
-	},
+	internals::{db, gen::ExtendedGen, heap::Slot},
 	owned::{Destructible, Owned},
-	session::{LocalSessionGuard, Session, StaticStorage, StaticStorageHandler},
+	reflect::ReflectType,
+	session::{LocalSessionGuard, Session},
 };
-
-// === Singleton data === //
-
-const ID_GEN_BATCH_SIZE: u64 = 4096 * 4096;
-
-struct GlobalData {
-	id_batch_gen: AtomicU64,
-	sess_data: Mutex<GlobalSessData>,
-}
-
-struct GlobalSessData {
-	/// A bit set of reserved locks.
-	reserved_locks: U8BitSet,
-
-	/// A bit set of locks held by a session. A lock can be held without being reserved.
-	held_locks: U8BitSet,
-
-	/// Debug names for the various locks.
-	lock_names: [Option<Cow<'static, str>>; 256],
-}
-
-static GLOBAL_DATA: GlobalData = GlobalData {
-	id_batch_gen: AtomicU64::new(1),
-	sess_data: new_lot_mutex(GlobalSessData {
-		reserved_locks: U8BitSet::new(),
-		held_locks: U8BitSet::new(),
-		lock_names: arr![None; 256],
-	}),
-};
-
-/// Per-session data to manage [Obj] allocation.
-///
-/// ## Safety
-///
-/// For best performance, we use a [MutexedUnsafeCell] instead of a [RefCell]. However, this means
-/// that we have to be very careful about avoiding reentracy. All public methods can assume that their
-/// corresponding [LocalSessData] is unborrowed by the time they are called. To enforce this invariant,
-/// users borrowing state from here must ensure that they never call untrusted (i.e. user) code while
-/// the borrow is ongoing.
-///
-/// TODO: Maybe we should have debug-only tracking in `MutexedUnsafeCell` to make it easier to catch
-///  bugs.
-///
-#[derive(Default)]
-pub(crate) struct LocalSessData {
-	/// Our local garbage-collected heap that serves as both a nursery for new allocations and the
-	/// primary heap for objects that don't belong in a specific global heap.
-	heap: GcHeap,
-
-	/// A free stack of [Slot]s to be reused.
-	slots: SlotManager,
-
-	/// Our session's actively held lock set.
-	session_locks: SessionLocks,
-
-	/// Our session's thread-local generation allocator.
-	generation_gen: LocalBatchAllocator,
-
-	/// The set of all locks acquired in our [SessionLocks] set.
-	lock_set: U8BitSet,
-}
-
-impl StaticStorageHandler for LocalSessData {
-	type Comp = MutexedUnsafeCell<Self>;
-
-	fn init_comp(target: &mut Option<Self::Comp>) {
-		if target.is_none() {
-			*target = Some(Default::default());
-		}
-	}
-
-	fn deinit_comp(target: &mut Option<Self::Comp>) {
-		let mut global_session_data = GLOBAL_DATA.sess_data.lock();
-		let local_session_data = target.as_mut().unwrap().get_mut();
-
-		for lock in local_session_data.lock_set.iter_set() {
-			local_session_data.lock_set.unset(lock);
-			local_session_data.session_locks.unlock(lock);
-			global_session_data.held_locks.unset(lock);
-		}
-	}
-}
 
 // === Locks === //
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Lock(u8);
 
-struct LockFormatter<'a> {
-	lock: Lock,
-	sess_data: &'a GlobalSessData,
-}
-
-impl fmt::Debug for LockFormatter<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("Lock")
-			.field("id", &self.lock.0)
-			.field(
-				"debug_name",
-				&self.sess_data.lock_names[self.lock.0 as usize],
-			)
-			.finish()
-	}
-}
-
-impl fmt::Debug for Lock {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		LockFormatter {
-			lock: *self,
-			sess_data: &*GLOBAL_DATA.sess_data.lock(),
-		}
-		.fmt(f)
-	}
-}
-
 impl Lock {
 	pub fn new<L: DebugLabel>(label: L) -> Owned<Self> {
-		let mut global = GLOBAL_DATA.sess_data.lock();
-
-		// Allocate ID
-		let id = global.reserved_locks.reserve_zero_bit().unwrap_or(0xFF);
-		assert_ne!(
-			id, 0xFF,
-			"Cannot allocate more than 255 locks continuously."
-		);
-
-		// Set debug name
-		global.lock_names[id as usize] = label.to_debug_label();
-
-		// Produce wrappers
-		Owned::new(Self(id))
+		let id = db::reserve_lock(label.to_debug_label());
+		Owned::new(Lock(id))
 	}
 
 	pub fn is_held(self) -> bool {
-		GLOBAL_DATA.sess_data.lock().held_locks.contains(self.0)
+		db::is_lock_held_somewhere(self.slot())
 	}
 
 	pub fn slot(self) -> u8 {
@@ -176,10 +42,16 @@ impl Lock {
 
 impl Destructible for Lock {
 	fn destruct(self) {
-		let mut global = GLOBAL_DATA.sess_data.lock();
+		db::unreserve_lock(self.slot())
+	}
+}
 
-		global.lock_names[self.slot() as usize] = None;
-		global.reserved_locks.unset(self.slot());
+impl fmt::Debug for Lock {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Lock")
+			.field("slot", &self.slot())
+			.field("debug_name", &db::get_lock_debug_name(self.slot()))
+			.finish()
 	}
 }
 
@@ -187,53 +59,17 @@ impl Destructible for Lock {
 
 impl Session<'_> {
 	pub fn acquire_locks<I: IntoIterator<Item = Lock>>(self, locks: I) {
-		// We collect our locks before we enter the critical section because we really don't want
-		// users running any code in the critical section. For one, it's necessary for us to prove
-		// the validity of `get_mut_unchecked`. We also want to avoid deadlocks.
-		let locks = locks.into_iter().collect::<Vec<_>>();
-
-		// Acquire dependencies once
-		let mut global_sess_data = GLOBAL_DATA.sess_data.lock();
-		let local_sess_data = unsafe {
-			// Safety: TODO
-			LocalSessData::get(self).get_mut_unchecked()
-		};
-
-		for lock in locks {
-			let slot = lock.slot();
-
-			// Ignore locks that we already have.
-			if local_sess_data.lock_set.contains(slot) {
-				continue;
-			}
-
-			// Ensure that no one else has the lock.
-			assert!(
-				!global_sess_data.held_locks.contains(slot),
-				"Cannot lock {:?} in more than one session.",
-				// Needed to avoid implicit dead-locks.
-				LockFormatter {
-					lock,
-					sess_data: &*global_sess_data,
-				},
-			);
-
-			// Register it globally.
-			global_sess_data.held_locks.set(slot);
-
-			// Register it in both the bit set and the `session_locks` container.
-			local_sess_data.lock_set.set(slot);
-			local_sess_data.session_locks.lock(slot);
-		}
+		db::acquire_locks(
+			self,
+			&locks
+				.into_iter()
+				.map(|lock| lock.slot())
+				.collect::<Vec<_>>(),
+		);
 	}
 
 	pub fn reserve_slot_capacity(self, amount: usize) {
-		let local_sess_data = unsafe {
-			// Safety: TODO
-			LocalSessData::get(self).get_mut_unchecked()
-		};
-
-		local_sess_data.slots.reserve_capacity(amount);
+		db::reserve_obj_slot_capacity(self, amount)
 	}
 }
 
@@ -325,61 +161,29 @@ impl RawObj {
 		session: Session,
 		lock: Option<Lock>,
 		layout: Layout,
-	) -> (Owned<Self>, NonNull<u8>) {
-		let sess_data = unsafe {
-			// Safety: TODO
-			LocalSessData::get(session).get_mut_unchecked()
-		};
+	) -> (Owned<Self>, *mut ()) {
+		let (slot, gen, initial_ptr) = db::allocate_new_obj(
+			session,
+			ReflectType::dynamic_no_drop(),
+			layout,
+			lock.map_or(0xFF, |lock| lock.slot()),
+		);
 
-		// Reserve a slot for us
-		let slot = sess_data.slots.reserve();
-
-		// Generate a `gen` ID
-		let gen = unsafe {
-			// Safety: TODO
-			NonZeroU64::new_unchecked(sess_data.generation_gen.generate(
-				&GLOBAL_DATA.id_batch_gen,
-				MAX_OBJ_GEN_EXCLUSIVE,
-				ID_GEN_BATCH_SIZE,
-			))
-		};
-
-		// Allocate the object
-		let p_data = {
-			// We need to create a separate gen for the slot allocation as we do for the `Obj`.
-			let gen_and_lock = ExtendedGen::new(lock.map_or(0, |l| l.0), Some(gen));
-
-			let p_data = sess_data.heap.alloc_dynamic(slot, gen_and_lock, layout);
-			p_data
-		};
-
-		// Create the proper `gen` ID
-		let gen = ExtendedGen::new(0xFF, Some(gen));
-
-		// And construct the obj
-		(Owned::new(Self { slot, gen }), p_data)
+		(Owned::new(Self { slot, gen }), initial_ptr)
 	}
 
-	pub fn new_dynamic(session: Session, layout: Layout) -> (Owned<Self>, NonNull<u8>) {
+	pub fn new_dynamic(session: Session, layout: Layout) -> (Owned<Self>, *mut ()) {
 		Self::new_dynamic_in(session, None, layout)
 	}
 
 	// Fetching
 	pub fn try_get_ptr(&self, session: Session) -> Result<*const (), ObjGetError> {
-		let sess_data = unsafe {
-			// Safety: TODO
-			LocalSessData::get(session).get_mut_unchecked()
-		};
-
 		#[cold]
 		#[inline(never)]
-		fn decode_error(
-			sess_data: &LocalSessData,
-			requested: RawObj,
-			slot_gen: ExtendedGen,
-		) -> ObjGetError {
+		fn decode_error(session: Session, requested: RawObj, slot_gen: ExtendedGen) -> ObjGetError {
 			let lock_id = slot_gen.meta();
-			if !sess_data.session_locks.check_lock(lock_id) {
+
+			if db::is_lock_held_by(session, lock_id) {
 				return ObjGetError::Locked(ObjLockedError {
 					requested,
 					lock: Lock(lock_id),
@@ -393,9 +197,9 @@ impl RawObj {
 			})
 		}
 
-		match self.slot.try_get_base(&sess_data.session_locks, self.gen) {
+		match db::try_get_obj_ptr(session, self.slot, self.gen) {
 			Ok(ptr) => Ok(ptr),
-			Err(slot_gen) => Err(decode_error(&sess_data, *self, slot_gen)),
+			Err(slot_gen) => Err(decode_error(session, *self, slot_gen)),
 		}
 	}
 
@@ -411,15 +215,8 @@ impl RawObj {
 		self.slot.is_alive(self.gen)
 	}
 
-	pub fn destroy(&self, session: Session) {
-		let sess_data = unsafe {
-			// Safety: TODO
-			LocalSessData::get(session).get_mut_unchecked()
-		};
-
-		if self.slot.release() {
-			sess_data.slots.unreserve(self.slot);
-		}
+	pub fn destroy(&self, session: Session) -> bool {
+		db::destroy_obj(session, self.slot, self.gen)
 	}
 }
 
@@ -455,40 +252,21 @@ impl<T: Sized + ObjPointee> Obj<T> {
 	}
 
 	fn new_in_raw(session: Session, lock: u8, value: T) -> Owned<Self> {
-		// TODO: De-duplicate constructor
+		// Allocate slot
+		let (slot, gen, initial_ptr) =
+			db::allocate_new_obj(session, ReflectType::of::<T>(), Layout::new::<T>(), lock);
 
-		let sess_data = unsafe {
-			// Safety: TODO
-			LocalSessData::get(session).get_mut_unchecked()
-		};
+		// Write initial data
+		let initial_ptr = initial_ptr.cast::<T>();
 
-		// Reserve a slot for us
-		let slot = sess_data.slots.reserve();
+		unsafe {
+			initial_ptr.write(value);
+		}
 
-		// Generate a `gen` ID
-		let gen = unsafe {
-			// Safety: TODO
-			NonZeroU64::new_unchecked(sess_data.generation_gen.generate(
-				&GLOBAL_DATA.id_batch_gen,
-				MAX_OBJ_GEN_EXCLUSIVE,
-				ID_GEN_BATCH_SIZE,
-			))
-		};
+		// Obtain pointer metadata (should always be `()` but we do this anyways because `T: Sized`
+		// does not imply `<T as Pointee>::Metadata == ()` to the type checker yet)
+		let (_, meta) = initial_ptr.to_raw_parts();
 
-		// Allocate the object
-		let meta = {
-			// We need to create a separate gen for the slot allocation as we do for the `Obj`.
-			let gen_and_lock = ExtendedGen::new(lock, Some(gen));
-
-			let p_data = sess_data.heap.alloc_static(slot, gen_and_lock, value);
-			let (_, meta) = p_data.to_raw_parts();
-			meta
-		};
-
-		// Create the proper `gen` ID
-		let gen = ExtendedGen::new(0xFF, Some(gen));
-
-		// And construct the obj
 		Owned::new(Self {
 			raw: RawObj { slot, gen },
 			meta,
@@ -498,8 +276,8 @@ impl<T: Sized + ObjPointee> Obj<T> {
 
 impl<T: ?Sized + ObjPointee> Obj<T> {
 	pub fn try_get<'a>(&self, session: Session<'a>) -> Result<&'a T, ObjGetError> {
-		let base = self.raw.try_get_ptr(session)?;
-		let ptr = ptr::from_raw_parts::<T>(base, self.meta);
+		let base_addr = self.raw.try_get_ptr(session)?;
+		let ptr = std::ptr::from_raw_parts(base_addr, self.meta);
 
 		Ok(unsafe { &*ptr })
 	}
@@ -516,7 +294,7 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 		self.raw.is_alive_now(session)
 	}
 
-	pub fn destroy<'a>(&self, session: Session<'a>) {
+	pub fn destroy<'a>(&self, session: Session<'a>) -> bool {
 		self.raw.destroy(session)
 	}
 

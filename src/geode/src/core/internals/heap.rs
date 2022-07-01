@@ -1,4 +1,5 @@
 use super::gen::{ExtendedGen, SessionLocks};
+use crate::core::reflect::ReflectType;
 use crate::util::bump::LeakyBump;
 use bumpalo::Bump;
 use std::alloc::Layout;
@@ -72,9 +73,9 @@ impl Slot {
 	/// Can be called on multiple threads simultaneously but only one thread will be considered as
 	/// having been responsible for the deletion.
 	///
-	pub fn release(&self) -> bool {
+	pub fn release(&self, _local_gen: ExtendedGen) -> bool {
 		// FIXME: This is not a legal implementation.
-		self.update(ExtendedGen::new(0, None), null());
+		self.update(ExtendedGen::new(0, 0), null());
 		true
 	}
 
@@ -139,24 +140,11 @@ pub struct GcHeap {
 }
 
 impl GcHeap {
-	pub fn alloc_static<T: 'static>(
+	pub fn alloc(
 		&mut self,
 		slot: &'static Slot,
 		gen_and_lock: ExtendedGen,
-		value: T,
-	) -> *const T {
-		//self.meta_bump.alloc((slot, TypeMeta::of::<T>()));
-		let full_ptr = self.bump.alloc(value) as *const T;
-		let base_ptr = full_ptr as *const ();
-
-		slot.acquire(gen_and_lock, base_ptr);
-		full_ptr
-	}
-
-	pub fn alloc_dynamic(
-		&mut self,
-		slot: &'static Slot,
-		gen_and_lock: ExtendedGen,
+		_ty: &'static ReflectType,
 		layout: Layout,
 	) -> NonNull<u8> {
 		let full_ptr = self.bump.alloc_layout(layout);

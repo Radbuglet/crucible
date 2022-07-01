@@ -16,7 +16,7 @@ pub mod prelude {
 			debug::NoLabel,
 			obj::{Lock, Obj, ObjCtorExt, ObjRw, RawObj},
 			owned::Owned,
-			reflect::TypeMeta,
+			reflect::ReflectType,
 			session::{LocalSessionGuard, Session},
 		},
 		entity::{
@@ -27,4 +27,4 @@ pub mod prelude {
 	};
 }
 
-pub use prelude::*;
+// pub use prelude::*;

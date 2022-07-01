@@ -1,23 +1,4 @@
-use std::{
-	num::NonZeroU64,
-	sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
-};
-
-// === NonZeroU64 utilities === //
-
-pub trait NonZeroNumExt {
-	type Primitive;
-
-	fn prim(self) -> Self::Primitive;
-}
-
-impl NonZeroNumExt for Option<NonZeroU64> {
-	type Primitive = u64;
-
-	fn prim(self) -> Self::Primitive {
-		self.map_or(0, NonZeroU64::get)
-	}
-}
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 // === Bitset utilities === //
 
@@ -139,6 +120,12 @@ impl U8BitSet {
 	pub fn alloc_all(&mut self) {
 		for word in &mut self.0 {
 			*word = u64::MAX;
+		}
+	}
+
+	pub fn bitwise_or(&mut self, set: &U8BitSet) {
+		for (a, b) in self.0.iter_mut().zip(set.0.iter()) {
+			*a |= b;
 		}
 	}
 

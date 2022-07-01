@@ -95,6 +95,59 @@ impl MovableSessionGuard {
 		}
 	}
 
+	/// Acquires a bunch of sessions atomically as specified by a filter. The filter is provided
+	/// a [u8] indicating the ID of the session slot and a [bool] indicating whether it is free.
+	/// If the `free` boolean flag is set, the filter can acquire the session by returning `Ok(true)`.
+	/// Returning `Ok(false)` will leave the session slot unaffected. The filter may abort the
+	/// operation at any time by returning an [Err], which will be forwarded on to the caller.
+	/// Panicking is also valid.
+	///
+	/// ## Locking
+	///
+	/// To make this method atomic, the method acquires a global mutex for the duration it runs the
+	/// acquire filter. The returned iterator does not hold this mutex. Because of this, the provided
+	/// filter closure must not call other methods that also acquire this mutex (i.e. all session
+	/// constructors and destructors) or block on the completion of methods also acquiring this
+	/// session slot.
+	///
+	/// Filtering sessions by providing a proper filtering closure to this method, and filtering
+	/// sessions by acquiring all of them and then discarding [MovableSessionGuard] instances that
+	/// don't fit the filter, are seemingly equivalent but subtly different. Because the iterator
+	/// returned by `acquire_many` does not hold onto the global session DB mutex, other users may be
+	/// able to slot in their call to [MovableSessionGuard::new] while the user is still filtering
+	/// their sessions. If the original closure is too aggressive in its reservation, it may exhaust
+	/// the strict `255` session limit, causing this interwoven constructor call—that could be
+	/// otherwise valid given a different ordering—to spuriously fail.
+	///
+	pub fn acquire_many<F, E>(mut filter: F) -> Result<SessionManyAllocIter, E>
+	where
+		F: FnMut(u8, bool) -> Result<bool, E>,
+	{
+		let mut ids = ID_ALLOC.lock();
+		let mut requested = U8BitSet::new();
+
+		// Filter IDs
+		for id in 0..255 {
+			let available = ids.contains(id);
+			if filter(id, available)? {
+				assert!(
+					available,
+					"Attempted to acquire unavailable session with ID ({id})"
+				);
+
+				requested.set(id);
+			}
+		}
+
+		// Apply requested mask
+		ids.bitwise_or(&requested);
+
+		// Create the iterator to produce the acquired session IDs.
+		Ok(SessionManyAllocIter {
+			remaining: requested,
+		})
+	}
+
 	pub fn handle(&self) -> Session<'_> {
 		Session::new_internal(self.id)
 	}
@@ -126,6 +179,33 @@ impl MovableSessionGuard {
 impl Drop for MovableSessionGuard {
 	fn drop(&mut self) {
 		dealloc_session(self.id);
+	}
+}
+
+#[derive(Debug)]
+pub struct SessionManyAllocIter {
+	remaining: U8BitSet,
+}
+
+impl Iterator for SessionManyAllocIter {
+	type Item = MovableSessionGuard;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let id = self.remaining.reserve_set_bit()?;
+
+		Some(MovableSessionGuard {
+			_no_sync: PhantomData,
+			id,
+		})
+	}
+}
+
+impl Drop for SessionManyAllocIter {
+	fn drop(&mut self) {
+		// Drain remaining sessions and run their destructors.
+		for guard in self {
+			drop(guard);
+		}
 	}
 }
 
@@ -485,4 +565,4 @@ macro register_static_storages($($target:path),*$(,)?) {
 	)*
 }
 
-register_static_storages!(super::obj::LocalSessData);
+register_static_storages![super::internals::db::LocalSessData];

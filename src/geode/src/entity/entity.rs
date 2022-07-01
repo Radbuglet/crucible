@@ -8,12 +8,11 @@ use parking_lot::Mutex;
 
 use crate::{
 	core::{
-		obj::ObjPointee,
+		obj::{Obj, ObjPointee},
 		owned::{Destructible, Owned},
 		session::{LocalSessionGuard, Session},
 	},
 	util::{arity::impl_tuples, error::UnwrapExt},
-	Obj,
 };
 
 use super::key::{typed_key, RawTypedKey, TypedKey};
@@ -80,7 +79,7 @@ impl Entity {
 		self.get::<RefCell<T>>(session).borrow_mut()
 	}
 
-	pub fn destroy(&self, session: Session) {
+	pub fn destroy(&self, session: Session) -> bool {
 		self.obj.destroy(session)
 	}
 }

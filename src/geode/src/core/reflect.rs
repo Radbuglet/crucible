@@ -64,29 +64,23 @@ impl PartialEq for NamedTypeId {
 }
 
 #[derive(Copy, Clone)]
-pub struct TypeMeta {
+pub struct ReflectType {
 	pub id: Option<NamedTypeId>,
-	pub layout: TypeMetaLayout,
+	pub static_layout: Option<Layout>,
 	pub drop_fn: Option<for<'a> unsafe fn(*mut (), Layout, Session)>,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum TypeMetaLayout {
-	Static(Layout),
-	Dynamic,
-}
-
-impl fmt::Debug for TypeMeta {
+impl fmt::Debug for ReflectType {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct("TypeMeta")
 			.field("id", &self.id)
-			.field("layout", &self.layout)
+			.field("static_layout", &self.static_layout)
 			.finish_non_exhaustive()
 	}
 }
 
-impl TypeMeta {
-	pub const fn of<T: 'static>() -> &'static TypeMeta {
+impl ReflectType {
+	pub const fn of<T: 'static>() -> &'static ReflectType {
 		unsafe fn drop_raw_ptr<T>(value: *mut (), _layout: Layout, _session: Session) {
 			std::ptr::drop_in_place(value as *mut T)
 		}
@@ -94,9 +88,9 @@ impl TypeMeta {
 		struct MetaProvider<T>(T);
 
 		impl<T: 'static> MetaProvider<T> {
-			const META: TypeMeta = TypeMeta {
+			const META: ReflectType = ReflectType {
 				id: Some(NamedTypeId::of::<T>()),
-				layout: TypeMetaLayout::Static(Layout::new::<T>()),
+				static_layout: Some(Layout::new::<T>()),
 				drop_fn: if std::mem::needs_drop::<T>() {
 					Some(drop_raw_ptr::<T>)
 				} else {
@@ -108,17 +102,17 @@ impl TypeMeta {
 		&MetaProvider::<T>::META
 	}
 
-	pub const fn dynamic_no_drop() -> &'static TypeMeta {
-		const INSTANCE: TypeMeta = TypeMeta {
+	pub const fn dynamic_no_drop() -> &'static ReflectType {
+		const INSTANCE: ReflectType = ReflectType {
 			id: None,
-			layout: TypeMetaLayout::Dynamic,
+			static_layout: None,
 			drop_fn: None,
 		};
 
 		&INSTANCE
 	}
 
-	pub const fn dynamic_with_drop<D>() -> &'static TypeMeta
+	pub const fn dynamic_with_drop<D>() -> &'static ReflectType
 	where
 		// lol, trivially bypassed feature gate
 		// (do we even need this? why the heck did I make this const-compatible in the first place?)
@@ -129,9 +123,9 @@ impl TypeMeta {
 		}
 
 		impl<D: CustomDropHandler> MetaProvider<D> {
-			const META: TypeMeta = TypeMeta {
+			const META: ReflectType = ReflectType {
 				id: None,
-				layout: TypeMetaLayout::Dynamic,
+				static_layout: None,
 				drop_fn: Some(D::destruct),
 			};
 		}
