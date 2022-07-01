@@ -62,13 +62,16 @@ pub fn main_inner() -> anyhow::Result<()> {
 				.context("failed to create graphics context")?;
 
 		let gfx = gfx.box_obj(s);
+		let weak_gfx = *gfx;
+
+		engine_root.add(s, gfx);
 
 		// Create `ViewportManager`
 		let viewport_mgr = ViewportManager::default().box_obj_rw(s, main_lock);
 		{
 			// Acquire services
 			let mut p_viewport_mgr = viewport_mgr.borrow_mut(s);
-			let p_gfx = gfx.get(s);
+			let p_gfx = weak_gfx.get(s);
 
 			// Construct main viewport
 			let input_mgr = InputTracker::default().box_obj_rw(s, main_lock);
@@ -103,13 +106,12 @@ pub fn main_inner() -> anyhow::Result<()> {
 		let scene_mgr = SceneManager::default().box_obj_rw(s, main_lock);
 		scene_mgr
 			.borrow_mut(s)
-			.init_scene(make_game_entry(s, main_lock));
+			.init_scene(make_game_entry(s, engine_root, main_lock));
 
 		// Create root entity
 		engine_root.add(
 			s,
 			(
-				gfx,
 				viewport_mgr,
 				scene_mgr,
 				ExposeUsing(main_lock_token.box_obj(s), MainLockKey::key()),

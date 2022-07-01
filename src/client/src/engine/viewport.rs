@@ -5,8 +5,7 @@ use std::{cell::Ref, collections::HashMap};
 use thiserror::Error;
 use winit::window::{Window, WindowId};
 
-const DEFAULT_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
-const UNMOUNTED_WINDOW_FETCH_ERR: &'static str = "attempted to get window for unmounted viewport";
+pub const DEFAULT_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 
 #[derive(Debug, Default)]
 pub struct ViewportManager {
@@ -88,7 +87,10 @@ impl Viewport {
 	) -> Result<Option<wgpu::SurfaceTexture>, OutOfDeviceMemoryError> {
 		use wgpu::SurfaceError::*;
 
-		let window = self.window.as_ref().expect(UNMOUNTED_WINDOW_FETCH_ERR);
+		let window = self
+			.window
+			.as_ref()
+			.expect("attempted to render to unmounted viewport");
 
 		// Ensure that the surface texture matches the window's physical (backing buffer) size
 		let win_size = window.inner_size();
