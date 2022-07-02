@@ -1,9 +1,20 @@
 use std::time::Instant;
 
+use bumpalo::Bump;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use geode::prelude::*;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
+	c.bench_function("box_new", |b| {
+		b.iter(|| std::mem::forget(black_box(Box::new(4u32))));
+	});
+
+	c.bench_function("bump_alloc", |b| {
+		let bump = Bump::new();
+
+		b.iter(|| bump.alloc(4u32));
+	});
+
 	c.bench_function("obj_alloc", |b| {
 		let session = LocalSessionGuard::new();
 		let s = session.handle();

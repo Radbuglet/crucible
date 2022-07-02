@@ -224,6 +224,7 @@ pub fn reserve_obj_slot_capacity(session: Session<'_>, amount: usize) {
 	local_sess_data.slots.reserve_capacity(amount);
 }
 
+#[inline(always)]
 pub fn allocate_new_obj(
 	session: Session<'_>,
 	ty: &'static ReflectType,
@@ -267,6 +268,7 @@ pub fn allocate_new_obj(
 	(slot, gen_and_mask, full_ptr)
 }
 
+#[inline(always)]
 pub fn try_get_obj_ptr(
 	session: Session<'_>,
 	slot: &'static Slot,

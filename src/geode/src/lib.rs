@@ -25,6 +25,10 @@ pub mod prelude {
 			key::{proxy_key, typed_key, ProxyKeyType},
 		},
 	};
+
+	pub fn cg_test_alloc(s: Session) -> Owned<Obj<u8>> {
+		Obj::new(s, 1u8)
+	}
 }
 
 // pub use prelude::*;
