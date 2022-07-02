@@ -60,7 +60,7 @@ pub fn make_game_entry(s: Session, engine_root: Entity, _main_lock: Lock) -> Own
 					depth_stencil_attachment: None,
 				});
 
-				let pipeline = &weak_voxel_rendering_pipeline.get(s).pipeline;
+				let pipeline = &weak_voxel_rendering_pipeline.get(s).opaque_block_pipeline;
 				pass.set_pipeline(pipeline);
 				pass.draw(0..3, 0..1);
 			}

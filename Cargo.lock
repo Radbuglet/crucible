@@ -472,6 +472,7 @@ dependencies = [
  "cgmath",
  "geode",
  "log",
+ "sealed",
 ]
 
 [[package]]

@@ -1,8 +1,28 @@
 use std::borrow::Borrow;
 use std::fmt::Debug;
-use std::mem::MaybeUninit;
+
+use crate::polyfill::iter::decompose_iter;
+use crate::polyfill::result::unwrap_either;
 
 // === Vector Traits === //
+
+// Dimension classes
+
+pub trait DimClassOf<V: Vector>: DimClassSupports<V, Self> {
+	fn dim_of(vec: &V) -> usize;
+}
+
+pub trait DimClassSupports<V: Vector, D: ?Sized + DimClassOf<V>> {}
+
+pub struct Dim3(!);
+
+impl<V: Vector> DimClassOf<V> for Dim3 {
+	fn dim_of(_: &V) -> usize {
+		3
+	}
+}
+
+impl<V: Vector> DimClassSupports<V, Dim3> for Dim3 {}
 
 // Core
 
@@ -11,7 +31,7 @@ pub trait ValueType: Sized + Debug + Clone + PartialEq {}
 impl<T: Debug + Clone + PartialEq> ValueType for T {}
 
 pub trait Vector: ValueType {
-	const DIM: usize;
+	type Dim: DimClassOf<Self>;
 	type Comp: ValueType;
 
 	// (De)composition
@@ -39,31 +59,50 @@ pub trait Vector: ValueType {
 		VecCompIter::new(self)
 	}
 
+	fn dim(&self) -> usize {
+		<Self::Dim as DimClassOf<Self>>::dim_of(self)
+	}
+
 	// Extensions
-	fn map<F, M>(&self, mut f: F) -> Self
+	fn map_enumerated<F>(&self, mut f: F) -> Self
 	where
-		F: VectorMapFn<Self, M>,
-		M: OpVariantMarker,
+		F: FnMut(Self::Comp, usize, &Self) -> Self::Comp,
 	{
 		Self::new(
 			self.comps()
 				.enumerate()
-				.map(|(index, comp)| f.map(comp, index, self)),
+				.map(|(index, comp)| f(comp, index, self)),
 		)
 	}
 
-	fn zip<R, F, M>(&self, rhs_vec: &R, mut f: F) -> Self
+	fn map<F>(&self, mut f: F) -> Self
+	where
+		F: FnMut(Self::Comp) -> Self::Comp,
+	{
+		self.map_enumerated(|v, _, _| f(v))
+	}
+
+	fn zip_enumerated<R, F>(&self, rhs_vec: &R, mut f: F) -> Self
 	where
 		R: ?Sized + Vector,
-		F: VectorZipFn<Self, R, M>,
-		M: OpVariantMarker,
+		F: FnMut(Self::Comp, R::Comp, usize, &Self, &R) -> Self::Comp,
+		Self::Dim: DimClassSupports<R, R::Dim>,
 	{
 		Self::new(
 			self.comps()
 				.zip(rhs_vec.comps())
 				.enumerate()
-				.map(|(index, (lhs, rhs))| f.zip(index, self, lhs, rhs_vec, rhs)),
+				.map(|(index, (lhs, rhs))| f(lhs, rhs, index, self, rhs_vec)),
 		)
+	}
+
+	fn zip<R, F>(&self, rhs_vec: &R, mut f: F) -> Self
+	where
+		R: ?Sized + Vector,
+		F: FnMut(Self::Comp, R::Comp) -> Self::Comp,
+		Self::Dim: DimClassSupports<R, R::Dim>,
+	{
+		self.zip_enumerated(rhs_vec, |a, b, _, _, _| f(a, b))
 	}
 }
 
@@ -86,7 +125,7 @@ impl<T: ?Sized + Vector> Iterator for VecCompIter<'_, T> {
 	type Item = T::Comp;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		if self.index < T::DIM {
+		if self.index < self.vec.dim() {
 			let comp = self.vec.comp(self.index);
 			self.index += 1;
 			Some(comp)
@@ -96,140 +135,9 @@ impl<T: ?Sized + Vector> Iterator for VecCompIter<'_, T> {
 	}
 }
 
-// Map traits
-
-pub trait OpVariantMarker: sealed::Sealed {}
-
-pub struct OpVariantCompOnly;
-
-pub struct OpVariantCompAndIndex;
-
-pub struct OpVariantCompIndexAndVec;
-
-mod sealed {
-	use super::*;
-
-	pub trait Sealed {}
-
-	impl OpVariantMarker for OpVariantCompOnly {}
-	impl Sealed for OpVariantCompOnly {}
-
-	impl OpVariantMarker for OpVariantCompAndIndex {}
-	impl Sealed for OpVariantCompAndIndex {}
-
-	impl OpVariantMarker for OpVariantCompIndexAndVec {}
-	impl Sealed for OpVariantCompIndexAndVec {}
-}
-
-pub trait VectorMapFn<V: ?Sized + Vector, M: OpVariantMarker> {
-	fn map(&mut self, comp: V::Comp, index: usize, vec: &V) -> V::Comp;
-}
-
-impl<F, V> VectorMapFn<V, OpVariantCompOnly> for F
-where
-	F: FnMut(V::Comp) -> V::Comp,
-	V: ?Sized + Vector,
-{
-	fn map(&mut self, comp: V::Comp, _index: usize, _vec: &V) -> V::Comp {
-		(self)(comp)
-	}
-}
-
-impl<F, V> VectorMapFn<V, OpVariantCompAndIndex> for F
-where
-	F: FnMut(V::Comp, usize) -> V::Comp,
-	V: ?Sized + Vector,
-{
-	fn map(&mut self, comp: V::Comp, index: usize, _vec: &V) -> V::Comp {
-		(self)(comp, index)
-	}
-}
-
-impl<F, V> VectorMapFn<V, OpVariantCompIndexAndVec> for F
-where
-	F: FnMut(V::Comp, usize, &V) -> V::Comp,
-	V: ?Sized + Vector,
-{
-	fn map(&mut self, comp: V::Comp, index: usize, vec: &V) -> V::Comp {
-		(self)(comp, index, vec)
-	}
-}
-
-pub trait VectorZipFn<L: ?Sized + Vector, R: Vector, M: OpVariantMarker> {
-	fn zip(
-		&mut self,
-		index: usize,
-		left_vec: &L,
-		left_comp: L::Comp,
-		right_vec: &R,
-		right_comp: R::Comp,
-	) -> L::Comp;
-}
-
-impl<F, L, R> VectorZipFn<L, R, OpVariantCompOnly> for F
-where
-	F: FnMut(L::Comp, R::Comp) -> L::Comp,
-	L: ?Sized + Vector,
-	R: ?Sized + Vector,
-{
-	fn zip(
-		&mut self,
-		_index: usize,
-		_left_vec: &L,
-		left_comp: L::Comp,
-		_right_vec: &R,
-		right_comp: R::Comp,
-	) -> L::Comp {
-		(self)(left_comp, right_comp)
-	}
-}
-
-impl<F, L, R> VectorZipFn<L, R, OpVariantCompAndIndex> for F
-where
-	F: FnMut(usize, L::Comp, R::Comp) -> L::Comp,
-	L: ?Sized + Vector,
-	R: ?Sized + Vector,
-{
-	fn zip(
-		&mut self,
-		index: usize,
-		_left_vec: &L,
-		left_comp: L::Comp,
-		_right_vec: &R,
-		right_comp: R::Comp,
-	) -> L::Comp {
-		(self)(index, left_comp, right_comp)
-	}
-}
-
-impl<F, L, R> VectorZipFn<L, R, OpVariantCompIndexAndVec> for F
-where
-	F: FnMut(usize, &L, L::Comp, &R, R::Comp) -> L::Comp,
-	L: ?Sized + Vector,
-	R: ?Sized + Vector,
-{
-	fn zip(
-		&mut self,
-		index: usize,
-		left_vec: &L,
-		left_comp: L::Comp,
-		right_vec: &R,
-		right_comp: R::Comp,
-	) -> L::Comp {
-		(self)(index, left_vec, left_comp, right_vec, right_comp)
-	}
-}
-
 // === Math traits === //
 
 // Core traits
-
-fn unwrap_either<T>(result: Result<T, T>) -> T {
-	match result {
-		Ok(val) => val,
-		Err(val) => val,
-	}
-}
 
 pub trait Arithmetic<R = Self>: ValueType {
 	fn try_add<Q: Borrow<R>>(&self, rhs: Q) -> Result<Self, Self>;
@@ -280,17 +188,17 @@ pub trait DerivesVectorMath<R: Vector>: Vector {
 	fn get_rhs_comp(rhs: &R, index: usize) -> Self::RhsProxy;
 }
 
-impl<VL, LC, VR, RC> Arithmetic<VR> for VL
+impl<VL, CL, VR, CR> Arithmetic<VR> for VL
 where
-	VL: DerivesVectorMath<VR, Comp = LC, RhsProxy = RC>,
+	VL: DerivesVectorMath<VR, Comp = CL, RhsProxy = CR>,
 	VR: Vector,
-	LC: Arithmetic<RC>,
+	CL: Arithmetic<CR>,
 {
 	fn try_add<Q: Borrow<VR>>(&self, rhs: Q) -> Result<Self, Self> {
 		let rhs = rhs.borrow();
 
 		let mut success = true;
-		let vec = self.map(|lhs: LC, i| {
+		let vec = self.map_enumerated(|lhs, i, _| {
 			let out = lhs.try_add(Self::get_rhs_comp(rhs, i));
 			if out.is_err() {
 				success = false;
@@ -306,55 +214,26 @@ where
 
 	fn add_wrapping<Q: Borrow<VR>>(&self, rhs: Q) -> Self {
 		let rhs = rhs.borrow();
-		self.map(|lhs: LC, i| lhs.add_wrapping(Self::get_rhs_comp(rhs, i)))
+		self.map_enumerated(|lhs, i, _| lhs.add_wrapping(Self::get_rhs_comp(rhs, i)))
 	}
 
 	fn add<Q: Borrow<VR>>(&self, rhs: Q) -> Self {
 		let rhs = rhs.borrow();
-		self.map(|lhs: LC, i| lhs.add(Self::get_rhs_comp(rhs, i)))
+		self.map_enumerated(|lhs, i, _| lhs.add(Self::get_rhs_comp(rhs, i)))
 	}
 
 	fn add_saturating<Q: Borrow<VR>>(&self, rhs: Q) -> Self {
 		let rhs = rhs.borrow();
-		self.map(|lhs: LC, i| lhs.add_saturating(Self::get_rhs_comp(rhs, i)))
+		self.map_enumerated(|lhs, i, _| lhs.add_saturating(Self::get_rhs_comp(rhs, i)))
 	}
 }
 
 // === Standard Vectors === //
 
-fn decompose_iter<I, T, E, const N: usize>(iter: I) -> Result<[T; N], E>
-where
-	I: IntoIterator<Item = Result<T, E>>,
-{
-	let mut array = MaybeUninit::<[T; N]>::uninit();
-	let uninit_slice = unsafe { &mut *array.as_mut_ptr().cast::<[MaybeUninit<T>; N]>() };
-	let mut i = 0usize;
-
-	for elem in iter {
-		if i >= uninit_slice.len() {
-			panic!("Too many iterator elements to pack into an array of length {N}.");
-		}
-		uninit_slice[i].write(elem?);
-		i += 1;
-	}
-
-	if i < uninit_slice.len() {
-		panic!(
-			"Expected there to be exactly {} element{} in the iterator but only found {} (missing {})",
-			N,
-			if N == 1 { "" } else { "s" },
-			i,
-			N - i,
-		);
-	}
-
-	Ok(unsafe { array.assume_init() })
-}
-
-fn invalid_comp_index_for<T: Vector>(index: usize) -> ! {
+fn invalid_comp_index_for<T: Vector>(vec: &T, index: usize) -> ! {
 	panic!(
 		"attempted to get component {index} of a {} dimensional vector.",
-		T::DIM
+		vec.dim(),
 	)
 }
 
@@ -366,7 +245,7 @@ pub struct Vec3<T> {
 }
 
 impl<T: ValueType> Vector for Vec3<T> {
-	const DIM: usize = 3;
+	type Dim = Dim3;
 	type Comp = T;
 
 	fn new_prop_err<I, E>(iter: I) -> Result<Self, E>
@@ -382,7 +261,11 @@ impl<T: ValueType> Vector for Vec3<T> {
 			0 => self.x.clone(),
 			1 => self.y.clone(),
 			2 => self.z.clone(),
-			_ => invalid_comp_index_for::<Self>(index),
+			_ => invalid_comp_index_for(self, index),
 		}
+	}
+
+	fn dim(&self) -> usize {
+		3
 	}
 }

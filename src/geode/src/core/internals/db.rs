@@ -298,7 +298,7 @@ pub fn destroy_obj(session: Session<'_>, slot: &'static Slot, local_gen: Extende
 
 // === Garbage collection === //
 
-pub fn collect_garbage() {
+pub fn _collect_garbage() {
 	// First, we run our finalizers.
 
 	// Next, we run our post-finalization listeners.

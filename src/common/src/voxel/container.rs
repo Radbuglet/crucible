@@ -1,8 +1,11 @@
-use std::{cell::Cell, collections::HashMap, hash};
+use std::{cell::Cell, collections::HashMap, fmt, hash};
 
 use geode::prelude::*;
 
-use super::math::{chunk_pos_of, Axis3, BlockFace, ChunkPos, Sign, WorldPos};
+use super::math::{
+	block_pos_to_index, chunk_pos_of, Axis3, BlockFace, BlockPos, ChunkPos, Sign, WorldPos,
+	CHUNK_VOLUME,
+};
 
 use crate::polyfill::c_enum::ExposesVariants;
 
@@ -68,6 +71,7 @@ pub struct VoxelChunkData {
 	world: Cell<Option<Entity>>,
 	neighbors: [Cell<Option<Entity>>; BlockFace::COUNT],
 	position: Cell<ChunkPos>,
+	blocks: Box<[Cell<u32>; CHUNK_VOLUME]>,
 }
 
 impl VoxelChunkData {
@@ -82,6 +86,12 @@ impl VoxelChunkData {
 	pub fn pos(&self) -> ChunkPos {
 		self.position.get()
 	}
+
+	pub fn block_state_of(&self, pos: BlockPos) -> RawBlockState<'_> {
+		RawBlockState {
+			cell: &self.blocks[block_pos_to_index(pos)],
+		}
+	}
 }
 
 impl Drop for VoxelChunkData {
@@ -89,6 +99,53 @@ impl Drop for VoxelChunkData {
 		if let Some(_world) = self.world() {
 			// TODO
 		}
+	}
+}
+
+#[derive(Copy, Clone)]
+pub struct RawBlockState<'a> {
+	cell: &'a Cell<u32>,
+}
+
+impl fmt::Debug for RawBlockState<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("RawBlockState")
+			.field("raw", &self.cell.get())
+			.field("material", &self.material())
+			.field("variant", &self.variant())
+			.field("light_level", &self.light_level())
+			.finish()
+	}
+}
+
+impl RawBlockState<'_> {
+	pub fn material(self) -> u16 {
+		self.cell.get() as u16
+	}
+
+	pub fn variant(self) -> u8 {
+		self.cell.get().to_be_bytes()[2]
+	}
+
+	pub fn light_level(self) -> u8 {
+		self.cell.get().to_be_bytes()[3]
+	}
+
+	pub fn set_material(self, id: u16) {
+		self.cell
+			.set(self.cell.get() & !(u16::MAX as u32) + id as u32)
+	}
+
+	pub fn set_variant(self, variant: u8) {
+		let mut bytes = self.cell.get().to_be_bytes();
+		bytes[2] = variant;
+		self.cell.set(u32::from_be_bytes(bytes))
+	}
+
+	pub fn set_light_level(self, light_level: u8) {
+		let mut bytes = self.cell.get().to_be_bytes();
+		bytes[3] = light_level;
+		self.cell.set(u32::from_be_bytes(bytes))
 	}
 }
 

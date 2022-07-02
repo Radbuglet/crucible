@@ -8,3 +8,4 @@ bytemuck = { version = "1.9.1", features = ["derive"] }
 cgmath = "0.18.0"
 geode = { path = "../geode" }
 log = "0.4.17"
+sealed = "0.4.0"

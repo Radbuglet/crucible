@@ -1,14 +1,33 @@
+// TODO: The types of numbers in this module are completely messed up!
+
 use std::ops::Index;
 
-use cgmath::{num_traits::Signed, BaseNum, Vector3};
+use cgmath::{num_traits::Signed, vec3, BaseNum, Vector3};
 
-use crate::polyfill::c_enum::c_enum;
+use crate::polyfill::c_enum::{c_enum, ExposesVariants};
+
+// === Coordinate Systems === //
 
 pub const CHUNK_EDGE: u8 = 16;
+pub const CHUNK_EDGE_USIZE: usize = CHUNK_EDGE as usize;
+pub const CHUNK_LAYER: usize = CHUNK_EDGE_USIZE.pow(2);
+pub const CHUNK_VOLUME: usize = CHUNK_EDGE_USIZE.pow(3);
 
 pub type WorldPos = Vector3<i64>;
 pub type ChunkPos = Vector3<i64>;
 pub type BlockPos = Vector3<u8>;
+
+pub fn is_valid_chunk_pos(pos: ChunkPos) -> bool {
+	Axis3::variants().all(|comp| pos[comp].checked_mul(CHUNK_EDGE as i64).is_some())
+}
+
+pub fn is_valid_block_pos(pos: BlockPos) -> bool {
+	Axis3::variants().all(|comp| pos[comp] <= CHUNK_EDGE)
+}
+
+pub fn is_valid_block_index(index: usize) -> bool {
+	index < CHUNK_VOLUME
+}
 
 pub fn chunk_pos_of(pos: WorldPos) -> ChunkPos {
 	pos.map(|val| val.div_euclid(CHUNK_EDGE.into()))
@@ -21,6 +40,43 @@ pub fn block_pos_of(pos: WorldPos) -> BlockPos {
 pub fn decompose_world_pos(pos: WorldPos) -> (ChunkPos, BlockPos) {
 	(chunk_pos_of(pos), block_pos_of(pos))
 }
+
+pub fn compose_world_pos(chunk: ChunkPos, block: BlockPos) -> WorldPos {
+	debug_assert!(is_valid_chunk_pos(chunk));
+	debug_assert!(is_valid_block_pos(block));
+
+	chunk * CHUNK_EDGE as i64 + block.map(|v| v as i64)
+}
+
+pub fn block_pos_to_index(pos: BlockPos) -> usize {
+	debug_assert!(is_valid_block_pos(pos));
+	let pos = pos.map(|v| v as usize);
+	pos.x + pos.y * CHUNK_EDGE_USIZE + pos.y * CHUNK_LAYER
+}
+
+pub fn index_to_block_pos(mut index: usize) -> BlockPos {
+	debug_assert!(is_valid_block_index(index));
+
+	let x = chunk_edge_rem_usize(index);
+	index /= CHUNK_EDGE_USIZE;
+
+	let y = chunk_edge_rem_usize(index);
+	index /= CHUNK_EDGE_USIZE;
+
+	let z = chunk_edge_rem_usize(index);
+
+	vec3(x, y, z)
+}
+
+pub fn chunk_edge_rem_usize(val: usize) -> u8 {
+	(val % CHUNK_EDGE_USIZE) as u8
+}
+
+pub fn iter_chunk_blocks() -> impl Iterator<Item = (usize, BlockPos)> {
+	(0..CHUNK_VOLUME).map(|index| (index, index_to_block_pos(index)))
+}
+
+// === Block Faces === //
 
 c_enum! {
 	pub enum BlockFace {

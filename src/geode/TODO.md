@@ -1,11 +1,10 @@
 # To-Do
 
 - [ ] Simple API changes:
-  - [ ] Replace `Owned: Deref` with an explicit call to `.weak_ref()`. Safe methods that don't
-        accidentally produce weak references can be forwarded.
   - [ ] Implement `Node`, a way to attach a dependency hierarchy to an `Entity`.
   - [ ] Implement `CopyVec`, `CopyHashMap`, and `CopyHashSet`.
   - [ ] Expose more of the `Obj` lifecycle methods to `Entity`.
+  - [ ] Expose fallible getters to `Obj`.
 - [ ] Signals:
   - [ ] `event_trait` multiplexing, packing, conversions, and forwarding.
   - [ ] `InstantSignal` and `DeferredSignal` object (once `Storage` becomes available)
@@ -32,4 +31,5 @@
   - [ ] Implement multithreaded compaction
   - [ ] Allow multithreaded finalization
   - [ ] Write internals document
+  - [ ] Add RW session locks to emulate ECS-style read-only component acquisition.
   - [ ] Document the API
