@@ -7,8 +7,8 @@ use core::{
 
 // === Modules === //
 
-#[path = "generated/op_forwards.rs"]
-mod op_forwards;
+#[path = "generated/fvec3.rs"]
+mod fvec3;
 
 // === Trait definitions === //
 
@@ -30,6 +30,8 @@ pub trait VecFlavor {
 }
 
 // === `TypedVector` === //
+
+pub use glam;
 
 pub type TypedVector<F> = TypedVectorImpl<<F as VecFlavor>::Backing, F>;
 

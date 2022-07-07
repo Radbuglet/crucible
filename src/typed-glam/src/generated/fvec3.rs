@@ -152,6 +152,10 @@ where
 		Self::from_raw(self.vec.normalize())
 	}
 
+	pub fn try_normalize(self) -> Option<Self> {
+		self.vec.try_normalize().map(Self::from_raw)
+	}
+
 	pub fn normalize_or_zero(self) -> Self {
 		Self::from_raw(self.vec.normalize_or_zero())
 	}
@@ -226,6 +230,23 @@ where
 
 	pub fn mul_add(self, a: Self, b: Self) -> Self {
 		Self::from_raw(self.vec.mul_add(a.into_raw(), b.into_raw()))
+	}
+
+	pub fn angle_between(self, rhs: Self) -> f32 {
+		self.vec.angle_between(rhs.into_raw())
+	}
+
+	pub fn any_orthogonal_vector(&self) -> Self {
+		Self::from_raw(self.vec.any_orthogonal_vector())
+	}
+
+	pub fn any_orthonormal_vector(&self) -> Self {
+		Self::from_raw(self.vec.any_orthonormal_vector())
+	}
+
+	pub fn any_orthonormal_pair(&self) -> (Self, Self) {
+		let (a, b) = self.vec.any_orthonormal_pair();
+		(Self::from_raw(a), Self::from_raw(b))
 	}
 }
 
@@ -331,7 +352,6 @@ where
 		&mut self.raw_mut()[i]
 	}
 }
-
 // === `core::ops` trait forwards === //
 
 // `Add` operation forwarding

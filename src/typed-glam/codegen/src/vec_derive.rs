@@ -1,3 +1,5 @@
+// TODO: Clean up this actual garbage.
+
 use crate::util::{FmtIntoOwnedExt, FmtIterExt};
 use genco::prelude::*;
 
@@ -80,7 +82,6 @@ struct VecDeriveSession<'a> {
 
 	// Reused items
 	self_owned: &'a rust::Tokens,
-	self_ref: &'a rust::Tokens,
 }
 
 struct AxisInfo {
@@ -140,16 +141,12 @@ fn derive_entry_one(
 
 		// Reused items
 		self_owned: &quote! { Self },
-		self_ref: &quote! { &Self },
 	};
 
+	// TODO: `Shl` and `Shr`; integration with matrices; allow AVec3 as a backing vector?
 	quote! {
 		$(derive_method_forwards(&sess))
 		$(derive_misc_traits(&sess))
-
-		// TODO: `Shl` and `Shr`
-		// TODO: Ensure that the formatting pre-rust-fmt isn't too bad.
-
 		$(derive_op_forwards(&sess))
 	}
 }
@@ -207,7 +204,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			.iter()
 			.map(|axis| (axis.name, ForwardedType::Exact(comp_ty)))
 			.collect::<Vec<_>>(),
-		&[ForwardedType::OwnedVector],
+		&[ForwardedType::Vector],
 	)
 	.format_into(&mut forwarded_methods);
 
@@ -217,7 +214,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 		true,
 		SelfTy::Static,
 		&[("v", ForwardedType::Exact(comp_ty))],
-		&[ForwardedType::OwnedVector],
+		&[ForwardedType::Vector],
 	)
 	.format_into(&mut forwarded_methods);
 
@@ -228,10 +225,10 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 		SelfTy::Static,
 		&[
 			("mask", ForwardedType::Exact(&bvec.fmt_to_tokens())),
-			("if_true", ForwardedType::OwnedVector),
-			("if_false", ForwardedType::OwnedVector),
+			("if_true", ForwardedType::Vector),
+			("if_false", ForwardedType::Vector),
 		],
-		&[ForwardedType::OwnedVector],
+		&[ForwardedType::Vector],
 	)
 	.format_into(&mut forwarded_methods);
 
@@ -241,7 +238,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 		true,
 		SelfTy::Static,
 		&[("a", ForwardedType::Exact(&quote! { [$comp_ty; $dim] }))],
-		&[ForwardedType::OwnedVector],
+		&[ForwardedType::Vector],
 	)
 	.format_into(&mut forwarded_methods);
 
@@ -261,7 +258,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 		true,
 		SelfTy::Static,
 		&[("slice", ForwardedType::Exact(&quote! { &[$comp_ty] }))],
-		&[ForwardedType::OwnedVector],
+		&[ForwardedType::Vector],
 	)
 	.format_into(&mut forwarded_methods);
 
@@ -280,7 +277,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 		"dot",
 		false,
 		SelfTy::Owned,
-		&[("rhs", ForwardedType::OwnedVector)],
+		&[("rhs", ForwardedType::Vector)],
 		&[ForwardedType::Exact(comp_ty)],
 	)
 	.format_into(&mut forwarded_methods);
@@ -290,8 +287,8 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 		"min",
 		false,
 		SelfTy::Owned,
-		&[("rhs", ForwardedType::OwnedVector)],
-		&[ForwardedType::OwnedVector],
+		&[("rhs", ForwardedType::Vector)],
+		&[ForwardedType::Vector],
 	)
 	.format_into(&mut forwarded_methods);
 
@@ -300,8 +297,8 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 		"max",
 		false,
 		SelfTy::Owned,
-		&[("rhs", ForwardedType::OwnedVector)],
-		&[ForwardedType::OwnedVector],
+		&[("rhs", ForwardedType::Vector)],
+		&[ForwardedType::Vector],
 	)
 	.format_into(&mut forwarded_methods);
 
@@ -311,10 +308,10 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 		false,
 		SelfTy::Owned,
 		&[
-			("min", ForwardedType::OwnedVector),
-			("max", ForwardedType::OwnedVector),
+			("min", ForwardedType::Vector),
+			("max", ForwardedType::Vector),
 		],
-		&[ForwardedType::OwnedVector],
+		&[ForwardedType::Vector],
 	)
 	.format_into(&mut forwarded_methods);
 
@@ -344,7 +341,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			format!("cmp{op}").as_str(),
 			false,
 			SelfTy::Owned,
-			&[("rhs", ForwardedType::OwnedVector)],
+			&[("rhs", ForwardedType::Vector)],
 			&[ForwardedType::Exact(&bvec.fmt_to_tokens())],
 		)
 		.format_into(&mut forwarded_methods);
@@ -357,7 +354,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			false,
 			SelfTy::Owned,
 			&[],
-			&[ForwardedType::OwnedVector],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
 
@@ -367,7 +364,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			false,
 			SelfTy::Owned,
 			&[],
-			&[ForwardedType::OwnedVector],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
 	}
@@ -438,7 +435,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			"distance",
 			false,
 			SelfTy::Owned,
-			&[("rhs", ForwardedType::OwnedVector)],
+			&[("rhs", ForwardedType::Vector)],
 			&[ForwardedType::Exact(comp_ty)],
 		)
 		.format_into(&mut forwarded_methods);
@@ -448,7 +445,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			"distance_squared",
 			false,
 			SelfTy::Owned,
-			&[("rhs", ForwardedType::OwnedVector)],
+			&[("rhs", ForwardedType::Vector)],
 			&[ForwardedType::Exact(comp_ty)],
 		)
 		.format_into(&mut forwarded_methods);
@@ -459,11 +456,17 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			false,
 			SelfTy::Owned,
 			&[],
-			&[ForwardedType::OwnedVector],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
 
-		// TODO: try_normalize
+		quote! {
+			pub fn try_normalize(self) -> Option<Self> {
+				self.vec.try_normalize().map(Self::from_raw)
+			}
+			$['\n']
+		}
+		.format_into(&mut forwarded_methods);
 
 		derive_method_forward_stub(
 			sess,
@@ -471,7 +474,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			false,
 			SelfTy::Owned,
 			&[],
-			&[ForwardedType::OwnedVector],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
 
@@ -490,8 +493,8 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			"project_onto",
 			false,
 			SelfTy::Owned,
-			&[("rhs", ForwardedType::OwnedVector)],
-			&[ForwardedType::OwnedVector],
+			&[("rhs", ForwardedType::Vector)],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
 
@@ -500,8 +503,8 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			"reject_from",
 			false,
 			SelfTy::Owned,
-			&[("rhs", ForwardedType::OwnedVector)],
-			&[ForwardedType::OwnedVector],
+			&[("rhs", ForwardedType::Vector)],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
 
@@ -510,8 +513,8 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			"project_onto_normalized",
 			false,
 			SelfTy::Owned,
-			&[("rhs", ForwardedType::OwnedVector)],
-			&[ForwardedType::OwnedVector],
+			&[("rhs", ForwardedType::Vector)],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
 
@@ -520,8 +523,8 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			"reject_from_normalized",
 			false,
 			SelfTy::Owned,
-			&[("rhs", ForwardedType::OwnedVector)],
-			&[ForwardedType::OwnedVector],
+			&[("rhs", ForwardedType::Vector)],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
 
@@ -532,7 +535,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 				false,
 				SelfTy::Owned,
 				&[],
-				&[ForwardedType::OwnedVector],
+				&[ForwardedType::Vector],
 			)
 			.format_into(&mut forwarded_methods);
 		}
@@ -543,7 +546,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			false,
 			SelfTy::Owned,
 			&[("n", ForwardedType::Exact(comp_ty))],
-			&[ForwardedType::OwnedVector],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
 
@@ -553,10 +556,10 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			false,
 			SelfTy::Owned,
 			&[
-				("rhs", ForwardedType::OwnedVector),
+				("rhs", ForwardedType::Vector),
 				("s", ForwardedType::Exact(comp_ty)),
 			],
-			&[ForwardedType::OwnedVector],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
 
@@ -566,7 +569,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			false,
 			SelfTy::Owned,
 			&[
-				("rhs", ForwardedType::OwnedVector),
+				("rhs", ForwardedType::Vector),
 				("max_abs_diff", ForwardedType::Exact(comp_ty)),
 			],
 			&[ForwardedType::Exact(&quote! { bool })],
@@ -582,7 +585,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 				("min", ForwardedType::Exact(comp_ty)),
 				("max", ForwardedType::Exact(comp_ty)),
 			],
-			&[ForwardedType::OwnedVector],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
 
@@ -592,7 +595,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			false,
 			SelfTy::Owned,
 			&[("max", ForwardedType::Exact(comp_ty))],
-			&[ForwardedType::OwnedVector],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
 
@@ -602,7 +605,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			false,
 			SelfTy::Owned,
 			&[("min", ForwardedType::Exact(comp_ty))],
-			&[ForwardedType::OwnedVector],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
 
@@ -611,13 +614,104 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			"mul_add",
 			false,
 			SelfTy::Owned,
-			&[
-				("a", ForwardedType::OwnedVector),
-				("b", ForwardedType::OwnedVector),
-			],
-			&[ForwardedType::OwnedVector],
+			&[("a", ForwardedType::Vector), ("b", ForwardedType::Vector)],
+			&[ForwardedType::Vector],
 		)
 		.format_into(&mut forwarded_methods);
+
+		if dim == 2 {
+			derive_method_forward_stub(
+				sess,
+				"from_angle",
+				false,
+				SelfTy::Static,
+				&[("angle", ForwardedType::Exact(comp_ty))],
+				&[ForwardedType::Vector],
+			)
+			.format_into(&mut forwarded_methods);
+
+			derive_method_forward_stub(
+				sess,
+				"angle_between",
+				false,
+				SelfTy::Owned,
+				&[("rhs", ForwardedType::Vector)],
+				&[ForwardedType::Exact(comp_ty)],
+			)
+			.format_into(&mut forwarded_methods);
+
+			derive_method_forward_stub(
+				sess,
+				"perp",
+				false,
+				SelfTy::Owned,
+				&[],
+				&[ForwardedType::Vector],
+			)
+			.format_into(&mut forwarded_methods);
+
+			derive_method_forward_stub(
+				sess,
+				"perp_dot",
+				false,
+				SelfTy::Owned,
+				&[("rhs", ForwardedType::Vector)],
+				&[ForwardedType::Exact(comp_ty)],
+			)
+			.format_into(&mut forwarded_methods);
+
+			derive_method_forward_stub(
+				sess,
+				"rotate",
+				false,
+				SelfTy::Owned,
+				&[("rhs", ForwardedType::Vector)],
+				&[ForwardedType::Vector],
+			)
+			.format_into(&mut forwarded_methods);
+		}
+
+		if dim == 3 {
+			derive_method_forward_stub(
+				sess,
+				"angle_between",
+				false,
+				SelfTy::Owned,
+				&[("rhs", ForwardedType::Vector)],
+				&[ForwardedType::Exact(comp_ty)],
+			)
+			.format_into(&mut forwarded_methods);
+
+			derive_method_forward_stub(
+				sess,
+				"any_orthogonal_vector",
+				false,
+				SelfTy::Ref,
+				&[],
+				&[ForwardedType::Vector],
+			)
+			.format_into(&mut forwarded_methods);
+
+			derive_method_forward_stub(
+				sess,
+				"any_orthonormal_vector",
+				false,
+				SelfTy::Ref,
+				&[],
+				&[ForwardedType::Vector],
+			)
+			.format_into(&mut forwarded_methods);
+
+			derive_method_forward_stub(
+				sess,
+				"any_orthonormal_pair",
+				false,
+				SelfTy::Ref,
+				&[],
+				&[ForwardedType::Vector, ForwardedType::Vector],
+			)
+			.format_into(&mut forwarded_methods);
+		}
 	}
 
 	// Generation
@@ -639,8 +733,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 #[derive(Debug, Copy, Clone)]
 enum ForwardedType<'a> {
 	Exact(&'a rust::Tokens),
-	OwnedVector,
-	VectorRef,
+	Vector,
 }
 
 impl<'a> ForwardedType<'a> {
@@ -650,24 +743,21 @@ impl<'a> ForwardedType<'a> {
 	{
 		match self {
 			ForwardedType::Exact(exact) => exact,
-			ForwardedType::OwnedVector => sess.self_owned,
-			ForwardedType::VectorRef => sess.self_ref,
+			ForwardedType::Vector => sess.self_owned,
 		}
 	}
 
 	fn as_wrapper_for(self, expr: rust::Tokens) -> rust::Tokens {
 		match self {
 			ForwardedType::Exact(_) => expr, // (no transformation necessary)
-			ForwardedType::OwnedVector => quote! { Self::from_raw($expr) },
-			ForwardedType::VectorRef => quote! { Self::from_raw_ref($expr) },
+			ForwardedType::Vector => quote! { Self::from_raw($expr) },
 		}
 	}
 
 	fn as_unwrapper_for(self, expr: rust::Tokens) -> rust::Tokens {
 		match self {
 			ForwardedType::Exact(_) => expr, // (no transformation necessary)
-			ForwardedType::OwnedVector => quote! { $expr.into_raw() },
-			ForwardedType::VectorRef => quote! { $expr.raw() },
+			ForwardedType::Vector => quote! { $expr.into_raw() },
 		}
 	}
 }
@@ -675,7 +765,6 @@ impl<'a> ForwardedType<'a> {
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 enum SelfTy {
 	Ref,
-	Mut,
 	Owned,
 	Static,
 }
@@ -684,7 +773,6 @@ impl SelfTy {
 	fn prefix(self) -> Option<&'static str> {
 		match self {
 			SelfTy::Ref => Some("&self"),
-			SelfTy::Mut => Some("&mut self"),
 			SelfTy::Owned => Some("self"),
 			SelfTy::Static => None,
 		}
@@ -715,19 +803,19 @@ fn derive_method_forward_stub(
 	let ret_vals_fmt = match ret_vals.len() {
 		0 => quote! {},
 		1 => quote! { -> $(ret_vals[0].as_out_ty(sess)) },
-		_ => quote! { -> $({
+		_ => quote! { -> ($({
 			ret_vals
 				.iter()
 				.map(|ty| ty.as_out_ty(sess))
 				.fmt_delimited(",")
 				.fmt_to_tokens()
-		})},
+		}))},
 	};
 
 	// Generate body elements
 	let fwd_prefix = match self_ty {
 		// I guess ease trumps idomatic code gen :person_shrugging:.
-		SelfTy::Ref | SelfTy::Mut | SelfTy::Owned => quote! { self.vec. },
+		SelfTy::Ref | SelfTy::Owned => quote! { self.vec. },
 		SelfTy::Static => quote! { $backing:: },
 	};
 
@@ -746,13 +834,14 @@ fn derive_method_forward_stub(
 			assert!(ret_vals.len() < ALPHABET.len());
 
 			let fwd_tup_args = ALPHABET[0..ret_vals.len()]
-				.split("")
+				.chars()
+				.map(|char| char.to_string())
 				.fmt_delimited(",")
 				.fmt_to_tokens();
 
 			let fwd_tup_transform = ret_vals
 				.iter()
-				.zip(ALPHABET.split(""))
+				.zip(ALPHABET.chars().map(|char| char.to_string()))
 				.map(|(ret_ty, name)| ret_ty.as_wrapper_for(name.fmt_to_tokens()))
 				.fmt_delimited(",");
 

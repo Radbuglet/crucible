@@ -7,15 +7,9 @@ pub trait FmtIterExt: Sized + IntoIterator {
 			delimiter,
 		}
 	}
-
-	fn fmt_iter(self) -> TokenIterFmt<Self::IntoIter> {
-		self.fmt_delimited(NoOpDelimiter)
-	}
 }
 
 impl<T: IntoIterator> FmtIterExt for T {}
-
-pub type TokenIterFmt<I> = DelimitedTokenIterFmt<I, NoOpDelimiter>;
 
 #[derive(Debug, Clone)]
 pub struct DelimitedTokenIterFmt<I, D> {
