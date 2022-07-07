@@ -7,6 +7,24 @@ use core::ops::{
 };
 use glam::i32::IVec3;
 
+// === Inherent `impl` items === //
+
+impl<M> TypedVectorImpl<IVec3, M>
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	pub const ZERO: Self = Self::splat(0);
+	pub const ONE: Self = Self::splat(1);
+
+	pub const fn new(x: i32, y: i32, z: i32) -> Self {
+		Self::from_raw(IVec3::new(x, y, z))
+	}
+
+	pub const fn splat(v: i32) -> Self {
+		Self::from_raw(IVec3::splat(v))
+	}
+}
+
 // === Misc trait derivations === //
 // (most other traits are derived via trait logic in `lib.rs`)
 

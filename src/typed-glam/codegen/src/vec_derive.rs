@@ -1,3 +1,4 @@
+use crate::util::{FmtIntoOwnedExt, FmtIterExt};
 use genco::prelude::*;
 
 // === Entry === //
@@ -43,6 +44,33 @@ impl CompType {
 			CompType::F64 => false,
 		}
 	}
+
+	pub fn unit_zero(self) -> &'static str {
+		match self {
+			CompType::U32 => "0",
+			CompType::I32 => "0",
+			CompType::F32 => "0.0",
+			CompType::F64 => "0.0",
+		}
+	}
+
+	pub fn unit_one(self) -> &'static str {
+		match self {
+			CompType::U32 => "1",
+			CompType::I32 => "1",
+			CompType::F32 => "1.0",
+			CompType::F64 => "1.0",
+		}
+	}
+
+	pub fn unit_neg_one(self) -> &'static str {
+		match self {
+			CompType::U32 => "-1",
+			CompType::I32 => "-1",
+			CompType::F32 => "-1.0",
+			CompType::F64 => "-1.0",
+		}
+	}
 }
 
 struct VecDeriveSession<'a> {
@@ -61,6 +89,10 @@ struct VecDeriveSession<'a> {
 	from: &'a rust::Import,
 	index: &'a rust::Import,
 	index_mut: &'a rust::Import,
+
+	// Reused items
+	self_owned: &'a rust::Tokens,
+	self_ref: &'a rust::Tokens,
 }
 
 // === Main derivation logic === //
@@ -82,15 +114,200 @@ fn derive_entry_one(backing: &rust::Import, comp_type: CompType, dim: usize) -> 
 		from: &rust::import("core::convert", "From"),
 		index: &rust::import("core::ops", "Index"),
 		index_mut: &rust::import("core::ops", "IndexMut"),
+
+		// Reused items
+		self_owned: &quote! { Self },
+		self_ref: &quote! { &Self },
 	};
 
 	quote! {
+		$(derive_method_forwards(&sess))
 		$(derive_misc_traits(&sess))
 
-		// TODO: `Shl` and `Shr`; method forwards
+		// TODO: `Shl` and `Shr`
 		// TODO: Ensure that the formatting pre-rust-fmt isn't too bad.
 
 		$(derive_op_forwards(&sess))
+	}
+}
+
+fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
+	// Hoisted
+	let backing = sess.backing;
+	let vec_flavor = sess.vec_flavor;
+	let typed_vector_impl = sess.typed_vector_impl;
+	let comp_ty = sess.comp_type.prim_ty();
+	let unit_zero = sess.comp_type.unit_zero();
+	let unit_one = sess.comp_type.unit_one();
+	let unit_neg_one = sess.comp_type.unit_neg_one();
+	let dim = sess.dim;
+
+	// Method forwarding generation
+	let mut forwarded_methods = Tokens::new();
+
+	derive_method_forward_stub(
+		sess,
+		"new",
+		true,
+		SelfTy::Static,
+		&[
+			// FIXME
+			("x", ForwardedType::Exact(&comp_ty.fmt_to_tokens())),
+			("y", ForwardedType::Exact(&comp_ty.fmt_to_tokens())),
+			("z", ForwardedType::Exact(&comp_ty.fmt_to_tokens())),
+		],
+		&[ForwardedType::OwnedVector],
+	)
+	.format_into(&mut forwarded_methods);
+
+	derive_method_forward_stub(
+		sess,
+		"splat",
+		true,
+		SelfTy::Static,
+		&[("v", ForwardedType::Exact(&comp_ty.fmt_to_tokens()))],
+		&[ForwardedType::OwnedVector],
+	)
+	.format_into(&mut forwarded_methods);
+
+	// Generation
+	quote! {
+		$("// === Inherent `impl` items === //")
+
+		impl<M> $typed_vector_impl<$backing, M>
+		where
+			M: ?Sized + $vec_flavor<Backing = $backing>,
+		{
+			pub const ZERO: Self = Self::splat($unit_zero);
+			pub const ONE: Self = Self::splat($unit_one);
+
+			$forwarded_methods
+		}
+		$['\n']
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+enum ForwardedType<'a> {
+	Exact(&'a rust::Tokens),
+	OwnedVector,
+	VectorRef,
+}
+
+impl<'a> ForwardedType<'a> {
+	fn as_out_ty<'b>(self, sess: &VecDeriveSession<'b>) -> &'b rust::Tokens
+	where
+		'a: 'b,
+	{
+		match self {
+			ForwardedType::Exact(exact) => exact,
+			ForwardedType::OwnedVector => sess.self_owned,
+			ForwardedType::VectorRef => sess.self_ref,
+		}
+	}
+
+	fn as_transformer_for(self, expr: rust::Tokens) -> rust::Tokens {
+		match self {
+			ForwardedType::Exact(_) => expr, // (no transformation necessary)
+			ForwardedType::OwnedVector => quote! { Self::from_raw($expr) },
+			ForwardedType::VectorRef => quote! { Self::from_raw_ref($expr) },
+		}
+	}
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+enum SelfTy {
+	Ref,
+	Mut,
+	Owned,
+	Static,
+}
+
+impl SelfTy {
+	fn prefix(self) -> Option<&'static str> {
+		match self {
+			SelfTy::Ref => Some("&self"),
+			SelfTy::Mut => Some("&mut self"),
+			SelfTy::Owned => Some("self"),
+			SelfTy::Static => None,
+		}
+	}
+}
+
+// FIXME: Forgot to do input transformations
+fn derive_method_forward_stub(
+	sess: &VecDeriveSession,
+	name: &str,
+	is_const: bool,
+	self_ty: SelfTy,
+	args: &[(&str, ForwardedType)],
+	ret_vals: &[ForwardedType],
+) -> rust::Tokens {
+	// Hoisting
+	let backing = sess.backing;
+
+	// Generate signature elements
+	let args_fmt = self_ty
+		.prefix()
+		.map(|elem| elem.fmt_to_tokens())
+		.into_iter()
+		.chain(args.iter().map(|(arg_name, arg_ty)| {
+			quote! { $(*arg_name): $(arg_ty.as_out_ty(sess)) }
+		}))
+		.fmt_delimited(",");
+
+	let ret_vals_fmt = if ret_vals.len() == 1 {
+		ret_vals[0].as_out_ty(sess).clone()
+	} else {
+		ret_vals
+			.iter()
+			.map(|ty| ty.as_out_ty(sess))
+			.fmt_delimited(",")
+			.fmt_to_tokens()
+	};
+
+	// Generate body elements
+	let fwd_prefix = match self_ty {
+		// I guess ease trumps good code gen :person_shrugging:.
+		SelfTy::Ref | SelfTy::Mut | SelfTy::Owned => quote! { self.vec. },
+		SelfTy::Static => quote! { $backing:: },
+	};
+
+	let fwd_args = args
+		.iter()
+		.map(|(arg_name, _)| arg_name.fmt_to_tokens())
+		.fmt_delimited(",");
+
+	let fwd_call = quote! { $fwd_prefix$name($fwd_args) };
+
+	let fwd_body = if ret_vals.len() == 1 {
+		ret_vals[0].as_transformer_for(fwd_call)
+	} else {
+		const ALPHABET: &'static str = "abcdefghijklmnopqrstuvwxyz";
+		assert!(ret_vals.len() < ALPHABET.len());
+
+		let fwd_tup_args = ALPHABET[0..ret_vals.len()]
+			.split("")
+			.fmt_delimited(",")
+			.fmt_to_tokens();
+
+		let fwd_tup_transform = ret_vals
+			.iter()
+			.zip(ALPHABET.split(""))
+			.map(|(ret_ty, name)| ret_ty.as_transformer_for(name.fmt_to_tokens()))
+			.fmt_delimited(",");
+
+		quote! {
+			let ($fwd_tup_args) = $fwd_call;
+			($fwd_tup_transform)
+		}
+	};
+
+	// Generate
+	quote! {
+		pub $(if is_const => const) fn $name($args_fmt) -> $ret_vals_fmt {
+			$fwd_body
+		}
 	}
 }
 
