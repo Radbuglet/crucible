@@ -1,12 +1,116 @@
 use crate::backing_vec::Sealed;
 use crate::{BackingVec, TypedVectorImpl, VecFlavor};
+use core::convert::{AsMut, AsRef, From};
 use core::ops::{
-	Add, AddAssign, BitAnd, BitOr, BitXor, Div, DivAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign,
+	Add, AddAssign, BitAnd, BitOr, BitXor, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg,
+	Not, Rem, RemAssign, Sub, SubAssign,
 };
 use glam::i32::IVec3;
 
+// === Misc trait derivations === //
+// (most other traits are derived via trait logic in `lib.rs`)
+
 impl BackingVec for IVec3 {}
 impl Sealed for IVec3 {}
+
+// Raw <-> Typed
+impl<M> From<IVec3> for TypedVectorImpl<IVec3, M>
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	fn from(v: IVec3) -> Self {
+		Self::from_raw(v)
+	}
+}
+
+impl<M> From<TypedVectorImpl<IVec3, M>> for IVec3
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	fn from(v: TypedVectorImpl<IVec3, M>) -> Self {
+		v.into_raw()
+	}
+}
+
+// [i32; 3] <-> Typed
+impl<M> From<[i32; 3]> for TypedVectorImpl<IVec3, M>
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	fn from(v: [i32; 3]) -> Self {
+		IVec3::from(v).into()
+	}
+}
+
+impl<M> From<TypedVectorImpl<IVec3, M>> for [i32; 3]
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	fn from(v: TypedVectorImpl<IVec3, M>) -> Self {
+		v.into_raw().into()
+	}
+}
+
+// (i32, ..., i32) <-> Typed
+impl<M> From<(i32, i32, i32)> for TypedVectorImpl<IVec3, M>
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	fn from(v: (i32, i32, i32)) -> Self {
+		IVec3::from(v).into()
+	}
+}
+
+impl<M> From<TypedVectorImpl<IVec3, M>> for (i32, i32, i32)
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	fn from(v: TypedVectorImpl<IVec3, M>) -> Self {
+		v.into_raw().into()
+	}
+}
+
+// `AsRef` and `AsMut`
+impl<M> AsRef<[i32; 3]> for TypedVectorImpl<IVec3, M>
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	fn as_ref(&self) -> &[i32; 3] {
+		self.raw().as_ref()
+	}
+}
+
+impl<M> AsMut<[i32; 3]> for TypedVectorImpl<IVec3, M>
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	fn as_mut(&mut self) -> &mut [i32; 3] {
+		self.raw_mut().as_mut()
+	}
+}
+
+// `Index` and `IndexMut`
+impl<M> Index<usize> for TypedVectorImpl<IVec3, M>
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	type Output = i32;
+
+	fn index(&self, i: usize) -> &i32 {
+		&self.raw()[i]
+	}
+}
+
+impl<M> IndexMut<usize> for TypedVectorImpl<IVec3, M>
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	fn index_mut(&mut self, i: usize) -> &mut i32 {
+		&mut self.raw_mut()[i]
+	}
+}
+
+// === `core::ops` trait forwards === //
 
 // `Add` operation forwarding
 
@@ -261,6 +365,70 @@ where
 {
 	fn div_assign(&mut self, rhs: IVec3) {
 		DivAssign::div_assign(self.raw_mut(), rhs)
+	}
+}
+
+// `Rem` operation forwarding
+
+impl<M> Rem for TypedVectorImpl<IVec3, M>
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	type Output = Self;
+
+	fn rem(self, rhs: Self) -> Self {
+		self.map_raw(|lhs| Rem::rem(lhs, rhs.into_raw()))
+	}
+}
+
+impl<M> Rem<IVec3> for TypedVectorImpl<IVec3, M>
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	type Output = Self;
+
+	fn rem(self, rhs: IVec3) -> Self {
+		self.map_raw(|lhs| Rem::rem(lhs, rhs))
+	}
+}
+
+impl<M> Rem<i32> for TypedVectorImpl<IVec3, M>
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	type Output = Self;
+
+	fn rem(self, rhs: i32) -> Self {
+		self.map_raw(|lhs| Rem::rem(lhs, rhs))
+	}
+}
+
+impl<M> Rem<TypedVectorImpl<IVec3, M>> for i32
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	type Output = TypedVectorImpl<IVec3, M>;
+
+	fn rem(self, rhs: TypedVectorImpl<IVec3, M>) -> TypedVectorImpl<IVec3, M> {
+		rhs.map_raw(|rhs| Rem::rem(self, rhs))
+	}
+}
+
+impl<M> RemAssign for TypedVectorImpl<IVec3, M>
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	fn rem_assign(&mut self, rhs: Self) {
+		RemAssign::rem_assign(self.raw_mut(), rhs.into_raw())
+	}
+}
+
+impl<M> RemAssign<IVec3> for TypedVectorImpl<IVec3, M>
+where
+	M: ?Sized + VecFlavor<Backing = IVec3>,
+{
+	fn rem_assign(&mut self, rhs: IVec3) {
+		RemAssign::rem_assign(self.raw_mut(), rhs)
 	}
 }
 
