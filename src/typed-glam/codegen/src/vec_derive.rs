@@ -5,9 +5,9 @@ use genco::prelude::*;
 
 pub fn derive_entry_all() -> rust::Tokens {
 	derive_entry_one(
-		&rust::import("glam::i32", "IVec3"),
+		&rust::import("glam::f32", "Vec3"),
 		&rust::import("glam::bool", "BVec3"),
-		CompType::I32,
+		CompType::F32,
 		3,
 	)
 }
@@ -49,6 +49,15 @@ impl CompType {
 			CompType::F64 => false,
 		}
 	}
+
+	pub fn is_floating(self) -> bool {
+		match self {
+			CompType::U32 => false,
+			CompType::I32 => false,
+			CompType::F32 => true,
+			CompType::F64 => true,
+		}
+	}
 }
 
 struct VecDeriveSession<'a> {
@@ -77,34 +86,29 @@ struct VecDeriveSession<'a> {
 struct AxisInfo {
 	name: &'static str,
 	name_screaming: &'static str,
-	name_neg_screaming: &'static str,
-	index: usize,
+	neg_name_screaming: &'static str,
 }
 
 const AXES: [AxisInfo; 4] = [
 	AxisInfo {
 		name: "x",
 		name_screaming: "X",
-		name_neg_screaming: "NEG_X",
-		index: 0,
+		neg_name_screaming: "NEG_X",
 	},
 	AxisInfo {
 		name: "y",
 		name_screaming: "Y",
-		name_neg_screaming: "NEG_Y",
-		index: 1,
+		neg_name_screaming: "NEG_Y",
 	},
 	AxisInfo {
 		name: "z",
 		name_screaming: "Z",
-		name_neg_screaming: "NEG_Z",
-		index: 2,
+		neg_name_screaming: "NEG_Z",
 	},
 	AxisInfo {
 		name: "w",
 		name_screaming: "W",
-		name_neg_screaming: "NEG_W",
-		index: 3,
+		neg_name_screaming: "NEG_W",
 	},
 ];
 
@@ -158,14 +162,29 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 	let typed_vector_impl = sess.typed_vector_impl;
 	let comp_ty = &sess.comp_type.prim_ty().fmt_to_tokens();
 	let dim = sess.dim;
+	let is_signed = sess.comp_type.is_signed();
+	let is_floating = sess.comp_type.is_floating();
 
 	// Constant forwarding generation
 	let forwarded_consts = quote! {
 		pub const ZERO: Self = Self::from_raw($backing::ZERO);
+
 		pub const ONE: Self = Self::from_raw($backing::ONE);
 
 		$(for axis in &AXES[0..dim] =>
 			pub const $(axis.name_screaming): Self = Self::from_raw($backing::$(axis.name_screaming));
+		)
+
+		$(if is_signed =>
+			pub const NEG_ONE: Self = Self::from_raw($backing::NEG_ONE);
+
+			$(for axis in &AXES[0..dim] =>
+				pub const $(axis.neg_name_screaming): Self = Self::from_raw($backing::$(axis.neg_name_screaming));
+			)
+		)
+
+		$(if is_floating =>
+			pub const NAN: Self = Self::from_raw($backing::NAN);
 		)
 
 		pub const AXES: [Self; $dim] = [$(
@@ -327,6 +346,276 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 			SelfTy::Owned,
 			&[("rhs", ForwardedType::OwnedVector)],
 			&[ForwardedType::Exact(&bvec.fmt_to_tokens())],
+		)
+		.format_into(&mut forwarded_methods);
+	}
+
+	if is_signed {
+		derive_method_forward_stub(
+			sess,
+			"abs",
+			false,
+			SelfTy::Owned,
+			&[],
+			&[ForwardedType::OwnedVector],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"signum",
+			false,
+			SelfTy::Owned,
+			&[],
+			&[ForwardedType::OwnedVector],
+		)
+		.format_into(&mut forwarded_methods);
+	}
+
+	if is_floating {
+		derive_method_forward_stub(
+			sess,
+			"is_finite",
+			false,
+			SelfTy::Owned,
+			&[],
+			&[ForwardedType::Exact(&quote! { bool })],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"is_nan",
+			false,
+			SelfTy::Owned,
+			&[],
+			&[ForwardedType::Exact(&quote! { bool })],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"is_nan_mask",
+			false,
+			SelfTy::Owned,
+			&[],
+			&[ForwardedType::Exact(&bvec.fmt_to_tokens())],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"length",
+			false,
+			SelfTy::Owned,
+			&[],
+			&[ForwardedType::Exact(comp_ty)],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"length_squared",
+			false,
+			SelfTy::Owned,
+			&[],
+			&[ForwardedType::Exact(comp_ty)],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"length_recip",
+			false,
+			SelfTy::Owned,
+			&[],
+			&[ForwardedType::Exact(comp_ty)],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"distance",
+			false,
+			SelfTy::Owned,
+			&[("rhs", ForwardedType::OwnedVector)],
+			&[ForwardedType::Exact(comp_ty)],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"distance_squared",
+			false,
+			SelfTy::Owned,
+			&[("rhs", ForwardedType::OwnedVector)],
+			&[ForwardedType::Exact(comp_ty)],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"normalize",
+			false,
+			SelfTy::Owned,
+			&[],
+			&[ForwardedType::OwnedVector],
+		)
+		.format_into(&mut forwarded_methods);
+
+		// TODO: try_normalize
+
+		derive_method_forward_stub(
+			sess,
+			"normalize_or_zero",
+			false,
+			SelfTy::Owned,
+			&[],
+			&[ForwardedType::OwnedVector],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"is_normalized",
+			false,
+			SelfTy::Owned,
+			&[],
+			&[ForwardedType::Exact(&quote! { bool })],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"project_onto",
+			false,
+			SelfTy::Owned,
+			&[("rhs", ForwardedType::OwnedVector)],
+			&[ForwardedType::OwnedVector],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"reject_from",
+			false,
+			SelfTy::Owned,
+			&[("rhs", ForwardedType::OwnedVector)],
+			&[ForwardedType::OwnedVector],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"project_onto_normalized",
+			false,
+			SelfTy::Owned,
+			&[("rhs", ForwardedType::OwnedVector)],
+			&[ForwardedType::OwnedVector],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"reject_from_normalized",
+			false,
+			SelfTy::Owned,
+			&[("rhs", ForwardedType::OwnedVector)],
+			&[ForwardedType::OwnedVector],
+		)
+		.format_into(&mut forwarded_methods);
+
+		for name in ["round", "floor", "ceil", "fract", "exp", "recip"] {
+			derive_method_forward_stub(
+				sess,
+				name,
+				false,
+				SelfTy::Owned,
+				&[],
+				&[ForwardedType::OwnedVector],
+			)
+			.format_into(&mut forwarded_methods);
+		}
+
+		derive_method_forward_stub(
+			sess,
+			"powf",
+			false,
+			SelfTy::Owned,
+			&[("n", ForwardedType::Exact(comp_ty))],
+			&[ForwardedType::OwnedVector],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"lerp",
+			false,
+			SelfTy::Owned,
+			&[
+				("rhs", ForwardedType::OwnedVector),
+				("s", ForwardedType::Exact(comp_ty)),
+			],
+			&[ForwardedType::OwnedVector],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"abs_diff_eq",
+			false,
+			SelfTy::Owned,
+			&[
+				("rhs", ForwardedType::OwnedVector),
+				("max_abs_diff", ForwardedType::Exact(comp_ty)),
+			],
+			&[ForwardedType::Exact(&quote! { bool })],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"clamp_length",
+			false,
+			SelfTy::Owned,
+			&[
+				("min", ForwardedType::Exact(comp_ty)),
+				("max", ForwardedType::Exact(comp_ty)),
+			],
+			&[ForwardedType::OwnedVector],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"clamp_length_max",
+			false,
+			SelfTy::Owned,
+			&[("max", ForwardedType::Exact(comp_ty))],
+			&[ForwardedType::OwnedVector],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"clamp_length_min",
+			false,
+			SelfTy::Owned,
+			&[("min", ForwardedType::Exact(comp_ty))],
+			&[ForwardedType::OwnedVector],
+		)
+		.format_into(&mut forwarded_methods);
+
+		derive_method_forward_stub(
+			sess,
+			"mul_add",
+			false,
+			SelfTy::Owned,
+			&[
+				("a", ForwardedType::OwnedVector),
+				("b", ForwardedType::OwnedVector),
+			],
+			&[ForwardedType::OwnedVector],
 		)
 		.format_into(&mut forwarded_methods);
 	}

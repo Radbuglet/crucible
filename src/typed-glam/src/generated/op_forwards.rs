@@ -2,56 +2,65 @@ use crate::backing_vec::Sealed;
 use crate::{BackingVec, TypedVectorImpl, VecFlavor};
 use core::convert::{AsMut, AsRef, From};
 use core::ops::{
-	Add, AddAssign, BitAnd, BitOr, BitXor, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg,
-	Not, Rem, RemAssign, Sub, SubAssign,
+	Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Rem, RemAssign, Sub,
+	SubAssign,
 };
 use glam::bool::BVec3;
-use glam::i32::IVec3;
+use glam::f32::Vec3;
 
 // === Inherent `impl` items === //
 
-impl<M> TypedVectorImpl<IVec3, M>
+impl<M> TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	pub const ZERO: Self = Self::from_raw(IVec3::ZERO);
-	pub const ONE: Self = Self::from_raw(IVec3::ONE);
+	pub const ZERO: Self = Self::from_raw(Vec3::ZERO);
 
-	pub const X: Self = Self::from_raw(IVec3::X);
-	pub const Y: Self = Self::from_raw(IVec3::Y);
-	pub const Z: Self = Self::from_raw(IVec3::Z);
+	pub const ONE: Self = Self::from_raw(Vec3::ONE);
+
+	pub const X: Self = Self::from_raw(Vec3::X);
+	pub const Y: Self = Self::from_raw(Vec3::Y);
+	pub const Z: Self = Self::from_raw(Vec3::Z);
+
+	pub const NEG_ONE: Self = Self::from_raw(Vec3::NEG_ONE);
+
+	pub const NEG_X: Self = Self::from_raw(Vec3::NEG_X);
+	pub const NEG_Y: Self = Self::from_raw(Vec3::NEG_Y);
+	pub const NEG_Z: Self = Self::from_raw(Vec3::NEG_Z);
+
+	pub const NAN: Self = Self::from_raw(Vec3::NAN);
 
 	pub const AXES: [Self; 3] = [Self::X, Self::Y, Self::Z];
 
-	pub const fn new(x: i32, y: i32, z: i32) -> Self {
-		Self::from_raw(IVec3::new(x, y, z))
+	pub const fn new(x: f32, y: f32, z: f32) -> Self {
+		Self::from_raw(Vec3::new(x, y, z))
 	}
 
-	pub const fn splat(v: i32) -> Self {
-		Self::from_raw(IVec3::splat(v))
+	pub const fn splat(v: f32) -> Self {
+		Self::from_raw(Vec3::splat(v))
 	}
 
 	pub fn select(mask: BVec3, if_true: Self, if_false: Self) -> Self {
-		Self::from_raw(IVec3::select(mask, if_true.into_raw(), if_false.into_raw()))
+		Self::from_raw(Vec3::select(mask, if_true.into_raw(), if_false.into_raw()))
 	}
 
-	pub const fn from_array(a: [i32; 3]) -> Self {
-		Self::from_raw(IVec3::from_array(a))
+	pub const fn from_array(a: [f32; 3]) -> Self {
+		Self::from_raw(Vec3::from_array(a))
 	}
 
-	pub const fn to_array(&self) -> [i32; 3] {
+	pub const fn to_array(&self) -> [f32; 3] {
 		self.vec.to_array()
 	}
 
-	pub const fn from_slice(slice: &[i32]) -> Self {
-		Self::from_raw(IVec3::from_slice(slice))
+	pub const fn from_slice(slice: &[f32]) -> Self {
+		Self::from_raw(Vec3::from_slice(slice))
 	}
 
-	pub fn write_to_slice(self, slice: &mut [i32]) {
+	pub fn write_to_slice(self, slice: &mut [f32]) {
 		self.vec.write_to_slice(slice)
 	}
 
-	pub fn dot(self, rhs: Self) -> i32 {
+	pub fn dot(self, rhs: Self) -> f32 {
 		self.vec.dot(rhs.into_raw())
 	}
 
@@ -67,11 +76,11 @@ where
 		Self::from_raw(self.vec.clamp(min.into_raw(), max.into_raw()))
 	}
 
-	pub fn min_element(self) -> i32 {
+	pub fn min_element(self) -> f32 {
 		self.vec.min_element()
 	}
 
-	pub fn max_element(self) -> i32 {
+	pub fn max_element(self) -> f32 {
 		self.vec.max_element()
 	}
 
@@ -98,107 +107,227 @@ where
 	pub fn cmplt(self, rhs: Self) -> BVec3 {
 		self.vec.cmplt(rhs.into_raw())
 	}
+
+	pub fn abs(self) -> Self {
+		Self::from_raw(self.vec.abs())
+	}
+
+	pub fn signum(self) -> Self {
+		Self::from_raw(self.vec.signum())
+	}
+
+	pub fn is_finite(self) -> bool {
+		self.vec.is_finite()
+	}
+
+	pub fn is_nan(self) -> bool {
+		self.vec.is_nan()
+	}
+
+	pub fn is_nan_mask(self) -> BVec3 {
+		self.vec.is_nan_mask()
+	}
+
+	pub fn length(self) -> f32 {
+		self.vec.length()
+	}
+
+	pub fn length_squared(self) -> f32 {
+		self.vec.length_squared()
+	}
+
+	pub fn length_recip(self) -> f32 {
+		self.vec.length_recip()
+	}
+
+	pub fn distance(self, rhs: Self) -> f32 {
+		self.vec.distance(rhs.into_raw())
+	}
+
+	pub fn distance_squared(self, rhs: Self) -> f32 {
+		self.vec.distance_squared(rhs.into_raw())
+	}
+
+	pub fn normalize(self) -> Self {
+		Self::from_raw(self.vec.normalize())
+	}
+
+	pub fn normalize_or_zero(self) -> Self {
+		Self::from_raw(self.vec.normalize_or_zero())
+	}
+
+	pub fn is_normalized(self) -> bool {
+		self.vec.is_normalized()
+	}
+
+	pub fn project_onto(self, rhs: Self) -> Self {
+		Self::from_raw(self.vec.project_onto(rhs.into_raw()))
+	}
+
+	pub fn reject_from(self, rhs: Self) -> Self {
+		Self::from_raw(self.vec.reject_from(rhs.into_raw()))
+	}
+
+	pub fn project_onto_normalized(self, rhs: Self) -> Self {
+		Self::from_raw(self.vec.project_onto_normalized(rhs.into_raw()))
+	}
+
+	pub fn reject_from_normalized(self, rhs: Self) -> Self {
+		Self::from_raw(self.vec.reject_from_normalized(rhs.into_raw()))
+	}
+
+	pub fn round(self) -> Self {
+		Self::from_raw(self.vec.round())
+	}
+
+	pub fn floor(self) -> Self {
+		Self::from_raw(self.vec.floor())
+	}
+
+	pub fn ceil(self) -> Self {
+		Self::from_raw(self.vec.ceil())
+	}
+
+	pub fn fract(self) -> Self {
+		Self::from_raw(self.vec.fract())
+	}
+
+	pub fn exp(self) -> Self {
+		Self::from_raw(self.vec.exp())
+	}
+
+	pub fn recip(self) -> Self {
+		Self::from_raw(self.vec.recip())
+	}
+
+	pub fn powf(self, n: f32) -> Self {
+		Self::from_raw(self.vec.powf(n))
+	}
+
+	pub fn lerp(self, rhs: Self, s: f32) -> Self {
+		Self::from_raw(self.vec.lerp(rhs.into_raw(), s))
+	}
+
+	pub fn abs_diff_eq(self, rhs: Self, max_abs_diff: f32) -> bool {
+		self.vec.abs_diff_eq(rhs.into_raw(), max_abs_diff)
+	}
+
+	pub fn clamp_length(self, min: f32, max: f32) -> Self {
+		Self::from_raw(self.vec.clamp_length(min, max))
+	}
+
+	pub fn clamp_length_max(self, max: f32) -> Self {
+		Self::from_raw(self.vec.clamp_length_max(max))
+	}
+
+	pub fn clamp_length_min(self, min: f32) -> Self {
+		Self::from_raw(self.vec.clamp_length_min(min))
+	}
+
+	pub fn mul_add(self, a: Self, b: Self) -> Self {
+		Self::from_raw(self.vec.mul_add(a.into_raw(), b.into_raw()))
+	}
 }
 
 // === Misc trait derivations === //
 // (most other traits are derived via trait logic in `lib.rs`)
 
-impl BackingVec for IVec3 {}
-impl Sealed for IVec3 {}
+impl BackingVec for Vec3 {}
+impl Sealed for Vec3 {}
 
 // Raw <-> Typed
-impl<M> From<IVec3> for TypedVectorImpl<IVec3, M>
+impl<M> From<Vec3> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn from(v: IVec3) -> Self {
+	fn from(v: Vec3) -> Self {
 		Self::from_raw(v)
 	}
 }
 
-impl<M> From<TypedVectorImpl<IVec3, M>> for IVec3
+impl<M> From<TypedVectorImpl<Vec3, M>> for Vec3
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn from(v: TypedVectorImpl<IVec3, M>) -> Self {
+	fn from(v: TypedVectorImpl<Vec3, M>) -> Self {
 		v.into_raw()
 	}
 }
 
-// [i32; 3] <-> Typed
-impl<M> From<[i32; 3]> for TypedVectorImpl<IVec3, M>
+// [f32; 3] <-> Typed
+impl<M> From<[f32; 3]> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn from(v: [i32; 3]) -> Self {
-		IVec3::from(v).into()
+	fn from(v: [f32; 3]) -> Self {
+		Vec3::from(v).into()
 	}
 }
 
-impl<M> From<TypedVectorImpl<IVec3, M>> for [i32; 3]
+impl<M> From<TypedVectorImpl<Vec3, M>> for [f32; 3]
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn from(v: TypedVectorImpl<IVec3, M>) -> Self {
+	fn from(v: TypedVectorImpl<Vec3, M>) -> Self {
 		v.into_raw().into()
 	}
 }
 
-// (i32, ..., i32) <-> Typed
-impl<M> From<(i32, i32, i32)> for TypedVectorImpl<IVec3, M>
+// (f32, ..., f32) <-> Typed
+impl<M> From<(f32, f32, f32)> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn from(v: (i32, i32, i32)) -> Self {
-		IVec3::from(v).into()
+	fn from(v: (f32, f32, f32)) -> Self {
+		Vec3::from(v).into()
 	}
 }
 
-impl<M> From<TypedVectorImpl<IVec3, M>> for (i32, i32, i32)
+impl<M> From<TypedVectorImpl<Vec3, M>> for (f32, f32, f32)
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn from(v: TypedVectorImpl<IVec3, M>) -> Self {
+	fn from(v: TypedVectorImpl<Vec3, M>) -> Self {
 		v.into_raw().into()
 	}
 }
 
 // `AsRef` and `AsMut`
-impl<M> AsRef<[i32; 3]> for TypedVectorImpl<IVec3, M>
+impl<M> AsRef<[f32; 3]> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn as_ref(&self) -> &[i32; 3] {
+	fn as_ref(&self) -> &[f32; 3] {
 		self.raw().as_ref()
 	}
 }
 
-impl<M> AsMut<[i32; 3]> for TypedVectorImpl<IVec3, M>
+impl<M> AsMut<[f32; 3]> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn as_mut(&mut self) -> &mut [i32; 3] {
+	fn as_mut(&mut self) -> &mut [f32; 3] {
 		self.raw_mut().as_mut()
 	}
 }
 
 // `Index` and `IndexMut`
-impl<M> Index<usize> for TypedVectorImpl<IVec3, M>
+impl<M> Index<usize> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	type Output = i32;
+	type Output = f32;
 
-	fn index(&self, i: usize) -> &i32 {
+	fn index(&self, i: usize) -> &f32 {
 		&self.raw()[i]
 	}
 }
 
-impl<M> IndexMut<usize> for TypedVectorImpl<IVec3, M>
+impl<M> IndexMut<usize> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn index_mut(&mut self, i: usize) -> &mut i32 {
+	fn index_mut(&mut self, i: usize) -> &mut f32 {
 		&mut self.raw_mut()[i]
 	}
 }
@@ -207,9 +336,9 @@ where
 
 // `Add` operation forwarding
 
-impl<M> Add for TypedVectorImpl<IVec3, M>
+impl<M> Add for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
@@ -218,62 +347,62 @@ where
 	}
 }
 
-impl<M> Add<IVec3> for TypedVectorImpl<IVec3, M>
+impl<M> Add<Vec3> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
-	fn add(self, rhs: IVec3) -> Self {
+	fn add(self, rhs: Vec3) -> Self {
 		self.map_raw(|lhs| Add::add(lhs, rhs))
 	}
 }
 
-impl<M> Add<i32> for TypedVectorImpl<IVec3, M>
+impl<M> Add<f32> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
-	fn add(self, rhs: i32) -> Self {
+	fn add(self, rhs: f32) -> Self {
 		self.map_raw(|lhs| Add::add(lhs, rhs))
 	}
 }
 
-impl<M> Add<TypedVectorImpl<IVec3, M>> for i32
+impl<M> Add<TypedVectorImpl<Vec3, M>> for f32
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	type Output = TypedVectorImpl<IVec3, M>;
+	type Output = TypedVectorImpl<Vec3, M>;
 
-	fn add(self, rhs: TypedVectorImpl<IVec3, M>) -> TypedVectorImpl<IVec3, M> {
+	fn add(self, rhs: TypedVectorImpl<Vec3, M>) -> TypedVectorImpl<Vec3, M> {
 		rhs.map_raw(|rhs| Add::add(self, rhs))
 	}
 }
 
-impl<M> AddAssign for TypedVectorImpl<IVec3, M>
+impl<M> AddAssign for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	fn add_assign(&mut self, rhs: Self) {
 		AddAssign::add_assign(self.raw_mut(), rhs.into_raw())
 	}
 }
 
-impl<M> AddAssign<IVec3> for TypedVectorImpl<IVec3, M>
+impl<M> AddAssign<Vec3> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn add_assign(&mut self, rhs: IVec3) {
+	fn add_assign(&mut self, rhs: Vec3) {
 		AddAssign::add_assign(self.raw_mut(), rhs)
 	}
 }
 
 // `Sub` operation forwarding
 
-impl<M> Sub for TypedVectorImpl<IVec3, M>
+impl<M> Sub for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
@@ -282,62 +411,62 @@ where
 	}
 }
 
-impl<M> Sub<IVec3> for TypedVectorImpl<IVec3, M>
+impl<M> Sub<Vec3> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
-	fn sub(self, rhs: IVec3) -> Self {
+	fn sub(self, rhs: Vec3) -> Self {
 		self.map_raw(|lhs| Sub::sub(lhs, rhs))
 	}
 }
 
-impl<M> Sub<i32> for TypedVectorImpl<IVec3, M>
+impl<M> Sub<f32> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
-	fn sub(self, rhs: i32) -> Self {
+	fn sub(self, rhs: f32) -> Self {
 		self.map_raw(|lhs| Sub::sub(lhs, rhs))
 	}
 }
 
-impl<M> Sub<TypedVectorImpl<IVec3, M>> for i32
+impl<M> Sub<TypedVectorImpl<Vec3, M>> for f32
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	type Output = TypedVectorImpl<IVec3, M>;
+	type Output = TypedVectorImpl<Vec3, M>;
 
-	fn sub(self, rhs: TypedVectorImpl<IVec3, M>) -> TypedVectorImpl<IVec3, M> {
+	fn sub(self, rhs: TypedVectorImpl<Vec3, M>) -> TypedVectorImpl<Vec3, M> {
 		rhs.map_raw(|rhs| Sub::sub(self, rhs))
 	}
 }
 
-impl<M> SubAssign for TypedVectorImpl<IVec3, M>
+impl<M> SubAssign for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	fn sub_assign(&mut self, rhs: Self) {
 		SubAssign::sub_assign(self.raw_mut(), rhs.into_raw())
 	}
 }
 
-impl<M> SubAssign<IVec3> for TypedVectorImpl<IVec3, M>
+impl<M> SubAssign<Vec3> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn sub_assign(&mut self, rhs: IVec3) {
+	fn sub_assign(&mut self, rhs: Vec3) {
 		SubAssign::sub_assign(self.raw_mut(), rhs)
 	}
 }
 
 // `Mul` operation forwarding
 
-impl<M> Mul for TypedVectorImpl<IVec3, M>
+impl<M> Mul for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
@@ -346,62 +475,62 @@ where
 	}
 }
 
-impl<M> Mul<IVec3> for TypedVectorImpl<IVec3, M>
+impl<M> Mul<Vec3> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
-	fn mul(self, rhs: IVec3) -> Self {
+	fn mul(self, rhs: Vec3) -> Self {
 		self.map_raw(|lhs| Mul::mul(lhs, rhs))
 	}
 }
 
-impl<M> Mul<i32> for TypedVectorImpl<IVec3, M>
+impl<M> Mul<f32> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
-	fn mul(self, rhs: i32) -> Self {
+	fn mul(self, rhs: f32) -> Self {
 		self.map_raw(|lhs| Mul::mul(lhs, rhs))
 	}
 }
 
-impl<M> Mul<TypedVectorImpl<IVec3, M>> for i32
+impl<M> Mul<TypedVectorImpl<Vec3, M>> for f32
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	type Output = TypedVectorImpl<IVec3, M>;
+	type Output = TypedVectorImpl<Vec3, M>;
 
-	fn mul(self, rhs: TypedVectorImpl<IVec3, M>) -> TypedVectorImpl<IVec3, M> {
+	fn mul(self, rhs: TypedVectorImpl<Vec3, M>) -> TypedVectorImpl<Vec3, M> {
 		rhs.map_raw(|rhs| Mul::mul(self, rhs))
 	}
 }
 
-impl<M> MulAssign for TypedVectorImpl<IVec3, M>
+impl<M> MulAssign for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	fn mul_assign(&mut self, rhs: Self) {
 		MulAssign::mul_assign(self.raw_mut(), rhs.into_raw())
 	}
 }
 
-impl<M> MulAssign<IVec3> for TypedVectorImpl<IVec3, M>
+impl<M> MulAssign<Vec3> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn mul_assign(&mut self, rhs: IVec3) {
+	fn mul_assign(&mut self, rhs: Vec3) {
 		MulAssign::mul_assign(self.raw_mut(), rhs)
 	}
 }
 
 // `Div` operation forwarding
 
-impl<M> Div for TypedVectorImpl<IVec3, M>
+impl<M> Div for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
@@ -410,62 +539,62 @@ where
 	}
 }
 
-impl<M> Div<IVec3> for TypedVectorImpl<IVec3, M>
+impl<M> Div<Vec3> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
-	fn div(self, rhs: IVec3) -> Self {
+	fn div(self, rhs: Vec3) -> Self {
 		self.map_raw(|lhs| Div::div(lhs, rhs))
 	}
 }
 
-impl<M> Div<i32> for TypedVectorImpl<IVec3, M>
+impl<M> Div<f32> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
-	fn div(self, rhs: i32) -> Self {
+	fn div(self, rhs: f32) -> Self {
 		self.map_raw(|lhs| Div::div(lhs, rhs))
 	}
 }
 
-impl<M> Div<TypedVectorImpl<IVec3, M>> for i32
+impl<M> Div<TypedVectorImpl<Vec3, M>> for f32
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	type Output = TypedVectorImpl<IVec3, M>;
+	type Output = TypedVectorImpl<Vec3, M>;
 
-	fn div(self, rhs: TypedVectorImpl<IVec3, M>) -> TypedVectorImpl<IVec3, M> {
+	fn div(self, rhs: TypedVectorImpl<Vec3, M>) -> TypedVectorImpl<Vec3, M> {
 		rhs.map_raw(|rhs| Div::div(self, rhs))
 	}
 }
 
-impl<M> DivAssign for TypedVectorImpl<IVec3, M>
+impl<M> DivAssign for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	fn div_assign(&mut self, rhs: Self) {
 		DivAssign::div_assign(self.raw_mut(), rhs.into_raw())
 	}
 }
 
-impl<M> DivAssign<IVec3> for TypedVectorImpl<IVec3, M>
+impl<M> DivAssign<Vec3> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn div_assign(&mut self, rhs: IVec3) {
+	fn div_assign(&mut self, rhs: Vec3) {
 		DivAssign::div_assign(self.raw_mut(), rhs)
 	}
 }
 
 // `Rem` operation forwarding
 
-impl<M> Rem for TypedVectorImpl<IVec3, M>
+impl<M> Rem for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
@@ -474,175 +603,60 @@ where
 	}
 }
 
-impl<M> Rem<IVec3> for TypedVectorImpl<IVec3, M>
+impl<M> Rem<Vec3> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
-	fn rem(self, rhs: IVec3) -> Self {
+	fn rem(self, rhs: Vec3) -> Self {
 		self.map_raw(|lhs| Rem::rem(lhs, rhs))
 	}
 }
 
-impl<M> Rem<i32> for TypedVectorImpl<IVec3, M>
+impl<M> Rem<f32> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
-	fn rem(self, rhs: i32) -> Self {
+	fn rem(self, rhs: f32) -> Self {
 		self.map_raw(|lhs| Rem::rem(lhs, rhs))
 	}
 }
 
-impl<M> Rem<TypedVectorImpl<IVec3, M>> for i32
+impl<M> Rem<TypedVectorImpl<Vec3, M>> for f32
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	type Output = TypedVectorImpl<IVec3, M>;
+	type Output = TypedVectorImpl<Vec3, M>;
 
-	fn rem(self, rhs: TypedVectorImpl<IVec3, M>) -> TypedVectorImpl<IVec3, M> {
+	fn rem(self, rhs: TypedVectorImpl<Vec3, M>) -> TypedVectorImpl<Vec3, M> {
 		rhs.map_raw(|rhs| Rem::rem(self, rhs))
 	}
 }
 
-impl<M> RemAssign for TypedVectorImpl<IVec3, M>
+impl<M> RemAssign for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	fn rem_assign(&mut self, rhs: Self) {
 		RemAssign::rem_assign(self.raw_mut(), rhs.into_raw())
 	}
 }
 
-impl<M> RemAssign<IVec3> for TypedVectorImpl<IVec3, M>
+impl<M> RemAssign<Vec3> for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
-	fn rem_assign(&mut self, rhs: IVec3) {
+	fn rem_assign(&mut self, rhs: Vec3) {
 		RemAssign::rem_assign(self.raw_mut(), rhs)
 	}
 }
 
-// `BitAnd` operation forwarding
-
-impl<M> BitAnd for TypedVectorImpl<IVec3, M>
+impl<M> Neg for TypedVectorImpl<Vec3, M>
 where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
-{
-	type Output = Self;
-
-	fn bitand(self, rhs: Self) -> Self {
-		self.map_raw(|lhs| BitAnd::bitand(lhs, rhs.into_raw()))
-	}
-}
-
-impl<M> BitAnd<IVec3> for TypedVectorImpl<IVec3, M>
-where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
-{
-	type Output = Self;
-
-	fn bitand(self, rhs: IVec3) -> Self {
-		self.map_raw(|lhs| BitAnd::bitand(lhs, rhs))
-	}
-}
-
-impl<M> BitAnd<i32> for TypedVectorImpl<IVec3, M>
-where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
-{
-	type Output = Self;
-
-	fn bitand(self, rhs: i32) -> Self {
-		self.map_raw(|lhs| BitAnd::bitand(lhs, rhs))
-	}
-}
-
-// `BitOr` operation forwarding
-
-impl<M> BitOr for TypedVectorImpl<IVec3, M>
-where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
-{
-	type Output = Self;
-
-	fn bitor(self, rhs: Self) -> Self {
-		self.map_raw(|lhs| BitOr::bitor(lhs, rhs.into_raw()))
-	}
-}
-
-impl<M> BitOr<IVec3> for TypedVectorImpl<IVec3, M>
-where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
-{
-	type Output = Self;
-
-	fn bitor(self, rhs: IVec3) -> Self {
-		self.map_raw(|lhs| BitOr::bitor(lhs, rhs))
-	}
-}
-
-impl<M> BitOr<i32> for TypedVectorImpl<IVec3, M>
-where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
-{
-	type Output = Self;
-
-	fn bitor(self, rhs: i32) -> Self {
-		self.map_raw(|lhs| BitOr::bitor(lhs, rhs))
-	}
-}
-
-// `BitXor` operation forwarding
-
-impl<M> BitXor for TypedVectorImpl<IVec3, M>
-where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
-{
-	type Output = Self;
-
-	fn bitxor(self, rhs: Self) -> Self {
-		self.map_raw(|lhs| BitXor::bitxor(lhs, rhs.into_raw()))
-	}
-}
-
-impl<M> BitXor<IVec3> for TypedVectorImpl<IVec3, M>
-where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
-{
-	type Output = Self;
-
-	fn bitxor(self, rhs: IVec3) -> Self {
-		self.map_raw(|lhs| BitXor::bitxor(lhs, rhs))
-	}
-}
-
-impl<M> BitXor<i32> for TypedVectorImpl<IVec3, M>
-where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
-{
-	type Output = Self;
-
-	fn bitxor(self, rhs: i32) -> Self {
-		self.map_raw(|lhs| BitXor::bitxor(lhs, rhs))
-	}
-}
-
-impl<M> Not for TypedVectorImpl<IVec3, M>
-where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
-{
-	type Output = Self;
-
-	fn not(self) -> Self {
-		self.map_raw(|v| !v)
-	}
-}
-impl<M> Neg for TypedVectorImpl<IVec3, M>
-where
-	M: ?Sized + VecFlavor<Backing = IVec3>,
+	M: ?Sized + VecFlavor<Backing = Vec3>,
 {
 	type Output = Self;
 
