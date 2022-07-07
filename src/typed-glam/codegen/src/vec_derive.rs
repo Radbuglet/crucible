@@ -4,7 +4,12 @@ use genco::prelude::*;
 // === Entry === //
 
 pub fn derive_entry_all() -> rust::Tokens {
-	derive_entry_one(&rust::import("glam::i32", "IVec3"), CompType::I32, 3)
+	derive_entry_one(
+		&rust::import("glam::i32", "IVec3"),
+		&rust::import("glam::bool", "BVec3"),
+		CompType::I32,
+		3,
+	)
 }
 
 // === Session types === //
@@ -44,38 +49,12 @@ impl CompType {
 			CompType::F64 => false,
 		}
 	}
-
-	pub fn unit_zero(self) -> &'static str {
-		match self {
-			CompType::U32 => "0",
-			CompType::I32 => "0",
-			CompType::F32 => "0.0",
-			CompType::F64 => "0.0",
-		}
-	}
-
-	pub fn unit_one(self) -> &'static str {
-		match self {
-			CompType::U32 => "1",
-			CompType::I32 => "1",
-			CompType::F32 => "1.0",
-			CompType::F64 => "1.0",
-		}
-	}
-
-	pub fn unit_neg_one(self) -> &'static str {
-		match self {
-			CompType::U32 => "-1",
-			CompType::I32 => "-1",
-			CompType::F32 => "-1.0",
-			CompType::F64 => "-1.0",
-		}
-	}
 }
 
 struct VecDeriveSession<'a> {
 	// Config parameters
 	backing: &'a rust::Import,
+	bvec: &'a rust::Import,
 	comp_type: CompType,
 	dim: usize,
 
@@ -95,12 +74,52 @@ struct VecDeriveSession<'a> {
 	self_ref: &'a rust::Tokens,
 }
 
+struct AxisInfo {
+	name: &'static str,
+	name_screaming: &'static str,
+	name_neg_screaming: &'static str,
+	index: usize,
+}
+
+const AXES: [AxisInfo; 4] = [
+	AxisInfo {
+		name: "x",
+		name_screaming: "X",
+		name_neg_screaming: "NEG_X",
+		index: 0,
+	},
+	AxisInfo {
+		name: "y",
+		name_screaming: "Y",
+		name_neg_screaming: "NEG_Y",
+		index: 1,
+	},
+	AxisInfo {
+		name: "z",
+		name_screaming: "Z",
+		name_neg_screaming: "NEG_Z",
+		index: 2,
+	},
+	AxisInfo {
+		name: "w",
+		name_screaming: "W",
+		name_neg_screaming: "NEG_W",
+		index: 3,
+	},
+];
+
 // === Main derivation logic === //
 
-fn derive_entry_one(backing: &rust::Import, comp_type: CompType, dim: usize) -> rust::Tokens {
+fn derive_entry_one(
+	backing: &rust::Import,
+	bvec: &rust::Import,
+	comp_type: CompType,
+	dim: usize,
+) -> rust::Tokens {
 	let sess = VecDeriveSession {
 		// Config parameters
 		backing,
+		bvec,
 		comp_type,
 		dim,
 
@@ -134,13 +153,28 @@ fn derive_entry_one(backing: &rust::Import, comp_type: CompType, dim: usize) -> 
 fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 	// Hoisted
 	let backing = sess.backing;
+	let bvec = sess.bvec;
 	let vec_flavor = sess.vec_flavor;
 	let typed_vector_impl = sess.typed_vector_impl;
-	let comp_ty = sess.comp_type.prim_ty();
-	let unit_zero = sess.comp_type.unit_zero();
-	let unit_one = sess.comp_type.unit_one();
-	let unit_neg_one = sess.comp_type.unit_neg_one();
+	let comp_ty = &sess.comp_type.prim_ty().fmt_to_tokens();
 	let dim = sess.dim;
+
+	// Constant forwarding generation
+	let forwarded_consts = quote! {
+		pub const ZERO: Self = Self::from_raw($backing::ZERO);
+		pub const ONE: Self = Self::from_raw($backing::ONE);
+
+		$(for axis in &AXES[0..dim] =>
+			pub const $(axis.name_screaming): Self = Self::from_raw($backing::$(axis.name_screaming));
+		)
+
+		pub const AXES: [Self; $dim] = [$(
+			AXES[0..dim]
+				.iter()
+				.map(|axis| quote! { Self::$(axis.name_screaming) })
+				.fmt_delimited(",")
+		)];
+	};
 
 	// Method forwarding generation
 	let mut forwarded_methods = Tokens::new();
@@ -150,12 +184,10 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 		"new",
 		true,
 		SelfTy::Static,
-		&[
-			// FIXME
-			("x", ForwardedType::Exact(&comp_ty.fmt_to_tokens())),
-			("y", ForwardedType::Exact(&comp_ty.fmt_to_tokens())),
-			("z", ForwardedType::Exact(&comp_ty.fmt_to_tokens())),
-		],
+		&AXES[0..dim]
+			.iter()
+			.map(|axis| (axis.name, ForwardedType::Exact(comp_ty)))
+			.collect::<Vec<_>>(),
 		&[ForwardedType::OwnedVector],
 	)
 	.format_into(&mut forwarded_methods);
@@ -165,10 +197,139 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 		"splat",
 		true,
 		SelfTy::Static,
-		&[("v", ForwardedType::Exact(&comp_ty.fmt_to_tokens()))],
+		&[("v", ForwardedType::Exact(comp_ty))],
 		&[ForwardedType::OwnedVector],
 	)
 	.format_into(&mut forwarded_methods);
+
+	derive_method_forward_stub(
+		sess,
+		"select",
+		false,
+		SelfTy::Static,
+		&[
+			("mask", ForwardedType::Exact(&bvec.fmt_to_tokens())),
+			("if_true", ForwardedType::OwnedVector),
+			("if_false", ForwardedType::OwnedVector),
+		],
+		&[ForwardedType::OwnedVector],
+	)
+	.format_into(&mut forwarded_methods);
+
+	derive_method_forward_stub(
+		sess,
+		"from_array",
+		true,
+		SelfTy::Static,
+		&[("a", ForwardedType::Exact(&quote! { [$comp_ty; $dim] }))],
+		&[ForwardedType::OwnedVector],
+	)
+	.format_into(&mut forwarded_methods);
+
+	derive_method_forward_stub(
+		sess,
+		"to_array",
+		true,
+		SelfTy::Ref,
+		&[],
+		&[ForwardedType::Exact(&quote! { [$comp_ty; $dim] })],
+	)
+	.format_into(&mut forwarded_methods);
+
+	derive_method_forward_stub(
+		sess,
+		"from_slice",
+		true,
+		SelfTy::Static,
+		&[("slice", ForwardedType::Exact(&quote! { &[$comp_ty] }))],
+		&[ForwardedType::OwnedVector],
+	)
+	.format_into(&mut forwarded_methods);
+
+	derive_method_forward_stub(
+		sess,
+		"write_to_slice",
+		false,
+		SelfTy::Owned,
+		&[("slice", ForwardedType::Exact(&quote! { &mut [$comp_ty] }))],
+		&[],
+	)
+	.format_into(&mut forwarded_methods);
+
+	derive_method_forward_stub(
+		sess,
+		"dot",
+		false,
+		SelfTy::Owned,
+		&[("rhs", ForwardedType::OwnedVector)],
+		&[ForwardedType::Exact(comp_ty)],
+	)
+	.format_into(&mut forwarded_methods);
+
+	derive_method_forward_stub(
+		sess,
+		"min",
+		false,
+		SelfTy::Owned,
+		&[("rhs", ForwardedType::OwnedVector)],
+		&[ForwardedType::OwnedVector],
+	)
+	.format_into(&mut forwarded_methods);
+
+	derive_method_forward_stub(
+		sess,
+		"max",
+		false,
+		SelfTy::Owned,
+		&[("rhs", ForwardedType::OwnedVector)],
+		&[ForwardedType::OwnedVector],
+	)
+	.format_into(&mut forwarded_methods);
+
+	derive_method_forward_stub(
+		sess,
+		"clamp",
+		false,
+		SelfTy::Owned,
+		&[
+			("min", ForwardedType::OwnedVector),
+			("max", ForwardedType::OwnedVector),
+		],
+		&[ForwardedType::OwnedVector],
+	)
+	.format_into(&mut forwarded_methods);
+
+	derive_method_forward_stub(
+		sess,
+		"min_element",
+		false,
+		SelfTy::Owned,
+		&[],
+		&[ForwardedType::Exact(comp_ty)],
+	)
+	.format_into(&mut forwarded_methods);
+
+	derive_method_forward_stub(
+		sess,
+		"max_element",
+		false,
+		SelfTy::Owned,
+		&[],
+		&[ForwardedType::Exact(comp_ty)],
+	)
+	.format_into(&mut forwarded_methods);
+
+	for op in ["eq", "ne", "ge", "gt", "le", "lt"] {
+		derive_method_forward_stub(
+			sess,
+			format!("cmp{op}").as_str(),
+			false,
+			SelfTy::Owned,
+			&[("rhs", ForwardedType::OwnedVector)],
+			&[ForwardedType::Exact(&bvec.fmt_to_tokens())],
+		)
+		.format_into(&mut forwarded_methods);
+	}
 
 	// Generation
 	quote! {
@@ -178,8 +339,7 @@ fn derive_method_forwards(sess: &VecDeriveSession) -> rust::Tokens {
 		where
 			M: ?Sized + $vec_flavor<Backing = $backing>,
 		{
-			pub const ZERO: Self = Self::splat($unit_zero);
-			pub const ONE: Self = Self::splat($unit_one);
+			$forwarded_consts
 
 			$forwarded_methods
 		}
@@ -206,11 +366,19 @@ impl<'a> ForwardedType<'a> {
 		}
 	}
 
-	fn as_transformer_for(self, expr: rust::Tokens) -> rust::Tokens {
+	fn as_wrapper_for(self, expr: rust::Tokens) -> rust::Tokens {
 		match self {
 			ForwardedType::Exact(_) => expr, // (no transformation necessary)
 			ForwardedType::OwnedVector => quote! { Self::from_raw($expr) },
 			ForwardedType::VectorRef => quote! { Self::from_raw_ref($expr) },
+		}
+	}
+
+	fn as_unwrapper_for(self, expr: rust::Tokens) -> rust::Tokens {
+		match self {
+			ForwardedType::Exact(_) => expr, // (no transformation necessary)
+			ForwardedType::OwnedVector => quote! { $expr.into_raw() },
+			ForwardedType::VectorRef => quote! { $expr.raw() },
 		}
 	}
 }
@@ -234,7 +402,6 @@ impl SelfTy {
 	}
 }
 
-// FIXME: Forgot to do input transformations
 fn derive_method_forward_stub(
 	sess: &VecDeriveSession,
 	name: &str,
@@ -256,58 +423,63 @@ fn derive_method_forward_stub(
 		}))
 		.fmt_delimited(",");
 
-	let ret_vals_fmt = if ret_vals.len() == 1 {
-		ret_vals[0].as_out_ty(sess).clone()
-	} else {
-		ret_vals
-			.iter()
-			.map(|ty| ty.as_out_ty(sess))
-			.fmt_delimited(",")
-			.fmt_to_tokens()
+	let ret_vals_fmt = match ret_vals.len() {
+		0 => quote! {},
+		1 => quote! { -> $(ret_vals[0].as_out_ty(sess)) },
+		_ => quote! { -> $({
+			ret_vals
+				.iter()
+				.map(|ty| ty.as_out_ty(sess))
+				.fmt_delimited(",")
+				.fmt_to_tokens()
+		})},
 	};
 
 	// Generate body elements
 	let fwd_prefix = match self_ty {
-		// I guess ease trumps good code gen :person_shrugging:.
+		// I guess ease trumps idomatic code gen :person_shrugging:.
 		SelfTy::Ref | SelfTy::Mut | SelfTy::Owned => quote! { self.vec. },
 		SelfTy::Static => quote! { $backing:: },
 	};
 
 	let fwd_args = args
 		.iter()
-		.map(|(arg_name, _)| arg_name.fmt_to_tokens())
+		.map(|(arg_name, arg_ty)| arg_ty.as_unwrapper_for(arg_name.fmt_to_tokens()))
 		.fmt_delimited(",");
 
 	let fwd_call = quote! { $fwd_prefix$name($fwd_args) };
 
-	let fwd_body = if ret_vals.len() == 1 {
-		ret_vals[0].as_transformer_for(fwd_call)
-	} else {
-		const ALPHABET: &'static str = "abcdefghijklmnopqrstuvwxyz";
-		assert!(ret_vals.len() < ALPHABET.len());
+	let fwd_body = match ret_vals.len() {
+		0 => fwd_call,
+		1 => ret_vals[0].as_wrapper_for(fwd_call),
+		_ => {
+			const ALPHABET: &'static str = "abcdefghijklmnopqrstuvwxyz";
+			assert!(ret_vals.len() < ALPHABET.len());
 
-		let fwd_tup_args = ALPHABET[0..ret_vals.len()]
-			.split("")
-			.fmt_delimited(",")
-			.fmt_to_tokens();
+			let fwd_tup_args = ALPHABET[0..ret_vals.len()]
+				.split("")
+				.fmt_delimited(",")
+				.fmt_to_tokens();
 
-		let fwd_tup_transform = ret_vals
-			.iter()
-			.zip(ALPHABET.split(""))
-			.map(|(ret_ty, name)| ret_ty.as_transformer_for(name.fmt_to_tokens()))
-			.fmt_delimited(",");
+			let fwd_tup_transform = ret_vals
+				.iter()
+				.zip(ALPHABET.split(""))
+				.map(|(ret_ty, name)| ret_ty.as_wrapper_for(name.fmt_to_tokens()))
+				.fmt_delimited(",");
 
-		quote! {
-			let ($fwd_tup_args) = $fwd_call;
-			($fwd_tup_transform)
+			quote! {
+				let ($fwd_tup_args) = $fwd_call;
+				($fwd_tup_transform)
+			}
 		}
 	};
 
 	// Generate
 	quote! {
-		pub $(if is_const => const) fn $name($args_fmt) -> $ret_vals_fmt {
+		pub $(if is_const => const) fn $name($args_fmt) $ret_vals_fmt {
 			$fwd_body
 		}
+		$['\n']
 	}
 }
 

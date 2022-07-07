@@ -5,6 +5,7 @@ use core::ops::{
 	Add, AddAssign, BitAnd, BitOr, BitXor, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg,
 	Not, Rem, RemAssign, Sub, SubAssign,
 };
+use glam::bool::BVec3;
 use glam::i32::IVec3;
 
 // === Inherent `impl` items === //
@@ -13,8 +14,14 @@ impl<M> TypedVectorImpl<IVec3, M>
 where
 	M: ?Sized + VecFlavor<Backing = IVec3>,
 {
-	pub const ZERO: Self = Self::splat(0);
-	pub const ONE: Self = Self::splat(1);
+	pub const ZERO: Self = Self::from_raw(IVec3::ZERO);
+	pub const ONE: Self = Self::from_raw(IVec3::ONE);
+
+	pub const X: Self = Self::from_raw(IVec3::X);
+	pub const Y: Self = Self::from_raw(IVec3::Y);
+	pub const Z: Self = Self::from_raw(IVec3::Z);
+
+	pub const AXES: [Self; 3] = [Self::X, Self::Y, Self::Z];
 
 	pub const fn new(x: i32, y: i32, z: i32) -> Self {
 		Self::from_raw(IVec3::new(x, y, z))
@@ -22,6 +29,74 @@ where
 
 	pub const fn splat(v: i32) -> Self {
 		Self::from_raw(IVec3::splat(v))
+	}
+
+	pub fn select(mask: BVec3, if_true: Self, if_false: Self) -> Self {
+		Self::from_raw(IVec3::select(mask, if_true.into_raw(), if_false.into_raw()))
+	}
+
+	pub const fn from_array(a: [i32; 3]) -> Self {
+		Self::from_raw(IVec3::from_array(a))
+	}
+
+	pub const fn to_array(&self) -> [i32; 3] {
+		self.vec.to_array()
+	}
+
+	pub const fn from_slice(slice: &[i32]) -> Self {
+		Self::from_raw(IVec3::from_slice(slice))
+	}
+
+	pub fn write_to_slice(self, slice: &mut [i32]) {
+		self.vec.write_to_slice(slice)
+	}
+
+	pub fn dot(self, rhs: Self) -> i32 {
+		self.vec.dot(rhs.into_raw())
+	}
+
+	pub fn min(self, rhs: Self) -> Self {
+		Self::from_raw(self.vec.min(rhs.into_raw()))
+	}
+
+	pub fn max(self, rhs: Self) -> Self {
+		Self::from_raw(self.vec.max(rhs.into_raw()))
+	}
+
+	pub fn clamp(self, min: Self, max: Self) -> Self {
+		Self::from_raw(self.vec.clamp(min.into_raw(), max.into_raw()))
+	}
+
+	pub fn min_element(self) -> i32 {
+		self.vec.min_element()
+	}
+
+	pub fn max_element(self) -> i32 {
+		self.vec.max_element()
+	}
+
+	pub fn cmpeq(self, rhs: Self) -> BVec3 {
+		self.vec.cmpeq(rhs.into_raw())
+	}
+
+	pub fn cmpne(self, rhs: Self) -> BVec3 {
+		self.vec.cmpne(rhs.into_raw())
+	}
+
+	pub fn cmpge(self, rhs: Self) -> BVec3 {
+		self.vec.cmpge(rhs.into_raw())
+	}
+
+	pub fn cmpgt(self, rhs: Self) -> BVec3 {
+		self.vec.cmpgt(rhs.into_raw())
+	}
+
+	pub fn cmple(self, rhs: Self) -> BVec3 {
+		self.vec.cmple(rhs.into_raw())
+	}
+
+	pub fn cmplt(self, rhs: Self) -> BVec3 {
+		self.vec.cmplt(rhs.into_raw())
 	}
 }
 
