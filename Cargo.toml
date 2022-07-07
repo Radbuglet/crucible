@@ -1,10 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    # "src/client",
-    # "src/common",
-    # "src/crew",
+    "src/client",
+    "src/common",
+    "src/crew",
     "src/geode",
+    "src/typed-glam",
+    "src/typed-glam/codegen",
 ]
 
 [profile.release]
