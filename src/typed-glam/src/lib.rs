@@ -29,6 +29,28 @@ pub trait VecFlavor {
 	type Backing: BackingVec;
 }
 
+pub trait FlavorCastFrom<T: ?Sized + VecFlavor>: VecFlavor {
+	fn vec_from(vec: TypedVector<T>) -> TypedVector<Self>;
+}
+
+impl<T: ?Sized + VecFlavor> FlavorCastFrom<T> for T {
+	fn vec_from(vec: TypedVector<T>) -> TypedVector<Self> {
+		vec
+	}
+}
+
+mod is_typed_vector {
+	pub trait Sealed {}
+}
+
+pub trait IsTypedVector: is_typed_vector::Sealed {
+	type Flavor: ?Sized + VecFlavor;
+	type Backing: BackingVec;
+
+	#[doc(hidden)]
+	fn no_op_id(vec: TypedVector<Self::Flavor>) -> Self;
+}
+
 // === `TypedVector` === //
 
 pub use glam;
@@ -43,6 +65,17 @@ pub type TypedVector<F> = TypedVectorImpl<<F as VecFlavor>::Backing, F>;
 pub struct TypedVectorImpl<B: BackingVec, F: ?Sized + VecFlavor<Backing = B>> {
 	_flavor: PhantomData<fn(F) -> F>,
 	vec: B,
+}
+
+impl<F: ?Sized + VecFlavor> is_typed_vector::Sealed for TypedVector<F> {}
+
+impl<F: ?Sized + VecFlavor> IsTypedVector for TypedVector<F> {
+	type Flavor = F;
+	type Backing = F::Backing;
+
+	fn no_op_id(vec: TypedVector<Self::Flavor>) -> Self {
+		vec
+	}
 }
 
 impl<F: ?Sized + VecFlavor> TypedVector<F> {
@@ -81,21 +114,28 @@ impl<F: ?Sized + VecFlavor> TypedVector<F> {
 		&mut self.vec
 	}
 
-	pub const fn cast<OF>(self) -> TypedVector<OF>
+	pub fn cast<T: IsTypedVector>(self) -> T
+	where
+		T::Flavor: FlavorCastFrom<F>,
+	{
+		T::no_op_id(T::Flavor::vec_from(self))
+	}
+
+	pub const fn raw_cast<OF>(self) -> TypedVector<OF>
 	where
 		OF: VecFlavor<Backing = F::Backing>,
 	{
 		TypedVector::from_raw(self.into_raw())
 	}
 
-	pub const fn cast_ref<OF>(&self) -> &TypedVector<OF>
+	pub const fn raw_cast_ref<OF>(&self) -> &TypedVector<OF>
 	where
 		OF: VecFlavor<Backing = F::Backing>,
 	{
 		TypedVector::from_raw_ref(self.raw())
 	}
 
-	pub fn cast_mut<OF>(&mut self) -> &mut TypedVector<OF>
+	pub fn raw_cast_mut<OF>(&mut self) -> &mut TypedVector<OF>
 	where
 		OF: VecFlavor<Backing = F::Backing>,
 	{
