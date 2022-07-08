@@ -5,7 +5,8 @@ edition = "2021"
 
 [dependencies]
 bytemuck = { version = "1.9.1", features = ["derive"] }
-cgmath = "0.18.0"
 geode = { path = "../geode" }
 log = "0.4.17"
+num-traits = "0.2.15"
 sealed = "0.4.0"
+typed-glam = { path = "../typed-glam" }

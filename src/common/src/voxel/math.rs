@@ -1,79 +1,157 @@
-// TODO: The types of numbers in this module are completely messed up!
+use std::ops::{Index, IndexMut};
 
-use std::ops::Index;
-
-use cgmath::{num_traits::Signed, vec3, BaseNum, Vector3};
+use num_traits::Signed;
+use typed_glam::{
+	glam::{self, IVec3},
+	TypedVector, TypedVectorImpl, VecFlavor,
+};
 
 use crate::polyfill::c_enum::{c_enum, ExposesVariants};
 
 // === Coordinate Systems === //
 
-pub const CHUNK_EDGE: u8 = 16;
-pub const CHUNK_EDGE_USIZE: usize = CHUNK_EDGE as usize;
-pub const CHUNK_LAYER: usize = CHUNK_EDGE_USIZE.pow(2);
-pub const CHUNK_VOLUME: usize = CHUNK_EDGE_USIZE.pow(3);
+pub const CHUNK_EDGE: i32 = 16;
+pub const CHUNK_LAYER: i32 = CHUNK_EDGE.pow(2);
+pub const CHUNK_VOLUME: i32 = CHUNK_EDGE.pow(3);
 
-pub type WorldPos = Vector3<i64>;
-pub type ChunkPos = Vector3<i64>;
-pub type BlockPos = Vector3<u8>;
+// === `WorldPos` === //
 
-pub fn is_valid_chunk_pos(pos: ChunkPos) -> bool {
-	Axis3::variants().all(|comp| pos[comp].checked_mul(CHUNK_EDGE as i64).is_some())
+pub type WorldPos = TypedVector<WorldPosFlavor>;
+
+pub struct WorldPosFlavor(!);
+
+impl VecFlavor for WorldPosFlavor {
+	type Backing = glam::i32::IVec3;
 }
 
-pub fn is_valid_block_pos(pos: BlockPos) -> bool {
-	Axis3::variants().all(|comp| pos[comp] <= CHUNK_EDGE)
+pub trait WorldPosExt: Sized {
+	fn compose(chunk: ChunkPos, block: BlockPos) -> Self;
+	fn decompose(self) -> (ChunkPos, BlockPos);
+	fn chunk(self) -> ChunkPos;
+	fn block(self) -> BlockPos;
 }
 
-pub fn is_valid_block_index(index: usize) -> bool {
-	index < CHUNK_VOLUME
+impl WorldPosExt for WorldPos {
+	fn compose(chunk: ChunkPos, block: BlockPos) -> Self {
+		debug_assert!(chunk.is_valid());
+		debug_assert!(block.is_valid());
+		Self::from_raw(chunk.into_raw() * CHUNK_EDGE + block.into_raw())
+	}
+
+	fn decompose(self) -> (ChunkPos, BlockPos) {
+		(self.chunk(), self.block())
+	}
+
+	fn chunk(self) -> ChunkPos {
+		let raw = self.into_raw();
+		ChunkPos::new(
+			raw.x.div_euclid(CHUNK_EDGE),
+			raw.y.div_euclid(CHUNK_EDGE),
+			raw.z.div_euclid(CHUNK_EDGE),
+		)
+	}
+
+	fn block(self) -> BlockPos {
+		let raw = self.into_raw();
+		BlockPos::new(
+			raw.x.rem_euclid(CHUNK_EDGE),
+			raw.y.rem_euclid(CHUNK_EDGE),
+			raw.z.rem_euclid(CHUNK_EDGE),
+		)
+	}
 }
 
-pub fn chunk_pos_of(pos: WorldPos) -> ChunkPos {
-	pos.map(|val| val.div_euclid(CHUNK_EDGE.into()))
+// === `ChunkPos` === //
+
+pub type ChunkPos = TypedVector<ChunkPosFlavor>;
+
+pub struct ChunkPosFlavor(!);
+
+impl VecFlavor for ChunkPosFlavor {
+	type Backing = glam::i32::IVec3;
 }
 
-pub fn block_pos_of(pos: WorldPos) -> BlockPos {
-	pos.map(|val| val.rem_euclid(CHUNK_EDGE.into()) as u8)
+pub trait ChunkPosExt: Sized {
+	fn is_valid(&self) -> bool;
 }
 
-pub fn decompose_world_pos(pos: WorldPos) -> (ChunkPos, BlockPos) {
-	(chunk_pos_of(pos), block_pos_of(pos))
+impl ChunkPosExt for ChunkPos {
+	fn is_valid(&self) -> bool {
+		Axis3::variants().all(|comp| self[comp].checked_mul(CHUNK_EDGE).is_some())
+	}
 }
 
-pub fn compose_world_pos(chunk: ChunkPos, block: BlockPos) -> WorldPos {
-	debug_assert!(is_valid_chunk_pos(chunk));
-	debug_assert!(is_valid_block_pos(block));
+// === `BlockPos` === //
 
-	chunk * CHUNK_EDGE as i64 + block.map(|v| v as i64)
+pub type BlockPos = TypedVector<BlockPosFlavor>;
+
+pub struct BlockPosFlavor(!);
+
+impl VecFlavor for BlockPosFlavor {
+	type Backing = glam::i32::IVec3;
 }
 
-pub fn block_pos_to_index(pos: BlockPos) -> usize {
-	debug_assert!(is_valid_block_pos(pos));
-	let pos = pos.map(|v| v as usize);
-	pos.x + pos.y * CHUNK_EDGE_USIZE + pos.y * CHUNK_LAYER
+pub trait BlockPosExt: Sized {
+	fn is_valid(&self) -> bool;
+	fn iter() -> BlockPosIter;
+
+	fn to_index(self) -> usize;
+	fn try_from_index(index: usize) -> Option<Self>;
+	fn from_index(index: usize) -> Self;
+	fn is_valid_index(index: usize) -> bool;
 }
 
-pub fn index_to_block_pos(mut index: usize) -> BlockPos {
-	debug_assert!(is_valid_block_index(index));
+impl BlockPosExt for BlockPos {
+	fn is_valid(&self) -> bool {
+		Axis3::variants().all(|comp| self[comp] <= CHUNK_EDGE)
+	}
 
-	let x = chunk_edge_rem_usize(index);
-	index /= CHUNK_EDGE_USIZE;
+	fn iter() -> BlockPosIter {
+		BlockPosIter(0)
+	}
 
-	let y = chunk_edge_rem_usize(index);
-	index /= CHUNK_EDGE_USIZE;
+	fn to_index(self) -> usize {
+		debug_assert!(self.is_valid());
+		let raw = self.into_raw();
+		(raw.x + raw.y * CHUNK_EDGE + raw.z * CHUNK_LAYER) as usize
+	}
 
-	let z = chunk_edge_rem_usize(index);
+	fn try_from_index(index: usize) -> Option<Self> {
+		if Self::is_valid_index(index) {
+			Some(Self::from_index(index))
+		} else {
+			None
+		}
+	}
 
-	vec3(x, y, z)
+	fn from_index(index: usize) -> Self {
+		debug_assert!(Self::is_valid_index(index));
+
+		let mut index = index as i32;
+		let x = index % CHUNK_EDGE;
+		index /= CHUNK_EDGE;
+		let y = index % CHUNK_EDGE;
+		index /= CHUNK_EDGE;
+		let z = index % CHUNK_EDGE;
+
+		Self::new(x, y, z)
+	}
+
+	fn is_valid_index(index: usize) -> bool {
+		index < CHUNK_VOLUME as usize
+	}
 }
 
-pub fn chunk_edge_rem_usize(val: usize) -> u8 {
-	(val % CHUNK_EDGE_USIZE) as u8
-}
+pub struct BlockPosIter(usize);
 
-pub fn iter_chunk_blocks() -> impl Iterator<Item = (usize, BlockPos)> {
-	(0..CHUNK_VOLUME).map(|index| (index, index_to_block_pos(index)))
+impl Iterator for BlockPosIter {
+	type Item = BlockPos;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let pos = BlockPos::try_from_index(self.0)?;
+		self.0 += 1;
+		Some(pos)
+	}
 }
 
 // === Block Faces === //
@@ -153,29 +231,35 @@ impl BlockFace {
 		Self::compose(self.axis(), self.sign().invert())
 	}
 
-	pub fn unit<T: BaseNum + Signed>(self) -> Vector3<T> {
-		self.axis().unit() * self.sign().unit()
+	pub fn unit(self) -> IVec3 {
+		self.axis().unit() * self.sign().unit::<i32>()
 	}
 }
 
 // Axis3
 impl Axis3 {
-	pub fn unit<T: BaseNum>(self) -> Vector3<T> {
+	pub fn unit(self) -> IVec3 {
 		use Axis3::*;
 
 		match self {
-			X => Vector3::unit_x(),
-			Y => Vector3::unit_y(),
-			Z => Vector3::unit_z(),
+			X => IVec3::X,
+			Y => IVec3::Y,
+			Z => IVec3::Z,
 		}
 	}
 }
 
-impl<T> Index<Axis3> for Vector3<T> {
-	type Output = T;
+impl<F: VecFlavor<Backing = IVec3>> Index<Axis3> for TypedVectorImpl<IVec3, F> {
+	type Output = i32;
 
 	fn index(&self, index: Axis3) -> &Self::Output {
 		&self[index as usize]
+	}
+}
+
+impl<F: VecFlavor<Backing = IVec3>> IndexMut<Axis3> for TypedVectorImpl<IVec3, F> {
+	fn index_mut(&mut self, index: Axis3) -> &mut Self::Output {
+		&mut self[index as usize]
 	}
 }
 

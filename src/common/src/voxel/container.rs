@@ -3,8 +3,7 @@ use std::{cell::Cell, collections::HashMap, fmt, hash};
 use geode::prelude::*;
 
 use super::math::{
-	block_pos_to_index, chunk_pos_of, Axis3, BlockFace, BlockPos, ChunkPos, Sign, WorldPos,
-	CHUNK_VOLUME,
+	Axis3, BlockFace, BlockPos, BlockPosExt, ChunkPos, Sign, WorldPos, WorldPosExt, CHUNK_VOLUME,
 };
 
 use crate::polyfill::c_enum::ExposesVariants;
@@ -44,7 +43,7 @@ impl VoxelWorldData {
 
 		// Link new chunk to neighbors
 		for face in BlockFace::variants() {
-			let rel: ChunkPos = face.unit();
+			let rel = ChunkPos::from_raw(face.unit());
 			let neighbor_pos = pos + rel;
 			let neighbor = self.chunks.get(&neighbor_pos).map(|neighbor| **neighbor);
 
@@ -71,7 +70,7 @@ pub struct VoxelChunkData {
 	world: Cell<Option<Entity>>,
 	neighbors: [Cell<Option<Entity>>; BlockFace::COUNT],
 	position: Cell<ChunkPos>,
-	blocks: Box<[Cell<u32>; CHUNK_VOLUME]>,
+	blocks: Box<[Cell<u32>; CHUNK_VOLUME as usize]>,
 }
 
 impl VoxelChunkData {
@@ -89,7 +88,7 @@ impl VoxelChunkData {
 
 	pub fn block_state_of(&self, pos: BlockPos) -> RawBlockState<'_> {
 		RawBlockState {
-			cell: &self.blocks[block_pos_to_index(pos)],
+			cell: &self.blocks[pos.to_index()],
 		}
 	}
 }
@@ -171,7 +170,7 @@ impl PartialEq for VoxelPointer {
 
 impl VoxelPointer {
 	pub fn new_cached(world: &VoxelWorldData, pos: WorldPos) -> Self {
-		let chunk_pos = chunk_pos_of(pos);
+		let chunk_pos = pos.chunk();
 		let chunk_cache = world.get_chunk(chunk_pos);
 		Self { chunk_cache, pos }
 	}
@@ -204,13 +203,13 @@ impl VoxelPointer {
 		self.get_neighbor_with_stride(s, face, 1)
 	}
 
-	pub fn get_neighbor_with_stride(mut self, s: Session, face: BlockFace, stride: i64) -> Self {
+	pub fn get_neighbor_with_stride(mut self, s: Session, face: BlockFace, stride: i32) -> Self {
 		debug_assert!(stride >= 0);
 
 		// Update position, keeping track of our chunk positions.
-		let old_chunk_pos = chunk_pos_of(self.pos);
-		self.pos += face.unit() * stride as i64;
-		let new_chunk_pos = chunk_pos_of(self.pos);
+		let old_chunk_pos = self.pos.chunk();
+		self.pos += face.unit() * stride;
+		let new_chunk_pos = self.pos.chunk();
 
 		// Attempt to update the chunk cache.
 		let chunks_moved = (new_chunk_pos[face.axis()] - old_chunk_pos[face.axis()]).abs();
@@ -243,7 +242,7 @@ impl VoxelPointer {
 
 		// Try to attach to the world if our chunk cache is stale.
 		if self.chunk_cache.is_none() {
-			self.chunk_cache = world_data.get_chunk(chunk_pos_of(self.pos));
+			self.chunk_cache = world_data.get_chunk(self.pos.chunk());
 		}
 	}
 

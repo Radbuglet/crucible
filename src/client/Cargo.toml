@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.57"
-cgmath = "0.18.0"
 crucible-common = { path = "../common" }
 env_logger = "0.9.0"
 fastrand = "1.7.0"
@@ -14,5 +13,6 @@ geode = { path = "../geode" }
 log = "0.4.17"
 parking_lot = "0.12.1"
 thiserror = "1.0.31"
+typed-glam = { path = "../typed-glam" }
 wgpu = { version = "0.12.0" }
 winit = "0.26.1"

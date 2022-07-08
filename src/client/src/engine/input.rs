@@ -1,6 +1,6 @@
-use cgmath::{Vector2, Zero};
 use std::collections::HashMap;
 use std::hash::Hash;
+use typed_glam::glam::Vec2;
 use winit::dpi::PhysicalPosition;
 use winit::event::{
 	DeviceEvent, DeviceId, ElementState, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent,
@@ -12,7 +12,7 @@ pub struct InputTracker {
 	keys: HashMap<VirtualKeyCode, BoolAction>,
 	mouse_buttons: HashMap<MouseButton, BoolAction>,
 	mouse_pos: Option<PhysicalPosition<f64>>,
-	mouse_delta: Vector2<f64>,
+	mouse_delta: Vec2,
 	has_focus: bool,
 }
 
@@ -22,7 +22,7 @@ impl Default for InputTracker {
 			keys: Default::default(),
 			mouse_buttons: Default::default(),
 			mouse_pos: None,
-			mouse_delta: Vector2::zero(),
+			mouse_delta: Vec2::ZERO,
 			has_focus: true,
 		}
 	}
@@ -93,7 +93,7 @@ impl InputTracker {
 		match event {
 			DeviceEvent::MouseMotion { delta: (dx, dy) } => {
 				if self.has_focus {
-					self.mouse_delta += Vector2::new(*dx, *dy);
+					self.mouse_delta += Vec2::new(*dx as f32, *dy as f32);
 				}
 			}
 			_ => {}
@@ -124,7 +124,7 @@ impl InputTracker {
 
 	/// Gets the sum of all mouse motions in physical (i.e. display pixel) space since the end of
 	/// the previous tick.
-	pub fn mouse_delta(&self) -> Vector2<f64> {
+	pub fn mouse_delta(&self) -> Vec2 {
 		self.mouse_delta
 	}
 
@@ -137,7 +137,7 @@ impl InputTracker {
 	pub fn end_tick(&mut self) {
 		self.keys.retain(|_, action| action.end_tick());
 		self.mouse_buttons.retain(|_, action| action.end_tick());
-		self.mouse_delta = Vector2::zero();
+		self.mouse_delta = Vec2::ZERO;
 	}
 }
 

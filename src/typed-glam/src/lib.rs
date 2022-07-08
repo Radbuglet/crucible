@@ -214,10 +214,16 @@ impl<F: ?Sized + VecFlavor> PartialEq for TypedVector<F> {
 	}
 }
 
-impl<F: ?Sized + VecFlavor> Eq for TypedVector<F> where F::Backing: Eq {}
-
-impl<F: ?Sized + VecFlavor> hash::Hash for TypedVector<F>
+impl<F> Eq for TypedVector<F>
 where
+	F: ?Sized + VecFlavor,
+	F::Backing: Eq,
+{
+}
+
+impl<F> hash::Hash for TypedVector<F>
+where
+	F: ?Sized + VecFlavor,
 	F::Backing: hash::Hash,
 {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
@@ -225,9 +231,9 @@ where
 	}
 }
 
-impl<'a, F: ?Sized + VecFlavor> Sum<&'a TypedVector<F>> for TypedVector<F>
+impl<'a, F> Sum<&'a TypedVector<F>> for TypedVector<F>
 where
-	F: VecFlavor,
+	F: ?Sized + VecFlavor,
 	F::Backing: 'a + Sum<&'a F::Backing>,
 {
 	fn sum<I: Iterator<Item = &'a TypedVector<F>>>(iter: I) -> Self {
@@ -235,9 +241,9 @@ where
 	}
 }
 
-impl<'a, F: ?Sized + VecFlavor> Product<&'a TypedVector<F>> for TypedVector<F>
+impl<'a, F> Product<&'a TypedVector<F>> for TypedVector<F>
 where
-	F: VecFlavor,
+	F: ?Sized + VecFlavor,
 	F::Backing: 'a + Product<&'a F::Backing>,
 {
 	fn product<I: Iterator<Item = &'a TypedVector<F>>>(iter: I) -> Self {
