@@ -71,7 +71,7 @@ impl GfxContext {
 				let wgpu::AdapterInfo { name, backend, .. } = &adapter_info.info;
 				let score = features.score();
 				log::info!(
-					"Found adapter \"{name}\" using backend {backend:?}. Score: {}",
+					"Found adapter {name:?} using backend {backend:?}. Score: {}",
 					match &score {
 						Some(score) => score as &dyn Display,
 						None => &"missing mandatory features" as &dyn Display,

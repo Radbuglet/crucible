@@ -3,21 +3,10 @@
 use crate::util::{FmtIntoOwnedExt, FmtIterExt};
 use genco::prelude::*;
 
-// === Entry === //
-
-pub fn derive_entry_all() -> rust::Tokens {
-	derive_entry_one(
-		&rust::import("glam::f32", "Vec3"),
-		&rust::import("glam::bool", "BVec3"),
-		CompType::F32,
-		3,
-	)
-}
-
 // === Session types === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-enum CompType {
+pub enum CompType {
 	U32,
 	I32,
 	F32,
@@ -52,7 +41,7 @@ impl CompType {
 		}
 	}
 
-	pub fn is_floating(self) -> bool {
+	fn is_floating(self) -> bool {
 		match self {
 			CompType::U32 => false,
 			CompType::I32 => false,
@@ -115,7 +104,7 @@ const AXES: [AxisInfo; 4] = [
 
 // === Main derivation logic === //
 
-fn derive_entry_one(
+pub fn derive_for_vec(
 	backing: &rust::Import,
 	bvec: &rust::Import,
 	comp_type: CompType,

@@ -7,8 +7,41 @@ use core::{
 
 // === Modules === //
 
-#[path = "generated/fvec3.rs"]
+#[path = "generated/dvec2.generated.rs"]
+mod dvec2;
+
+#[path = "generated/dvec3.generated.rs"]
+mod dvec3;
+
+#[path = "generated/dvec4.generated.rs"]
+mod dvec4;
+
+#[path = "generated/fvec2.generated.rs"]
+mod fvec2;
+
+#[path = "generated/fvec3.generated.rs"]
 mod fvec3;
+
+#[path = "generated/fvec4.generated.rs"]
+mod fvec4;
+
+#[path = "generated/ivec2.generated.rs"]
+mod ivec2;
+
+#[path = "generated/ivec3.generated.rs"]
+mod ivec3;
+
+#[path = "generated/ivec4.generated.rs"]
+mod ivec4;
+
+#[path = "generated/uvec2.generated.rs"]
+mod uvec2;
+
+#[path = "generated/uvec3.generated.rs"]
+mod uvec3;
+
+#[path = "generated/uvec4.generated.rs"]
+mod uvec4;
 
 // === Trait definitions === //
 
@@ -142,7 +175,7 @@ impl<F: ?Sized + VecFlavor> TypedVector<F> {
 		TypedVector::from_raw_mut(self.raw_mut())
 	}
 
-	pub(crate) fn map_raw<C>(self, f: C) -> Self
+	pub fn map_raw<C>(self, f: C) -> Self
 	where
 		C: FnOnce(F::Backing) -> F::Backing,
 	{
