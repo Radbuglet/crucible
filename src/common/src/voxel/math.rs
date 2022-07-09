@@ -6,7 +6,7 @@ use typed_glam::{
 	TypedVector, TypedVectorImpl, VecFlavor,
 };
 
-use crate::polyfill::c_enum::{c_enum, ExposesVariants};
+use crate::util::c_enum::{c_enum, ExposesVariants};
 
 // === Coordinate Systems === //
 
@@ -93,6 +93,7 @@ impl VecFlavor for BlockPosFlavor {
 
 pub trait BlockPosExt: Sized {
 	fn is_valid(&self) -> bool;
+	fn wrap(self) -> Self;
 	fn iter() -> BlockPosIter;
 
 	fn to_index(self) -> usize;
@@ -104,6 +105,14 @@ pub trait BlockPosExt: Sized {
 impl BlockPosExt for BlockPos {
 	fn is_valid(&self) -> bool {
 		Axis3::variants().all(|comp| self[comp] <= CHUNK_EDGE)
+	}
+
+	fn wrap(mut self) -> Self {
+		for axis in Axis3::variants() {
+			self[axis] = self[axis].rem_euclid(CHUNK_EDGE);
+		}
+
+		self
 	}
 
 	fn iter() -> BlockPosIter {
@@ -234,6 +243,21 @@ impl BlockFace {
 	pub fn unit(self) -> IVec3 {
 		self.axis().unit() * self.sign().unit::<i32>()
 	}
+
+	pub fn ortho(self) -> (Self, Self) {
+		let sign = self.sign();
+
+		// Get axes with proper winding
+		let (a, b) = if sign == Sign::Positive {
+			self.axis().ortho()
+		} else {
+			let (a, b) = self.axis().ortho();
+			(b, a)
+		};
+
+		// Construct faces
+		(Self::compose(a, sign), Self::compose(b, sign))
+	}
 }
 
 // Axis3
@@ -245,6 +269,16 @@ impl Axis3 {
 			X => IVec3::X,
 			Y => IVec3::Y,
 			Z => IVec3::Z,
+		}
+	}
+}
+
+impl Axis3 {
+	pub fn ortho(self) -> (Self, Self) {
+		match self {
+			Self::X => (Self::Z, Self::Y),
+			Self::Y => (Self::X, Self::Z),
+			Self::Z => (Self::Y, Self::X),
 		}
 	}
 }

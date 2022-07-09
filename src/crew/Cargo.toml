@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bumpalo = "3.9.1"
+bumpalo = "3.10.0"
 hashbrown = { version = "0.12.1", features = ["raw"] }
 thiserror = "1.0.31"
 sealed = "0.4.0"
-smallvec = "1.8.0"
+smallvec = "1.9.0"

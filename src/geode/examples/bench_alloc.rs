@@ -48,7 +48,7 @@ fn main() {
 			let start = Instant::now();
 
 			for _ in 0..times {
-				let _b = 1.box_obj(s).manually_manage();
+				let _b = 1.box_obj(s).manually_destruct();
 			}
 
 			accum += dbg!(start.elapsed());

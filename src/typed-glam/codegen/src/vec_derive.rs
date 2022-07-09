@@ -132,8 +132,8 @@ pub fn derive_for_vec(
 		self_owned: &quote! { Self },
 	};
 
-	// TODO: `Shl` and `Shr`; integration with matrices; allow AVec3 as a backing vector;
-	//  deref to `x, y, z`
+	// TODO: `Shl` and `Shr`; integration with matrices and other transformations; allow AVec3 as a
+	//  backing vector; deref to `x, y, z, w`; conversion integrations
 	quote! {
 		$(derive_method_forwards(&sess))
 		$(derive_misc_traits(&sess))

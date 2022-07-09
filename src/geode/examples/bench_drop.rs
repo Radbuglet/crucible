@@ -17,7 +17,7 @@ fn main() {
 			let start = Instant::now();
 
 			for _ in 0..times {
-				let obj = Obj::new(s, 1u32).manually_manage();
+				let obj = Obj::new(s, 1u32).manually_destruct();
 				obj.destroy(s);
 			}
 

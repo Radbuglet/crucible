@@ -7,7 +7,6 @@ use std::{
 	ptr::Pointee,
 };
 
-use derive_where::derive_where;
 use thiserror::Error;
 
 use crate::util::{error::ResultExt, ptr::unsize_meta};
@@ -76,6 +75,26 @@ impl Session<'_> {
 // === Obj Errors === //
 
 #[derive(Debug, Copy, Clone, Error)]
+#[error("failed to fetch `Obj`")]
+pub enum ObjGetError {
+	Dead(#[from] ObjDeadError),
+	Locked(#[from] ObjLockedError),
+}
+
+impl ObjGetError {
+	pub fn as_lifetime_error(self) -> Result<ObjDeadError, ObjLockedError> {
+		match self {
+			Self::Dead(value) => Ok(value),
+			Self::Locked(locked) => Err(locked),
+		}
+	}
+
+	pub fn unwrap_weak<T>(result: Result<T, Self>) -> Result<T, ObjDeadError> {
+		result.map_err(|err| err.as_lifetime_error().unwrap_pretty())
+	}
+}
+
+#[derive(Debug, Copy, Clone, Error)]
 pub struct ObjDeadError {
 	pub requested: RawObj,
 	pub new_gen: u64,
@@ -102,26 +121,6 @@ impl fmt::Display for ObjDeadError {
 pub struct ObjLockedError {
 	pub requested: RawObj,
 	pub lock: Lock,
-}
-
-#[derive(Debug, Copy, Clone, Error)]
-#[error("failed to fetch `Obj`")]
-pub enum ObjGetError {
-	Dead(#[from] ObjDeadError),
-	Locked(#[from] ObjLockedError),
-}
-
-impl ObjGetError {
-	pub fn weak(self) -> Result<ObjDeadError, ObjLockedError> {
-		match self {
-			Self::Dead(value) => Ok(value),
-			Self::Locked(locked) => Err(locked),
-		}
-	}
-
-	pub fn unwrap_weak<T>(result: Result<T, Self>) -> Result<T, ObjDeadError> {
-		result.map_err(|err| err.weak().unwrap_pretty())
-	}
 }
 
 // === RawObj === //
@@ -234,7 +233,6 @@ pub unsafe trait ObjPointee: 'static + Send {}
 
 unsafe impl<T: ?Sized + 'static + Send> ObjPointee for T {}
 
-#[derive_where(Copy, Clone)]
 pub struct Obj<T: ?Sized + ObjPointee> {
 	raw: RawObj,
 	meta: <T as Pointee>::Metadata,
@@ -325,6 +323,17 @@ impl<T: ?Sized + ObjPointee> fmt::Debug for Obj<T> {
 	}
 }
 
+impl<T: ?Sized + ObjPointee> Copy for Obj<T> {}
+
+impl<T: ?Sized + ObjPointee> Clone for Obj<T> {
+	fn clone(&self) -> Self {
+		Self {
+			raw: self.raw,
+			meta: self.meta,
+		}
+	}
+}
+
 impl<T: ?Sized + ObjPointee> Eq for Obj<T> {}
 
 impl<T: ?Sized + ObjPointee> PartialEq for Obj<T> {
@@ -392,10 +401,10 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 		T: Unsize<U>,
 		U: ?Sized + ObjPointee,
 	{
-		Owned::new(self.manually_manage().as_unsized::<U>())
+		Owned::new(self.manually_destruct().as_unsized::<U>())
 	}
 
 	pub fn to_raw(self) -> Owned<RawObj> {
-		Owned::new(self.manually_manage().as_raw())
+		Owned::new(self.manually_destruct().as_raw())
 	}
 }

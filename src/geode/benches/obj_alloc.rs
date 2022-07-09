@@ -28,7 +28,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 			let start = Instant::now();
 
 			for _ in 0..iters {
-				black_box(Obj::new(s, 4u32)).manually_manage();
+				black_box(Obj::new(s, 4u32)).manually_destruct();
 			}
 
 			start.elapsed()
@@ -39,7 +39,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 		let session = LocalSessionGuard::new();
 		let s = session.handle();
 
-		let my_obj = Obj::new(s, 3u32).manually_manage();
+		let my_obj = Obj::new(s, 3u32).manually_destruct();
 
 		b.iter(|| *my_obj.get(s));
 	});

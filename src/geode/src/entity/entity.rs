@@ -5,14 +5,15 @@ use std::{
 };
 
 use parking_lot::Mutex;
+use thiserror::Error;
 
 use crate::{
 	core::{
-		obj::{Obj, ObjPointee},
+		obj::{Obj, ObjGetError, ObjPointee},
 		owned::{Destructible, Owned},
 		session::{LocalSessionGuard, Session},
 	},
-	util::{arity::impl_tuples, error::UnwrapExt},
+	util::{arity::impl_tuples, error::ResultExt},
 };
 
 use super::key::{typed_key, RawTypedKey, TypedKey};
@@ -30,7 +31,7 @@ struct EntityInner {
 impl Entity {
 	pub fn new(session: Session) -> Owned<Self> {
 		Owned::new(Self {
-			obj: Obj::new(session, Default::default()).manually_manage(),
+			obj: Obj::new(session, Default::default()).manually_destruct(),
 		})
 	}
 
@@ -42,7 +43,7 @@ impl Entity {
 		});
 
 		Owned::new(Self {
-			obj: Obj::new(session, Mutex::new(inner)).manually_manage(),
+			obj: Obj::new(session, Mutex::new(inner)).manually_destruct(),
 		})
 	}
 
@@ -51,20 +52,44 @@ impl Entity {
 		components.push_values(&mut ComponentAttachTarget { map });
 	}
 
+	pub fn falliable_get_in<'a, T: ?Sized + ObjPointee>(
+		&self,
+		session: Session<'a>,
+		key: TypedKey<T>,
+	) -> Result<&'a T, EntityGetError> {
+		Ok(self
+			.obj
+			// Acquire `Entity` heap handle
+			.try_get(session)
+			.map_err(EntityGetError::EntityDerefError)?
+			// Lock hash map
+			.lock()
+			.map
+			// Get component in `HashMap`
+			.get(&key.raw())
+			.ok_or_else(|| {
+				EntityGetError::ComponentMissing(ComponentMissingError { key: key.raw() })
+			})?
+			.downcast_ref::<Obj<T>>()
+			.unwrap()
+			// Deref component
+			.try_get(session)
+			.map_err(|err| EntityGetError::CompDerefError(key.raw(), err))?)
+	}
+
+	pub fn falliable_get<'a, T: ?Sized + ObjPointee>(
+		&self,
+		session: Session<'a>,
+	) -> Result<&'a T, EntityGetError> {
+		self.falliable_get_in(session, typed_key::<T>())
+	}
+
 	pub fn get_in<'a, T: ?Sized + ObjPointee>(
 		&self,
 		session: Session<'a>,
 		key: TypedKey<T>,
 	) -> &'a T {
-		self.obj
-			.get(session)
-			.lock()
-			.map
-			.get(&key.raw())
-			.unwrap_using(|_| format!("Missing component under key {key:?}"))
-			.downcast_ref::<Obj<T>>()
-			.unwrap()
-			.get(session)
+		self.falliable_get_in(session, key).unwrap_pretty()
 	}
 
 	pub fn get<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> &'a T {
@@ -110,7 +135,7 @@ impl<T: ?Sized + ObjPointee> RegisterObj for Owned<Obj<T>> {
 	type Value = T;
 
 	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
-		registry.add(key, self.manually_manage());
+		registry.add(key, self.manually_destruct());
 	}
 }
 
@@ -153,3 +178,46 @@ macro impl_component_list_on_tuple($($name:ident: $field:tt),*) {
 }
 
 impl_tuples!(impl_component_list_on_tuple);
+
+#[derive(Debug, Clone, Error)]
+pub enum EntityGetError {
+	#[error("failed to deref `Entity`'s `Obj`")]
+	EntityDerefError(#[source] ObjGetError),
+	#[error("failed to deref `Obj` of component with key {0:?}")]
+	CompDerefError(RawTypedKey, #[source] ObjGetError),
+	#[error("failed to get missing component")]
+	ComponentMissing(#[source] ComponentMissingError),
+}
+
+impl EntityGetError {
+	pub fn as_missing_error(self) -> Result<ComponentMissingError, EntityGetError> {
+		match self {
+			Self::ComponentMissing(err) => Ok(err),
+			other => Err(other),
+		}
+	}
+
+	pub fn ok_or_missing<T>(result: Result<T, Self>) -> Result<T, ComponentMissingError> {
+		result.map_err(|err| err.as_missing_error().unwrap_pretty())
+	}
+}
+
+pub trait EntityGetErrorExt {
+	type OkTy;
+
+	fn ok_or_missing(self) -> Result<Self::OkTy, ComponentMissingError>;
+}
+
+impl<T> EntityGetErrorExt for Result<T, EntityGetError> {
+	type OkTy = T;
+
+	fn ok_or_missing(self) -> Result<Self::OkTy, ComponentMissingError> {
+		EntityGetError::ok_or_missing(self)
+	}
+}
+
+#[derive(Debug, Clone, Error)]
+#[error("component with key {key:?} is missing from `Entity`")]
+pub struct ComponentMissingError {
+	pub key: RawTypedKey,
+}

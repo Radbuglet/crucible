@@ -40,7 +40,7 @@ fn main() {
 		let session = LocalSessionGuard::new();
 		let s = session.handle();
 
-		let foo = Obj::new(s, 1).manually_manage();
+		let foo = Obj::new(s, 1).manually_destruct();
 
 		// Setup & run test
 		let mut accum = Duration::ZERO;

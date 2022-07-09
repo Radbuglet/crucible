@@ -1,11 +1,20 @@
 use crate::engine::gfx::GfxContext;
-use crucible_common::polyfill::cell::filter_map_ref;
+use crucible_common::util::cell::filter_map_ref;
 use geode::prelude::*;
 use std::{cell::Ref, collections::HashMap};
 use thiserror::Error;
 use winit::window::{Window, WindowId};
 
-pub const DEFAULT_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
+pub const THE_ONE_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
+
+// TODO: Dynamically adapt format; figure out color spaces
+// fn get_preferred_format(surface: &wgpu::Surface, adapter: &wgpu::Adapter) -> wgpu::TextureFormat {
+// 	surface
+// 		.get_supported_formats(adapter)
+// 		.get(0)
+// 		.copied()
+// 		.expect("Surface is incompatible with adapter.")
+// }
 
 #[derive(Debug, Default)]
 pub struct ViewportManager {
@@ -26,9 +35,7 @@ impl ViewportManager {
 		let win_size = window.inner_size();
 		let config = wgpu::SurfaceConfiguration {
 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-			format: surface
-				.get_preferred_format(&gfx.adapter)
-				.unwrap_or(DEFAULT_SURFACE_FORMAT),
+			format: THE_ONE_SURFACE_FORMAT,
 			width: win_size.width,
 			height: win_size.height,
 			present_mode: wgpu::PresentMode::Fifo,
@@ -95,10 +102,7 @@ impl Viewport {
 		// Ensure that the surface texture matches the window's physical (backing buffer) size
 		let win_size = window.inner_size();
 
-		let preferred_format = self
-			.surface
-			.get_preferred_format(&gfx.adapter)
-			.unwrap_or(DEFAULT_SURFACE_FORMAT);
+		let preferred_format = THE_ONE_SURFACE_FORMAT;
 
 		if self.config.format != preferred_format {
 			self.config.format = preferred_format;

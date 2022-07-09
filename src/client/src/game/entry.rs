@@ -1,17 +1,28 @@
+use crucible_common::voxel::container::{VoxelChunkData, VoxelWorldData};
 use geode::prelude::*;
 
 use crate::engine::{
 	entry::MainLockKey, gfx::GfxContext, scene::SceneUpdateHandler, viewport::ViewportRenderHandler,
 };
 
-use super::voxel::pipeline::VoxelRenderingPipeline;
+use super::voxel::{mesh::VoxelWorldMesh, pipeline::VoxelRenderingPipeline};
 
-pub fn make_game_entry(s: Session, engine_root: Entity, _main_lock: Lock) -> Owned<Entity> {
-	// Create voxel rendering services
-	let voxel_rendering_pipeline =
+pub fn make_game_entry(s: Session, engine_root: Entity, main_lock: Lock) -> Owned<Entity> {
+	// Create voxel services
+	let voxel_pipeline_guard =
 		VoxelRenderingPipeline::new(s, engine_root.get::<GfxContext>(s)).box_obj(s);
 
-	let weak_voxel_rendering_pipeline = *voxel_rendering_pipeline;
+	let voxel_pipeline = *voxel_pipeline_guard;
+
+	let voxel_world_data = VoxelWorldData::default().box_obj_rw(s, main_lock);
+	let voxel_world_mesh = VoxelWorldMesh::default().box_obj_rw(s, main_lock);
+
+	{
+		let chunk_entity = Entity::new(s);
+		let chunk_data = VoxelChunkData::default();
+
+		chunk_entity.add(s, (chunk_data));
+	}
 
 	// Create event handlers
 	let update_handler = Obj::new(s, |s: Session, _me: Entity, engine_root: Entity| {
@@ -44,7 +55,7 @@ pub fn make_game_entry(s: Session, engine_root: Entity, _main_lock: Lock) -> Own
 			{
 				let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
 					label: None,
-					color_attachments: &[wgpu::RenderPassColorAttachment {
+					color_attachments: &[Some(wgpu::RenderPassColorAttachment {
 						view: &frame_view,
 						resolve_target: None,
 						ops: wgpu::Operations {
@@ -56,7 +67,7 @@ pub fn make_game_entry(s: Session, engine_root: Entity, _main_lock: Lock) -> Own
 							}),
 							store: true,
 						},
-					}],
+					})],
 					depth_stencil_attachment: None,
 				});
 
@@ -73,8 +84,5 @@ pub fn make_game_entry(s: Session, engine_root: Entity, _main_lock: Lock) -> Own
 	.to_unsized::<dyn ViewportRenderHandler>();
 
 	// Create main entity
-	Entity::new_with(
-		s,
-		(update_handler, render_handler, voxel_rendering_pipeline),
-	)
+	Entity::new_with(s, (update_handler, render_handler, voxel_pipeline_guard))
 }

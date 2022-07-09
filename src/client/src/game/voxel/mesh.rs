@@ -1,20 +1,33 @@
-use std::{cell::Cell, collections::HashSet};
+use std::{
+	cell::Cell,
+	collections::HashSet,
+	time::{Duration, Instant},
+};
 
-use crucible_common::voxel::container::VoxelWorldData;
+use crucible_common::{
+	util::c_enum::ExposesVariants,
+	voxel::{
+		container::VoxelChunkData,
+		math::{BlockFace, BlockPos, BlockPosExt, WorldPos, WorldPosExt},
+	},
+};
 use geode::{
 	entity::key::{dyn_key, TypedKey},
 	prelude::*,
 };
+use wgpu::util::DeviceExt;
 
-use super::pipeline::VoxelRenderingPipeline;
+use crate::engine::gfx::GfxContext;
 
-pub struct VoxelMeshRenderer {
+use super::pipeline::{VoxelRenderingPipeline, VoxelVertex};
+
+pub struct VoxelWorldMesh {
 	chunks: HashSet<Entity>,
 	dirty_queue: Vec<Entity>,
-	mesh_meta_key: TypedKey<ChunkMesh>,
+	mesh_meta_key: TypedKey<VoxelChunkMesh>,
 }
 
-impl Default for VoxelMeshRenderer {
+impl Default for VoxelWorldMesh {
 	fn default() -> Self {
 		Self {
 			chunks: Default::default(),
@@ -24,10 +37,93 @@ impl Default for VoxelMeshRenderer {
 	}
 }
 
-impl VoxelMeshRenderer {
-	pub fn flag_chunk(&mut self, s: Session, chunk: Entity) {}
+impl VoxelWorldMesh {
+	pub fn flag_chunk(&mut self, s: Session, meshing_lock: Lock, chunk: Entity) {
+		if let Ok(chunk_mesh) = chunk
+			.falliable_get_in(s, self.mesh_meta_key)
+			.ok_or_missing()
+		{
+			if !chunk_mesh.still_dirty.get() {
+				chunk_mesh.still_dirty.set(true);
+				self.dirty_queue.push(chunk);
+			}
+		} else {
+			let chunk_mesh = VoxelChunkMesh {
+				still_dirty: Cell::new(true),
+				vertex_count: Cell::new(0),
+				buffer: Cell::new(None),
+			}
+			.box_obj_in(s, meshing_lock);
 
-	pub fn update_chunks(&mut self, s: Session, data: &VoxelWorldData) {}
+			chunk.add(s, ExposeUsing(chunk_mesh, self.mesh_meta_key));
+			self.dirty_queue.push(chunk);
+		}
+	}
+
+	pub fn update_chunks(&mut self, s: Session, gfx: &GfxContext, time_limit: Option<Duration>) {
+		let started = Instant::now();
+
+		for dirty in self.dirty_queue.drain(..) {
+			let chunk_data = dirty.get::<VoxelChunkData>(s);
+			let chunk_mesh = dirty.get_in::<VoxelChunkMesh>(s, self.mesh_meta_key);
+			let mut vertices = Vec::new();
+
+			for center_pos in BlockPos::iter() {
+				// Don't mesh air blocks
+				if chunk_data.block_state_of(center_pos).material() == 0 {
+					continue;
+				}
+
+				// For every side of a solid block...
+				for face in BlockFace::variants() {
+					let neighbor_block = center_pos + face.unit();
+
+					// If the neighbor isn't solid...
+					let is_solid = if neighbor_block.is_valid() {
+						chunk_data.block_state_of(neighbor_block).material() != 0
+					} else {
+						chunk_data.neighbor(face).map_or(false, |neighbor_entity| {
+							let neighbor_chunk = neighbor_entity.get::<VoxelChunkData>(s);
+
+							neighbor_chunk.block_state_of(center_pos.wrap()).material() != 0
+						})
+					};
+
+					if is_solid {
+						continue;
+					}
+
+					// Mesh it!
+					let center_pos = WorldPos::compose(chunk_data.pos(), center_pos);
+					VoxelVertex::push_quad(&mut vertices, center_pos.into_raw().as_vec3(), face);
+				}
+			}
+
+			chunk_mesh.still_dirty.set(false);
+			chunk_mesh.vertex_count.set(vertices.len() as u32);
+
+			let replaced = chunk_mesh.buffer.replace(Some(
+				gfx.device
+					.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+						label: None,
+						contents: bytemuck::cast_slice(vertices.as_slice()),
+						usage: wgpu::BufferUsages::VERTEX,
+					})
+					.box_obj(s)
+					.manually_destruct(),
+			));
+
+			if let Some(replaced) = replaced {
+				replaced.destroy(s);
+			}
+
+			// Check if we've elapsed our time limit. Do this at the end of the loop to ensure that
+			// at least one chunk has the opportunity to be meshed.
+			if time_limit.map_or(false, |limit| started.elapsed() > limit) {
+				break;
+			}
+		}
+	}
 
 	pub fn render_chunks<'a>(
 		&mut self,
@@ -36,19 +132,24 @@ impl VoxelMeshRenderer {
 		pass: &mut wgpu::RenderPass<'a>,
 	) {
 		pass.set_pipeline(&assets.opaque_block_pipeline);
+		pass.set_bind_group(0, &assets.bind_group, &[]);
 
 		for chunk in self.chunks.iter().copied() {
-			let mesh = chunk.get_in(s, self.mesh_meta_key);
-			let buffer = mesh.buffer.get().get(s);
+			let mesh = chunk.get_in::<VoxelChunkMesh>(s, self.mesh_meta_key);
+			let buffer = mesh
+				.buffer
+				.get()
+				.expect("unmeshed chunk should not be in the chunk set")
+				.get(s);
 
 			pass.set_vertex_buffer(0, buffer.slice(..));
-			pass.draw(0..6, 0..mesh.face_count.get());
+			pass.draw(0..6, 0..mesh.vertex_count.get());
 		}
 	}
 }
 
-struct ChunkMesh {
+struct VoxelChunkMesh {
 	still_dirty: Cell<bool>,
-	face_count: Cell<u32>,
-	buffer: Cell<Obj<wgpu::Buffer>>,
+	vertex_count: Cell<u32>,
+	buffer: Cell<Option<Obj<wgpu::Buffer>>>,
 }

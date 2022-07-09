@@ -1,14 +1,15 @@
 use std::{cell::Cell, collections::HashMap, fmt, hash};
 
+use arr_macro::arr;
 use geode::prelude::*;
 
 use super::math::{
 	Axis3, BlockFace, BlockPos, BlockPosExt, ChunkPos, Sign, WorldPos, WorldPosExt, CHUNK_VOLUME,
 };
 
-use crate::polyfill::c_enum::ExposesVariants;
+use crate::util::c_enum::ExposesVariants;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct VoxelWorldData {
 	chunks: HashMap<ChunkPos, Owned<Entity>>,
 }
@@ -71,6 +72,17 @@ pub struct VoxelChunkData {
 	neighbors: [Cell<Option<Entity>>; BlockFace::COUNT],
 	position: Cell<ChunkPos>,
 	blocks: Box<[Cell<u32>; CHUNK_VOLUME as usize]>,
+}
+
+impl Default for VoxelChunkData {
+	fn default() -> Self {
+		Self {
+			world: Default::default(),
+			neighbors: Default::default(),
+			position: Default::default(),
+			blocks: Box::new(arr![Cell::new(0); CHUNK_VOLUME as usize]),
+		}
+	}
 }
 
 impl VoxelChunkData {

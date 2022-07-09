@@ -2,7 +2,7 @@ use std::cell::{Ref, RefMut};
 
 use bytemuck::TransparentWrapper;
 
-use crate::polyfill::lifetime::try_transform;
+use crate::util::lifetime::try_transform;
 
 pub fn filter_map_ref<'a, T, U, F>(orig: Ref<'a, T>, mut f: F) -> Result<Ref<'a, U>, Ref<'a, T>>
 where

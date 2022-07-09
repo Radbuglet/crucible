@@ -45,7 +45,7 @@ impl<N: Display, D: Display> FeatureDescriptor<N, D> {
 
 #[derive(Debug, Clone)]
 pub struct FeatureEntry {
-	/// A description of the feature.
+	/// A human-readable description of the feature.
 	pub desc: FeatureDescriptor,
 
 	/// Whether the feature is mandatory or optional.
@@ -67,7 +67,7 @@ pub enum FeatureScore {
 	/// The feature is not supported at all, with no explicit score given.
 	BinaryFail {
 		/// A string listing the reasons for which the feature is not supported and ways to allow it
-		/// to be supported. A sub-feature-list (specified by [FeatureList::sub]`) may be more
+		/// to be supported. A sub-feature-list (specified by `FeatureEntry.sub`) may be more
 		/// effective for this if a given logical feature requires several sub-features.
 		reason: String,
 	},

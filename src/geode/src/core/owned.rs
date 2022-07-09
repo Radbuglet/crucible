@@ -18,7 +18,7 @@ impl<T: Destructible> Owned<T> {
 		Self(ManuallyDrop::new(inner))
 	}
 
-	pub fn manually_manage(mut self) -> T {
+	pub fn manually_destruct(mut self) -> T {
 		let inner = unsafe { ManuallyDrop::take(&mut self.0) };
 		std::mem::forget(self);
 		inner

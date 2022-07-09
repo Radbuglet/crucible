@@ -231,6 +231,15 @@ where
 	}
 }
 
+impl<F: ?Sized + VecFlavor> Default for TypedVector<F> {
+	fn default() -> Self {
+		Self {
+			_flavor: Default::default(),
+			vec: Default::default(),
+		}
+	}
+}
+
 impl<'a, F> Sum<&'a TypedVector<F>> for TypedVector<F>
 where
 	F: ?Sized + VecFlavor,
