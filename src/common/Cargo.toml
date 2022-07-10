@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-arr_macro = "0.1.3"
 bytemuck = { version = "1.10.0", features = ["derive"] }
+crucible-core = { path = "../core" }
 geode = { path = "../geode" }
 log = "0.4.17"
 num-traits = "0.2.15"

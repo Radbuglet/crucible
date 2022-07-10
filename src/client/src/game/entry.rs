@@ -1,9 +1,10 @@
-use crucible_common::voxel::container::{VoxelChunkData, VoxelWorldData};
+use crucible_common::voxel::{
+	container::{VoxelChunkData, VoxelWorldData},
+	math::{BlockPos, ChunkPos},
+};
 use geode::prelude::*;
 
-use crate::engine::{
-	entry::MainLockKey, gfx::GfxContext, scene::SceneUpdateHandler, viewport::ViewportRenderHandler,
-};
+use crate::engine::{gfx::GfxContext, scene::SceneUpdateHandler, viewport::ViewportRenderHandler};
 
 use super::voxel::{mesh::VoxelWorldMesh, pipeline::VoxelRenderingPipeline};
 
@@ -14,25 +15,44 @@ pub fn make_game_entry(s: Session, engine_root: Entity, main_lock: Lock) -> Owne
 
 	let voxel_pipeline = *voxel_pipeline_guard;
 
-	let voxel_world_data = VoxelWorldData::default().box_obj_rw(s, main_lock);
-	let voxel_world_mesh = VoxelWorldMesh::default().box_obj_rw(s, main_lock);
+	let voxel_world_data_guard = VoxelWorldData::default().box_obj_rw(s, main_lock);
+	let voxel_world_mesh_guard = VoxelWorldMesh::default().box_obj_rw(s, main_lock);
+	let voxel_world_mesh = *voxel_world_mesh_guard;
 
 	{
-		let chunk_entity = Entity::new(s);
-		let chunk_data = VoxelChunkData::default();
+		let chunk_entity_guard = Entity::new(s);
+		let chunk_entity = *chunk_entity_guard;
 
-		chunk_entity.add(s, (chunk_data));
+		let chunk_data_guard = VoxelChunkData::default().box_obj_in(s, main_lock);
+		let chunk_data = *chunk_data_guard;
+
+		chunk_entity.add(s, chunk_data_guard);
+
+		chunk_data
+			.get(s)
+			.block_state_of(BlockPos::new(0, 0, 0))
+			.set_material(1);
+
+		voxel_world_data_guard.borrow_mut(s).add_chunk(
+			s,
+			ChunkPos::new(0, 0, 0),
+			engine_root,
+			chunk_entity_guard,
+		);
+
+		voxel_world_mesh
+			.borrow_mut(s)
+			.flag_chunk(s, main_lock, chunk_entity);
 	}
 
 	// Create event handlers
-	let update_handler = Obj::new(s, |s: Session, _me: Entity, engine_root: Entity| {
-		let main_lock = engine_root.get_in(s, proxy_key::<MainLockKey>());
-
-		log::info!("Updating scene. Our main lock is {main_lock:?}");
+	let update_handler_guard = Obj::new(s, move |s: Session, _me: Entity, engine_root: Entity| {
+		let gfx = engine_root.get::<GfxContext>(s);
+		voxel_world_mesh.borrow_mut(s).update_chunks(s, &gfx, None);
 	})
 	.to_unsized::<dyn SceneUpdateHandler>();
 
-	let render_handler = Obj::new(
+	let render_handler_guard = Obj::new(
 		s,
 		move |frame: Option<wgpu::SurfaceTexture>,
 		      s: Session,
@@ -40,7 +60,7 @@ pub fn make_game_entry(s: Session, engine_root: Entity, main_lock: Lock) -> Owne
 		      _viewport,
 		      engine_root: Entity| {
 			// Acquire services
-			let p_gfx = engine_root.get::<GfxContext>(s);
+			let gfx = engine_root.get::<GfxContext>(s);
 
 			// Acquire frame and create a view to it.
 			let frame = match frame {
@@ -51,7 +71,7 @@ pub fn make_game_entry(s: Session, engine_root: Entity, main_lock: Lock) -> Owne
 			let frame_view = frame.texture.create_view(&Default::default());
 
 			// Encode main pass
-			let mut cb = p_gfx.device.create_command_encoder(&Default::default());
+			let mut cb = gfx.device.create_command_encoder(&Default::default());
 			{
 				let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
 					label: None,
@@ -71,18 +91,27 @@ pub fn make_game_entry(s: Session, engine_root: Entity, main_lock: Lock) -> Owne
 					depth_stencil_attachment: None,
 				});
 
-				let pipeline = &weak_voxel_rendering_pipeline.get(s).opaque_block_pipeline;
-				pass.set_pipeline(pipeline);
-				pass.draw(0..3, 0..1);
+				voxel_world_mesh
+					.borrow_mut(s)
+					.render_chunks(s, voxel_pipeline.get(s), &mut pass);
 			}
 
 			// Present and flush
-			p_gfx.queue.submit([cb.finish()]);
+			gfx.queue.submit([cb.finish()]);
 			frame.present();
 		},
 	)
 	.to_unsized::<dyn ViewportRenderHandler>();
 
 	// Create main entity
-	Entity::new_with(s, (update_handler, render_handler, voxel_pipeline_guard))
+	Entity::new_with(
+		s,
+		(
+			update_handler_guard,
+			render_handler_guard,
+			voxel_pipeline_guard,
+			voxel_world_data_guard,
+			voxel_world_mesh_guard,
+		),
+	)
 }

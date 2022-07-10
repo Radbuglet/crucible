@@ -1,6 +1,6 @@
 use std::{cell::Cell, collections::HashMap, fmt, hash};
 
-use arr_macro::arr;
+use crucible_core::array::arr;
 use geode::prelude::*;
 
 use super::math::{
@@ -115,6 +115,14 @@ impl Drop for VoxelChunkData {
 
 #[derive(Copy, Clone)]
 pub struct RawBlockState<'a> {
+	/// Format:
+	///
+	/// ```text
+	/// LSB
+	/// ---- ---- ~~~~ ~~~~ | ---- ---- | ~~~~ ~~~~ |
+	/// Material Data       | Variant   | Light lvl |
+	/// (u16)               | (u8)      | (u8)      |
+	/// ```
 	cell: &'a Cell<u32>,
 }
 
@@ -143,8 +151,8 @@ impl RawBlockState<'_> {
 	}
 
 	pub fn set_material(self, id: u16) {
-		self.cell
-			.set(self.cell.get() & !(u16::MAX as u32) + id as u32)
+		let value = self.cell.get() - self.material() as u32 + id as u32;
+		self.cell.set(value);
 	}
 
 	pub fn set_variant(self, variant: u8) {

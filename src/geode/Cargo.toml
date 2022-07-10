@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-arr_macro = "0.1.3"
 bumpalo = "3.10.0"
+crucible-core = { path = "../core" }
 derive-where = "1.0.0-rc.3"
 once_cell = "1.13.0"
 parking_lot = "0.12.1"

@@ -64,44 +64,56 @@ impl VoxelWorldMesh {
 		let started = Instant::now();
 
 		for dirty in self.dirty_queue.drain(..) {
+			// Acquire instances
 			let chunk_data = dirty.get::<VoxelChunkData>(s);
 			let chunk_mesh = dirty.get_in::<VoxelChunkMesh>(s, self.mesh_meta_key);
-			let mut vertices = Vec::new();
 
-			for center_pos in BlockPos::iter() {
-				// Don't mesh air blocks
-				if chunk_data.block_state_of(center_pos).material() == 0 {
-					continue;
-				}
-
-				// For every side of a solid block...
-				for face in BlockFace::variants() {
-					let neighbor_block = center_pos + face.unit();
-
-					// If the neighbor isn't solid...
-					let is_solid = if neighbor_block.is_valid() {
-						chunk_data.block_state_of(neighbor_block).material() != 0
-					} else {
-						chunk_data.neighbor(face).map_or(false, |neighbor_entity| {
-							let neighbor_chunk = neighbor_entity.get::<VoxelChunkData>(s);
-
-							neighbor_chunk.block_state_of(center_pos.wrap()).material() != 0
-						})
-					};
-
-					if is_solid {
+			// Generate mesh
+			let vertices = {
+				let mut vertices = Vec::new();
+				for center_pos in BlockPos::iter() {
+					// Don't mesh air blocks
+					if chunk_data.block_state_of(center_pos).material() == 0 {
 						continue;
 					}
 
-					// Mesh it!
-					let center_pos = WorldPos::compose(chunk_data.pos(), center_pos);
-					VoxelVertex::push_quad(&mut vertices, center_pos.into_raw().as_vec3(), face);
-				}
-			}
+					// For every side of a solid block...
+					for face in BlockFace::variants() {
+						let neighbor_block = center_pos + face.unit();
 
+						// If the neighbor isn't solid...
+						let is_solid = if neighbor_block.is_valid() {
+							chunk_data.block_state_of(neighbor_block).material() != 0
+						} else {
+							chunk_data.neighbor(face).map_or(false, |neighbor_entity| {
+								let neighbor_chunk = neighbor_entity.get::<VoxelChunkData>(s);
+
+								neighbor_chunk.block_state_of(center_pos.wrap()).material() != 0
+							})
+						};
+
+						if is_solid {
+							continue;
+						}
+
+						// Mesh it!
+						let center_pos = WorldPos::compose(chunk_data.pos(), center_pos);
+						VoxelVertex::push_quad(
+							&mut vertices,
+							center_pos.into_raw().as_vec3(),
+							face,
+						);
+					}
+				}
+				vertices
+			};
+
+			// Unflag chunk and register it
 			chunk_mesh.still_dirty.set(false);
 			chunk_mesh.vertex_count.set(vertices.len() as u32);
+			self.chunks.insert(dirty);
 
+			// Replace buffer
 			let replaced = chunk_mesh.buffer.replace(Some(
 				gfx.device
 					.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -113,9 +125,22 @@ impl VoxelWorldMesh {
 					.manually_destruct(),
 			));
 
+			// TODO: This type of logic should be removed once we write our extension methods for
+			//  `Cell<Owned<T>>`.
 			if let Some(replaced) = replaced {
 				replaced.destroy(s);
 			}
+
+			// Log some debug info
+			log::info!(
+				"Meshed {} {} for chunk {dirty:?}",
+				vertices.len(),
+				if vertices.len() == 1 {
+					"vertex"
+				} else {
+					"vertices"
+				}
+			);
 
 			// Check if we've elapsed our time limit. Do this at the end of the loop to ensure that
 			// at least one chunk has the opportunity to be meshed.
@@ -134,8 +159,16 @@ impl VoxelWorldMesh {
 		pass.set_pipeline(&assets.opaque_block_pipeline);
 		pass.set_bind_group(0, &assets.bind_group, &[]);
 
+		// log::info!("Woo!");
 		for chunk in self.chunks.iter().copied() {
 			let mesh = chunk.get_in::<VoxelChunkMesh>(s, self.mesh_meta_key);
+
+			// Ignore empty chunks.
+			if mesh.vertex_count.get() == 0 {
+				continue;
+			}
+
+			// Otherwise, acquire the buffer and render.
 			let buffer = mesh
 				.buffer
 				.get()

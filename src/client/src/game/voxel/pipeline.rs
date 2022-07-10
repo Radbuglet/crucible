@@ -76,7 +76,11 @@ impl VoxelRenderingPipeline {
 					vertex: wgpu::VertexState {
 						module: &opaque_block_module,
 						entry_point: "vs_main",
-						buffers: &[],
+						buffers: &[wgpu::VertexBufferLayout {
+							array_stride: 0,
+							step_mode: wgpu::VertexStepMode::Vertex,
+							attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+						}],
 					},
 					primitive: wgpu::PrimitiveState {
 						topology: wgpu::PrimitiveTopology::TriangleList,

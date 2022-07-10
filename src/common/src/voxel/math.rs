@@ -104,7 +104,7 @@ pub trait BlockPosExt: Sized {
 
 impl BlockPosExt for BlockPos {
 	fn is_valid(&self) -> bool {
-		Axis3::variants().all(|comp| self[comp] <= CHUNK_EDGE)
+		Axis3::variants().all(|comp| self[comp] >= 0 && self[comp] < CHUNK_EDGE)
 	}
 
 	fn wrap(mut self) -> Self {

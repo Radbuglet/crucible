@@ -6,7 +6,7 @@
 
 use std::{alloc::Layout, borrow::Cow, fmt, sync::atomic::AtomicU64};
 
-use arr_macro::arr;
+use crucible_core::array::arr;
 use parking_lot::Mutex;
 
 use crate::{

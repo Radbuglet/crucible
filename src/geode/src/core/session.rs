@@ -1,6 +1,6 @@
 use std::{cell::Cell, hint::unreachable_unchecked, marker::PhantomData};
 
-use arr_macro::arr;
+use crucible_core::array::arr;
 use parking_lot::Mutex;
 
 use crate::util::{
