@@ -6,7 +6,7 @@ use typed_glam::{
 	TypedVector, TypedVectorImpl, VecFlavor,
 };
 
-use crate::util::c_enum::{c_enum, ExposesVariants};
+use crucible_core::c_enum::{c_enum, ExposesVariants};
 
 // === Coordinate Systems === //
 

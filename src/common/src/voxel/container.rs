@@ -7,7 +7,7 @@ use super::math::{
 	Axis3, BlockFace, BlockPos, BlockPosExt, ChunkPos, Sign, WorldPos, WorldPosExt, CHUNK_VOLUME,
 };
 
-use crate::util::c_enum::ExposesVariants;
+use crucible_core::c_enum::ExposesVariants;
 
 #[derive(Debug, Default)]
 pub struct VoxelWorldData {

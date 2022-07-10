@@ -6,14 +6,13 @@
 
 use std::{alloc::Layout, borrow::Cow, fmt, sync::atomic::AtomicU64};
 
-use crucible_core::array::arr;
+use crucible_core::{array::arr, cell::MutexedUnsafeCell};
 use parking_lot::Mutex;
 
 use crate::{
 	core::reflect::ReflectType,
 	core::session::{Session, StaticStorage, StaticStorageHandler},
 	util::{
-		cell::MutexedUnsafeCell,
 		number::{LocalBatchAllocator, U8BitSet},
 		threading::new_lot_mutex,
 	},

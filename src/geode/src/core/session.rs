@@ -1,15 +1,13 @@
 use std::{cell::Cell, hint::unreachable_unchecked, marker::PhantomData};
 
-use crucible_core::array::arr;
+use crucible_core::{
+	array::arr,
+	cell::MutexedUnsafeCell,
+	marker::{PhantomNoSendOrSync, PhantomNoSync}, transmute::super_unchecked_transmute,
+};
 use parking_lot::Mutex;
 
-use crate::util::{
-	cell::MutexedUnsafeCell,
-	marker::{PhantomNoSendOrSync, PhantomNoSync},
-	number::U8BitSet,
-	ptr::dangerous_transmute,
-	threading::new_lot_mutex,
-};
+use crate::util::{number::U8BitSet, threading::new_lot_mutex};
 
 // === Global State === //
 
@@ -330,7 +328,7 @@ impl<T> SessionStorage<T> {
 				// Safety: `MutexedUnsafeCell` is `repr(transparent)` so the two types have the same
 				// layout. These two types are not wrapped in anything so we're not susceptible to
 				// e.g. the super dangerous `&T` to `&UnsafeCell<T>` cast.
-				dangerous_transmute::<[T; 256], [MutexedUnsafeCell<T>; 256]>(arr)
+				super_unchecked_transmute::<[T; 256], [MutexedUnsafeCell<T>; 256]>(arr)
 			},
 		}
 	}

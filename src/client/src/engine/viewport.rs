@@ -1,5 +1,5 @@
 use crate::engine::gfx::GfxContext;
-use crucible_common::util::cell::filter_map_ref;
+use crucible_core::cell::filter_map_ref;
 use geode::prelude::*;
 use std::{cell::Ref, collections::HashMap};
 use thiserror::Error;

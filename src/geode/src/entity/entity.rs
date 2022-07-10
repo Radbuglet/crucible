@@ -4,16 +4,14 @@ use std::{
 	collections::HashMap,
 };
 
+use crucible_core::{arity::impl_tuples, error::ResultExt};
 use parking_lot::Mutex;
 use thiserror::Error;
 
-use crate::{
-	core::{
-		obj::{Obj, ObjGetError, ObjPointee},
-		owned::{Destructible, Owned},
-		session::{LocalSessionGuard, Session},
-	},
-	util::{arity::impl_tuples, error::ResultExt},
+use crate::core::{
+	obj::{Obj, ObjGetError, ObjPointee},
+	owned::{Destructible, Owned},
+	session::{LocalSessionGuard, Session},
 };
 
 use super::key::{typed_key, RawTypedKey, TypedKey};

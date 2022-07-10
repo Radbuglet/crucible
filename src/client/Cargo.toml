@@ -8,6 +8,7 @@ anyhow = "1.0.58"
 bytemuck = "1.10.0"
 crevice = { version = "0.11.0", features = ["glam"] }
 crucible-common = { path = "../common" }
+crucible-core = { path = "../core" }
 env_logger = "0.9.0"
 fastrand = "1.7.0"
 futures = "0.3.21"

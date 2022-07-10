@@ -4,13 +4,11 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use crucible_common::{
-	util::c_enum::ExposesVariants,
-	voxel::{
-		container::VoxelChunkData,
-		math::{BlockFace, BlockPos, BlockPosExt, WorldPos, WorldPosExt},
-	},
+use crucible_common::voxel::{
+	container::VoxelChunkData,
+	math::{BlockFace, BlockPos, BlockPosExt, WorldPos, WorldPosExt},
 };
+use crucible_core::c_enum::ExposesVariants;
 use geode::{
 	entity::key::{dyn_key, TypedKey},
 	prelude::*,

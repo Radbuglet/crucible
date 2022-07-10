@@ -7,9 +7,10 @@ use std::{
 	ptr::Pointee,
 };
 
+use crucible_core::error::ResultExt;
 use thiserror::Error;
 
-use crate::util::{error::ResultExt, ptr::unsize_meta};
+use crate::util::ptr::unsize_meta;
 
 use super::{
 	debug::DebugLabel,

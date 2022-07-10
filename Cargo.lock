@@ -513,6 +513,7 @@ dependencies = [
  "bytemuck",
  "crevice",
  "crucible-common",
+ "crucible-core",
  "env_logger",
  "fastrand",
  "futures",
@@ -529,7 +530,6 @@ dependencies = [
 name = "crucible-common"
 version = "0.1.0"
 dependencies = [
- "bytemuck",
  "crucible-core",
  "geode",
  "log",
@@ -541,6 +541,10 @@ dependencies = [
 [[package]]
 name = "crucible-core"
 version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "derive-where",
+]
 
 [[package]]
 name = "csv"
