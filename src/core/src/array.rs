@@ -6,11 +6,6 @@ pub const fn new_uninit_array<T, const N: usize>() -> [MaybeUninit<T>; N] {
 	transmute_uninit_array_to_inner(arr)
 }
 
-#[doc(hidden)]
-pub const fn new_uninit_array_and_return_len<T, const N: usize>() -> ([MaybeUninit<T>; N], usize) {
-	(new_uninit_array(), N)
-}
-
 pub const fn transmute_uninit_array_to_inner<T, const N: usize>(
 	arr: MaybeUninit<[T; N]>,
 ) -> [MaybeUninit<T>; N] {
@@ -23,26 +18,49 @@ pub const fn transmute_uninit_array_to_outer<T, const N: usize>(
 	unsafe { super_unchecked_transmute(arr) }
 }
 
-pub fn array_from_iter<I: IntoIterator, const N: usize>(producer: I) -> [I::Item; N] {
-	let mut producer = producer.into_iter();
-	arr![producer.next().expect("not enough elements in iterator to construct array"); N]
+pub const unsafe fn assume_init_array<T, const N: usize>(arr: [MaybeUninit<T>; N]) -> [T; N] {
+	// Safety: provided by caller
+	transmute_uninit_array_to_outer(arr).assume_init()
 }
 
-pub const fn array_from_copy<T: Copy, const N: usize>(value: T) -> [T; N] {
-	arr![value; N]
+#[repr(C)]
+pub struct MacroArrayBuilder<T, const N: usize> {
+	pub array: [MaybeUninit<T>; N],
+	pub init_count: usize,
+	pub len: usize,
+}
+
+impl<T, const N: usize> MacroArrayBuilder<T, N> {
+	pub const unsafe fn new() -> Self {
+		Self {
+			array: new_uninit_array(),
+			init_count: 0,
+			len: N,
+		}
+	}
+}
+
+impl<T, const N: usize> Drop for MacroArrayBuilder<T, N> {
+	fn drop(&mut self) {
+		for i in 0..self.init_count {
+			unsafe { self.array[i].assume_init_drop() };
+		}
+	}
+}
+
+pub const unsafe fn unwrap_macro_array_builder<T, const N: usize>(
+	builder: MacroArrayBuilder<T, N>,
+) -> [T; N] {
+	super_unchecked_transmute(builder)
 }
 
 pub macro arr($ctor:expr; $size:expr) {{
-	// Construct array
-	let (mut arr, len) = new_uninit_array_and_return_len::<_, { $size }>();
+	let mut arr = unsafe { MacroArrayBuilder::<_, { $size }>::new() };
 
-	let mut i = 0;
-
-	while i < len {
-		arr[i] = MaybeUninit::new($ctor);  // TODO: What happens if a `ctor` panics?
-		i += 1;
+	while arr.init_count < arr.len {
+		arr.array[arr.init_count] = MaybeUninit::new($ctor);
+		arr.init_count += 1;
 	}
 
-	let arr = transmute_uninit_array_to_outer(arr);
-	unsafe { arr.assume_init() }
+	unsafe { unwrap_macro_array_builder(arr) }
 }}
