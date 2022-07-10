@@ -133,14 +133,16 @@ impl VoxelWorldMesh {
 
 			// Log some debug info
 			log::info!(
-				"Meshed {} {} for chunk {dirty:?}",
+				"Meshed {} {} for chunk {:?}",
 				vertices.len(),
 				if vertices.len() == 1 {
 					"vertex"
 				} else {
 					"vertices"
-				}
+				},
+				dirty,
 			);
+			// log::info!("Mesh data: {:#?}", vertices);
 
 			// Check if we've elapsed our time limit. Do this at the end of the loop to ensure that
 			// at least one chunk has the opportunity to be meshed.
@@ -176,7 +178,7 @@ impl VoxelWorldMesh {
 				.get(s);
 
 			pass.set_vertex_buffer(0, buffer.slice(..));
-			pass.draw(0..6, 0..mesh.vertex_count.get());
+			pass.draw(0..mesh.vertex_count.get(), 0..1);
 		}
 	}
 }

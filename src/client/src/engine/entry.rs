@@ -262,8 +262,10 @@ fn run_main_loop(event_loop: EventLoop<()>, engine_root: Owned<Entity>) {
 					None => return,
 				};
 
-				let mut p_viewport = viewport.borrow_mut::<Viewport>(s);
-				let frame = p_viewport.render(p_gfx).expect("failed to get frame");
+				let frame = viewport
+					.borrow_mut::<Viewport>(s)
+					.render(p_gfx)
+					.expect("failed to get frame");
 
 				viewport.get::<dyn ViewportRenderHandler>(s).on_render(
 					frame,

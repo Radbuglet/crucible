@@ -3,6 +3,7 @@ use crucible_common::util::cell::filter_map_ref;
 use geode::prelude::*;
 use std::{cell::Ref, collections::HashMap};
 use thiserror::Error;
+use typed_glam::glam::UVec2;
 use winit::window::{Window, WindowId};
 
 pub const THE_ONE_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
@@ -88,6 +89,11 @@ pub struct Viewport {
 }
 
 impl Viewport {
+	// TODO: Handle zero-sized windows in a slightly safer way.
+	pub fn configured_size(&self) -> UVec2 {
+		UVec2::new(self.config.width, self.config.height)
+	}
+
 	pub fn render(
 		&mut self,
 		gfx: &GfxContext,
@@ -117,6 +123,11 @@ impl Viewport {
 		if self.config.height != win_size.height {
 			self.config.height = win_size.height;
 			self.config_changed = true;
+		}
+
+		// Avoid presenting to a zero-sized canvas.
+		if self.config.width == 0 || self.config.height == 0 {
+			return Ok(None);
 		}
 
 		if self.config_changed {

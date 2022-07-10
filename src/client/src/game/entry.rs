@@ -3,8 +3,13 @@ use crucible_common::voxel::{
 	math::{BlockPos, ChunkPos},
 };
 use geode::prelude::*;
+use typed_glam::glam::{Mat4, Vec3};
 
-use crate::engine::{gfx::GfxContext, scene::SceneUpdateHandler, viewport::ViewportRenderHandler};
+use crate::engine::{
+	gfx::GfxContext,
+	scene::SceneUpdateHandler,
+	viewport::{Viewport, ViewportRenderHandler},
+};
 
 use super::voxel::{mesh::VoxelWorldMesh, pipeline::VoxelRenderingPipeline};
 
@@ -57,12 +62,14 @@ pub fn make_game_entry(s: Session, engine_root: Entity, main_lock: Lock) -> Owne
 		move |frame: Option<wgpu::SurfaceTexture>,
 		      s: Session,
 		      _me,
-		      _viewport,
+		      viewport: Entity,
 		      engine_root: Entity| {
 			// Acquire services
-			let gfx = engine_root.get::<GfxContext>(s);
+			let p_gfx = engine_root.get::<GfxContext>(s);
+			let p_voxel_pipeline = voxel_pipeline.get(s);
+			let p_viewport_handle = viewport.borrow::<Viewport>(s);
 
-			// Acquire frame and create a view to it.
+			// Acquire frame and create a view to it
 			let frame = match frame {
 				Some(frame) => frame,
 				None => return,
@@ -70,8 +77,25 @@ pub fn make_game_entry(s: Session, engine_root: Entity, main_lock: Lock) -> Owne
 
 			let frame_view = frame.texture.create_view(&Default::default());
 
+			// Setup projection matrix
+			{
+				let viewport_size = p_viewport_handle.configured_size().as_vec2();
+
+				let mut aspect = viewport_size.x / viewport_size.y;
+				if aspect.is_nan() {
+					aspect = 1.;
+				}
+
+				let proj = Mat4::perspective_lh(70f32.to_radians(), aspect, 0.1, 100.);
+				let view = Mat4::look_at_lh(Vec3::new(-10., -10., -10.), Vec3::ZERO, Vec3::Y);
+				// let view = view.inverse();
+				let full = proj * view;
+
+				p_voxel_pipeline.set_camera_matrix(p_gfx, full);
+			}
+
 			// Encode main pass
-			let mut cb = gfx.device.create_command_encoder(&Default::default());
+			let mut cb = p_gfx.device.create_command_encoder(&Default::default());
 			{
 				let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
 					label: None,
@@ -93,11 +117,11 @@ pub fn make_game_entry(s: Session, engine_root: Entity, main_lock: Lock) -> Owne
 
 				voxel_world_mesh
 					.borrow_mut(s)
-					.render_chunks(s, voxel_pipeline.get(s), &mut pass);
+					.render_chunks(s, p_voxel_pipeline, &mut pass);
 			}
 
 			// Present and flush
-			gfx.queue.submit([cb.finish()]);
+			p_gfx.queue.submit([cb.finish()]);
 			frame.present();
 		},
 	)

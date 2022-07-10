@@ -77,7 +77,7 @@ impl VoxelRenderingPipeline {
 						module: &opaque_block_module,
 						entry_point: "vs_main",
 						buffers: &[wgpu::VertexBufferLayout {
-							array_stride: 0,
+							array_stride: VoxelVertex::std430_size_static() as wgpu::BufferAddress,
 							step_mode: wgpu::VertexStepMode::Vertex,
 							attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
 						}],
@@ -116,18 +116,18 @@ impl VoxelRenderingPipeline {
 		}
 	}
 
-	pub fn set_projection_matrix(&self, gfx: &GfxContext, proj: glam::Mat4) {
+	pub fn set_camera_matrix(&self, gfx: &GfxContext, proj: glam::Mat4) {
 		gfx.queue.write_buffer(
 			&self.uniform_buffer,
 			0,
-			ShaderUniformBuffer { proj }.as_std430().as_bytes(),
+			ShaderUniformBuffer { camera: proj }.as_std430().as_bytes(),
 		)
 	}
 }
 
 #[derive(AsStd430)]
 struct ShaderUniformBuffer {
-	pub proj: glam::Mat4,
+	pub camera: glam::Mat4,
 }
 
 #[derive(AsStd430)]

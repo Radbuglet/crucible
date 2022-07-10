@@ -39,7 +39,7 @@ pub macro arr($ctor:expr; $size:expr) {{
 	let mut i = 0;
 
 	while i < len {
-		arr[i] = MaybeUninit::new($ctor);
+		arr[i] = MaybeUninit::new($ctor);  // TODO: What happens if a `ctor` panics?
 		i += 1;
 	}
 
