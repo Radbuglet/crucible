@@ -825,6 +825,7 @@ dependencies = [
 name = "geode"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bumpalo",
  "criterion",
  "crucible-core",

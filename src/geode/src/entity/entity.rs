@@ -4,17 +4,19 @@ use std::{
 	collections::HashMap,
 };
 
-use crucible_core::{arity::impl_tuples, error::ResultExt};
+use crucible_core::{error::ResultExt, macros::impl_tuples};
 use parking_lot::Mutex;
 use thiserror::Error;
 
 use crate::core::{
-	obj::{Obj, ObjGetError, ObjPointee},
+	obj::{Obj, ObjGetError, ObjLockedError, ObjPointee},
 	owned::{Destructible, Owned},
 	session::{LocalSessionGuard, Session},
 };
 
 use super::key::{typed_key, RawTypedKey, TypedKey};
+
+// === `Entity` core === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Entity {
@@ -115,69 +117,9 @@ impl Destructible for Entity {
 	}
 }
 
-pub trait RegisterObj: Sized {
-	type Value: ?Sized + ObjPointee;
+// === `Entity` error types === //
 
-	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>);
-}
-
-impl<T: ?Sized + ObjPointee> RegisterObj for Obj<T> {
-	type Value = T;
-
-	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
-		registry.add(key, self);
-	}
-}
-
-impl<T: ?Sized + ObjPointee> RegisterObj for Owned<Obj<T>> {
-	type Value = T;
-
-	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
-		registry.add(key, self.manually_destruct());
-	}
-}
-
-pub struct ComponentAttachTarget<'a> {
-	map: &'a mut HashMap<RawTypedKey, Box<dyn Any + Send>>,
-}
-
-impl ComponentAttachTarget<'_> {
-	pub fn add<T: ?Sized + ObjPointee>(&mut self, key: TypedKey<T>, value: Obj<T>) {
-		self.map.insert(key.raw(), Box::new(value));
-	}
-}
-
-pub trait ComponentList: Sized {
-	fn push_values(self, registry: &mut ComponentAttachTarget);
-}
-
-impl<T: RegisterObj> ComponentList for T {
-	fn push_values(self, registry: &mut ComponentAttachTarget) {
-		self.push_value_under(registry, typed_key::<T::Value>());
-	}
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct ExposeUsing<T: RegisterObj>(pub T, pub TypedKey<T::Value>);
-
-impl<T: RegisterObj> ComponentList for ExposeUsing<T> {
-	fn push_values(self, registry: &mut ComponentAttachTarget) {
-		self.0.push_value_under(registry, self.1);
-	}
-}
-
-macro impl_component_list_on_tuple($($name:ident: $field:tt),*) {
-    impl<$($name: ComponentList),*> ComponentList for ($($name,)*) {
-        #[allow(unused)]
-        fn push_values(self, registry: &mut ComponentAttachTarget) {
-            $(self.$field.push_values(registry);)*
-        }
-    }
-}
-
-impl_tuples!(impl_component_list_on_tuple);
-
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Copy, Clone, Error)]
 pub enum EntityGetError {
 	#[error("failed to deref `Entity`'s `Obj`")]
 	EntityDerefError(#[source] ObjGetError),
@@ -192,6 +134,14 @@ impl EntityGetError {
 		match self {
 			Self::ComponentMissing(err) => Ok(err),
 			other => Err(other),
+		}
+	}
+
+	pub fn as_permission_error(self) -> Option<ObjLockedError> {
+		match self {
+			Self::EntityDerefError(ObjGetError::Locked(perm_err)) => Some(perm_err),
+			Self::CompDerefError(_, ObjGetError::Locked(perm_err)) => Some(perm_err),
+			_ => None,
 		}
 	}
 
@@ -214,8 +164,116 @@ impl<T> EntityGetErrorExt for Result<T, EntityGetError> {
 	}
 }
 
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Copy, Clone, Error)]
 #[error("component with key {key:?} is missing from `Entity`")]
 pub struct ComponentMissingError {
 	pub key: RawTypedKey,
+}
+
+// === `ComponentList` === //
+
+pub struct ComponentAttachTarget<'a> {
+	map: &'a mut HashMap<RawTypedKey, Box<dyn Any + Send>>,
+}
+
+impl ComponentAttachTarget<'_> {
+	pub fn add_raw<T: ?Sized + ObjPointee>(
+		&mut self,
+		key: TypedKey<T>,
+		value: Obj<T>,
+		_call_dctor: bool,
+	) {
+		self.map.insert(key.raw(), Box::new(value));
+	}
+
+	pub fn add_weak<T: ?Sized + ObjPointee>(&mut self, key: TypedKey<T>, value: Obj<T>) {
+		self.add_raw(key, value, false);
+	}
+
+	pub fn add_owned<T: ?Sized + ObjPointee>(&mut self, key: TypedKey<T>, value: Owned<Obj<T>>) {
+		self.add_raw(key, value.manually_destruct(), true);
+	}
+}
+
+pub trait ComponentList: Sized {
+	fn push_values(self, registry: &mut ComponentAttachTarget);
+}
+
+impl<T: SingleComponent> ComponentList for T {
+	fn push_values(self, registry: &mut ComponentAttachTarget) {
+		self.push_value_under(registry, typed_key::<T::Value>());
+	}
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct ExposeUsing<T: SingleComponent>(pub T, pub TypedKey<T::Value>);
+
+impl<T: SingleComponent> ComponentList for ExposeUsing<T> {
+	fn push_values(self, registry: &mut ComponentAttachTarget) {
+		self.0.push_value_under(registry, self.1);
+	}
+}
+
+macro impl_component_list_on_tuple($($name:ident: $field:tt),*) {
+    impl<$($name: ComponentList),*> ComponentList for ($($name,)*) {
+        #[allow(unused)]
+        fn push_values(self, registry: &mut ComponentAttachTarget) {
+            $(self.$field.push_values(registry);)*
+        }
+    }
+}
+
+impl_tuples!(impl_component_list_on_tuple);
+
+// === `SingleComponent` === //
+
+pub trait SingleComponent: Sized {
+	type Value: ?Sized + ObjPointee;
+
+	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>);
+}
+
+impl<T: ?Sized + ObjPointee> SingleComponent for Obj<T> {
+	type Value = T;
+
+	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
+		registry.add_weak(key, self);
+	}
+}
+
+impl<T: ?Sized + ObjPointee> SingleComponent for Owned<Obj<T>> {
+	type Value = T;
+
+	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
+		registry.add_owned(key, self);
+	}
+}
+
+#[derive(Debug)]
+pub enum OwnedOrWeak<T: ?Sized + ObjPointee> {
+	Owned(Owned<Obj<T>>),
+	Weak(Obj<T>),
+}
+
+impl<T: ?Sized + ObjPointee> SingleComponent for OwnedOrWeak<T> {
+	type Value = T;
+
+	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
+		match self {
+			OwnedOrWeak::Owned(owned) => registry.add_owned(key, owned),
+			OwnedOrWeak::Weak(weak) => registry.add_weak(key, weak),
+		}
+	}
+}
+
+impl<T: ?Sized + ObjPointee> From<Owned<Obj<T>>> for OwnedOrWeak<T> {
+	fn from(owned: Owned<Obj<T>>) -> Self {
+		Self::Owned(owned)
+	}
+}
+
+impl<T: ?Sized + ObjPointee> From<Obj<T>> for OwnedOrWeak<T> {
+	fn from(weak: Obj<T>) -> Self {
+		Self::Weak(weak)
+	}
 }

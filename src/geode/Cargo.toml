@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.58"
 bumpalo = "3.10.0"
 crucible-core = { path = "../core" }
 derive-where = "1.0.0-rc.3"
