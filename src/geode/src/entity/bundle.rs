@@ -4,13 +4,16 @@ use crate::core::{
 };
 
 use super::entity::ComponentList;
+
 #[allow(unused)] // Actually captured by the macro
-use super::{
-	entity::{ComponentAttachTarget, Entity, OwnedOrWeak},
-	key::typed_key,
+use {
+	super::{
+		entity::{ComponentAttachTarget, Entity, OwnedOrWeak},
+		key::typed_key,
+	},
+	bytemuck::TransparentWrapper,
+	crucible_core::macros::prefer_left,
 };
-#[allow(unused)]
-use crucible_core::macros::prefer_left;
 
 pub trait ComponentBundle: Sized + Destructible {
 	type CompList: ComponentList;
@@ -20,6 +23,8 @@ pub trait ComponentBundle: Sized + Destructible {
 	fn try_cast(session: Session, entity: Entity) -> anyhow::Result<Self>;
 
 	fn force_cast(entity: Entity) -> Self;
+
+	fn force_cast_ref(entity: &Entity) -> &Self;
 
 	// === Derived casting methods === //
 
@@ -49,11 +54,13 @@ pub trait ComponentBundle: Sized + Destructible {
 	// === Deconstructors === //
 
 	fn raw(self) -> Entity;
+
+	fn raw_ref(&self) -> &Entity;
 }
 
 pub macro component_bundle($(
     $vis:vis struct $bundle_name:ident($bundle_ctor_name:ident) {
-        $(..$ext_ty:ty;)*
+        $(..$ext_name:ident: $ext_ty:ty;)*
 
         $(
             $field_name:ident$([$key:expr])?: $field_ty:ty
@@ -61,16 +68,20 @@ pub macro component_bundle($(
         $(,)?
     }
 )*) {$(
-    #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+    #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, TransparentWrapper)]
+    #[repr(transparent)]
     $vis struct $bundle_name(Entity);
 
     #[derive(Debug)]
     $vis struct $bundle_ctor_name {
+        $(pub $ext_name: <$ext_ty as ComponentBundle>::CompList,)*
         $(pub $field_name: OwnedOrWeak<$field_ty>,)*
     }
 
     impl ComponentList for $bundle_ctor_name {
+        #[allow(unused)]  // `registry` may be unused in empty bundles.
         fn push_values(self, registry: &mut ComponentAttachTarget) {
+            $(ComponentList::push_values(self.$ext_name, registry);)*
             $(ComponentList::push_values(self.$field_name, registry);)*
         }
     }
@@ -78,20 +89,25 @@ pub macro component_bundle($(
     impl ComponentBundle for $bundle_name {
         type CompList = $bundle_ctor_name;
 
+        #[allow(unused)]  // `session` and `BUNDLE_MAKE_ERR` may be unused in empty bundles.
         fn try_cast(session: Session, entity: Entity) -> anyhow::Result<Self> {
+            const BUNDLE_MAKE_ERR: &'static str = concat!(
+                "failed to construct ",
+                stringify!($bundle_name),
+                " component bundle"
+            );
+
+            $(
+                <$ext_ty as ComponentBundle>::try_cast(session, entity)?;
+            )*
+
             $(
                 if let Err(err) = entity.falliable_get_in(session, prefer_left!(
                     $({$key})?
                     { typed_key::<$field_ty>() }
                 )) {
                     if err.as_permission_error().is_none() {
-                        return Err(anyhow::Error::new(err)
-                            .context(concat!(
-                                "failed to construct ",
-                                stringify!($bundle_name),
-                                " component bundle"
-                            ))
-                        );
+                        return Err(anyhow::Error::new(err).context(BUNDLE_MAKE_ERR));
                     }
                 }
             )*
@@ -102,12 +118,34 @@ pub macro component_bundle($(
             Self(entity)
         }
 
+        fn force_cast_ref(entity: &Entity) -> &Self {
+            <Self as TransparentWrapper<Entity>>::wrap_ref(entity)
+        }
+
         fn raw(self) -> Entity {
             self.0
         }
+
+        fn raw_ref(&self) -> &Entity {
+            &self.0
+        }
     }
 
+    $(
+        impl AsRef<$ext_ty> for $bundle_name {
+            fn as_ref(&self) -> &$ext_ty {
+                <$ext_ty as ComponentBundle>::force_cast_ref(self.raw_ref())
+            }
+        }
+    )*
+
     impl $bundle_name {
+        $(
+            pub fn $ext_name(self) -> $ext_ty {
+                *self.as_ref()
+            }
+        )*
+
         $(
             pub fn $field_name<'a>(self, session: Session<'a>) -> &'a $field_ty {
                 self.raw().get_in(session, prefer_left!(
