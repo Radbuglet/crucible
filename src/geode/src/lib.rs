@@ -20,7 +20,7 @@ pub mod prelude {
 			session::{LocalSessionGuard, Session},
 		},
 		entity::{
-			bundle::{component_bundle, ComponentBundle},
+			bundle::{component_bundle, ComponentBundle, ComponentBundleWithCtor},
 			entity::{Entity, EntityGetErrorExt, ExposeUsing},
 			event::event_trait,
 			key::{proxy_key, typed_key, ProxyKeyType},

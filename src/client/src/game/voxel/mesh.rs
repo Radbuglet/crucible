@@ -15,7 +15,7 @@ use geode::{
 };
 use wgpu::util::DeviceExt;
 
-use crate::engine::gfx::GfxContext;
+use crate::engine::services::gfx::GfxContext;
 
 use super::pipeline::{VoxelRenderingPipeline, VoxelVertex};
 

@@ -9,3 +9,6 @@ target/
 
 # MacOS
 .DS_Store
+
+# Private Scripts
+private-scripts

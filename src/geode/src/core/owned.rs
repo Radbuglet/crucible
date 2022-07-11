@@ -18,6 +18,13 @@ impl<T: Destructible> Owned<T> {
 		Self(ManuallyDrop::new(inner))
 	}
 
+	pub fn map_owned<F, R: Destructible>(self, f: F) -> Owned<R>
+	where
+		F: FnOnce(T) -> R,
+	{
+		Owned::new(f(self.manually_destruct()))
+	}
+
 	pub fn manually_destruct(mut self) -> T {
 		let inner = unsafe { ManuallyDrop::take(&mut self.0) };
 		std::mem::forget(self);

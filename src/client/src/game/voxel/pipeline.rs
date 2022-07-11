@@ -5,7 +5,7 @@ use crucible_common::voxel::math::{BlockFace, Sign};
 use geode::prelude::*;
 use typed_glam::glam;
 
-use crate::engine::{gfx::GfxContext, viewport::FALLBACK_SURFACE_FORMAT};
+use crate::engine::services::{gfx::GfxContext, viewport::FALLBACK_SURFACE_FORMAT};
 
 pub struct VoxelRenderingPipeline {
 	pub opaque_block_pipeline: wgpu::RenderPipeline,

@@ -1,4 +1,4 @@
-use crate::engine::gfx::GfxContext;
+use super::gfx::GfxContext;
 use crucible_core::cell::filter_map_ref;
 use geode::prelude::*;
 use std::{cell::Ref, collections::HashMap};

@@ -5,7 +5,7 @@ use crucible_common::voxel::{
 use geode::prelude::*;
 use typed_glam::glam::{Mat4, Vec3};
 
-use crate::engine::{
+use crate::engine::services::{
 	gfx::GfxContext,
 	scene::SceneUpdateHandler,
 	viewport::{Viewport, ViewportRenderHandler},

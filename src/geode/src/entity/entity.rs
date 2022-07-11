@@ -5,6 +5,7 @@ use std::{
 };
 
 use crucible_core::{error::ResultExt, macros::impl_tuples};
+use derive_where::derive_where;
 use parking_lot::Mutex;
 use thiserror::Error;
 
@@ -249,7 +250,7 @@ impl<T: ?Sized + ObjPointee> SingleComponent for Owned<Obj<T>> {
 	}
 }
 
-#[derive(Debug)]
+#[derive_where(Debug)]
 pub enum OwnedOrWeak<T: ?Sized + ObjPointee> {
 	Owned(Owned<Obj<T>>),
 	Weak(Obj<T>),
