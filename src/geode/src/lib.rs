@@ -14,7 +14,7 @@ pub mod prelude {
 	pub use crate::{
 		core::{
 			debug::NoLabel,
-			obj::{Lock, Obj, ObjCtorExt, ObjRw, RawObj},
+			obj::{Lock, Obj, ObjCtorExt, ObjPointee, ObjRw, RawObj},
 			owned::Owned,
 			reflect::ReflectType,
 			session::{LocalSessionGuard, Session},

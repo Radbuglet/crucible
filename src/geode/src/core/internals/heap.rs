@@ -3,7 +3,7 @@ use crate::core::reflect::ReflectType;
 use crate::util::bump::LeakyBump;
 use bumpalo::Bump;
 use std::alloc::Layout;
-use std::ptr::{null, NonNull};
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
 
 // === SlotManager === //
@@ -58,11 +58,17 @@ impl Slot {
 	///
 	/// ## Safety
 	///
-	/// While the object guarantees that a wrong pointer-generation pair cannot be observed, this
-	/// guarantee only applies if you `acquire` the [Slot] from exactly one thread.
+	/// While the object guarantees that a wrong pointer-generation pair cannot be acquired externally,
+	/// this guarantee only applies if generations are never reused.
+	///
 	pub fn acquire(&self, new_gen: ExtendedGen, new_base: *const ()) {
 		debug_assert_ne!(new_gen.gen(), 0);
-		self.update(new_gen, new_base);
+
+		// We first ensure that the new `lock_and_gen` is visible to other threads before modifying
+		// the pointer. That way, even if they load the stale pointer, they'll see that the `gen`
+		// has been changed and prevent the unsafe fetch.
+		self.lock_and_gen.store(new_gen.raw(), Ordering::Relaxed);
+		self.base_ptr.store(new_base as *mut (), Ordering::Release); // Forces other cores to see `lock_and_gen`
 	}
 
 	/// Atomically releases the [Slot], invalidating both its generation and its pointer. Returns
@@ -73,18 +79,27 @@ impl Slot {
 	/// Can be called on multiple threads simultaneously but only one thread will be considered as
 	/// having been responsible for the deletion.
 	///
-	pub fn release(&self, _local_gen: ExtendedGen) -> bool {
-		// FIXME: This is not a legal implementation.
-		self.update(ExtendedGen::new(0, 0), null());
-		true
-	}
+	/// TODO: Code review
+	///
+	pub fn release(&self, local_gen: ExtendedGen) -> bool {
+		// We're going to perform a one-shot `fetch_update`. This is sound because the, if the slot
+		// changed in between the calls, it must have been updated by some other `release`/`acquire`
+		// call.
 
-	fn update(&self, new_gen: ExtendedGen, new_base: *const ()) {
-		// We first ensure that the new `lock_and_gen` is visible to other threads before modifying
-		// the pointer. That way, even if they load the stale pointer, they'll see that the `gen`
-		// has been changed and prevent the unsafe fetch.
-		self.lock_and_gen.store(new_gen.raw(), Ordering::Relaxed);
-		self.base_ptr.store(new_base as *mut (), Ordering::Release); // Forces other cores to see `lock_and_gen`
+		// We don't need to see anything else so this is just a relaxed load.
+		let lock_and_gen = self.lock_and_gen.load(Ordering::Relaxed);
+
+		// Of course, even if we win the race, we still have to ensure that we're not deleting the
+		// slot at the wrong generation.
+		if ExtendedGen::from_raw(lock_and_gen).gen() != local_gen.gen() {
+			return false;
+		}
+
+		// The ordering here is `Relaxed` because releases are performed best-effort. Just so long as
+		// exactly one thread releases the slot, everything is fine.
+		self.lock_and_gen
+			.compare_exchange(lock_and_gen, 0, Ordering::Relaxed, Ordering::Relaxed)
+			.is_ok()
 	}
 
 	// /// Attempts a best-effort repointing of the slot without invalidating the generation.

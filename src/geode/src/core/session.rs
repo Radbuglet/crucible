@@ -3,7 +3,8 @@ use std::{cell::Cell, hint::unreachable_unchecked, marker::PhantomData};
 use crucible_core::{
 	array::arr,
 	cell::MutexedUnsafeCell,
-	marker::{PhantomNoSendOrSync, PhantomNoSync}, transmute::super_unchecked_transmute,
+	marker::{PhantomNoSendOrSync, PhantomNoSync},
+	transmute::super_unchecked_transmute,
 };
 use parking_lot::Mutex;
 
@@ -30,13 +31,12 @@ impl Drop for UnregisterGuard {
 /// during initialization, no IDs will be leaked.
 ///
 fn allocate_session() -> u8 {
-	// Allocate ID
+	// Allocate ID and set up an unregistry guard to trigger on panic. We mark the session ID as
+	// registered here and employ a guard because `init_session` can call `allocate_session` (making
+	// it reentrant) and we need to prevent that semi-initialized ID from being reused.
 	let id = ID_ALLOC.lock().reserve_zero_bit().unwrap_or(0xFF);
 	assert_ne!(id, 0xFF, "Cannot create more than 255 sessions!");
 
-	// Setup guard to unregister ID if something goes poorly.
-	// We complete the transaction before knowing whether it is valid because `init_session` can call
-	// to `allocate_session`.
 	let unregister_guard = UnregisterGuard(id);
 
 	// Initialize all critical session info instances.
@@ -45,7 +45,8 @@ fn allocate_session() -> u8 {
 		<() as StaticStorageHygieneBreak>::init_session(id);
 	}
 
-	// Defuse the `unregister_guard`—we don't need it anymore.
+	// Defuse the `unregister_guard`. A user-facing guard designed to call `dealloc_session` will be
+	// created in its place.
 	std::mem::forget(unregister_guard);
 
 	id
@@ -54,9 +55,9 @@ fn allocate_session() -> u8 {
 /// Deallocates an existing session.
 fn dealloc_session(id: u8) {
 	// We set up a guard to unregister the session `id` once `deinit_session` finishes or panics.
-	// We cannot unregister the session until `deinit_session` has stopped because the handler might
+	// We cannot unregister the session until `deinit_session` has finished because the handler might
 	// then allocate a session with that free ID that is simultaneously being initialized and
-	// deinitialized, which would cause the *big bad*.
+	// deinitialized, which could cause the *big bad*.
 	let unregister_guard = UnregisterGuard(id);
 
 	unsafe {
@@ -494,9 +495,9 @@ pub(crate) trait StaticStorageHandler {
 /// A trait providing static methods to access the statically-initialized [SessionStorage] attached
 /// to the item on which the trait is implemented.
 ///
-/// **This trait is not to be implemented manually.** Rather, users should implement [StaticStorageHandler]
-/// to define the actual storage's properties and then derive this trait by registering the struct in
-/// the singleton call to [register_static_storages].
+/// **This trait is not to be implemented manually.** Instead, users should implement
+/// [StaticStorageHandler] to define the actual storage's properties and then derive this trait by
+/// registering the struct in the singleton call to [register_static_storages].
 pub(crate) unsafe trait StaticStorage: StaticStorageHandler {
 	unsafe fn backing_storage() -> &'static SessionStorage<Option<Self::Comp>>;
 

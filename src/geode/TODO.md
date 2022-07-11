@@ -4,15 +4,15 @@
   - [ ] Implement `Node`, a way to attach a dependency hierarchy to an `Entity`.
   - [ ] Implement `CopyVec`, `CopyHashMap`, and `CopyHashSet`.
   - [ ] Expose more of the `Obj` lifecycle methods to `Entity`.
-  - [ ] Expose fallible getters to `Obj`.
+  - [x] Expose fallible getters to `Obj`.
 - [ ] Signals:
   - [ ] `event_trait` multiplexing, packing, conversions, and forwarding.
   - [ ] `InstantSignal` and `DeferredSignal` object (once `Storage` becomes available)
-- [ ] GC prep:
+- [x] GC prep:
   - [x] Clean up `Sessions` implementation (i.e. clarify invariants)
   - [x] Put non-reentrant methods in their own layer to avoid recursive calls.
   - [x] Unify `Obj` and `RawObj` implementations.
-  - [ ] Fix the `Slot` release routine (the free slot can only be added to the list of the thread
+  - [x] Fix the `Slot` release routine (the free slot can only be added to the list of the thread
         that deleted it)
 - [ ] GC implementation:
   - [ ] Implement `Heap` compaction.
