@@ -79,13 +79,7 @@ pub fn make_game_entry(s: Session, engine_root: Entity, main_lock: Lock) -> Owne
 
 			// Setup projection matrix
 			{
-				let viewport_size = p_viewport_handle.configured_size().as_vec2();
-
-				let mut aspect = viewport_size.x / viewport_size.y;
-				if aspect.is_nan() {
-					aspect = 1.;
-				}
-
+				let aspect = p_viewport_handle.surface_aspect().unwrap_or(1.);
 				let proj = Mat4::perspective_lh(70f32.to_radians(), aspect, 0.1, 100.);
 				let view = Mat4::look_at_lh(Vec3::new(-10., -10., -10.), Vec3::ZERO, Vec3::Y);
 				// let view = view.inverse();

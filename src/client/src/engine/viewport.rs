@@ -6,16 +6,7 @@ use thiserror::Error;
 use typed_glam::glam::UVec2;
 use winit::window::{Window, WindowId};
 
-pub const THE_ONE_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
-
-// TODO: Dynamically adapt format; figure out color spaces
-// fn get_preferred_format(surface: &wgpu::Surface, adapter: &wgpu::Adapter) -> wgpu::TextureFormat {
-// 	surface
-// 		.get_supported_formats(adapter)
-// 		.get(0)
-// 		.copied()
-// 		.expect("Surface is incompatible with adapter.")
-// }
+pub const FALLBACK_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 
 #[derive(Debug, Default)]
 pub struct ViewportManager {
@@ -36,7 +27,7 @@ impl ViewportManager {
 		let win_size = window.inner_size();
 		let config = wgpu::SurfaceConfiguration {
 			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-			format: THE_ONE_SURFACE_FORMAT,
+			format: FALLBACK_SURFACE_FORMAT,
 			width: win_size.width,
 			height: win_size.height,
 			present_mode: wgpu::PresentMode::Fifo,
@@ -80,6 +71,18 @@ impl ViewportManager {
 	}
 }
 
+fn surface_size_from_config(config: &wgpu::SurfaceConfiguration) -> Option<UVec2> {
+	let size = UVec2::new(config.width, config.height);
+
+	// We also don't really want 1x1 surfaces in case we ever want to subtract one from the
+	// dimension.
+	if size.x < 2 || size.y < 2 {
+		None
+	} else {
+		Some(size)
+	}
+}
+
 #[derive(Debug)]
 pub struct Viewport {
 	window: Option<Window>,
@@ -89,9 +92,37 @@ pub struct Viewport {
 }
 
 impl Viewport {
-	// TODO: Handle zero-sized windows in a slightly safer way.
-	pub fn configured_size(&self) -> UVec2 {
-		UVec2::new(self.config.width, self.config.height)
+	pub fn set_format(&mut self, format: wgpu::TextureFormat) {
+		if self.config.format != format {
+			self.config.format = format;
+			self.config_changed = true;
+		}
+	}
+
+	pub fn format(&self) -> wgpu::TextureFormat {
+		self.config.format
+	}
+
+	pub fn set_present_mode(&mut self, mode: wgpu::PresentMode) {
+		if self.config.present_mode != mode {
+			self.config.present_mode = mode;
+			self.config_changed = true;
+		}
+	}
+
+	pub fn present_mode(&self) -> wgpu::PresentMode {
+		self.config.present_mode
+	}
+
+	pub fn surface_size(&self) -> Option<UVec2> {
+		surface_size_from_config(&self.config)
+	}
+
+	pub fn surface_aspect(&self) -> Option<f32> {
+		self.surface_size().map(|size| {
+			let size = size.as_vec2();
+			size.x / size.y
+		})
 	}
 
 	pub fn render(
@@ -100,36 +131,70 @@ impl Viewport {
 	) -> Result<Option<wgpu::SurfaceTexture>, OutOfDeviceMemoryError> {
 		use wgpu::SurfaceError::*;
 
+		fn normalize_swapchain_config(
+			surface: &wgpu::Surface,
+			config: &mut wgpu::SurfaceConfiguration,
+			config_changed: &mut bool,
+			gfx: &GfxContext,
+			window: &Window,
+		) -> bool {
+			// Ensure that we're still using a supported format.
+			let supported_formats = surface.get_supported_formats(&gfx.adapter);
+
+			assert!(
+				supported_formats.len() > 0,
+				"The current graphics adapter does not support this surface."
+			);
+
+			if supported_formats.contains(&config.format) {
+				log::warn!(
+					"Swapchain format {:?} is unsupported by surface-adapter pair. Falling back to {:?}.",
+					config.format,
+					FALLBACK_SURFACE_FORMAT
+				);
+				config.format = FALLBACK_SURFACE_FORMAT;
+				*config_changed = true;
+			}
+
+			// Ensure that the surface texture matches the window's physical (backing buffer) size
+			let win_size = window.inner_size();
+
+			if config.width != win_size.width {
+				config.width = win_size.width;
+				*config_changed = true;
+			}
+
+			if config.height != win_size.height {
+				config.height = win_size.height;
+				*config_changed = true;
+			}
+
+			// Ensure that we can actually render to the surface
+			if surface_size_from_config(config).is_none() {
+				return false;
+			}
+
+			true
+		}
+
+		// Get window
 		let window = self
 			.window
 			.as_ref()
 			.expect("attempted to render to unmounted viewport");
 
-		// Ensure that the surface texture matches the window's physical (backing buffer) size
-		let win_size = window.inner_size();
-
-		let preferred_format = THE_ONE_SURFACE_FORMAT;
-
-		if self.config.format != preferred_format {
-			self.config.format = preferred_format;
-			self.config_changed = true;
-		}
-
-		if self.config.width != win_size.width {
-			self.config.width = win_size.width;
-			self.config_changed = true;
-		}
-
-		if self.config.height != win_size.height {
-			self.config.height = win_size.height;
-			self.config_changed = true;
-		}
-
-		// Avoid presenting to a zero-sized canvas.
-		if self.config.width == 0 || self.config.height == 0 {
+		// Normalize the swapchain
+		if !normalize_swapchain_config(
+			&self.surface,
+			&mut self.config,
+			&mut self.config_changed,
+			gfx,
+			window,
+		) {
 			return Ok(None);
 		}
 
+		// Try to reconfigure the surface if it was updated
 		if self.config_changed {
 			self.surface.configure(&gfx.device, &self.config);
 			self.config_changed = false;
@@ -151,7 +216,21 @@ impl Viewport {
 					window.id()
 				);
 
-				// Try to recreate the swap-chain and try again.
+				// Renormalize the swapchain config
+				// This is done in case the swapchain settings changed since then. This event is
+				// exceedingly rare but we're already in the slow path anyways so we might as well
+				// do things right.
+				if !normalize_swapchain_config(
+					&self.surface,
+					&mut self.config,
+					&mut self.config_changed,
+					gfx,
+					window,
+				) {
+					return Ok(None);
+				}
+
+				// Try to recreate the swapchain and try again
 				self.surface.configure(&gfx.device, &self.config);
 
 				match self.surface.get_current_texture() {
