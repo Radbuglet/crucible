@@ -1,0 +1,9 @@
+[package]
+name = "spc-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fastrand = "1.7.0"
+space-time = "0.2.0"
+typed-glam = { path = "../typed-glam" }

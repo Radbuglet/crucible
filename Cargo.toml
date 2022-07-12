@@ -6,6 +6,7 @@ members = [
     "src/core",
     "src/crew",
     "src/geode",
+    "src/spc-test",
     "src/typed-glam",
     "src/typed-glam/codegen",
 ]
