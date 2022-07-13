@@ -51,11 +51,11 @@ impl ViewportManager {
 	}
 
 	pub fn get_viewport(&self, id: WindowId) -> Option<Entity> {
-		self.viewports.get(&id).map(|viewport| **viewport)
+		self.viewports.get(&id).map(|viewport| viewport.weak_copy())
 	}
 
 	pub fn all_viewports(&self) -> impl Iterator<Item = (WindowId, Entity)> + '_ {
-		self.viewports.iter().map(|(k, v)| (*k, **v))
+		self.viewports.iter().map(|(k, v)| (*k, v.weak_copy()))
 	}
 
 	pub fn mounted_viewports<'a>(

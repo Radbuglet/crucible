@@ -42,9 +42,8 @@ impl EngineRootBundle {
 		main_lock_guard: Owned<Lock>,
 		event_loop: &EventLoop<()>,
 	) -> anyhow::Result<Owned<Self>> {
-		let engine_root_guard = Entity::new(s);
-		let engine_root = *engine_root_guard;
-		let main_lock = *main_lock_guard;
+		let (engine_root_guard, engine_root) = Entity::new(s).to_guard_ref_pair();
+		let main_lock = main_lock_guard.weak_copy();
 
 		// Create the main window for which we'll create our main surface.
 		let main_window = WindowBuilder::new()
@@ -82,8 +81,7 @@ impl EngineRootBundle {
 				.context("failed to create graphics context")?
 		};
 
-		let gfx_guard = gfx.box_obj(s);
-		let gfx = *gfx_guard;
+		let (gfx_guard, gfx) = gfx.box_obj(s).to_guard_ref_pair();
 
 		engine_root_guard.add(s, gfx_guard);
 
@@ -107,7 +105,7 @@ impl EngineRootBundle {
 		let scene_mgr = SceneManager::default().box_obj_rw(s, main_lock);
 		scene_mgr
 			.borrow_mut(s)
-			.init_scene(make_game_entry(s, *engine_root_guard, main_lock));
+			.init_scene(make_game_entry(s, engine_root_guard.weak_copy(), main_lock));
 
 		// Create root entity
 		engine_root_guard.add(

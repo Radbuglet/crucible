@@ -25,6 +25,8 @@ use {
 	crucible_core::macros::prefer_left,
 };
 
+// TODO: `Deref` coercion for `Owned<T>; T: ComponentBundle`.
+
 pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> {
 	// === Required methods === //
 

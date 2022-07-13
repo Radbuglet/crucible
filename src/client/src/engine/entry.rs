@@ -18,7 +18,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 		let main_lock_guard = Lock::new("main thread");
 		let session = LocalSessionGuard::new();
 		let s = session.handle();
-		s.acquire_locks([*main_lock_guard]);
+		s.acquire_locks([main_lock_guard.weak_copy()]);
 
 		// Create engine root
 		let event_loop = EventLoop::new();
@@ -26,7 +26,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 		// Make all viewports visible
 		{
-			let p_viewport_mgr = engine_root.viewport_mgr(s).borrow_mut();
+			let p_viewport_mgr = engine_root.weak_copy().viewport_mgr(s).borrow_mut();
 
 			for (_, _viewport, window) in p_viewport_mgr.mounted_viewports(s) {
 				window.set_visible(true);
@@ -47,8 +47,8 @@ pub fn main_inner() -> anyhow::Result<()> {
 		let session = LocalSessionGuard::new();
 		let s = session.handle();
 
-		let main_lock = **engine_root.main_lock(s);
-		s.acquire_locks([main_lock]);
+		let main_lock = engine_root.main_lock(s);
+		s.acquire_locks([main_lock.weak_copy()]);
 
 		// Acquire root context
 		let bundle = WinitEventBundle { event, proxy, flow };

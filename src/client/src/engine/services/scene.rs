@@ -43,10 +43,10 @@ impl SceneManager {
 	}
 
 	pub fn current_scene(&self) -> Entity {
-		**self
-			.scene
+		self.scene
 			.as_ref()
 			.expect("Called `current_scene` before an initial scene was provided.")
+			.weak_copy()
 	}
 }
 

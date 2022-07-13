@@ -228,6 +228,28 @@ impl Destructible for RawObj {
 	}
 }
 
+impl Owned<RawObj> {
+	pub fn try_get_ptr(&self, session: Session) -> Result<*const (), ObjGetError> {
+		self.weak_copy().try_get_ptr(session)
+	}
+
+	pub fn get_ptr(&self, session: Session) -> *const () {
+		self.weak_copy().get_ptr(session)
+	}
+
+	pub fn weak_get_ptr(&self, session: Session) -> Result<*const (), ObjDeadError> {
+		self.weak_copy().weak_get_ptr(session)
+	}
+
+	pub fn is_alive_now(&self, session: Session) -> bool {
+		self.weak_copy().is_alive_now(session)
+	}
+
+	pub fn destroy(self, session: Session) -> bool {
+		self.manually_destruct().destroy(session)
+	}
+}
+
 // === Obj === //
 
 pub unsafe trait ObjPointee: 'static + Send {}
@@ -357,6 +379,40 @@ impl<T: ?Sized + ObjPointee> Destructible for Obj<T> {
 	}
 }
 
+impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
+	pub fn try_get<'a>(&self, session: Session<'a>) -> Result<&'a T, ObjGetError> {
+		self.weak_copy().try_get(session)
+	}
+
+	pub fn get<'a>(&self, session: Session<'a>) -> &'a T {
+		self.weak_copy().get(session)
+	}
+
+	pub fn weak_get<'a>(&self, session: Session<'a>) -> Result<&'a T, ObjDeadError> {
+		self.weak_copy().weak_get(session)
+	}
+
+	pub fn is_alive_now(&self, session: Session) -> bool {
+		self.weak_copy().is_alive_now(session)
+	}
+
+	pub fn destroy(self, session: Session) -> bool {
+		self.manually_destruct().destroy(session)
+	}
+
+	pub fn as_raw(self) -> Owned<RawObj> {
+		self.map_owned(|obj| obj.as_raw())
+	}
+
+	pub fn as_unsized<U>(self) -> Owned<Obj<U>>
+	where
+		T: Unsize<U>,
+		U: ?Sized + ObjPointee,
+	{
+		self.map_owned(|obj| obj.as_unsized())
+	}
+}
+
 // === Obj extensions === //
 
 pub type ObjRw<T> = Obj<RefCell<T>>;
@@ -374,6 +430,16 @@ impl<T: ?Sized + ObjPointee> ObjRw<T> {
 
 	pub fn borrow_mut<'a>(&self, session: Session<'a>) -> RefMut<'a, T> {
 		self.get(session).borrow_mut()
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Owned<ObjRw<T>> {
+	pub fn borrow<'a>(&self, session: Session<'a>) -> Ref<'a, T> {
+		self.weak_copy().borrow(session)
+	}
+
+	pub fn borrow_mut<'a>(&self, session: Session<'a>) -> RefMut<'a, T> {
+		self.weak_copy().borrow_mut(session)
 	}
 }
 

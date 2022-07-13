@@ -110,6 +110,51 @@ impl Entity {
 	}
 }
 
+impl Owned<Entity> {
+	pub fn add<L: ComponentList>(&self, session: Session, components: L) {
+		self.weak_copy().add(session, components)
+	}
+
+	pub fn falliable_get_in<'a, T: ?Sized + ObjPointee>(
+		&self,
+		session: Session<'a>,
+		key: TypedKey<T>,
+	) -> Result<&'a T, EntityGetError> {
+		self.weak_copy().falliable_get_in(session, key)
+	}
+
+	pub fn falliable_get<'a, T: ?Sized + ObjPointee>(
+		&self,
+		session: Session<'a>,
+	) -> Result<&'a T, EntityGetError> {
+		self.weak_copy().falliable_get(session)
+	}
+
+	pub fn get_in<'a, T: ?Sized + ObjPointee>(
+		&self,
+		session: Session<'a>,
+		key: TypedKey<T>,
+	) -> &'a T {
+		self.weak_copy().get_in(session, key)
+	}
+
+	pub fn get<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> &'a T {
+		self.weak_copy().get(session)
+	}
+
+	pub fn borrow<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> Ref<'a, T> {
+		self.weak_copy().borrow(session)
+	}
+
+	pub fn borrow_mut<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> RefMut<'a, T> {
+		self.weak_copy().borrow_mut(session)
+	}
+
+	pub fn destroy(self, session: Session) -> bool {
+		self.manually_destruct().destroy(session)
+	}
+}
+
 impl Destructible for Entity {
 	fn destruct(self) {
 		LocalSessionGuard::with_new(|session| {

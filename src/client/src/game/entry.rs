@@ -15,21 +15,22 @@ use super::voxel::{mesh::VoxelWorldMesh, pipeline::VoxelRenderingPipeline};
 
 pub fn make_game_entry(s: Session, engine_root: Entity, main_lock: Lock) -> Owned<Entity> {
 	// Create voxel services
-	let voxel_pipeline_guard =
-		VoxelRenderingPipeline::new(s, engine_root.get::<GfxContext>(s)).box_obj(s);
-
-	let voxel_pipeline = *voxel_pipeline_guard;
+	let (voxel_pipeline_guard, voxel_pipeline) =
+		VoxelRenderingPipeline::new(s, engine_root.get::<GfxContext>(s))
+			.box_obj(s)
+			.to_guard_ref_pair();
 
 	let voxel_world_data_guard = VoxelWorldData::default().box_obj_rw(s, main_lock);
-	let voxel_world_mesh_guard = VoxelWorldMesh::default().box_obj_rw(s, main_lock);
-	let voxel_world_mesh = *voxel_world_mesh_guard;
+	let (voxel_world_mesh_guard, voxel_world_mesh) = VoxelWorldMesh::default()
+		.box_obj_rw(s, main_lock)
+		.to_guard_ref_pair();
 
 	{
-		let chunk_entity_guard = Entity::new(s);
-		let chunk_entity = *chunk_entity_guard;
+		let (chunk_entity_guard, chunk_entity) = Entity::new(s).to_guard_ref_pair();
 
-		let chunk_data_guard = VoxelChunkData::default().box_obj_in(s, main_lock);
-		let chunk_data = *chunk_data_guard;
+		let (chunk_data_guard, chunk_data) = VoxelChunkData::default()
+			.box_obj_in(s, main_lock)
+			.to_guard_ref_pair();
 
 		chunk_entity.add(s, chunk_data_guard);
 

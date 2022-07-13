@@ -1,6 +1,7 @@
 # To-Do
 
 - [ ] Simple API changes:
+  - [x] Remove `Owned`'s `Deref` implementation.
   - [ ] Implement `Node`, a way to attach a dependency hierarchy to an `Entity`.
   - [ ] Implement `CopyVec`, `CopyHashMap`, and `CopyHashSet`.
   - [ ] Expose more of the `Obj` lifecycle methods to `Entity`.

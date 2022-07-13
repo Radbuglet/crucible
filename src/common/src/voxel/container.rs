@@ -22,7 +22,7 @@ impl VoxelWorldData {
 		me: Entity,
 		chunk: Owned<Entity>,
 	) -> Option<Owned<Entity>> {
-		let weak_chunk = *chunk;
+		let weak_chunk = chunk.weak_copy();
 		let chunk_data = chunk.get::<VoxelChunkData>(s);
 
 		// Validate chunk's current world
@@ -46,7 +46,7 @@ impl VoxelWorldData {
 		for face in BlockFace::variants() {
 			let rel = ChunkPos::from_raw(face.unit());
 			let neighbor_pos = pos + rel;
-			let neighbor = self.chunks.get(&neighbor_pos).map(|neighbor| **neighbor);
+			let neighbor = self.chunks.get(&neighbor_pos).map(|neighbor| neighbor.weak_copy());
 
 			// Link ourselves to the neighboring chunk
 			chunk_data.neighbors[face.index()].set(neighbor);
@@ -62,7 +62,7 @@ impl VoxelWorldData {
 	}
 
 	pub fn get_chunk(&self, pos: ChunkPos) -> Option<Entity> {
-		self.chunks.get(&pos).map(|chunk| **chunk)
+		self.chunks.get(&pos).map(|chunk| chunk.weak_copy())
 	}
 }
 
