@@ -146,7 +146,9 @@ impl Viewport {
 				"The current graphics adapter does not support this surface."
 			);
 
-			if supported_formats.contains(&config.format) {
+			if config.format != FALLBACK_SURFACE_FORMAT
+				&& !supported_formats.contains(&config.format)
+			{
 				log::warn!(
 					"Swapchain format {:?} is unsupported by surface-adapter pair. Falling back to {:?}.",
 					config.format,
@@ -155,6 +157,8 @@ impl Viewport {
 				config.format = FALLBACK_SURFACE_FORMAT;
 				*config_changed = true;
 			}
+
+			debug_assert!(supported_formats.contains(&config.format));
 
 			// Ensure that the surface texture matches the window's physical (backing buffer) size
 			let win_size = window.inner_size();

@@ -278,3 +278,29 @@ impl<T: ?Sized + ObjPointee> From<Obj<T>> for OwnedOrWeak<T> {
 		Self::Weak(weak)
 	}
 }
+
+// `Option<OwnedOrWeak<T>>` conversions
+
+impl<T: ?Sized + ObjPointee> SingleComponent for Option<OwnedOrWeak<T>> {
+	type Value = T;
+
+	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
+		match self {
+			Some(OwnedOrWeak::Owned(owned)) => registry.add_owned(key, owned),
+			Some(OwnedOrWeak::Weak(weak)) => registry.add_weak(key, weak),
+			None => {}
+		}
+	}
+}
+
+impl<T: ?Sized + ObjPointee> From<Owned<Obj<T>>> for Option<OwnedOrWeak<T>> {
+	fn from(owned: Owned<Obj<T>>) -> Self {
+		Some(OwnedOrWeak::Owned(owned))
+	}
+}
+
+impl<T: ?Sized + ObjPointee> From<Obj<T>> for Option<OwnedOrWeak<T>> {
+	fn from(weak: Obj<T>) -> Self {
+		Some(OwnedOrWeak::Weak(weak))
+	}
+}

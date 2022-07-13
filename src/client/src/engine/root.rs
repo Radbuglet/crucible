@@ -13,11 +13,12 @@ use super::services::{
 	},
 	input::InputTracker,
 	scene::SceneManager,
-	viewport::{ViewportManager, ViewportRenderHandler},
+	viewport::{Viewport, ViewportManager, ViewportRenderHandler},
 };
 
 proxy_key! {
 	pub struct MainLockKey of Owned<Lock>;
+	pub struct ViewportDepthTexture of wgpu::Texture;
 }
 
 component_bundle! {
@@ -26,6 +27,12 @@ component_bundle! {
 		viewport_mgr: RefCell<ViewportManager>,
 		main_lock[MainLockKey::key()]: Owned<Lock>,
 		scene_mgr: RefCell<SceneManager>,
+	}
+
+	pub struct ViewportBundle(ViewportBundleCtor) {
+		viewport: RefCell<Viewport>,
+		input_tracker: RefCell<InputTracker>,
+		render_handler: dyn ViewportRenderHandler,
 	}
 }
 
@@ -48,9 +55,32 @@ impl EngineRootBundle {
 			.context("failed to create main window")?;
 
 		// Initialize a graphics context.
-		let (gfx, _table, main_surface) =
+		let (gfx, _table, main_surface) = {
+			struct MyFeatureList;
+
+			impl GfxFeatureDetector for MyFeatureList {
+				type Table = ();
+
+				fn query_compat(
+					&mut self,
+					info: &mut CompatQueryInfo,
+				) -> (FeatureList, Option<Self::Table>) {
+					let mut feature_list = FeatureList::default();
+
+					feature_list.import_from(GfxFeatureNeedsScreen.query_compat(info).0);
+					feature_list.import_from(
+						GfxFeaturePowerPreference(wgpu::PowerPreference::HighPerformance)
+							.query_compat(info)
+							.0,
+					);
+
+					feature_list.wrap_user_table(())
+				}
+			}
+
 			futures::executor::block_on(GfxContext::init(&main_window, &mut MyFeatureList))
-				.context("failed to create graphics context")?;
+				.context("failed to create graphics context")?
+		};
 
 		let gfx_guard = gfx.box_obj(s);
 		let gfx = *gfx_guard;
@@ -60,34 +90,14 @@ impl EngineRootBundle {
 		// Create `ViewportManager`
 		let viewport_mgr = ViewportManager::default().box_obj_rw(s, main_lock);
 		{
-			// Acquire services
-			let mut p_viewport_mgr = viewport_mgr.borrow_mut(s);
 			let p_gfx = gfx.get(s);
+			let main_viewport = ViewportBundle::new(s, main_lock, p_gfx, engine_root);
 
-			// Construct main viewport
-			let input_mgr = InputTracker::default().box_obj_rw(s, main_lock);
-			let render_handler = Obj::new(s, move |frame, s: Session, _me, viewport, engine| {
-				let p_scene_mgr = engine_root.borrow::<SceneManager>(s);
-				let current_scene = p_scene_mgr.current_scene();
-
-				current_scene.get::<dyn ViewportRenderHandler>(s).on_render(
-					frame,
-					s,
-					current_scene,
-					viewport,
-					engine,
-				);
-			})
-			.to_unsized::<dyn ViewportRenderHandler>();
-
-			let main_viewport = Entity::new_with(s, (render_handler, input_mgr));
-
-			// Register main viewport
-			p_viewport_mgr.register(
+			viewport_mgr.borrow_mut(s).register(
 				s,
 				main_lock,
 				p_gfx,
-				main_viewport,
+				main_viewport.map_owned(ViewportBundle::raw),
 				main_window,
 				main_surface,
 			);
@@ -113,21 +123,31 @@ impl EngineRootBundle {
 	}
 }
 
-struct MyFeatureList;
+impl ViewportBundle {
+	pub fn new(s: Session, main_lock: Lock, _gfx: &GfxContext, engine_root: Entity) -> Owned<Self> {
+		// Construct main viewport
+		let input_tracker = InputTracker::default().box_obj_rw(s, main_lock);
+		let render_handler = Obj::new(s, move |frame, s: Session, _me, viewport, engine| {
+			let p_scene_mgr = engine_root.borrow::<SceneManager>(s);
+			let current_scene = p_scene_mgr.current_scene();
 
-impl GfxFeatureDetector for MyFeatureList {
-	type Table = ();
+			current_scene.get::<dyn ViewportRenderHandler>(s).on_render(
+				frame,
+				s,
+				current_scene,
+				viewport,
+				engine,
+			);
+		})
+		.to_unsized::<dyn ViewportRenderHandler>();
 
-	fn query_compat(&mut self, info: &mut CompatQueryInfo) -> (FeatureList, Option<Self::Table>) {
-		let mut feature_list = FeatureList::default();
-
-		feature_list.import_from(GfxFeatureNeedsScreen.query_compat(info).0);
-		feature_list.import_from(
-			GfxFeaturePowerPreference(wgpu::PowerPreference::HighPerformance)
-				.query_compat(info)
-				.0,
-		);
-
-		feature_list.wrap_user_table(())
+		Self::spawn(
+			s,
+			ViewportBundleCtor {
+				viewport: None, // (to be initialized by the viewport manager)
+				input_tracker: input_tracker.into(),
+				render_handler: render_handler.into(),
+			},
+		)
 	}
 }

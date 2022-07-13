@@ -4,13 +4,14 @@ use std::{
 	sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
 };
 
+use crucible_core::marker::PhantomInvariant;
 use derive_where::derive_where;
 
 use crate::core::reflect::NamedTypeId;
 
 #[derive_where(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct TypedKey<T: ?Sized> {
-	_ty: PhantomData<fn(T) -> T>,
+	_ty: PhantomInvariant<T>,
 	raw: RawTypedKey,
 }
 
