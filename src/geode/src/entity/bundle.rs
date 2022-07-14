@@ -5,6 +5,7 @@ use std::{
 	cell::{Ref, RefCell, RefMut},
 	marker::PhantomData,
 	mem::transmute,
+	ops::Deref,
 };
 
 use crate::core::{
@@ -25,9 +26,7 @@ use {
 	crucible_core::macros::prefer_left,
 };
 
-// TODO: `Deref` coercion for `Owned<T>; T: ComponentBundle`.
-
-pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> {
+pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> + Deref {
 	// === Required methods === //
 
 	fn try_cast(session: Session, entity: Entity) -> anyhow::Result<Self>;
@@ -37,6 +36,18 @@ pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> {
 	fn force_cast_ref(entity: &Entity) -> &Self;
 
 	// === Derived casting methods === //
+
+	fn try_cast_owned(session: Session, entity: Owned<Entity>) -> anyhow::Result<Owned<Self>> {
+		entity.try_map_owned(|entity| Self::try_cast(session, entity))
+	}
+
+	fn force_cast_owned(entity: Owned<Entity>) -> Owned<Self> {
+		entity.map_owned(|entity| Self::force_cast(entity))
+	}
+
+	fn unchecked_cast_owned(entity: Owned<Entity>) -> Owned<Self> {
+		entity.map_owned(|entity| Self::unchecked_cast(entity))
+	}
 
 	fn can_cast(session: Session, entity: Entity) -> bool {
 		Self::try_cast(session, entity).is_ok()
@@ -74,7 +85,34 @@ pub trait ComponentBundleWithCtor: ComponentBundle {
 		entity.add(session, components);
 		Self::force_cast(entity)
 	}
+
+	fn add_onto_owned(
+		session: Session,
+		entity: Owned<Entity>,
+		components: Self::CompList,
+	) -> Owned<Self> {
+		entity.add(session, components);
+		Self::force_cast_owned(entity)
+	}
 }
+
+// === `Owned` integration === //
+
+impl<T: ComponentBundle> Owned<T> {
+	pub fn raw(self) -> Owned<Entity> {
+		self.map_owned(|bundle| bundle.raw())
+	}
+}
+
+impl<T: ComponentBundle> Deref for Owned<T> {
+	type Target = T::Target;
+
+	fn deref(&self) -> &Self::Target {
+		self.weak_copy_ref().deref()
+	}
+}
+
+// === `EntityWith` === //
 
 pub type EntityWithRw<T> = EntityWith<RefCell<T>>;
 
@@ -83,22 +121,6 @@ pub type EntityWithRw<T> = EntityWith<RefCell<T>>;
 pub struct EntityWith<T: ?Sized + ObjPointee> {
 	_ty: PhantomInvariant<T>,
 	entity: Entity,
-}
-
-impl<T: ?Sized + ObjPointee> EntityWith<T> {
-	pub fn get<'a>(self, session: Session<'a>) -> &'a T {
-		self.entity.get::<T>(session)
-	}
-}
-
-impl<T: ?Sized + ObjPointee> EntityWithRw<T> {
-	pub fn borrow<'a>(self, session: Session<'a>) -> Ref<'a, T> {
-		self.entity.borrow::<T>(session)
-	}
-
-	pub fn borrow_mut<'a>(self, session: Session<'a>) -> RefMut<'a, T> {
-		self.entity.borrow_mut::<T>(session)
-	}
 }
 
 impl<T: ?Sized + ObjPointee> ComponentBundle for EntityWith<T> {
@@ -133,9 +155,40 @@ impl<T: ?Sized + ObjPointee> Borrow<Entity> for EntityWith<T> {
 	}
 }
 
+impl<T: ?Sized + ObjPointee> Deref for EntityWith<T> {
+	type Target = EntityWithBundledMethods<T>;
+
+	fn deref(&self) -> &Self::Target {
+		unsafe { transmute(self) }
+	}
+}
+
 impl<T: ?Sized + ObjPointee> Destructible for EntityWith<T> {
 	fn destruct(self) {
 		self.entity.destruct();
+	}
+}
+
+#[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct EntityWithBundledMethods<T: ?Sized + ObjPointee> {
+	_ty: PhantomInvariant<T>,
+	entity: Entity,
+}
+
+impl<T: ?Sized + ObjPointee> EntityWithBundledMethods<T> {
+	pub fn get<'a>(self, session: Session<'a>) -> &'a T {
+		self.entity.get::<T>(session)
+	}
+}
+
+impl<T: ?Sized + ObjPointee> EntityWithBundledMethods<RefCell<T>> {
+	pub fn borrow<'a>(self, session: Session<'a>) -> Ref<'a, T> {
+		self.entity.borrow::<T>(session)
+	}
+
+	pub fn borrow_mut<'a>(self, session: Session<'a>) -> RefMut<'a, T> {
+		self.entity.borrow_mut::<T>(session)
 	}
 }
 
@@ -250,16 +303,30 @@ pub macro component_bundle {
             }
         }
 
-        impl $bundle_name {
+        impl Deref for $bundle_name {
+            type Target = BundleMethods;
+
+            fn deref(&self) -> &BundleMethods {
+                <BundleMethods as TransparentWrapper<Entity>>::wrap_ref(&self.entity)
+            }
+        }
+
+        #[derive(TransparentWrapper)]
+        #[repr(transparent)]
+       pub struct BundleMethods {
+            entity: Entity,
+        }
+
+        impl BundleMethods {
             $(
-                pub fn $ext_name(self) -> $ext_ty {
+                pub fn $ext_name(&self) -> $ext_ty {
                     *self.as_ref()
                 }
             )*
 
             $(
-                pub fn $field_name<'a>(self, session: Session<'a>) -> &'a $field_ty {
-                    self.raw().get_in(session, prefer_left!(
+                pub fn $field_name<'a>(&self, session: Session<'a>) -> &'a $field_ty {
+                    self.entity.get_in(session, prefer_left!(
                         $({$key})?
                         { typed_key::<$field_ty>() }
                     ))

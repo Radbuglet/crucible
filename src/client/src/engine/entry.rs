@@ -26,7 +26,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 		// Make all viewports visible
 		{
-			let p_viewport_mgr = engine_root.weak_copy().viewport_mgr(s).borrow_mut();
+			let p_viewport_mgr = engine_root.viewport_mgr(s).borrow_mut();
 
 			for (_, _viewport, window) in p_viewport_mgr.mounted_viewports(s) {
 				window.set_visible(true);
