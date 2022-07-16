@@ -187,17 +187,17 @@ pub struct EntityWithBundledMethods<T: ?Sized + ObjPointee> {
 }
 
 impl<T: ?Sized + ObjPointee> EntityWithBundledMethods<T> {
-	pub fn get<'a>(self, session: Session<'a>) -> &'a T {
+	pub fn get(self, session: Session) -> &T {
 		self.entity.get::<T>(session)
 	}
 }
 
 impl<T: ?Sized + ObjPointee> EntityWithBundledMethods<RefCell<T>> {
-	pub fn borrow<'a>(self, session: Session<'a>) -> Ref<'a, T> {
+	pub fn borrow(self, session: Session) -> Ref<T> {
 		self.entity.borrow::<T>(session)
 	}
 
-	pub fn borrow_mut<'a>(self, session: Session<'a>) -> RefMut<'a, T> {
+	pub fn borrow_mut(self, session: Session) -> RefMut<T> {
 		self.entity.borrow_mut::<T>(session)
 	}
 }

@@ -152,7 +152,7 @@ impl Viewport {
 			let supported_formats = surface.get_supported_formats(&gfx.adapter);
 
 			assert!(
-				supported_formats.len() > 0,
+				!supported_formats.is_empty(),
 				"The current graphics adapter does not support this surface."
 			);
 

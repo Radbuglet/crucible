@@ -58,8 +58,7 @@ impl Entity {
 		session: Session<'a>,
 		key: TypedKey<T>,
 	) -> Result<&'a T, EntityGetError> {
-		Ok(self
-			.obj
+		self.obj
 			// Acquire `Entity` heap handle
 			.try_get(session)
 			.map_err(EntityGetError::EntityDerefError)?
@@ -75,7 +74,7 @@ impl Entity {
 			.unwrap()
 			// Deref component
 			.try_get(session)
-			.map_err(|err| EntityGetError::CompDerefError(key.raw(), err))?)
+			.map_err(|err| EntityGetError::CompDerefError(key.raw(), err))
 	}
 
 	pub fn fallible_get<'a, T: ?Sized + ObjPointee>(
@@ -251,7 +250,8 @@ impl<T: SingleComponent> ComponentList for T {
 	}
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[allow(clippy::derive_partial_eq_without_eq)] // False positive??
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ExposeUsing<T: SingleComponent>(pub T, pub TypedKey<T::Value>);
 
 impl<T: SingleComponent> ComponentList for ExposeUsing<T> {
@@ -262,7 +262,7 @@ impl<T: SingleComponent> ComponentList for ExposeUsing<T> {
 
 macro impl_component_list_on_tuple($($name:ident: $field:tt),*) {
     impl<$($name: ComponentList),*> ComponentList for ($($name,)*) {
-        #[allow(unused)]
+        #[allow(unused)]  // `registry` unused in unit tuples
         fn push_values(self, registry: &mut ComponentAttachTarget) {
             $(self.$field.push_values(registry);)*
         }

@@ -86,6 +86,12 @@ pub struct MovableSessionGuard {
 	id: u8,
 }
 
+impl Default for MovableSessionGuard {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl MovableSessionGuard {
 	pub fn new() -> Self {
 		Self {
@@ -213,6 +219,12 @@ impl Drop for SessionManyAllocIter {
 pub struct LocalSessionGuard {
 	_no_threading: PhantomNoSendOrSync,
 	id: u8,
+}
+
+impl Default for LocalSessionGuard {
+	fn default() -> Self {
+		Self::new()
+	}
 }
 
 impl LocalSessionGuard {
@@ -343,6 +355,7 @@ impl<T> SessionStorage<T> {
 		}
 	}
 
+	#[allow(clippy::mut_from_ref)] // That's the users' problem.
 	#[inline(always)]
 	pub unsafe fn get_mut_unchecked<'a>(&'a self, session: Session<'a>) -> &'a mut T {
 		// Safety: a combination of the validity of `.get` with an additional user-supplied
@@ -502,7 +515,7 @@ pub(crate) unsafe trait StaticStorage: StaticStorageHandler {
 	unsafe fn backing_storage() -> &'static SessionStorage<Option<Self::Comp>>;
 
 	#[inline(always)]
-	fn get<'a>(session: Session<'a>) -> &'a Self::Comp {
+	fn get(session: Session) -> &Self::Comp {
 		unsafe {
 			match Self::backing_storage().get(session) {
 				Some(comp) => comp,

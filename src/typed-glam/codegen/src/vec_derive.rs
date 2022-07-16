@@ -820,7 +820,7 @@ fn derive_method_forward_stub(
 		0 => fwd_call,
 		1 => ret_vals[0].as_wrapper_for(fwd_call),
 		_ => {
-			const ALPHABET: &'static str = "abcdefghijklmnopqrstuvwxyz";
+			const ALPHABET: &str = "abcdefghijklmnopqrstuvwxyz";
 			assert!(ret_vals.len() < ALPHABET.len());
 
 			let fwd_tup_args = ALPHABET[0..ret_vals.len()]

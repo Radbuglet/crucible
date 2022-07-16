@@ -141,7 +141,7 @@ pub trait ForkableCursor: Cursor + Clone {
 	}
 
 	/// Returns an iterator which drains the remaining atoms from the cursor.
-	fn drain_remaining<'a>(&'a mut self) -> CursorDrain<&'a mut Self> {
+	fn drain_remaining(&mut self) -> CursorDrain<&'_ mut Self> {
 		CursorDrain(self)
 	}
 

@@ -45,7 +45,7 @@ impl GameSceneBundle {
 		let update_handler_guard =
 			Obj::new(s, move |s: Session, _me: Entity, engine_root: Entity| {
 				let gfx = engine_root.get::<GfxContext>(s);
-				voxel_mesh.borrow_mut(s).update_chunks(s, &gfx, None);
+				voxel_mesh.borrow_mut(s).update_chunks(s, gfx, None);
 			})
 			.to_unsized::<dyn SceneUpdateHandler>();
 

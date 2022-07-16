@@ -201,7 +201,7 @@ struct LockDebugNameWithCx<'a> {
 impl fmt::Debug for LockDebugNameWithCx<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self.mutexed_data.lock_names[self.id as usize] {
-			Some(debug_name) => Some::<&str>(&*debug_name).fmt(f),
+			Some(debug_name) => Some::<&str>(debug_name).fmt(f),
 			None => None::<&str>.fmt(f),
 		}
 	}

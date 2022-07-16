@@ -115,6 +115,7 @@ impl Default for FeatureList {
 impl FeatureList {
 	pub fn push_raw(&mut self, entry: FeatureEntry) {
 		// Count met percentages
+		#[allow(clippy::collapsible_else_if)] // This is a bit more legible.
 		if entry.mandatory {
 			if entry.score.is_met() {
 				self.met_mandatory += 1;

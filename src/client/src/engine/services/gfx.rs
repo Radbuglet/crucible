@@ -79,18 +79,13 @@ impl GfxContext {
 				);
 				log::info!("Feature table: {:#?}", features);
 
-				if let Some(compat_table) = compat_table {
-					Some(ValidatedAdapter {
-						adapter,
-						adapter_info,
-						descriptor,
-						compat_table,
-						score: features.score().unwrap(),
-					})
-				} else {
-					// The adapter did not pass.
-					None
-				}
+				compat_table.map(|compat_table| ValidatedAdapter {
+					adapter,
+					adapter_info,
+					descriptor,
+					compat_table,
+					score: features.score().unwrap(),
+				})
 			})
 			.max_by(|a, b| a.score.cmp(&b.score))
 			.context("no adapters satisfy the application's minimum requirements")?;
@@ -183,7 +178,7 @@ impl GfxFeatureDetector for GfxFeatureNeedsScreen {
 				name: "Can display to screen",
 				description: "The specified driver must be capable of rendering to the main window",
 			},
-			if info.adapter.is_surface_supported(&info.main_surface) {
+			if info.adapter.is_surface_supported(info.main_surface) {
 				FeatureScore::BinaryPass
 			} else {
 				FeatureScore::BinaryFail {

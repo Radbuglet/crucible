@@ -157,7 +157,7 @@ impl VoxelWorldMesh {
 		pass.set_bind_group(0, &assets.bind_group, &[]);
 
 		// log::info!("Woo!");
-		for chunk in self.chunks.iter().copied() {
+		for chunk in self.chunks.iter() {
 			let mesh = chunk.get_in::<VoxelChunkMesh>(s, self.mesh_meta_key);
 
 			// Ignore empty chunks.

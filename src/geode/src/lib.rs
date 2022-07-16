@@ -1,3 +1,4 @@
+#![allow(clippy::missing_safety_doc)] // TODO: Remove this lint once we have the bandwidth.
 #![feature(const_type_id)]
 #![feature(const_type_name)]
 #![feature(decl_macro)]

@@ -31,7 +31,7 @@ impl Default for InputTracker {
 impl InputTracker {
 	pub fn handle_window_event(&mut self, event: &WindowEvent) {
 		fn set_state_in_map<K: Hash + Eq>(map: &mut HashMap<K, BoolAction>, key: K, value: bool) {
-			let action = map.entry(key).or_insert(Default::default());
+			let action = map.entry(key).or_insert_with(Default::default);
 			action.set_state(value);
 		}
 
@@ -90,13 +90,10 @@ impl InputTracker {
 	}
 
 	pub fn handle_device_event(&mut self, _device_id: DeviceId, event: &DeviceEvent) {
-		match event {
-			DeviceEvent::MouseMotion { delta: (dx, dy) } => {
-				if self.has_focus {
-					self.mouse_delta += Vec2::new(*dx as f32, *dy as f32);
-				}
+		if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
+			if self.has_focus {
+				self.mouse_delta += Vec2::new(*dx as f32, *dy as f32);
 			}
-			_ => {}
 		}
 	}
 
@@ -141,19 +138,10 @@ impl InputTracker {
 	}
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BoolAction {
 	changes: u8,
 	state: bool,
-}
-
-impl Default for BoolAction {
-	fn default() -> Self {
-		Self {
-			changes: 0,
-			state: false,
-		}
-	}
 }
 
 impl BoolAction {

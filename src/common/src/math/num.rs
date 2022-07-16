@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct OrdF32(f32);
 
 impl OrdF32 {
@@ -64,6 +64,12 @@ impl Mul for OrdF32 {
 impl MulAssign for OrdF32 {
 	fn mul_assign(&mut self, rhs: Self) {
 		*self = *self * rhs;
+	}
+}
+
+impl PartialOrd for OrdF32 {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		self.0.partial_cmp(&other.0)
 	}
 }
 

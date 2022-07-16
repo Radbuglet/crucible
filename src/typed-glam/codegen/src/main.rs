@@ -222,9 +222,7 @@ fn main() -> anyhow::Result<()> {
 				eprintln!("Failed to get clipboard context.");
 			}
 		}
-		Commands::Rebuild { path } => {
-			let mut path = path.clone();
-
+		Commands::Rebuild { mut path } => {
 			// Ensure that users have the `_generated.md` marker file
 			{
 				path.push("_generated.md");
@@ -242,7 +240,7 @@ fn main() -> anyhow::Result<()> {
 
 			// Remove all existing `.generated.rs` files
 			{
-				const DEL_ERR: &'static str =
+				const DEL_ERR: &str =
 					"IO operation failed while removing existing `.generated.rs` files.";
 
 				for entry in path.read_dir().context(DEL_ERR)? {

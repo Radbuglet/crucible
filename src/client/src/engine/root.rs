@@ -53,7 +53,7 @@ impl EngineRootBundle {
 			.with_title("Crucible")
 			.with_inner_size(LogicalSize::new(1920u32, 1080u32))
 			.with_visible(false)
-			.build(&event_loop)
+			.build(event_loop)
 			.context("failed to create main window")?;
 
 		// Initialize a graphics context.

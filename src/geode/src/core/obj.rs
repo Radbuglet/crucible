@@ -192,7 +192,7 @@ impl RawObj {
 
 			debug_assert_ne!(slot_gen.gen(), requested.gen.gen());
 			ObjGetError::Dead(ObjDeadError {
-				requested: requested,
+				requested,
 				new_gen: slot_gen.gen(),
 			})
 		}
@@ -318,7 +318,7 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 		self.raw.is_alive_now(session)
 	}
 
-	pub fn destroy<'a>(&self, session: Session<'a>) -> bool {
+	pub fn destroy(&self, session: Session) -> bool {
 		self.raw.destroy(session)
 	}
 

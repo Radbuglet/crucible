@@ -220,7 +220,7 @@ fn fr_read_atom_untracked(codepoints: &mut CodepointReader<'_>) -> FileAtom {
 
 			FileAtom::Newline { kind }
 		}
-		char @ _ => FileAtom::Codepoint(char),
+		char => FileAtom::Codepoint(char),
 	}
 }
 

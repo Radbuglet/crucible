@@ -6,7 +6,7 @@ use crate::lifetime::try_transform;
 
 // === RefCell extensions === //
 
-pub fn filter_map_ref<'a, T, U, F>(orig: Ref<'a, T>, mut f: F) -> Result<Ref<'a, U>, Ref<'a, T>>
+pub fn filter_map_ref<T, U, F>(orig: Ref<T>, mut f: F) -> Result<Ref<U>, Ref<T>>
 where
 	F: FnMut(&T) -> Option<&U>,
 {
@@ -24,10 +24,7 @@ where
 	}
 }
 
-pub fn filter_map_mut<'a, T, U, F>(
-	orig: RefMut<'a, T>,
-	f: F,
-) -> Result<RefMut<'a, U>, RefMut<'a, T>>
+pub fn filter_map_mut<T, U, F>(orig: RefMut<T>, f: F) -> Result<RefMut<U>, RefMut<T>>
 where
 	F: FnMut(&mut T) -> Option<&mut U>,
 {
@@ -109,6 +106,7 @@ impl<T: ?Sized> MutexedUnsafeCell<T> {
 		&*self.get()
 	}
 
+	#[allow(clippy::mut_from_ref)] // That's the users' problem.
 	pub unsafe fn get_mut_unchecked(&self) -> &mut T {
 		&mut *self.get()
 	}
