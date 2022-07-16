@@ -53,7 +53,7 @@ impl Entity {
 		components.push_values(&mut ComponentAttachTarget { map });
 	}
 
-	pub fn falliable_get_in<'a, T: ?Sized + ObjPointee>(
+	pub fn fallible_get_in<'a, T: ?Sized + ObjPointee>(
 		&self,
 		session: Session<'a>,
 		key: TypedKey<T>,
@@ -78,11 +78,11 @@ impl Entity {
 			.map_err(|err| EntityGetError::CompDerefError(key.raw(), err))?)
 	}
 
-	pub fn falliable_get<'a, T: ?Sized + ObjPointee>(
+	pub fn fallible_get<'a, T: ?Sized + ObjPointee>(
 		&self,
 		session: Session<'a>,
 	) -> Result<&'a T, EntityGetError> {
-		self.falliable_get_in(session, typed_key::<T>())
+		self.fallible_get_in(session, typed_key::<T>())
 	}
 
 	pub fn get_in<'a, T: ?Sized + ObjPointee>(
@@ -90,7 +90,7 @@ impl Entity {
 		session: Session<'a>,
 		key: TypedKey<T>,
 	) -> &'a T {
-		self.falliable_get_in(session, key).unwrap_pretty()
+		self.fallible_get_in(session, key).unwrap_pretty()
 	}
 
 	pub fn get<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> &'a T {
@@ -115,19 +115,19 @@ impl Owned<Entity> {
 		self.weak_copy().add(session, components)
 	}
 
-	pub fn falliable_get_in<'a, T: ?Sized + ObjPointee>(
+	pub fn fallible_get_in<'a, T: ?Sized + ObjPointee>(
 		&self,
 		session: Session<'a>,
 		key: TypedKey<T>,
 	) -> Result<&'a T, EntityGetError> {
-		self.weak_copy().falliable_get_in(session, key)
+		self.weak_copy().fallible_get_in(session, key)
 	}
 
-	pub fn falliable_get<'a, T: ?Sized + ObjPointee>(
+	pub fn fallible_get<'a, T: ?Sized + ObjPointee>(
 		&self,
 		session: Session<'a>,
 	) -> Result<&'a T, EntityGetError> {
-		self.weak_copy().falliable_get(session)
+		self.weak_copy().fallible_get(session)
 	}
 
 	pub fn get_in<'a, T: ?Sized + ObjPointee>(

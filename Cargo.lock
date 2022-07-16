@@ -1712,6 +1712,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sfc-test"
+version = "0.1.0"
+dependencies = [
+ "fastrand",
+ "space-time",
+ "typed-glam",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1759,15 +1768,6 @@ checksum = "3a4ccef939f051015437f4b4a2936893d6b0bbb34aa7674436b95568c416e824"
 dependencies = [
  "num-integer",
  "num-traits",
-]
-
-[[package]]
-name = "spc-test"
-version = "0.1.0"
-dependencies = [
- "fastrand",
- "space-time",
- "typed-glam",
 ]
 
 [[package]]

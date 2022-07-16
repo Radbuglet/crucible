@@ -135,7 +135,7 @@ pub struct EntityWith<T: ?Sized + ObjPointee> {
 
 impl<T: ?Sized + ObjPointee> ComponentBundle for EntityWith<T> {
 	fn try_cast(session: Session, entity: Entity) -> anyhow::Result<Self> {
-		if let Err(err) = entity.falliable_get::<T>(session) {
+		if let Err(err) = entity.fallible_get::<T>(session) {
 			if err.as_permission_error().is_none() {
 				return Err(anyhow::Error::new(err).context(format!(
 					"failed to construct `EntityWith<{}>` component bundle",
@@ -278,7 +278,7 @@ pub macro component_bundle {
                 )*
 
                 $(
-                    if let Err(err) = entity.falliable_get_in(session, prefer_left!(
+                    if let Err(err) = entity.fallible_get_in(session, prefer_left!(
                         $({$key})?
                         { typed_key::<$field_ty>() }
                     )) {

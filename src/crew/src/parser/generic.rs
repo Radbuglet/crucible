@@ -115,7 +115,7 @@ pub trait ForkableCursor: Cursor + Clone {
 		self.clone().consume_atom()
 	}
 
-	/// Applies a match closure to a fork of the reader, only comitting the fork state when
+	/// Applies a match closure to a fork of the reader, only committing the fork state when
 	/// [LookaheadResult::should_commit] returns true.
 	fn lookahead<F, R>(&mut self, mut f: F) -> R
 	where

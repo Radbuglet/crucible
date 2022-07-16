@@ -804,7 +804,7 @@ fn derive_method_forward_stub(
 
 	// Generate body elements
 	let fwd_prefix = match self_ty {
-		// I guess ease trumps idomatic code gen :person_shrugging:.
+		// I guess ease trumps idiomatic code gen :person_shrugging:.
 		SelfTy::Ref | SelfTy::Owned => quote! { self.vec. },
 		SelfTy::Static => quote! { $backing:: },
 	};

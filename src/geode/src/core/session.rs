@@ -399,7 +399,7 @@ impl<T> LazySessionStorage<T> {
 		unsafe {
 			// Safety: we know that no references to the `Option` because it is still `None` and
 			// we only return references to the inner value of the `Option` if it is not `None`.
-			// Because we hava session for this slot, we can assume that our thread has exclusive
+			// Because we have a session for this slot, we can assume that our thread has exclusive
 			// access to this slot.
 			// Thus, this is safe.
 			let slot = self.raw.get_mut_unchecked(session);

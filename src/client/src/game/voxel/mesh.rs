@@ -37,10 +37,7 @@ impl Default for VoxelWorldMesh {
 
 impl VoxelWorldMesh {
 	pub fn flag_chunk(&mut self, s: Session, meshing_lock: Lock, chunk: Entity) {
-		if let Ok(chunk_mesh) = chunk
-			.falliable_get_in(s, self.mesh_meta_key)
-			.ok_or_missing()
-		{
+		if let Ok(chunk_mesh) = chunk.fallible_get_in(s, self.mesh_meta_key).ok_or_missing() {
 			if !chunk_mesh.still_dirty.get() {
 				chunk_mesh.still_dirty.set(true);
 				self.dirty_queue.push(chunk);

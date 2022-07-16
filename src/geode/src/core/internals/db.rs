@@ -1,5 +1,5 @@
 //! The low-level implementation underlying `Obj`, written in such a way that control flow is as
-//! explicit as h&umanly possible. This module exists purely to separate reentrancy-sensitive code
+//! explicit as humanly possible. This module exists purely to separate reentrancy-sensitive code
 //! from userland objects. The latter has much more complicated implicit control flow (e.g. `Drop`
 //! handlers, accidental `Debug` calls, etc) that could easily cause deadlocks or UB if we're not
 //! careful.
@@ -57,7 +57,7 @@ static GLOBAL_DATA: GlobalData = GlobalData {
 /// ## Safety
 ///
 /// For best performance, we use a [MutexedUnsafeCell] instead of a [RefCell](std::cell::RefCell).
-/// However, this means that we have to be very careful about avoiding reentracy. All public methods
+/// However, this means that we have to be very careful about avoiding reentrancy. All public methods
 /// can assume that their corresponding [LocalSessData] is unborrowed by the time they are called.
 /// To enforce this invariant, users borrowing state from here must ensure that they never call
 /// untrusted (i.e. user) code while the borrow is ongoing.

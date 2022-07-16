@@ -114,7 +114,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			// After all user events have been triggered, this event is triggered.
 			Event::MainEventsCleared => {
 				// Handle scene manager update logic.
-				let should_update = true; // TODO: Tickrate limit
+				let should_update = true; // TODO: Tick-rate limit
 
 				if should_update {
 					let sm = engine_root.scene_mgr(s);

@@ -134,14 +134,14 @@ impl<'a> Cursor for CodepointReader<'a> {
 						// to be the start of another codepoint. Let's synchronize to it and continue!
 						self.next_index += err_len;
 
-						// Everything up until the synchronization point is errouneous.
+						// Everything up until the synchronization point is erroneous.
 						&remaining[..err_len]
 					} else {
 						// A value of `None` tells us that an unexpected EOF was encountered while
 						// parsing the codepoint. Let's align ourselves to the EOF!
 						self.next_index = self.contents.len();
 
-						// The entire unfinished stream is errouneous.
+						// The entire unfinished stream is erroneous.
 						remaining
 					};
 
@@ -291,7 +291,7 @@ pub enum NewlineKind {
 	Crlf,
 	/// A single-byte newline represented by a line feed (`\n`). Usually seen on Unix systems.
 	Lf,
-	/// A mostly abandonned single-byte newline represented by a carriage return (`\r`). Usually
+	/// A mostly abandoned single-byte newline represented by a carriage return (`\r`). Usually
 	/// seen on classic MacOS systems.
 	Cr,
 }
