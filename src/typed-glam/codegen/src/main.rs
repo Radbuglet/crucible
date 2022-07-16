@@ -4,7 +4,7 @@ mod vec_derive;
 fn main() -> anyhow::Result<()> {
 	use anyhow::{bail, Context};
 	use clap::{Parser, Subcommand};
-	use clipboard::ClipboardProvider;
+	// use clipboard::ClipboardProvider;
 	use genco::prelude::*;
 	use std::{collections::HashMap, path::PathBuf};
 
@@ -215,12 +215,12 @@ fn main() -> anyhow::Result<()> {
 
 			println!("{output}");
 
-			if let Ok(mut cx) = clipboard::ClipboardContext::new() {
-				cx.set_contents(output).unwrap();
-				eprintln!("The above file has been copied to your clipboard.");
-			} else {
-				eprintln!("Failed to get clipboard context.");
-			}
+			// if let Ok(mut cx) = clipboard::ClipboardContext::new() {
+			// 	cx.set_contents(output).unwrap();
+			// 	eprintln!("The above file has been copied to your clipboard.");
+			// } else {
+			// 	eprintln!("Failed to get clipboard context.");
+			// }
 		}
 		Commands::Rebuild { mut path } => {
 			// Ensure that users have the `_generated.md` marker file
