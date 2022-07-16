@@ -350,10 +350,7 @@ impl<T: ?Sized + ObjPointee> Copy for Obj<T> {}
 
 impl<T: ?Sized + ObjPointee> Clone for Obj<T> {
 	fn clone(&self) -> Self {
-		Self {
-			raw: self.raw,
-			meta: self.meta,
-		}
+		*self
 	}
 }
 

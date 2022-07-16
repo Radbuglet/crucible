@@ -3,8 +3,6 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
-use derive_where::derive_where;
-
 pub trait ErrorFormatExt: Error {
 	fn format_error(&self) -> FormattedError<Self>;
 
@@ -19,9 +17,16 @@ impl<T: ?Sized + Error> ErrorFormatExt for T {
 	}
 }
 
-#[derive_where(Clone)]
 pub struct FormattedError<'a, T: ?Sized> {
 	target: &'a T,
+}
+
+impl<T: ?Sized> Copy for FormattedError<'_, T> {}
+
+impl<T: ?Sized> Clone for FormattedError<'_, T> {
+	fn clone(&self) -> Self {
+		*self
+	}
 }
 
 impl<T: ?Sized + Error> Display for FormattedError<'_, T> {

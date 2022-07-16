@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, marker::PhantomData};
+use core::{cell::UnsafeCell, marker::PhantomData};
 
 pub type PhantomNoSendOrSync = PhantomData<*mut ()>;
 pub type PhantomNoSync = PhantomData<UnsafeCell<()>>;

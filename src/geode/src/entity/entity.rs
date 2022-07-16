@@ -2,10 +2,10 @@ use std::{
 	any::Any,
 	cell::{Ref, RefCell, RefMut},
 	collections::HashMap,
+	fmt,
 };
 
 use crucible_core::{error::ResultExt, macros::impl_tuples};
-use derive_where::derive_where;
 use parking_lot::Mutex;
 use thiserror::Error;
 
@@ -295,10 +295,18 @@ impl<T: ?Sized + ObjPointee> SingleComponent for Owned<Obj<T>> {
 	}
 }
 
-#[derive_where(Debug)]
 pub enum OwnedOrWeak<T: ?Sized + ObjPointee> {
 	Owned(Owned<Obj<T>>),
 	Weak(Obj<T>),
+}
+
+impl<T: ?Sized + ObjPointee> fmt::Debug for OwnedOrWeak<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			OwnedOrWeak::Owned(owned) => f.debug_tuple("OwnedOrWeak::Owned").field(owned).finish(),
+			OwnedOrWeak::Weak(weak) => f.debug_tuple("OwnedOrWeak::Weak").field(weak).finish(),
+		}
+	}
 }
 
 impl<T: ?Sized + ObjPointee> SingleComponent for OwnedOrWeak<T> {

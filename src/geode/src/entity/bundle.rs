@@ -179,7 +179,6 @@ impl<T: ?Sized + ObjPointee> Destructible for EntityWith<T> {
 	}
 }
 
-#[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct EntityWithBundledMethods<T: ?Sized + ObjPointee> {
 	_ty: PhantomInvariant<T>,

@@ -201,10 +201,7 @@ impl<F: ?Sized + VecFlavor> Copy for TypedVector<F> {}
 
 impl<F: ?Sized + VecFlavor> Clone for TypedVector<F> {
 	fn clone(&self) -> Self {
-		Self {
-			_flavor: self._flavor,
-			vec: self.vec,
-		}
+		*self
 	}
 }
 

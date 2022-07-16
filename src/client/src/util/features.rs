@@ -1,5 +1,5 @@
-use crucible_common::math::num::OrdF32;
-use crucible_common::math::range::{unwrap_or_unbounded, AnyRange};
+use crucible_core::ord_f32::OrdF32;
+use crucible_core::range::{unwrap_or_unbounded, AnyRange};
 use std::collections::Bound;
 use std::fmt::{Debug, Display};
 

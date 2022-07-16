@@ -278,6 +278,12 @@ impl LocalSessionGuard {
 	}
 }
 
+impl Clone for LocalSessionGuard {
+	fn clone(&self) -> Self {
+		Self::try_reuse().unwrap()
+	}
+}
+
 impl Drop for LocalSessionGuard {
 	fn drop(&mut self) {
 		#[cold]

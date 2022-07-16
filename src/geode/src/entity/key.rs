@@ -1,15 +1,15 @@
 use std::{
-	fmt,
+	fmt, hash,
 	marker::PhantomData,
 	sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
 };
 
 use crucible_core::marker::PhantomInvariant;
-use derive_where::derive_where;
 
 use crate::core::reflect::NamedTypeId;
 
-#[derive_where(Copy, Clone, Hash, Eq, PartialEq)]
+// === `TypedKey` === //
+
 pub struct TypedKey<T: ?Sized> {
 	_ty: PhantomInvariant<T>,
 	raw: RawTypedKey,
@@ -27,6 +27,28 @@ impl<T: ?Sized> fmt::Debug for TypedKey<T> {
 	}
 }
 
+impl<T: ?Sized> Copy for TypedKey<T> {}
+
+impl<T: ?Sized> Clone for TypedKey<T> {
+	fn clone(&self) -> Self {
+		*self
+	}
+}
+
+impl<T: ?Sized> hash::Hash for TypedKey<T> {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		self.raw.hash(state);
+	}
+}
+
+impl<T: ?Sized> Eq for TypedKey<T> {}
+
+impl<T: ?Sized> PartialEq for TypedKey<T> {
+	fn eq(&self, other: &Self) -> bool {
+		self.raw == other.raw
+	}
+}
+
 impl<T: ?Sized> TypedKey<T> {
 	pub unsafe fn from_raw(raw: RawTypedKey) -> TypedKey<T> {
 		Self {
@@ -39,6 +61,8 @@ impl<T: ?Sized> TypedKey<T> {
 		self.raw
 	}
 }
+
+// === `RawTypedKey` === //
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct RawTypedKey(TypedKeyRawInner);
@@ -66,6 +90,8 @@ enum TypedKeyRawInner {
 	Proxy(NamedTypeId),
 	Runtime(u64),
 }
+
+// === Shortcuts === //
 
 pub fn typed_key<T: ?Sized + 'static>() -> TypedKey<T> {
 	TypedKey {

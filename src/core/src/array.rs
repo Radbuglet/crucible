@@ -1,5 +1,8 @@
 use crate::transmute::super_unchecked_transmute;
+use core::iter;
 use core::mem::MaybeUninit;
+
+// === Raw array creation === //
 
 pub const fn new_uninit_array<T, const N: usize>() -> [MaybeUninit<T>; N] {
 	let arr = MaybeUninit::<[T; N]>::uninit();
@@ -64,3 +67,26 @@ pub macro arr($ctor:expr; $size:expr) {{
 
 	unsafe { unwrap_macro_array_builder(arr) }
 }}
+
+// === Boxed array creation === //
+
+pub fn iter_repeat_len<F, T>(f: F, len: usize) -> iter::Take<iter::RepeatWith<F>>
+where
+	F: FnMut() -> T,
+{
+	iter::repeat_with(f).take(len)
+}
+
+pub fn vec_repeat_len<F, T>(f: F, len: usize) -> Vec<T>
+where
+	F: FnMut() -> T,
+{
+	iter_repeat_len(f, len).collect()
+}
+
+pub fn boxed_arr_repeat_len<F, T>(f: F, len: usize) -> Box<[T]>
+where
+	F: FnMut() -> T,
+{
+	vec_repeat_len(f, len).into_boxed_slice()
+}
