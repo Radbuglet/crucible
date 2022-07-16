@@ -1,12 +1,22 @@
 use super::gfx::GfxContext;
-use crucible_core::cell::filter_map_ref;
+use crucible_core::{cell::filter_map_ref, lifetime::try_transform};
 use geode::prelude::*;
-use std::{cell::Ref, collections::HashMap};
+use std::{
+	cell::{Ref, RefCell},
+	collections::HashMap,
+};
 use thiserror::Error;
 use typed_glam::glam::UVec2;
 use winit::window::{Window, WindowId};
 
 pub const FALLBACK_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
+
+// TODO: Stop hard-coding this. All pipelines should dynamically adapt to format settings.
+pub const DEPTH_BUFFER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+proxy_key! {
+	pub struct DepthTextureKey of RefCell<ScreenTexture>;
+}
 
 #[derive(Debug, Default)]
 pub struct ViewportManager {
@@ -114,18 +124,18 @@ impl Viewport {
 		self.config.present_mode
 	}
 
-	pub fn surface_size(&self) -> Option<UVec2> {
+	pub fn present_surface_size(&self) -> Option<UVec2> {
 		surface_size_from_config(&self.config)
 	}
 
 	pub fn surface_aspect(&self) -> Option<f32> {
-		self.surface_size().map(|size| {
+		self.present_surface_size().map(|size| {
 			let size = size.as_vec2();
 			size.x / size.y
 		})
 	}
 
-	pub fn render(
+	pub fn present(
 		&mut self,
 		gfx: &GfxContext,
 	) -> Result<Option<wgpu::SurfaceTexture>, OutOfDeviceMemoryError> {
@@ -274,4 +284,90 @@ event_trait! {
 		viewport: Entity,
 		engine: Entity,
 	);
+}
+
+pub struct ScreenTexture {
+	data: Option<ScreenTextureData>,
+	labels: Option<(String, String)>,
+	format: wgpu::TextureFormat,
+	usages: wgpu::TextureUsages,
+}
+
+struct ScreenTextureData {
+	size: UVec2,
+	texture: wgpu::Texture,
+	view: wgpu::TextureView,
+}
+
+impl ScreenTexture {
+	pub fn new(
+		_gfx: &GfxContext,
+		label: wgpu::Label,
+		format: wgpu::TextureFormat,
+		usages: wgpu::TextureUsages,
+	) -> Self {
+		let labels = label.map(|primary| (primary.to_string(), format!("{primary} view")));
+
+		Self {
+			data: None,
+			labels,
+			format,
+			usages,
+		}
+	}
+
+	pub fn acquire(
+		&mut self,
+		gfx: &GfxContext,
+		viewport: &Viewport,
+	) -> Option<(&wgpu::Texture, &wgpu::TextureView)> {
+		let size = viewport.present_surface_size()?;
+
+		let data = try_transform(&mut self.data, |data| {
+			if let Some(data) = data.as_mut().filter(|data| data.size == size) {
+				Some(data)
+			} else {
+				None
+			}
+		});
+
+		let data = match data {
+			Ok(data) => data,
+			Err(data) => {
+				log::info!("Resizing `ScreenTexture` to {size:?}.");
+				let texture = gfx.device.create_texture(&wgpu::TextureDescriptor {
+					label: self.labels.as_ref().map(|(a, _)| a.as_str()),
+					size: wgpu::Extent3d {
+						width: size.x,
+						height: size.y,
+						depth_or_array_layers: 1,
+					},
+					mip_level_count: 1,
+					sample_count: 1,
+					dimension: wgpu::TextureDimension::D2,
+					format: self.format,
+					usage: self.usages,
+				});
+
+				let view = texture.create_view(&wgpu::TextureViewDescriptor {
+					label: self.labels.as_ref().map(|(_, b)| b.as_str()),
+					format: None,
+					dimension: None,
+					aspect: wgpu::TextureAspect::All,
+					base_mip_level: 0,
+					mip_level_count: None,
+					base_array_layer: 0,
+					array_layer_count: None,
+				});
+
+				data.insert(ScreenTextureData {
+					size,
+					texture,
+					view,
+				})
+			}
+		};
+
+		Some((&data.texture, &data.view))
+	}
 }

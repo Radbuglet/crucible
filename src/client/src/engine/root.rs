@@ -4,7 +4,7 @@ use anyhow::Context;
 use geode::prelude::*;
 use winit::{dpi::LogicalSize, event_loop::EventLoop, window::WindowBuilder};
 
-use crate::{game::entry::make_game_entry, util::features::FeatureList};
+use crate::{game::entry::GameSceneBundle, util::features::FeatureList};
 
 use super::services::{
 	gfx::{
@@ -13,12 +13,14 @@ use super::services::{
 	},
 	input::InputTracker,
 	scene::SceneManager,
-	viewport::{Viewport, ViewportManager, ViewportRenderHandler},
+	viewport::{
+		DepthTextureKey, ScreenTexture, Viewport, ViewportManager, ViewportRenderHandler,
+		DEPTH_BUFFER_FORMAT,
+	},
 };
 
 proxy_key! {
 	pub struct MainLockKey of Owned<Lock>;
-	pub struct ViewportDepthTexture of wgpu::Texture;
 }
 
 component_bundle! {
@@ -33,6 +35,7 @@ component_bundle! {
 		viewport: RefCell<Viewport>,
 		input_tracker: RefCell<InputTracker>,
 		render_handler: dyn ViewportRenderHandler,
+		depth_texture[DepthTextureKey::key()]: RefCell<ScreenTexture>,
 	}
 }
 
@@ -105,7 +108,7 @@ impl EngineRootBundle {
 		let scene_mgr = SceneManager::default().box_obj_rw(s, main_lock);
 		scene_mgr
 			.borrow_mut(s)
-			.init_scene(make_game_entry(s, engine_root_guard.weak_copy(), main_lock));
+			.init_scene(GameSceneBundle::new(s, engine_root, main_lock).raw());
 
 		// Create root entity
 		engine_root_guard.add(
@@ -122,7 +125,7 @@ impl EngineRootBundle {
 }
 
 impl ViewportBundle {
-	pub fn new(s: Session, main_lock: Lock, _gfx: &GfxContext, engine_root: Entity) -> Owned<Self> {
+	pub fn new(s: Session, main_lock: Lock, gfx: &GfxContext, engine_root: Entity) -> Owned<Self> {
 		// Construct main viewport
 		let input_tracker = InputTracker::default().box_obj_rw(s, main_lock);
 		let render_handler = Obj::new(s, move |frame, s: Session, _me, viewport, engine| {
@@ -139,12 +142,21 @@ impl ViewportBundle {
 		})
 		.to_unsized::<dyn ViewportRenderHandler>();
 
+		let depth_texture = ScreenTexture::new(
+			gfx,
+			Some("depth buffer"),
+			DEPTH_BUFFER_FORMAT,
+			wgpu::TextureUsages::RENDER_ATTACHMENT,
+		)
+		.box_obj_rw(s, main_lock);
+
 		Self::spawn(
 			s,
 			ViewportBundleCtor {
 				viewport: None, // (to be initialized by the viewport manager)
 				input_tracker: input_tracker.into(),
 				render_handler: render_handler.into(),
+				depth_texture: depth_texture.into(),
 			},
 		)
 	}

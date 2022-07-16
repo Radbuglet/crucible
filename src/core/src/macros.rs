@@ -20,11 +20,6 @@ pub macro impl_tuples {
 	}
 }
 
-pub macro prefer_left {
-	({$($left:tt)*}) => {
-		$($left)*
-	},
-	({$($left:tt)*} {$($right:tt)*}) => {
-		$($left)*
-	},
+pub macro prefer_left({$($chosen:tt)*} $({$($_ignored:tt)*})*) {
+	$($chosen)*
 }

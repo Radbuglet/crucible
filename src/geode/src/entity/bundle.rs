@@ -1,4 +1,7 @@
-use crucible_core::marker::PhantomInvariant;
+use crucible_core::{
+	error::{AnyhowConvertExt, ErrorFormatExt},
+	marker::PhantomInvariant,
+};
 use derive_where::derive_where;
 use std::{
 	borrow::Borrow,
@@ -19,7 +22,7 @@ use super::entity::{ComponentList, Entity};
 #[allow(unused)] // Actually captured by the macro
 use {
 	super::{
-		entity::{ComponentAttachTarget, OwnedOrWeak},
+		entity::{ComponentAttachTarget, OwnedOrWeak, SingleComponent},
 		key::typed_key,
 	},
 	bytemuck::TransparentWrapper,
@@ -54,7 +57,14 @@ pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> + Deref {
 	}
 
 	fn unchecked_cast(entity: Entity) -> Self {
-		debug_assert!(Self::can_cast(LocalSessionGuard::new().handle(), entity));
+		#[cfg(debug_assertions)]
+		{
+			if let Err(err) =
+				Self::try_cast(LocalSessionGuard::new().handle(), entity).into_std_error()
+			{
+				err.raise();
+			}
+		}
 		Self::force_cast(entity)
 	}
 
@@ -228,7 +238,9 @@ pub macro component_bundle {
             #[allow(unused)]  // `registry` may be unused in empty bundles.
             fn push_values(self, registry: &mut ComponentAttachTarget) {
                 $(ComponentList::push_values(self.$ext_name, registry);)*
-                $(ComponentList::push_values(self.$field_name, registry);)*
+                $(SingleComponent::push_value_under(self.$field_name, registry, prefer_left!(
+                    $({$key})? {typed_key()}
+                ));)*
             }
         }
 
@@ -250,9 +262,7 @@ pub macro component_bundle {
     ) => {
         #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, TransparentWrapper)]
         #[repr(transparent)]
-        $vis struct $bundle_name {
-            entity: Entity,
-        }
+        $vis struct $bundle_name(Entity);
 
         impl ComponentBundle for $bundle_name {
             #[allow(unused)]  // `session` and `BUNDLE_MAKE_ERR` may be unused in empty bundles.
@@ -281,7 +291,7 @@ pub macro component_bundle {
             }
 
             fn force_cast(entity: Entity) -> Self {
-                Self { entity }
+                Self(entity)
             }
 
             fn force_cast_ref(entity: &Entity) -> &Self {
@@ -299,7 +309,7 @@ pub macro component_bundle {
 
         impl Borrow<Entity> for $bundle_name {
             fn borrow(&self) -> &Entity {
-                &self.entity
+                <Self as TransparentWrapper<Entity>>::peel_ref(self)
             }
         }
 
@@ -307,15 +317,13 @@ pub macro component_bundle {
             type Target = BundleMethods;
 
             fn deref(&self) -> &BundleMethods {
-                <BundleMethods as TransparentWrapper<Entity>>::wrap_ref(&self.entity)
+                <BundleMethods as TransparentWrapper<Entity>>::wrap_ref(Borrow::borrow(self))
             }
         }
 
         #[derive(TransparentWrapper)]
         #[repr(transparent)]
-       pub struct BundleMethods {
-            entity: Entity,
-        }
+       pub struct BundleMethods(Entity);
 
         impl BundleMethods {
             $(
@@ -326,7 +334,7 @@ pub macro component_bundle {
 
             $(
                 pub fn $field_name<'a>(&self, session: Session<'a>) -> &'a $field_ty {
-                    self.entity.get_in(session, prefer_left!(
+                    <Self as TransparentWrapper<Entity>>::peel_ref(self).get_in(session, prefer_left!(
                         $({$key})?
                         { typed_key::<$field_ty>() }
                     ))
@@ -336,7 +344,7 @@ pub macro component_bundle {
 
         impl Destructible for $bundle_name {
             fn destruct(self) {
-                self.entity.destruct();
+                <Self as TransparentWrapper<Entity>>::peel(self).destruct();
             }
         }
 

@@ -157,7 +157,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 				let frame = viewport
 					.borrow_mut::<Viewport>(s)
-					.render(p_gfx)
+					.present(p_gfx)
 					.expect("failed to get frame");
 
 				viewport.get::<dyn ViewportRenderHandler>(s).on_render(

@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.58"
 bytemuck = { version = "1.10.0", features = ["derive"] }
 derive-where = "1.0.0-rc.3"

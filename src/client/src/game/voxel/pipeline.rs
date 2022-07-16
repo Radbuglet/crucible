@@ -5,7 +5,10 @@ use crucible_common::voxel::math::{BlockFace, Sign};
 use geode::prelude::*;
 use typed_glam::glam;
 
-use crate::engine::services::{gfx::GfxContext, viewport::FALLBACK_SURFACE_FORMAT};
+use crate::engine::services::{
+	gfx::GfxContext,
+	viewport::{DEPTH_BUFFER_FORMAT, FALLBACK_SURFACE_FORMAT},
+};
 
 pub struct VoxelRenderingPipeline {
 	pub opaque_block_pipeline: wgpu::RenderPipeline,
@@ -91,7 +94,13 @@ impl VoxelRenderingPipeline {
 						polygon_mode: wgpu::PolygonMode::Fill,
 						conservative: false,
 					},
-					depth_stencil: None,
+					depth_stencil: Some(wgpu::DepthStencilState {
+						format: DEPTH_BUFFER_FORMAT,
+						depth_write_enabled: true,
+						depth_compare: wgpu::CompareFunction::Greater,
+						stencil: wgpu::StencilState::default(),
+						bias: wgpu::DepthBiasState::default(),
+					}),
 					multisample: wgpu::MultisampleState {
 						count: 1,
 						mask: !0,

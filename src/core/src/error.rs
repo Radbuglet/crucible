@@ -93,3 +93,20 @@ impl<T, E> UnwrapExt<T, E> for Result<T, E> {
 		}
 	}
 }
+
+pub type AnyhowErrorBoxed = Box<AnyhowErrorInner>;
+pub type AnyhowErrorInner = dyn Error + Send + Sync + 'static;
+
+pub trait AnyhowConvertExt {
+	type StdError;
+
+	fn into_std_error(self) -> Self::StdError;
+}
+
+impl<T> AnyhowConvertExt for anyhow::Result<T> {
+	type StdError = Result<T, AnyhowErrorBoxed>;
+
+	fn into_std_error(self) -> Self::StdError {
+		self.map_err(|err| err.into())
+	}
+}
