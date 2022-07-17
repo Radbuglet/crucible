@@ -487,6 +487,7 @@ dependencies = [
  "fastrand",
  "futures",
  "geode",
+ "hashbrown 0.12.2",
  "log",
  "parking_lot 0.12.1",
  "thiserror",
@@ -585,17 +586,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c972679f83bdf9c42bd905396b6c3588a843a17f0f16dfcfa3e2c5d57441835"
 dependencies = [
  "darling_core",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "derive-where"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c13f480ba804fb9ebbbcdeb942be88eedcbe051fdcf375804f8ee837126dc1db"
-dependencies = [
- "proc-macro2",
  "quote",
  "syn",
 ]
@@ -799,7 +789,6 @@ dependencies = [
  "bytemuck",
  "criterion",
  "crucible-core",
- "derive-where",
  "once_cell",
  "parking_lot 0.12.1",
  "sealed",

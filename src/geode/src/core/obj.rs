@@ -4,13 +4,11 @@ use std::{
 	fmt::{self, Write},
 	hash,
 	marker::Unsize,
-	ptr::Pointee,
+	ptr::{self, Pointee},
 };
 
 use crucible_core::error::ResultExt;
 use thiserror::Error;
-
-use crate::util::ptr::unsize_meta;
 
 use super::{
 	debug::DebugLabel,
@@ -70,6 +68,36 @@ impl Session<'_> {
 
 	pub fn reserve_slot_capacity(self, amount: usize) {
 		db::reserve_obj_slot_capacity(self, amount)
+	}
+}
+
+// === `ObjCast` Trait === //
+
+pub unsafe trait ObjCast<T: ?Sized> {
+	fn transform_meta(meta: <Self as Pointee>::Metadata) -> <T as Pointee>::Metadata;
+
+	fn cast_ref(&self) -> &T {
+		let (base, meta) = (self as *const Self).to_raw_parts();
+		let ptr = ptr::from_raw_parts(base, Self::transform_meta(meta));
+		unsafe { &*ptr }
+	}
+
+	fn cast_mut(&mut self) -> &mut T {
+		let (base, meta) = (self as *mut Self).to_raw_parts();
+		let ptr = ptr::from_raw_parts_mut(base, Self::transform_meta(meta));
+		unsafe { &mut *ptr }
+	}
+}
+
+unsafe impl<A, B> ObjCast<B> for A
+where
+	A: ?Sized + Unsize<B>,
+	B: ?Sized,
+{
+	fn transform_meta(meta: <Self as Pointee>::Metadata) -> <B as Pointee>::Metadata {
+		let ptr = ptr::from_raw_parts::<A>(ptr::null(), meta) as *const B;
+		let (_, meta) = ptr.to_raw_parts();
+		meta
 	}
 }
 
@@ -326,14 +354,14 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 		self.raw
 	}
 
-	pub fn as_unsized<U>(&self) -> Obj<U>
+	pub fn cast<U>(&self) -> Obj<U>
 	where
-		T: Unsize<U>,
+		T: ObjCast<U>,
 		U: ?Sized + ObjPointee,
 	{
 		Obj {
 			raw: self.raw,
-			meta: unsize_meta::<T, U>(self.meta),
+			meta: T::transform_meta(self.meta),
 		}
 	}
 }
@@ -401,12 +429,12 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 		self.map_owned(|obj| obj.as_raw())
 	}
 
-	pub fn as_unsized<U>(self) -> Owned<Obj<U>>
+	pub fn cast<U>(self) -> Owned<Obj<U>>
 	where
-		T: Unsize<U>,
+		T: ObjCast<U>,
 		U: ?Sized + ObjPointee,
 	{
-		self.map_owned(|obj| obj.as_unsized())
+		self.map_owned(|obj| obj.cast())
 	}
 }
 
@@ -465,7 +493,7 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 		T: Unsize<U>,
 		U: ?Sized + ObjPointee,
 	{
-		Owned::new(self.manually_destruct().as_unsized::<U>())
+		Owned::new(self.manually_destruct().cast::<U>())
 	}
 
 	pub fn to_raw(self) -> Owned<RawObj> {

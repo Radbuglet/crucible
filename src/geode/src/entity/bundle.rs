@@ -2,10 +2,10 @@ use crucible_core::{
 	error::{AnyhowConvertExt, ErrorFormatExt},
 	marker::PhantomInvariant,
 };
-use derive_where::derive_where;
 use std::{
 	borrow::Borrow,
 	cell::{Ref, RefCell, RefMut},
+	fmt, hash,
 	marker::PhantomData,
 	mem::transmute,
 	ops::Deref,
@@ -126,7 +126,6 @@ impl<T: ComponentBundle> Deref for Owned<T> {
 
 pub type EntityWithRw<T> = EntityWith<RefCell<T>>;
 
-#[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct EntityWith<T: ?Sized + ObjPointee> {
 	_ty: PhantomInvariant<T>,
@@ -156,6 +155,36 @@ impl<T: ?Sized + ObjPointee> ComponentBundle for EntityWith<T> {
 	fn force_cast_ref(entity: &Entity) -> &Self {
 		// `derive(TransparentWrapper)` crashes on this struct so we just have to do this manually.
 		unsafe { transmute(entity) }
+	}
+}
+
+impl<T: ?Sized + ObjPointee> fmt::Debug for EntityWith<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("EntityWith")
+			.field("entity", &self.entity)
+			.finish_non_exhaustive()
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Copy for EntityWith<T> {}
+
+impl<T: ?Sized + ObjPointee> Clone for EntityWith<T> {
+	fn clone(&self) -> Self {
+		*self
+	}
+}
+
+impl<T: ?Sized + ObjPointee> hash::Hash for EntityWith<T> {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		self.entity.hash(state);
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Eq for EntityWith<T> {}
+
+impl<T: ?Sized + ObjPointee> PartialEq for EntityWith<T> {
+	fn eq(&self, other: &Self) -> bool {
+		self.entity == other.entity
 	}
 }
 
