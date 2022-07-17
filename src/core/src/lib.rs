@@ -1,5 +1,6 @@
 #![allow(clippy::missing_safety_doc)] // TODO: Remove this lint once we have the bandwidth.
 #![feature(decl_macro)]
+#![feature(never_type)]
 
 pub mod array;
 pub mod c_enum;

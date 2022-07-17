@@ -275,7 +275,7 @@ impl Viewport {
 #[error("out of device memory")]
 pub struct OutOfDeviceMemoryError;
 
-event_trait! {
+delegate! {
 	pub trait ViewportRenderHandler::on_render(
 		&self,
 		frame: Option<wgpu::SurfaceTexture>,

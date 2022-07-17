@@ -6,9 +6,9 @@ use crate::lifetime::try_transform;
 
 // === RefCell extensions === //
 
-pub fn filter_map_ref<T, U, F>(orig: Ref<T>, mut f: F) -> Result<Ref<U>, Ref<T>>
+pub fn filter_map_ref<T, U, F>(orig: Ref<T>, f: F) -> Result<Ref<U>, Ref<T>>
 where
-	F: FnMut(&T) -> Option<&U>,
+	F: FnOnce(&T) -> Option<&U>,
 {
 	// Thanks to `kpreid` for the awesome insight behind this technique!
 	let backup = Ref::clone(&orig);
@@ -26,7 +26,7 @@ where
 
 pub fn filter_map_mut<T, U, F>(orig: RefMut<T>, f: F) -> Result<RefMut<U>, RefMut<T>>
 where
-	F: FnMut(&mut T) -> Option<&mut U>,
+	F: FnOnce(&mut T) -> Option<&mut U>,
 {
 	// Utils
 	// Thanks, again, to `kpreid` for helping me make the original implementation of this safe.

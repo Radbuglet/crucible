@@ -3,10 +3,10 @@
 #[allow(clippy::needless_lifetimes)]
 pub fn try_transform<'a, T: ?Sized, R: ?Sized, F>(
 	orig: &'a mut T,
-	mut f: F,
+	f: F,
 ) -> Result<&'a mut R, &'a mut T>
 where
-	F: FnMut(&mut T) -> Option<&mut R>,
+	F: FnOnce(&mut T) -> Option<&mut R>,
 {
 	let orig_ptr = orig as *mut T;
 

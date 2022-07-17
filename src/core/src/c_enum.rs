@@ -76,16 +76,20 @@ impl<K: ExposesVariants, V> CEnumMap<K, V> {
 	}
 
 	pub fn get_mut(&mut self, key: K) -> Option<&mut V> {
-		self.map[key.index()].as_mut()
+		self.entry_mut(key).as_mut()
 	}
 
-	pub fn values(&self) -> impl Iterator<Item = (K, &V)> + '_ {
+	pub fn entry_mut(&mut self, key: K) -> &mut Option<V> {
+		&mut self.map[key.index()]
+	}
+
+	pub fn iter(&self) -> impl Iterator<Item = (K, &V)> + '_ {
 		K::variants()
 			.zip(self.map.iter())
 			.filter_map(|(k, v)| Some((k, v.as_ref()?)))
 	}
 
-	pub fn values_mut(&mut self) -> impl Iterator<Item = (K, &mut V)> + '_ {
+	pub fn iter_mut(&mut self) -> impl Iterator<Item = (K, &mut V)> + '_ {
 		K::variants()
 			.zip(self.map.iter_mut())
 			.filter_map(|(k, v)| Some((k, v.as_mut()?)))

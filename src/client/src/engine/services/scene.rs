@@ -50,6 +50,6 @@ impl SceneManager {
 	}
 }
 
-event_trait! {
+delegate! {
 	pub trait SceneUpdateHandler::on_update(&self, s: Session, me: Entity, engine_root: Entity);
 }

@@ -1,4 +1,4 @@
-pub macro event_trait {
+pub macro delegate {
 	// Muncher base case
 	() => {},
 
@@ -36,7 +36,7 @@ pub macro event_trait {
 			}
 		}
 
-		event_trait!($($rest)*);
+		delegate!($($rest)*);
 	},
 
 	// Mutable
@@ -73,6 +73,6 @@ pub macro event_trait {
 			}
 		}
 
-		event_trait!($($rest)*);
+		delegate!($($rest)*);
 	},
 }

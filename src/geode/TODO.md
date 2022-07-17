@@ -7,7 +7,7 @@
   - [ ] Expose more of the `Obj` lifecycle methods to `Entity`.
   - [x] Expose fallible getters to `Obj`.
 - [ ] Signals:
-  - [ ] `event_trait` multiplexing, packing, conversions, and forwarding.
+  - [ ] `delegate` multiplexing, packing, conversions, and forwarding.
   - [ ] `InstantSignal` and `DeferredSignal` object (once `Storage` becomes available)
 - [x] GC prep:
   - [x] Clean up `Sessions` implementation (i.e. clarify invariants)

@@ -489,6 +489,7 @@ dependencies = [
  "geode",
  "hashbrown 0.12.2",
  "log",
+ "once_cell",
  "parking_lot 0.12.1",
  "thiserror",
  "typed-glam",

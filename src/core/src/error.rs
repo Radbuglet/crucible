@@ -67,34 +67,31 @@ impl<T, E: Error> ResultExt<T, E> for Result<T, E> {
 }
 
 pub trait UnwrapExt<T, E> {
-	fn unwrap_using<F, EF>(self, f: F) -> T
+	fn unwrap_using<F>(self, f: F) -> T
 	where
-		F: FnMut(E) -> EF,
-		EF: Display;
+		F: FnOnce(E) -> !;
 }
 
 impl<T> UnwrapExt<T, ()> for Option<T> {
-	fn unwrap_using<F, EF>(self, mut f: F) -> T
+	fn unwrap_using<F>(self, f: F) -> T
 	where
-		F: FnMut(()) -> EF,
-		EF: Display,
+		F: FnOnce(()) -> !,
 	{
 		match self {
 			Some(value) => value,
-			None => panic!("{}", f(())),
+			None => f(()),
 		}
 	}
 }
 
 impl<T, E> UnwrapExt<T, E> for Result<T, E> {
-	fn unwrap_using<F, EF>(self, mut f: F) -> T
+	fn unwrap_using<F>(self, f: F) -> T
 	where
-		F: FnMut(E) -> EF,
-		EF: Display,
+		F: FnOnce(E) -> !,
 	{
 		match self {
 			Ok(value) => value,
-			Err(err) => panic!("{}", f(err)),
+			Err(err) => f(err),
 		}
 	}
 }

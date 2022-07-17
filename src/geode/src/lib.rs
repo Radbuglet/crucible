@@ -21,9 +21,12 @@ pub mod prelude {
 			session::{LocalSessionGuard, Session},
 		},
 		entity::{
-			bundle::{component_bundle, ComponentBundle, ComponentBundleWithCtor, EntityWith, EntityWithRw},
+			bundle::{
+				component_bundle, ComponentBundle, ComponentBundleWithCtor, EntityWith,
+				EntityWithRw,
+			},
 			entity::{Entity, EntityGetErrorExt, ExposeUsing},
-			event::event_trait,
+			event::delegate,
 			key::{proxy_key, typed_key, ProxyKeyType},
 		},
 	};

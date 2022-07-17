@@ -234,9 +234,9 @@ impl LocalSessionGuard {
 	}
 
 	#[inline(always)]
-	pub fn with_new<F, R>(mut f: F) -> R
+	pub fn with_new<F, R>(f: F) -> R
 	where
-		F: FnMut(Self) -> R,
+		F: FnOnce(Self) -> R,
 	{
 		if let Some(reused) = Self::try_reuse() {
 			f(reused)
@@ -247,9 +247,9 @@ impl LocalSessionGuard {
 
 	#[cold]
 	#[inline(never)]
-	fn with_new_cold<F, R>(mut f: F) -> R
+	fn with_new_cold<F, R>(f: F) -> R
 	where
-		F: FnMut(Self) -> R,
+		F: FnOnce(Self) -> R,
 	{
 		let session = MovableSessionGuard::new().make_local();
 		f(session)
@@ -389,7 +389,7 @@ impl<T> LazySessionStorage<T> {
 	#[inline(always)]
 	pub fn get_or_init_using<'a, F>(&'a self, session: Session<'a>, initializer: F) -> &'a T
 	where
-		F: FnMut() -> T,
+		F: FnOnce() -> T,
 	{
 		// Try to acquire via existing reference
 		if let Some(data) = self.get(session) {
@@ -401,9 +401,9 @@ impl<T> LazySessionStorage<T> {
 
 	#[cold]
 	#[inline(never)]
-	fn init_cold<'a, F>(&'a self, session: Session<'a>, mut initializer: F) -> &'a T
+	fn init_cold<'a, F>(&'a self, session: Session<'a>, initializer: F) -> &'a T
 	where
-		F: FnMut() -> T,
+		F: FnOnce() -> T,
 	{
 		// Run our initializer
 		let value = initializer();
