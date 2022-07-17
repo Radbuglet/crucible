@@ -1,4 +1,4 @@
-use crate::transmute::super_unchecked_transmute;
+use crate::ext::transmute::super_unchecked_transmute;
 use core::iter;
 use core::mem::MaybeUninit;
 

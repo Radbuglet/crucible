@@ -1,8 +1,8 @@
-use core::cell::{Ref, RefMut};
+use core::{any::type_name, cell::{Ref, RefMut, UnsafeCell}, fmt};
 
 use bytemuck::TransparentWrapper;
 
-use crate::lifetime::try_transform;
+use crate::ext::lifetime::try_transform;
 
 // === RefCell extensions === //
 
@@ -67,8 +67,6 @@ where
 		false => Err(RefMut::map(mapped, |val| val.as_result().err().unwrap())),
 	}
 }
-
-use std::{any::type_name, cell::UnsafeCell, fmt};
 
 // === MutexedUnsafeCell === //
 

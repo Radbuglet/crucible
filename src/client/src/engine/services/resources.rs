@@ -1,17 +1,15 @@
 use std::{
-	any::Any,
-	cell::Cell,
-	collections::hash_map::RandomState,
-	error::Error,
-	hash::{self, BuildHasher, Hasher},
-	time::Instant,
+	any::Any, cell::Cell, collections::hash_map::RandomState, error::Error, hash, time::Instant,
 };
 
+use crucible_common::util::linked_list::ObjLinkedList;
 use hashbrown::raw::RawTable;
 
 use crucible_core::{
 	c_enum::{c_enum, CEnumMap},
 	error::{ResultExt, UnwrapExt},
+	hasher::hash_one,
+	linked_list::LinkedList,
 };
 use geode::prelude::*;
 use once_cell::unsync::OnceCell;
@@ -110,6 +108,28 @@ pub trait ResourceDescriptor<C>: ObjPointee + hash::Hash + Eq + Sync {
 
 // === ResourceManager === //
 
+type ResListLink<'s> = &'s Cell<Option<Obj<ResourceEntry>>>;
+
+fn get_res_list_view<'s>(
+	session: Session<'s>,
+	head: ResListLink<'s>,
+	tail: ResListLink<'s>,
+) -> ObjLinkedList<
+	's,
+	Obj<ResourceEntry>,
+	fn(Session<'s>, Obj<ResourceEntry>) -> (ResListLink<'s>, ResListLink<'s>),
+> {
+	ObjLinkedList {
+		session,
+		head,
+		tail,
+		access: |s, entry| {
+			let entry = entry.get(s);
+			(&entry.tou_left, &entry.tou_right)
+		},
+	}
+}
+
 #[derive(Default)]
 pub struct ResourceManager {
 	/// A map from resource descriptors to [ManagedResource] entries. Hashes are cached to prevent
@@ -123,10 +143,10 @@ pub struct ResourceManager {
 	hash_builder: RandomState,
 
 	/// The head (leftmost element) of the TOU doubly-linked list.
-	tou_head: Cell<Option<Obj<ResourceEntry>>>,
+	tou_head: Option<Obj<ResourceEntry>>,
 
 	/// The tail (rightmost element) of the TOU doubly-linked list.
-	tou_tail: Cell<Option<Obj<ResourceEntry>>>,
+	tou_tail: Option<Obj<ResourceEntry>>,
 }
 
 struct ResourceEntry {
@@ -137,7 +157,7 @@ struct ResourceEntry {
 	// === TOU state === //
 	tou_left: Cell<Option<Obj<ResourceEntry>>>,
 	tou_right: Cell<Option<Obj<ResourceEntry>>>,
-	_tou_time: Cell<Instant>,
+	tou_time: Cell<Instant>,
 }
 
 struct ResourceEntryData {
@@ -157,11 +177,7 @@ impl ResourceManager {
 		D: ResourceDescriptor<C>,
 	{
 		// Find existing resource
-		let hash = {
-			let mut hasher = self.hash_builder.build_hasher();
-			descriptor.hash(&mut hasher); // TODO: `hash_once`!
-			hasher.finish()
-		};
+		let hash = hash_one(&self.hash_builder, &descriptor);
 
 		let entry = self.resource_map.get(hash, |(entry_hash, entry)| {
 			if hash != *entry_hash {
@@ -181,15 +197,23 @@ impl ResourceManager {
 		});
 
 		if let Some((_, entry)) = entry {
-			let entry = entry.get(s);
-			let resource = entry
+			// Fetch the resource
+			let p_entry = entry.get(s);
+			let resource = p_entry
 				.value
 				.get()
 				.unwrap_using(|_| panic!("cannot load a resource that is currently being loaded."))
 				.resource
 				.weak_copy();
 
-			// TODO: Hoisting in the TOU queue.
+			// Update the TOU
+			get_res_list_view(
+				s,
+				Cell::from_mut(&mut self.tou_head),
+				Cell::from_mut(&mut self.tou_tail),
+			)
+			.insert_head(Some(entry.weak_copy()));
+			p_entry.tou_time.set(Instant::now());
 
 			Ok(EntityWith::unchecked_cast(resource))
 		} else {
@@ -200,7 +224,7 @@ impl ResourceManager {
 			let (entry_guard, entry) = ResourceEntry {
 				descriptor: descriptor_guard.cast(),
 				value: OnceCell::new(),
-				_tou_time: Cell::new(Instant::now()),
+				tou_time: Cell::new(Instant::now()),
 				tou_left: Cell::new(None), // We'll initialize these down below.
 				tou_right: Cell::new(None),
 			}
@@ -218,31 +242,12 @@ impl ResourceManager {
 			// Register it in the TOU linked list.
 			// N.B. we do this after the resource map insertion since the former is more panic prone
 			// and, if we panic there, the registry should be placed in a valid state.
-			{
-				// TODO: Use a generic linked-list system using `Provider`s once those are finished.
-				let p_entry = entry.get(s);
-
-				// Layout:
-				// "<HEAD> [entry] [old head | TAIL]"
-				// (4 links)
-
-				// Link 1 & 2:
-				// "<HEAD> <- [entry] -> [head (old)]"
-				p_entry.tou_left.set(None);
-				p_entry.tou_right.set(self.tou_head.get());
-
-				// Link 3:
-				// "[entry] <- [head (old)]" or "[entry] <- <TAIL>"
-				if let Some(head) = self.tou_head.get() {
-					head.get(s).tou_left.set(Some(entry));
-				} else {
-					self.tou_tail.set(Some(entry));
-				}
-
-				// Link 4:
-				// "<HEAD> -> [entry]"
-				self.tou_head.set(Some(entry));
-			}
+			get_res_list_view(
+				s,
+				Cell::from_mut(&mut self.tou_head),
+				Cell::from_mut(&mut self.tou_tail),
+			)
+			.insert_head(Some(entry));
 
 			// Release `RefCell` and create the resource.
 			let created = descriptor.get(s).create(s, lock, self, ctx);
@@ -290,32 +295,13 @@ impl ResourceManager {
 		// Remove from the linked list
 		// N.B. we do this first because `resource_map.remove_entry` is more panic prone than we are
 		// and we'd like to keep the registry in as much of a valid state as possible.
-		{
-			// Layout:
-			// "<entry.left | HEAD> ~entry~ <entry.right | TAIL>"
-			// (2 links)
-			let p_entry = entry.get(s);
-			let tou_left = p_entry.tou_left.get();
-			let tou_right = p_entry.tou_right.get();
+		let mut view = get_res_list_view(
+			s,
+			Cell::from_mut(&mut self.tou_head),
+			Cell::from_mut(&mut self.tou_tail),
+		);
 
-			// "left -> (right | TAIL)" or "HEAD -> (right | TAIL)"
-			if let Some(tou_left) = tou_left {
-				// `right` is right of a node.
-				tou_left.get(s).tou_right.set(tou_right);
-			} else {
-				// `right` is right of the head.
-				self.tou_head.set(tou_right);
-			}
-
-			// "(HEAD | left) <- right" or "(HEAD | left) <- TAIL"
-			if let Some(tou_right) = tou_right {
-				// `left` is left of a node
-				tou_right.get(s).tou_left.set(tou_left);
-			} else {
-				// `left` is left of the tail.
-				self.tou_tail.set(tou_left);
-			}
-		}
+		view.unlink(Some(entry));
 
 		// Remove from the map.
 		#[rustfmt::skip]

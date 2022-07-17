@@ -1,6 +1,6 @@
 use core::{fmt, hash, ops::Index};
 
-use crate::{array::boxed_arr_repeat_len, marker::PhantomInvariant};
+use crate::ext::{array::boxed_arr_repeat_len, marker::PhantomInvariant};
 
 // === `ExposesVariants` === //
 
