@@ -67,6 +67,16 @@ impl<K: ExposesVariants, V> CEnumMap<K, V> {
 		Self::default()
 	}
 
+	pub fn from_entries<I: IntoIterator<Item = (K, V)>>(entries: I) -> Self {
+		let mut target = Self::new();
+
+		for (k, v) in entries {
+			target.insert(k, v);
+		}
+
+		target
+	}
+
 	pub fn insert(&mut self, key: K, value: V) -> Option<V> {
 		self.map[key.index()].replace(value)
 	}

@@ -4,7 +4,10 @@ use anyhow::Context;
 use geode::prelude::*;
 use winit::{dpi::LogicalSize, event_loop::EventLoop, window::WindowBuilder};
 
-use crate::{game::entry::GameSceneBundle, util::features::FeatureList};
+use crate::{
+	game::entry::GameSceneBundle,
+	util::features::{FeatureDescriptor, FeatureList, FeatureScore},
+};
 
 use super::services::{
 	gfx::{
@@ -12,10 +15,11 @@ use super::services::{
 		GfxFeaturePowerPreference,
 	},
 	input::InputTracker,
+	resources::ResourceManager,
 	scene::SceneManager,
 	viewport::{
 		DepthTextureKey, ScreenTexture, Viewport, ViewportManager, ViewportRenderHandler,
-		DEPTH_BUFFER_FORMAT,
+		DEFAULT_DEPTH_BUFFER_FORMAT,
 	},
 };
 
@@ -29,6 +33,7 @@ component_bundle! {
 		viewport_mgr: RefCell<ViewportManager>,
 		main_lock[MainLockKey::key()]: Owned<Lock>,
 		scene_mgr: RefCell<SceneManager>,
+		res_mgr: RefCell<ResourceManager>,
 	}
 
 	pub struct ViewportBundle(ViewportBundleCtor) {
@@ -48,7 +53,7 @@ impl EngineRootBundle {
 		let (engine_root_guard, engine_root) = Entity::new(s).to_guard_ref_pair();
 		let main_lock = main_lock_guard.weak_copy();
 
-		// Create the main window for which we'll create our main surface.
+		// Create the main window for which we'll create our main surface
 		let main_window = WindowBuilder::new()
 			.with_title("Crucible")
 			.with_inner_size(LogicalSize::new(1920u32, 1080u32))
@@ -56,7 +61,7 @@ impl EngineRootBundle {
 			.build(event_loop)
 			.context("failed to create main window")?;
 
-		// Initialize a graphics context.
+		// Initialize a graphics context
 		let (gfx, _table, main_surface) = {
 			struct MyFeatureList;
 
@@ -75,6 +80,31 @@ impl EngineRootBundle {
 							.query_compat(info)
 							.0,
 					);
+
+					// Require wire-frame drawing
+					// TODO: Make this an optional feature
+					if feature_list.mandatory_feature(
+						FeatureDescriptor {
+							name: "Can Draw Wireframe",
+							description: "",
+						},
+						if info
+							.adapter_info
+							.features
+							.contains(wgpu::Features::POLYGON_MODE_LINE)
+						{
+							FeatureScore::BinaryPass
+						} else {
+							FeatureScore::BinaryFail {
+								reason: "`POLYGON_MODE_LINE` feature not supported by the adapter"
+									.to_string(),
+							}
+						},
+					) {
+						info.descriptor
+							.features
+							.insert(wgpu::Features::POLYGON_MODE_LINE);
+					}
 
 					feature_list.wrap_user_table(())
 				}
@@ -105,20 +135,28 @@ impl EngineRootBundle {
 		}
 
 		// Create `SceneManager`
-		let scene_mgr = SceneManager::default().box_obj_rw(s, main_lock);
-		scene_mgr
-			.borrow_mut(s)
-			.init_scene(GameSceneBundle::new(s, engine_root, main_lock).raw());
+		let (scene_mgr_guard, scene_mgr) = SceneManager::default()
+			.box_obj_rw(s, main_lock)
+			.to_guard_ref_pair();
+
+		// Create resource manager
+		let res_mgr = ResourceManager::new(main_lock).box_obj_rw(s, main_lock);
 
 		// Create root entity
 		engine_root_guard.add(
 			s,
 			(
 				viewport_mgr,
-				scene_mgr,
+				scene_mgr_guard,
+				res_mgr,
 				ExposeUsing(main_lock_guard.box_obj(s), MainLockKey::key()),
 			),
 		);
+
+		// Setup initial scene
+		scene_mgr
+			.borrow_mut(s)
+			.init_scene(GameSceneBundle::new(s, engine_root, main_lock).raw());
 
 		Ok(engine_root_guard.map_owned(Self::unchecked_cast))
 	}
@@ -145,7 +183,7 @@ impl ViewportBundle {
 		let depth_texture = ScreenTexture::new(
 			gfx,
 			Some("depth buffer"),
-			DEPTH_BUFFER_FORMAT,
+			DEFAULT_DEPTH_BUFFER_FORMAT,
 			wgpu::TextureUsages::RENDER_ATTACHMENT,
 		)
 		.box_obj_rw(s, main_lock);

@@ -6,17 +6,21 @@ use crucible_common::voxel::{
 };
 use geode::prelude::*;
 use typed_glam::glam::{Mat4, Vec3};
+use winit::event::VirtualKeyCode;
 
 use crate::engine::{
 	root::{EngineRootBundle, ViewportBundle},
 	services::{gfx::GfxContext, scene::SceneUpdateHandler, viewport::ViewportRenderHandler},
 };
 
-use super::voxel::{mesh::VoxelWorldMesh, pipeline::VoxelRenderingPipeline};
+use super::voxel::{
+	mesh::VoxelWorldMesh,
+	pipeline::{VoxelRenderingPipelineDesc, VoxelUniforms},
+};
 
 component_bundle! {
 	pub struct GameSceneBundle(GameSceneBundleCtor) {
-		voxel_pipeline: VoxelRenderingPipeline,
+		voxel_uniforms: VoxelUniforms,
 		voxel_data: RefCell<VoxelWorldData>,
 		voxel_mesh: RefCell<VoxelWorldMesh>,
 		update_handler: dyn SceneUpdateHandler,
@@ -30,11 +34,19 @@ component_bundle! {
 
 impl GameSceneBundle {
 	pub fn new(s: Session, engine_root: Entity, main_lock: Lock) -> Owned<Self> {
+		let engine_root = EngineRootBundle::unchecked_cast(engine_root);
+
 		// Create voxel services
-		let (voxel_pipeline_guard, voxel_pipeline) =
-			VoxelRenderingPipeline::new(s, engine_root.get::<GfxContext>(s))
+		let (voxel_uniforms_guard, voxel_uniforms) = {
+			// Get dependencies
+			let gfx = engine_root.gfx(s);
+			let mut res_mgr = engine_root.res_mgr(s).borrow_mut();
+
+			// Create `VoxelUniforms`
+			VoxelUniforms::new(s, gfx, &mut res_mgr)
 				.box_obj(s)
-				.to_guard_ref_pair();
+				.to_guard_ref_pair()
+		};
 
 		let voxel_data_guard = VoxelWorldData::default().box_obj_rw(s, main_lock);
 		let (voxel_mesh_guard, voxel_mesh) = VoxelWorldMesh::default()
@@ -57,39 +69,46 @@ impl GameSceneBundle {
 			      viewport: Entity,
 			      engine_root: Entity| {
 				// Acquire services
-				let viewport = ViewportBundle::unchecked_cast(viewport);
-				let engine_root = EngineRootBundle::unchecked_cast(engine_root);
+				let p_voxel_uniforms = voxel_uniforms.get(s);
 
+				let engine_root = EngineRootBundle::unchecked_cast(engine_root);
 				let p_gfx = engine_root.gfx(s);
-				let p_voxel_pipeline = voxel_pipeline.get(s);
+				let mut p_res_mgr = engine_root.res_mgr(s).borrow_mut();
+
+				let viewport = ViewportBundle::unchecked_cast(viewport);
 				let p_viewport_handle = viewport.viewport(s).borrow();
 				let mut p_depth_texture = viewport.depth_texture(s).borrow_mut();
+				let p_input_tracker = viewport.input_tracker(s).borrow();
 
 				// Acquire frame and create a view to it
 				let frame = match frame {
 					Some(frame) => frame,
 					None => return,
 				};
-
 				let frame_view = frame.texture.create_view(&Default::default());
 
-				let (_, depth_tex_view) =
-					p_depth_texture.acquire(p_gfx, &*p_viewport_handle).unwrap();
+				// Acquire depth texture
+				let depth_tex_format = p_depth_texture.format();
+				let depth_tex_view = p_depth_texture
+					.acquire(p_gfx, &*p_viewport_handle)
+					.unwrap()
+					.1;
 
 				// Setup projection matrix
 				{
 					let aspect = p_viewport_handle.surface_aspect().unwrap_or(1.);
 					let proj = Mat4::perspective_lh(70f32.to_radians(), aspect, 0.1, 100.);
 					let view = Mat4::look_at_lh(Vec3::new(-10., -10., -10.), Vec3::ZERO, Vec3::Y);
-					// let view = view.inverse();
+					// let view = view.inverse();  (already inversed by `look_at_lh`)
 					let full = proj * view;
 
-					p_voxel_pipeline.set_camera_matrix(p_gfx, full);
+					p_voxel_uniforms.set_camera_matrix(p_gfx, full);
 				}
 
 				// Encode main pass
 				let mut cb = p_gfx.device.create_command_encoder(&Default::default());
 				{
+					// Begin pass
 					let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
 						label: None,
 						color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -115,9 +134,23 @@ impl GameSceneBundle {
 						}),
 					});
 
+					// Set appropriate pipeline
+					let pipeline = p_res_mgr.load(
+						s,
+						p_gfx,
+						VoxelRenderingPipelineDesc {
+							surface_format: p_viewport_handle.format(),
+							depth_format: depth_tex_format,
+							is_wireframe: p_input_tracker.key(VirtualKeyCode::Space).state(),
+						},
+					);
+
+					pass.set_pipeline(pipeline.get(s));
+
+					// Render mesh
 					voxel_mesh
 						.borrow_mut(s)
-						.render_chunks(s, p_voxel_pipeline, &mut pass);
+						.render_chunks(s, p_voxel_uniforms, &mut pass);
 				}
 
 				// Present and flush
@@ -131,7 +164,7 @@ impl GameSceneBundle {
 		let scene_guard = Self::spawn(
 			s,
 			GameSceneBundleCtor {
-				voxel_pipeline: voxel_pipeline_guard.into(),
+				voxel_uniforms: voxel_uniforms_guard.into(),
 				voxel_data: voxel_data_guard.into(),
 				voxel_mesh: voxel_mesh_guard.into(),
 				update_handler: update_handler_guard.into(),

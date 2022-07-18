@@ -115,8 +115,7 @@ impl ReflectType {
 	pub const fn dynamic_with_drop<D>() -> &'static ReflectType
 	where
 		// lol, trivially bypassed feature gate
-		// (do we even need this? why the heck did I make this const-compatible in the first place?)
-		(D,): CustomDropHandler,
+		FeatureGateBypass<D>: CustomDropHandler,
 	{
 		struct MetaProvider<D: CustomDropHandler> {
 			_ty: PhantomData<D>,
@@ -130,7 +129,7 @@ impl ReflectType {
 			};
 		}
 
-		&MetaProvider::<(D,)>::META
+		&MetaProvider::<FeatureGateBypass<D>>::META
 	}
 }
 
@@ -138,7 +137,9 @@ pub trait CustomDropHandler {
 	unsafe fn destruct(alloc_base: *mut (), layout: Layout, session: Session);
 }
 
-impl<T: CustomDropHandler> CustomDropHandler for (T,) {
+pub struct FeatureGateBypass<T>(T);
+
+impl<T: CustomDropHandler> CustomDropHandler for FeatureGateBypass<T> {
 	unsafe fn destruct(alloc_base: *mut (), layout: Layout, session: Session) {
 		T::destruct(alloc_base, layout, session)
 	}

@@ -10,9 +10,7 @@ use typed_glam::glam::UVec2;
 use winit::window::{Window, WindowId};
 
 pub const FALLBACK_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
-
-// TODO: Stop hard-coding this. All pipelines should dynamically adapt to format settings.
-pub const DEPTH_BUFFER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+pub const DEFAULT_DEPTH_BUFFER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 proxy_key! {
 	pub struct DepthTextureKey of RefCell<ScreenTexture>;
@@ -314,6 +312,10 @@ impl ScreenTexture {
 			format,
 			usages,
 		}
+	}
+
+	pub fn format(&self) -> wgpu::TextureFormat {
+		self.format
 	}
 
 	pub fn acquire(

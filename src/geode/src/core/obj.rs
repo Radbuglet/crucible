@@ -4,7 +4,7 @@ use std::{
 	fmt::{self, Write},
 	hash,
 	marker::Unsize,
-	ptr::{self, Pointee},
+	ptr::{self, NonNull, Pointee},
 };
 
 use crucible_core::error::ResultExt;
@@ -205,7 +205,7 @@ impl RawObj {
 	}
 
 	// Fetching
-	pub fn try_get_ptr(&self, session: Session) -> Result<*const (), ObjGetError> {
+	pub fn try_get_ptr(&self, session: Session) -> Result<NonNull<u8>, ObjGetError> {
 		#[cold]
 		#[inline(never)]
 		fn decode_error(session: Session, requested: RawObj, slot_gen: ExtendedGen) -> ObjGetError {
@@ -226,17 +226,25 @@ impl RawObj {
 		}
 
 		match db::try_get_obj_ptr(session, self.slot, self.gen) {
-			Ok(ptr) => Ok(ptr),
+			Ok(ptr) => Ok(unsafe {
+				// Safety: `RawObj` never points to a null pointer while alive.
+				NonNull::new_unchecked(ptr.cast::<u8>())
+			}),
 			Err(slot_gen) => Err(decode_error(session, *self, slot_gen)),
 		}
 	}
 
-	pub fn get_ptr(&self, session: Session) -> *const () {
+	pub fn get_ptr(&self, session: Session) -> NonNull<u8> {
 		self.try_get_ptr(session).unwrap_pretty()
 	}
 
-	pub fn weak_get_ptr(&self, session: Session) -> Result<*const (), ObjDeadError> {
+	pub fn weak_get_ptr(&self, session: Session) -> Result<NonNull<u8>, ObjDeadError> {
 		ObjGetError::unwrap_weak(self.try_get_ptr(session))
+	}
+
+	pub fn force_get_ptr(&self, session: Session) -> NonNull<u8> {
+		// TODO: Elide checks in release builds.
+		self.get_ptr(session)
 	}
 
 	pub fn is_alive_now(&self, _session: Session) -> bool {
@@ -257,15 +265,15 @@ impl Destructible for RawObj {
 }
 
 impl Owned<RawObj> {
-	pub fn try_get_ptr(&self, session: Session) -> Result<*const (), ObjGetError> {
+	pub fn try_get_ptr(&self, session: Session) -> Result<NonNull<u8>, ObjGetError> {
 		self.weak_copy().try_get_ptr(session)
 	}
 
-	pub fn get_ptr(&self, session: Session) -> *const () {
+	pub fn get_ptr(&self, session: Session) -> NonNull<u8> {
 		self.weak_copy().get_ptr(session)
 	}
 
-	pub fn weak_get_ptr(&self, session: Session) -> Result<*const (), ObjDeadError> {
+	pub fn weak_get_ptr(&self, session: Session) -> Result<NonNull<u8>, ObjDeadError> {
 		self.weak_copy().weak_get_ptr(session)
 	}
 
@@ -329,7 +337,7 @@ impl<T: Sized + ObjPointee> Obj<T> {
 impl<T: ?Sized + ObjPointee> Obj<T> {
 	pub fn try_get<'a>(&self, session: Session<'a>) -> Result<&'a T, ObjGetError> {
 		let base_addr = self.raw.try_get_ptr(session)?;
-		let ptr = std::ptr::from_raw_parts(base_addr, self.meta);
+		let ptr = std::ptr::from_raw_parts(base_addr.as_ptr() as *const (), self.meta);
 
 		Ok(unsafe { &*ptr })
 	}

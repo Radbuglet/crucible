@@ -94,14 +94,13 @@ pub struct CreatedResource<R: ?Sized + ObjPointee> {
 }
 
 pub trait ResourceDescriptor<C>: ObjPointee + hash::Hash + Eq + Sync {
-	type Error: Error;
 	type Resource: ObjPointee;
+	type Error: Error;
 
 	fn create(
 		&self,
 		s: Session,
-		lock: Lock,
-		manager: &mut ResourceManager,
+		res_mgr: &mut ResourceManager,
 		ctx: C,
 	) -> Result<CreatedResource<Self::Resource>, Self::Error>;
 }
@@ -130,7 +129,6 @@ fn get_res_list_view<'s>(
 	}
 }
 
-#[derive(Default)]
 pub struct ResourceManager {
 	/// A map from resource descriptors to [ManagedResource] entries. Hashes are cached to prevent
 	/// very large amounts of dynamic dispatch during rehashing.
@@ -147,6 +145,9 @@ pub struct ResourceManager {
 
 	/// The tail (rightmost element) of the TOU doubly-linked list.
 	tou_tail: Option<Obj<ResourceEntry>>,
+
+	/// The lock used by everything `ResourceManager` touches.
+	lock: Lock,
 }
 
 struct ResourceEntry {
@@ -166,10 +167,20 @@ struct ResourceEntryData {
 }
 
 impl ResourceManager {
+	pub fn new(lock: Lock) -> Self {
+		Self {
+			resource_map: Default::default(),
+			total_cost: Default::default(),
+			hash_builder: Default::default(),
+			tou_head: Default::default(),
+			tou_tail: Default::default(),
+			lock,
+		}
+	}
+
 	pub fn try_load<C, D>(
 		&mut self,
 		s: Session,
-		lock: Lock,
 		ctx: C,
 		descriptor: D,
 	) -> Result<EntityWith<D::Resource>, D::Error>
@@ -202,7 +213,7 @@ impl ResourceManager {
 			let resource = p_entry
 				.value
 				.get()
-				.unwrap_using(|_| panic!("cannot load a resource that is currently being loaded."))
+				.unwrap_using(|_| panic!("cannot load a resource that is currently being loaded"))
 				.resource
 				.weak_copy();
 
@@ -228,7 +239,7 @@ impl ResourceManager {
 				tou_left: Cell::new(None), // We'll initialize these down below.
 				tou_right: Cell::new(None),
 			}
-			.box_obj_in(s, lock)
+			.box_obj_in(s, self.lock)
 			.to_guard_ref_pair();
 
 			// Register the resource in the map.
@@ -250,7 +261,7 @@ impl ResourceManager {
 			.insert_head(Some(entry));
 
 			// Release `RefCell` and create the resource.
-			let created = descriptor.get(s).create(s, lock, self, ctx);
+			let created = descriptor.get(s).create(s, self, ctx);
 
 			// Register the new resource and return it
 			match created {
@@ -278,17 +289,11 @@ impl ResourceManager {
 		}
 	}
 
-	pub fn load<C, D>(
-		&mut self,
-		s: Session,
-		lock: Lock,
-		ctx: C,
-		descriptor: D,
-	) -> EntityWith<D::Resource>
+	pub fn load<C, D>(&mut self, s: Session, ctx: C, descriptor: D) -> EntityWith<D::Resource>
 	where
 		D: ResourceDescriptor<C>,
 	{
-		self.try_load(s, lock, ctx, descriptor).unwrap_pretty()
+		self.try_load(s, ctx, descriptor).unwrap_pretty()
 	}
 
 	fn unregister_resource(&mut self, s: Session, hash: u64, entry: Obj<ResourceEntry>) {
@@ -309,6 +314,10 @@ impl ResourceManager {
 			hash,
 			|(_, obj)| obj.weak_copy() == entry
 		);
+	}
+
+	pub fn get_lock(&self) -> Lock {
+		self.lock
 	}
 }
 

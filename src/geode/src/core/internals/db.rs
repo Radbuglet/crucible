@@ -272,7 +272,7 @@ pub fn try_get_obj_ptr(
 	session: Session<'_>,
 	slot: &'static Slot,
 	gen: ExtendedGen,
-) -> Result<*const (), ExtendedGen> {
+) -> Result<*mut (), ExtendedGen> {
 	debug_assert_eq!(gen.meta(), 0xFF);
 
 	let local_sess_data = unsafe {

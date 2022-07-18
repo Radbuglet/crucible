@@ -158,6 +158,10 @@ impl<T: ?Sized + ObjPointee> ComponentBundle for EntityWith<T> {
 	}
 }
 
+impl<T: ?Sized + ObjPointee> ComponentBundleWithCtor for EntityWith<T> {
+	type CompList = Option<OwnedOrWeak<T>>;
+}
+
 impl<T: ?Sized + ObjPointee> fmt::Debug for EntityWith<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct("EntityWith")
@@ -215,7 +219,7 @@ pub struct EntityWithBundledMethods<T: ?Sized + ObjPointee> {
 }
 
 impl<T: ?Sized + ObjPointee> EntityWithBundledMethods<T> {
-	pub fn get(self, session: Session) -> &T {
+	pub fn get<'a>(&self, session: Session<'a>) -> &'a T {
 		self.entity.get::<T>(session)
 	}
 }

@@ -121,7 +121,7 @@ impl Slot {
 		&self,
 		locks: &SessionLocks,
 		ptr_gen: ExtendedGen,
-	) -> Result<*const (), ExtendedGen> {
+	) -> Result<*mut (), ExtendedGen> {
 		let base_ptr = self.base_ptr.load(Ordering::Acquire); // Forces us to see `lock_and_gen` and `base_ptr`.
 		let slot_gen = self.lock_and_gen.load(Ordering::Relaxed);
 		let slot_gen = ExtendedGen::from_raw(slot_gen);

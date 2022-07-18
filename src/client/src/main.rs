@@ -1,3 +1,5 @@
+#![feature(never_type)]
+
 pub mod engine;
 pub mod game;
 pub mod util;

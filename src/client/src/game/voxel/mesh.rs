@@ -17,7 +17,7 @@ use wgpu::util::DeviceExt;
 
 use crate::engine::services::gfx::GfxContext;
 
-use super::pipeline::{VoxelRenderingPipeline, VoxelVertex};
+use super::pipeline::{VoxelUniforms, VoxelVertex};
 
 pub struct VoxelWorldMesh {
 	chunks: HashSet<Entity>,
@@ -150,13 +150,11 @@ impl VoxelWorldMesh {
 	pub fn render_chunks<'a>(
 		&mut self,
 		s: Session<'a>,
-		assets: &'a VoxelRenderingPipeline,
+		voxel_uniforms: &'a VoxelUniforms,
 		pass: &mut wgpu::RenderPass<'a>,
 	) {
-		pass.set_pipeline(&assets.opaque_block_pipeline);
-		pass.set_bind_group(0, &assets.bind_group, &[]);
+		voxel_uniforms.set_pass_state(pass);
 
-		// log::info!("Woo!");
 		for chunk in self.chunks.iter() {
 			let mesh = chunk.get_in::<VoxelChunkMesh>(s, self.mesh_meta_key);
 
