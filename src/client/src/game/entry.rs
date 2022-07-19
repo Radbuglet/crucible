@@ -133,6 +133,10 @@ pub struct GameSceneBundleHandlers {
 
 impl SceneUpdateHandler for GameSceneBundleHandlers {
 	fn on_update(&self, s: Session, me: Entity, engine: Entity) {
+		if !self.viewport.raw().is_alive_now(s) {
+			return;
+		}
+
 		let me = GameSceneBundle::cast(me);
 		let engine = EngineRootBundle::cast(engine);
 

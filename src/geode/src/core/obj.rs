@@ -211,7 +211,7 @@ impl RawObj {
 		fn decode_error(session: Session, requested: RawObj, slot_gen: ExtendedGen) -> ObjGetError {
 			let lock_id = slot_gen.meta();
 
-			if db::is_lock_held_by(session, lock_id) {
+			if !db::is_lock_held_by(session, lock_id) {
 				return ObjGetError::Locked(ObjLockedError {
 					requested,
 					lock: Lock(lock_id),

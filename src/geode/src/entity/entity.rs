@@ -104,6 +104,10 @@ impl Entity {
 		self.get::<RefCell<T>>(session).borrow_mut()
 	}
 
+	pub fn is_alive_now(&self, session: Session) -> bool {
+		self.obj.is_alive_now(session)
+	}
+
 	pub fn destroy(&self, session: Session) -> bool {
 		self.obj.destroy(session)
 	}
@@ -147,6 +151,10 @@ impl Owned<Entity> {
 
 	pub fn borrow_mut<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> RefMut<'a, T> {
 		self.weak_copy().borrow_mut(session)
+	}
+
+	pub fn is_alive_now(&self, session: Session) -> bool {
+		self.weak_copy().is_alive_now(session)
 	}
 
 	pub fn destroy(self, session: Session) -> bool {

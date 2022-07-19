@@ -3,11 +3,17 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
+// === Standard Error Extensions === //
+
 pub trait ErrorFormatExt: Error {
 	fn format_error(&self) -> FormattedError<Self>;
 
 	fn raise(&self) -> ! {
 		panic!("{}", self.format_error());
+	}
+
+	fn log(&self) {
+		log::error!("{}", self.format_error());
 	}
 }
 
@@ -55,6 +61,7 @@ impl<T: ?Sized + Error> Display for FormattedError<'_, T> {
 
 pub trait ResultExt<T, E: Error> {
 	fn unwrap_pretty(self) -> T;
+	fn log(self) -> Option<T>;
 }
 
 impl<T, E: Error> ResultExt<T, E> for Result<T, E> {
@@ -64,34 +71,14 @@ impl<T, E: Error> ResultExt<T, E> for Result<T, E> {
 			Err(err) => err.raise(),
 		}
 	}
-}
 
-pub trait UnwrapExt<T, E> {
-	fn unwrap_using<F>(self, f: F) -> T
-	where
-		F: FnOnce(E) -> !;
-}
-
-impl<T> UnwrapExt<T, ()> for Option<T> {
-	fn unwrap_using<F>(self, f: F) -> T
-	where
-		F: FnOnce(()) -> !,
-	{
+	fn log(self) -> Option<T> {
 		match self {
-			Some(value) => value,
-			None => f(()),
-		}
-	}
-}
-
-impl<T, E> UnwrapExt<T, E> for Result<T, E> {
-	fn unwrap_using<F>(self, f: F) -> T
-	where
-		F: FnOnce(E) -> !,
-	{
-		match self {
-			Ok(value) => value,
-			Err(err) => f(err),
+			Ok(val) => Some(val),
+			Err(err) => {
+				err.log();
+				None
+			}
 		}
 	}
 }

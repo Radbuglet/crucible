@@ -7,7 +7,7 @@ use hashbrown::raw::RawTable;
 
 use crucible_core::{
 	c_enum::{c_enum, CEnumMap},
-	error::{ResultExt, UnwrapExt},
+	error::ResultExt,
 	hasher::hash_one,
 	linked_list::LinkedList,
 };
@@ -213,7 +213,7 @@ impl ResourceManager {
 			let resource = p_entry
 				.value
 				.get()
-				.unwrap_using(|_| panic!("cannot load a resource that is currently being loaded"))
+				.unwrap_or_else(|| panic!("cannot load a resource that is currently being loaded"))
 				.resource
 				.weak_copy();
 
