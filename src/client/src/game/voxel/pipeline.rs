@@ -108,6 +108,7 @@ pub struct VoxelRenderingPipelineDesc {
 	pub surface_format: wgpu::TextureFormat,
 	pub depth_format: wgpu::TextureFormat,
 	pub is_wireframe: bool,
+	pub back_face_culling: bool,
 }
 
 impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelRenderingPipelineDesc {
@@ -141,7 +142,11 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelRenderingPipelineDesc {
 					topology: wgpu::PrimitiveTopology::TriangleList,
 					strip_index_format: None,
 					front_face: wgpu::FrontFace::Ccw,
-					cull_mode: None,
+					cull_mode: if self.back_face_culling {
+						Some(wgpu::Face::Back)
+					} else {
+						None
+					},
 					unclipped_depth: false,
 					polygon_mode: if self.is_wireframe {
 						wgpu::PolygonMode::Line

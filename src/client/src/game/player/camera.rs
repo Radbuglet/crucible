@@ -1,3 +1,5 @@
+use std::f32::consts::{PI, TAU};
+
 use typed_glam::glam::{Mat4, Vec2, Vec3};
 
 #[derive(Debug, Clone, Default)]
@@ -5,7 +7,6 @@ pub struct FreeCamController {
 	pos: Vec3,
 	pos_vel: Vec3,
 	rot: Vec2,
-	// rot_vel: Vec2,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -51,19 +52,25 @@ impl InputActions {
 }
 
 impl FreeCamController {
+	pub fn handle_mouse_move(&mut self, delta: Vec2) {
+		self.rot += delta * 0.1f32.to_radians();
+		self.rot.x = self.rot.x.rem_euclid(TAU);
+		self.rot.y = self.rot.y.clamp(-PI / 2., PI / 2.);
+	}
+
 	pub fn process(&mut self, actions: InputActions) {
 		let heading = self.rot_matrix().transform_point3(actions.heading());
 
 		self.pos_vel += heading;
-		self.pos_vel *= 0.3;
-		self.pos += self.pos_vel;
+		self.pos_vel *= 0.7;
+		self.pos += self.pos_vel * 0.3;
 	}
 
 	pub fn rot_matrix(&self) -> Mat4 {
-		Mat4::from_rotation_x(self.rot.y) * Mat4::from_rotation_y(self.rot.x)
+		Mat4::from_rotation_y(self.rot.x) * Mat4::from_rotation_x(self.rot.y)
 	}
 
 	pub fn view_matrix(&self) -> Mat4 {
-		Mat4::from_translation(-self.pos) * self.rot_matrix().inverse()
+		self.rot_matrix().inverse() * Mat4::from_translation(-self.pos)
 	}
 }

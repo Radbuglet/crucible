@@ -48,14 +48,14 @@ pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> {
 	}
 
 	fn unchecked_cast_owned(entity: Owned<Entity>) -> Owned<Self> {
-		entity.map_owned(|entity| Self::unchecked_cast(entity))
+		entity.map_owned(|entity| Self::cast(entity))
 	}
 
 	fn can_cast(session: Session, entity: Entity) -> bool {
 		Self::try_cast(session, entity).is_ok()
 	}
 
-	fn unchecked_cast(entity: Entity) -> Self {
+	fn cast(entity: Entity) -> Self {
 		#[cfg(debug_assertions)]
 		{
 			if let Err(err) =

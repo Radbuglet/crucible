@@ -226,7 +226,7 @@ impl ResourceManager {
 			.insert_head(Some(entry.weak_copy()));
 			p_entry.tou_time.set(Instant::now());
 
-			Ok(EntityWith::unchecked_cast(resource))
+			Ok(EntityWith::cast(resource))
 		} else {
 			// Box the descriptor.
 			let (descriptor_guard, descriptor) = descriptor.box_obj(s).to_guard_ref_pair();
