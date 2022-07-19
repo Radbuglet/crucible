@@ -153,7 +153,7 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelRenderingPipelineDesc {
 				depth_stencil: Some(wgpu::DepthStencilState {
 					format: self.depth_format,
 					depth_write_enabled: true,
-					depth_compare: wgpu::CompareFunction::Greater,
+					depth_compare: wgpu::CompareFunction::Less,
 					stencil: wgpu::StencilState::default(),
 					bias: wgpu::DepthBiasState::default(),
 				}),

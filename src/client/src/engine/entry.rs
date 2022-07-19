@@ -12,12 +12,12 @@ use super::{
 };
 
 pub fn main_inner() -> anyhow::Result<()> {
-	// Initialize engine
-	let (event_loop, engine_root) = {
+	let (engine_root, event_loop) = {
 		// Create initialization session
-		let main_lock_guard = Lock::new("main thread");
 		let session = LocalSessionGuard::new();
 		let s = session.handle();
+
+		let main_lock_guard = Lock::new("main thread");
 		s.acquire_locks([main_lock_guard.weak_copy()]);
 
 		// Create engine root
@@ -25,22 +25,20 @@ pub fn main_inner() -> anyhow::Result<()> {
 		let engine_root = EngineRootBundle::new(s, main_lock_guard, &event_loop)?;
 
 		// Make all viewports visible
-		{
-			let p_viewport_mgr = engine_root.viewport_mgr(s).borrow_mut();
+		let p_viewport_mgr = engine_root.weak_copy().viewport_mgr(s).borrow_mut();
 
-			for (_, _viewport, window) in p_viewport_mgr.mounted_viewports(s) {
-				window.set_visible(true);
-			}
+		for (_, _viewport, window) in p_viewport_mgr.mounted_viewports(s) {
+			window.set_visible(true);
 		}
 
-		(event_loop, engine_root)
+		// We want to execute this destructor in the loop teardown phase instead of the unwinding phase.
+		let engine_root = engine_root.manually_destruct();
+
+		(engine_root, event_loop)
 	};
 
 	// Enter main loop
 	log::info!("Entering main loop!");
-
-	// We want to execute this destructor in the loop teardown phase instead of the unwinding phase.
-	let engine_root = engine_root.manually_destruct();
 
 	event_loop.run(move |event, proxy, flow| {
 		// Create entry session
@@ -54,7 +52,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 		let bundle = WinitEventBundle { event, proxy, flow };
 
 		// Acquire services
-		let p_gfx = engine_root.gfx(s);
+		let gfx = engine_root.gfx(s);
 
 		// Process events
 		match &bundle.event {
@@ -157,7 +155,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 				let frame = viewport
 					.borrow_mut::<Viewport>(s)
-					.present(p_gfx)
+					.present(gfx)
 					.expect("failed to get frame");
 
 				viewport.get::<dyn ViewportRenderHandler>(s).on_render(

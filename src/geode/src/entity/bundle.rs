@@ -8,7 +8,6 @@ use std::{
 	fmt, hash,
 	marker::PhantomData,
 	mem::transmute,
-	ops::Deref,
 };
 
 use crate::core::{
@@ -29,7 +28,7 @@ use {
 	crucible_core::macros::prefer_left,
 };
 
-pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> + Deref {
+pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> {
 	// === Required methods === //
 
 	fn try_cast(session: Session, entity: Entity) -> anyhow::Result<Self>;
@@ -114,13 +113,7 @@ impl<T: ComponentBundle> Owned<T> {
 	}
 }
 
-impl<T: ComponentBundle> Deref for Owned<T> {
-	type Target = T::Target;
-
-	fn deref(&self) -> &Self::Target {
-		self.weak_copy_ref().deref()
-	}
-}
+// TODO: Deref integration
 
 // === `EntityWith` === //
 
@@ -198,39 +191,25 @@ impl<T: ?Sized + ObjPointee> Borrow<Entity> for EntityWith<T> {
 	}
 }
 
-impl<T: ?Sized + ObjPointee> Deref for EntityWith<T> {
-	type Target = EntityWithBundledMethods<T>;
-
-	fn deref(&self) -> &Self::Target {
-		unsafe { transmute(self) }
-	}
-}
-
-impl<T: ?Sized + ObjPointee> Destructible for EntityWith<T> {
-	fn destruct(self) {
-		self.entity.destruct();
-	}
-}
-
-#[repr(transparent)]
-pub struct EntityWithBundledMethods<T: ?Sized + ObjPointee> {
-	_ty: PhantomInvariant<T>,
-	entity: Entity,
-}
-
-impl<T: ?Sized + ObjPointee> EntityWithBundledMethods<T> {
+impl<T: ?Sized + ObjPointee> EntityWith<T> {
 	pub fn get<'a>(&self, session: Session<'a>) -> &'a T {
 		self.entity.get::<T>(session)
 	}
 }
 
-impl<T: ?Sized + ObjPointee> EntityWithBundledMethods<RefCell<T>> {
+impl<T: ?Sized + ObjPointee> EntityWithRw<T> {
 	pub fn borrow(self, session: Session) -> Ref<T> {
 		self.entity.borrow::<T>(session)
 	}
 
 	pub fn borrow_mut(self, session: Session) -> RefMut<T> {
 		self.entity.borrow_mut::<T>(session)
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Destructible for EntityWith<T> {
+	fn destruct(self) {
+		self.entity.destruct();
 	}
 }
 
@@ -331,6 +310,23 @@ pub macro component_bundle {
             }
         }
 
+		impl $bundle_name {
+			$(
+                pub fn $ext_name(&self) -> $ext_ty {
+                    *self.as_ref()
+                }
+            )*
+
+            $(
+                pub fn $field_name<'a>(&self, session: Session<'a>) -> &'a $field_ty {
+					<Self as TransparentWrapper<Entity>>::peel_ref(self).get_in(session, prefer_left!(
+                        $({$key})?
+                        { typed_key::<$field_ty>() }
+                    ))
+                }
+            )*
+		}
+
         $(
             impl Borrow<$ext_ty> for $bundle_name {
                 fn borrow(&self) -> &$ext_ty {
@@ -343,35 +339,6 @@ pub macro component_bundle {
             fn borrow(&self) -> &Entity {
                 <Self as TransparentWrapper<Entity>>::peel_ref(self)
             }
-        }
-
-        impl Deref for $bundle_name {
-            type Target = BundleMethods;
-
-            fn deref(&self) -> &BundleMethods {
-                <BundleMethods as TransparentWrapper<Entity>>::wrap_ref(Borrow::borrow(self))
-            }
-        }
-
-        #[derive(TransparentWrapper)]
-        #[repr(transparent)]
-       pub struct BundleMethods(Entity);
-
-        impl BundleMethods {
-            $(
-                pub fn $ext_name(&self) -> $ext_ty {
-                    *self.as_ref()
-                }
-            )*
-
-            $(
-                pub fn $field_name<'a>(&self, session: Session<'a>) -> &'a $field_ty {
-                    <Self as TransparentWrapper<Entity>>::peel_ref(self).get_in(session, prefer_left!(
-                        $({$key})?
-                        { typed_key::<$field_ty>() }
-                    ))
-                }
-            )*
         }
 
         impl Destructible for $bundle_name {

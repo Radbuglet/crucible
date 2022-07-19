@@ -2,20 +2,23 @@ use std::cell::RefCell;
 
 use crucible_common::voxel::{
 	container::{VoxelChunkData, VoxelWorldData},
-	math::{BlockPos, ChunkPos},
+	math::{BlockPos, BlockPosExt, ChunkPos},
 };
 use geode::prelude::*;
-use typed_glam::glam::{Mat4, Vec3};
+use typed_glam::glam::Mat4;
 use winit::event::VirtualKeyCode;
 
 use crate::engine::{
 	root::{EngineRootBundle, ViewportBundle},
-	services::{gfx::GfxContext, scene::SceneUpdateHandler, viewport::ViewportRenderHandler},
+	services::{scene::SceneUpdateHandler, viewport::ViewportRenderHandler},
 };
 
-use super::voxel::{
-	mesh::VoxelWorldMesh,
-	pipeline::{VoxelRenderingPipelineDesc, VoxelUniforms},
+use super::{
+	player::camera::{FreeCamController, InputActions},
+	voxel::{
+		mesh::VoxelWorldMesh,
+		pipeline::{VoxelRenderingPipelineDesc, VoxelUniforms},
+	},
 };
 
 component_bundle! {
@@ -25,6 +28,7 @@ component_bundle! {
 		voxel_mesh: RefCell<VoxelWorldMesh>,
 		update_handler: dyn SceneUpdateHandler,
 		render_handler: dyn ViewportRenderHandler,
+		local_camera: RefCell<FreeCamController>,
 	}
 
 	pub struct ChunkBundle(ChunkBundleCtor) {
@@ -33,14 +37,17 @@ component_bundle! {
 }
 
 impl GameSceneBundle {
-	pub fn new(s: Session, engine_root: Entity, main_lock: Lock) -> Owned<Self> {
-		let engine_root = EngineRootBundle::unchecked_cast(engine_root);
-
+	pub fn new(
+		s: Session,
+		engine: EngineRootBundle,
+		viewport: ViewportBundle,
+		main_lock: Lock,
+	) -> Owned<Self> {
 		// Create voxel services
 		let (voxel_uniforms_guard, voxel_uniforms) = {
 			// Get dependencies
-			let gfx = engine_root.gfx(s);
-			let mut res_mgr = engine_root.res_mgr(s).borrow_mut();
+			let gfx = engine.gfx(s);
+			let mut res_mgr = engine.res_mgr(s).borrow_mut();
 
 			// Create `VoxelUniforms`
 			VoxelUniforms::new(s, gfx, &mut res_mgr)
@@ -53,13 +60,31 @@ impl GameSceneBundle {
 			.box_obj_rw(s, main_lock)
 			.to_guard_ref_pair();
 
+		let (local_camera_guard, local_camera) = FreeCamController::default()
+			.box_obj_rw(s, main_lock)
+			.to_guard_ref_pair();
+
 		// Create event handlers
-		let update_handler_guard =
-			Obj::new(s, move |s: Session, _me: Entity, engine_root: Entity| {
-				let gfx = engine_root.get::<GfxContext>(s);
-				voxel_mesh.borrow_mut(s).update_chunks(s, gfx, None);
+		let update_handler_guard = Obj::new(s, move |s: Session, _me: Entity, engine: Entity| {
+			let engine = EngineRootBundle::unchecked_cast(engine);
+
+			let input_tracker = viewport.input_tracker(s).borrow();
+			let gfx = engine.gfx(s);
+
+			// Update chunk meshes
+			voxel_mesh.borrow_mut(s).update_chunks(s, gfx, None);
+
+			// Update camera
+			local_camera.borrow_mut(s).process(InputActions {
+				up: input_tracker.key(VirtualKeyCode::E).state(),
+				down: input_tracker.key(VirtualKeyCode::Q).state(),
+				left: input_tracker.key(VirtualKeyCode::A).state(),
+				right: input_tracker.key(VirtualKeyCode::D).state(),
+				fore: input_tracker.key(VirtualKeyCode::W).state(),
+				back: input_tracker.key(VirtualKeyCode::S).state(),
 			})
-			.to_unsized::<dyn SceneUpdateHandler>();
+		})
+		.to_unsized::<dyn SceneUpdateHandler>();
 
 		let render_handler_guard = Obj::new(
 			s,
@@ -70,6 +95,7 @@ impl GameSceneBundle {
 			      engine_root: Entity| {
 				// Acquire services
 				let p_voxel_uniforms = voxel_uniforms.get(s);
+				let p_local_camera = local_camera.borrow(s);
 
 				let engine_root = EngineRootBundle::unchecked_cast(engine_root);
 				let p_gfx = engine_root.gfx(s);
@@ -98,7 +124,7 @@ impl GameSceneBundle {
 				{
 					let aspect = p_viewport_handle.surface_aspect().unwrap_or(1.);
 					let proj = Mat4::perspective_lh(70f32.to_radians(), aspect, 0.1, 100.);
-					let view = Mat4::look_at_lh(Vec3::new(-10., -10., -10.), Vec3::ZERO, Vec3::Y);
+					let view = p_local_camera.view_matrix();
 					// let view = view.inverse();  (already inversed by `look_at_lh`)
 					let full = proj * view;
 
@@ -127,7 +153,7 @@ impl GameSceneBundle {
 						depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
 							view: depth_tex_view,
 							depth_ops: Some(wgpu::Operations {
-								load: wgpu::LoadOp::Clear(0.),
+								load: wgpu::LoadOp::Clear(f32::INFINITY),
 								store: true,
 							}),
 							stencil_ops: None,
@@ -169,20 +195,26 @@ impl GameSceneBundle {
 				voxel_mesh: voxel_mesh_guard.into(),
 				update_handler: update_handler_guard.into(),
 				render_handler: render_handler_guard.into(),
+				local_camera: local_camera_guard.into(),
 			},
 		);
 
 		// Create starter chunk
 		let (chunk_guard, chunk) = ChunkBundle::new(s, main_lock).to_guard_ref_pair();
 
-		scene_guard.voxel_data(s).borrow_mut().add_chunk(
-			s,
-			ChunkPos::new(0, 0, 0),
-			scene_guard.weak_copy().raw(),
-			chunk_guard.raw(),
-		);
+		scene_guard
+			.weak_copy()
+			.voxel_data(s)
+			.borrow_mut()
+			.add_chunk(
+				s,
+				ChunkPos::new(0, 0, 0),
+				scene_guard.weak_copy().raw(),
+				chunk_guard.raw(),
+			);
 
 		scene_guard
+			.weak_copy()
 			.voxel_mesh(s)
 			.borrow_mut()
 			.flag_chunk(s, main_lock, chunk.raw());
@@ -198,10 +230,13 @@ impl ChunkBundle {
 				.box_obj_in(s, main_lock)
 				.to_guard_ref_pair();
 
-			chunk_data
-				.get(s)
-				.block_state_of(BlockPos::new(0, 0, 0))
-				.set_material(1);
+			let p_chunk_data = chunk_data.get(s);
+
+			for pos in BlockPos::iter() {
+				if fastrand::bool() {
+					p_chunk_data.block_state_of(pos).set_material(1);
+				}
+			}
 
 			ChunkBundle::spawn(
 				s,
