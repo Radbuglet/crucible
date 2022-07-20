@@ -34,6 +34,8 @@ pub trait ResourceDescriptor<C>: fmt::Debug + ObjPointee + hash::Hash + Eq + Syn
 		res_mgr: &mut ResourceManager,
 		ctx: C,
 	) -> Result<Owned<ResourceBundle<Self::Resource>>, Self::Error>;
+
+	fn keep_alive(&self, _s: Session, _res_mgr: &mut ResourceManager, _ctx: C) {}
 }
 
 // === ResourceManager === //
@@ -113,24 +115,7 @@ impl ResourceManager {
 		D: ResourceDescriptor<C>,
 	{
 		// Find existing resource
-		let hash = hash_one(&self.hash_builder, &descriptor);
-
-		let entry = self.resource_map.get(hash, |entry| {
-			if hash != entry.get(s).hash {
-				return false;
-			}
-
-			let entry = entry.get(s);
-
-			if !matches!(
-				entry.descriptor.get(s).downcast_ref::<D>(),
-				Some(rhs_descriptor) if &descriptor == rhs_descriptor
-			) {
-				return false;
-			}
-
-			true
-		});
+		let (hash, entry) = self.fetch_entry_inner(s, &descriptor);
 
 		if let Some(entry) = entry {
 			// Fetch the resource
@@ -148,9 +133,12 @@ impl ResourceManager {
 				Cell::from_mut(&mut self.tou_tail),
 			);
 
-			entries.unlink(Some(entry.weak_copy()));
-			entries.insert_head(Some(entry.weak_copy()));
+			entries.unlink(Some(entry));
+			entries.insert_head(Some(entry));
 			p_entry.tou_time.set(Instant::now());
+
+			// Run the descriptor's keep alive handlers.
+			descriptor.keep_alive(s, self, ctx);
 
 			Ok(ResourceBundle::cast(resource))
 		} else {
@@ -217,6 +205,95 @@ impl ResourceManager {
 		self.try_load(s, ctx, descriptor).unwrap_pretty()
 	}
 
+	pub fn keep_alive<C, D: ResourceDescriptor<C>>(
+		&mut self,
+		s: Session,
+		ctx: C,
+		descriptor: D,
+	) -> bool {
+		// Ensure that the resource is loaded.
+		let (_, entry) = self.fetch_entry_inner(s, &descriptor);
+
+		if let Some(entry) = entry {
+			// Push it to the front of the TOU list.
+			let mut entries = get_res_list_view(
+				s,
+				Cell::from_mut(&mut self.tou_head),
+				Cell::from_mut(&mut self.tou_tail),
+			);
+
+			entries.unlink(Some(entry));
+			entries.insert_head(Some(entry));
+			entry.get(s).tou_time.set(Instant::now());
+
+			// And run its corresponding handlers.
+			descriptor.keep_alive(s, self, ctx);
+			true
+		} else {
+			false
+		}
+	}
+
+	pub fn collect_unused(&mut self, s: Session, max_tou: Duration) {
+		let mut entries = get_res_list_view(
+			s,
+			Cell::from_mut(&mut self.tou_head),
+			Cell::from_mut(&mut self.tou_tail),
+		);
+
+		let mut iter = entries.iter_backwards_interactive();
+		let now = Instant::now();
+
+		while let Some(entry) = iter.next(&entries) {
+			let entry = entry.unwrap();
+			let p_entry = entry.get(s);
+
+			let elapsed = now.duration_since(p_entry.tou_time.get());
+
+			if elapsed > max_tou {
+				Self::unregister_resource_inner(s, &mut entries, &mut self.resource_map, entry);
+				log::info!(
+					"Freed resource (entity: {:?}) that hadn't been used for {:?}",
+					p_entry.value.get(),
+					elapsed
+				);
+			}
+		}
+	}
+
+	pub fn get_lock(&self) -> Lock {
+		self.lock
+	}
+
+	// === Internals === //
+
+	fn fetch_entry_inner<C, D: ResourceDescriptor<C>>(
+		&self,
+		s: Session,
+		descriptor: &D,
+	) -> (u64, Option<Obj<ResourceEntry>>) {
+		let hash = hash_one(&self.hash_builder, &descriptor);
+
+		let entry = self.resource_map.get(hash, |entry| {
+			if hash != entry.get(s).hash {
+				return false;
+			}
+
+			let entry = entry.get(s);
+
+			if !matches!(
+				entry.descriptor.get(s).downcast_ref::<D>(),
+				Some(rhs_descriptor) if descriptor == rhs_descriptor
+			) {
+				return false;
+			}
+
+			true
+		});
+
+		(hash, entry.map(|val| val.weak_copy()))
+	}
+
 	fn unregister_resource_inner(
 		s: Session,
 		entries: &mut TouLinkedList,
@@ -247,33 +324,5 @@ impl ResourceManager {
 			&mut self.resource_map,
 			entry,
 		);
-	}
-
-	pub fn collect_unused(&mut self, s: Session, max_tou: Duration) {
-		let mut entries = get_res_list_view(
-			s,
-			Cell::from_mut(&mut self.tou_head),
-			Cell::from_mut(&mut self.tou_tail),
-		);
-
-		let mut iter = entries.iter_backwards_interactive();
-		let now = Instant::now();
-
-		while let Some(entry) = iter.next(&entries) {
-			let entry = entry.unwrap();
-			let p_entry = entry.get(s);
-
-			let elapsed = now.duration_since(p_entry.tou_time.get());
-
-			// TODO: Bring back the keep-alive system!
-			if elapsed > max_tou {
-				Self::unregister_resource_inner(s, &mut entries, &mut self.resource_map, entry);
-				log::info!("Freed resource that hadn't been used for {elapsed:?}");
-			}
-		}
-	}
-
-	pub fn get_lock(&self) -> Lock {
-		self.lock
 	}
 }

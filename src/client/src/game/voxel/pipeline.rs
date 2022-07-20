@@ -191,6 +191,11 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelRenderingPipelineDesc {
 			},
 		))
 	}
+
+	fn keep_alive(&self, s: Session, res_mgr: &mut ResourceManager, ctx: &'a GfxContext) {
+		res_mgr.keep_alive(s, ctx, OpaqueBlockShaderDesc);
+		res_mgr.keep_alive(s, ctx, VoxelPipelineLayoutDesc);
+	}
 }
 
 // === VoxelUniformManager === //
