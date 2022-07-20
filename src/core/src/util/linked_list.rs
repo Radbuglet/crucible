@@ -1,5 +1,7 @@
+use crate::contextual_iter::{ContextualIter, WithContext};
+
 // TODO: Strongly type non-sentinel nodes so we can achieve better performance.
-pub trait LinkedList<N: Copy> {
+pub trait LinkedList<N: Copy + Eq> {
 	fn sentinel(&self) -> N;
 	fn is_sentinel(&self, node: N) -> bool;
 
@@ -88,5 +90,79 @@ pub trait LinkedList<N: Copy> {
 
 	fn insert_tail(&mut self, node: N) {
 		self.insert_before(node, self.sentinel());
+	}
+
+	fn iter_forwards(&self) -> WithContext<&'_ Self, ListIterForwards<N>> {
+		self.iter_forwards_interactive().with_context(self)
+	}
+
+	fn iter_forwards_interactive(&self) -> ListIterForwards<N> {
+		ListIterForwards {
+			next_yielded: self.head(),
+			end_at: self.sentinel(),
+		}
+	}
+
+	fn iter_backwards(&self) -> WithContext<&'_ Self, ListIterBackwards<N>> {
+		self.iter_backwards_interactive().with_context(self)
+	}
+
+	fn iter_backwards_interactive(&self) -> ListIterBackwards<N> {
+		ListIterBackwards {
+			next_yielded: self.tail(),
+			end_at: self.sentinel(),
+		}
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct ListIterForwards<N> {
+	pub next_yielded: N,
+	pub end_at: N,
+}
+
+impl<'a, L, N> ContextualIter<&'a L> for ListIterForwards<N>
+where
+	L: ?Sized + LinkedList<N>,
+	N: Copy + Eq,
+{
+	type Item = N;
+
+	fn next_on_ref(&mut self, list: &mut &'a L) -> Option<Self::Item> {
+		let node = self.next_yielded;
+
+		if node == self.end_at {
+			return None;
+		}
+
+		self.next_yielded = list.get_next(self.next_yielded);
+
+		Some(node)
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct ListIterBackwards<N> {
+	pub next_yielded: N,
+	pub end_at: N,
+}
+
+impl<'a, L, N> ContextualIter<&'a L> for ListIterBackwards<N>
+where
+	L: ?Sized + LinkedList<N>,
+	N: Copy + Eq,
+{
+	type Item = N;
+
+	fn next_on_ref(&mut self, list: &mut &'a L) -> Option<Self::Item> {
+		let node = self.next_yielded;
+
+		if node == self.end_at {
+			return None;
+		}
+
+		self.next_yielded = list.get_prev(self.next_yielded);
+
+		Some(node)
 	}
 }

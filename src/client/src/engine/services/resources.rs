@@ -1,5 +1,10 @@
 use std::{
-	any::Any, cell::Cell, collections::hash_map::RandomState, error::Error, hash, time::Instant,
+	any::Any,
+	cell::Cell,
+	collections::hash_map::RandomState,
+	error::Error,
+	hash,
+	time::{Duration, Instant},
 };
 
 use crucible_common::util::linked_list::ObjLinkedList;
@@ -7,6 +12,7 @@ use hashbrown::raw::RawTable;
 
 use crucible_core::{
 	c_enum::{c_enum, CEnumMap},
+	contextual_iter::ContextualIter,
 	error::ResultExt,
 	hasher::hash_one,
 	linked_list::LinkedList,
@@ -163,7 +169,7 @@ struct ResourceEntry {
 
 struct ResourceEntryData {
 	resource: Owned<Entity>,
-	_cost: ResourceCostSet,
+	costs: ResourceCostSet,
 }
 
 impl ResourceManager {
@@ -276,7 +282,7 @@ impl ResourceManager {
 
 					let _ = entry.get(s).value.set(ResourceEntryData {
 						resource: resource.raw(),
-						_cost: costs,
+						costs,
 					});
 
 					Ok(resource_weak)
@@ -297,16 +303,23 @@ impl ResourceManager {
 	}
 
 	fn unregister_resource(&mut self, s: Session, hash: u64, entry: Obj<ResourceEntry>) {
+		// Decrement cost counter
+		if let Some(data) = entry.get(s).value.get() {
+			// Update total cost counters
+			for (key, cost) in data.costs.iter() {
+				*self.total_cost.entry_mut(key).get_or_insert(0) -= *cost;
+			}
+		}
+
 		// Remove from the linked list
 		// N.B. we do this first because `resource_map.remove_entry` is more panic prone than we are
 		// and we'd like to keep the registry in as much of a valid state as possible.
-		let mut view = get_res_list_view(
+		get_res_list_view(
 			s,
 			Cell::from_mut(&mut self.tou_head),
 			Cell::from_mut(&mut self.tou_tail),
-		);
-
-		view.unlink(Some(entry));
+		)
+		.unlink(Some(entry));
 
 		// Remove from the map.
 		#[rustfmt::skip]
@@ -314,6 +327,29 @@ impl ResourceManager {
 			hash,
 			|(_, obj)| obj.weak_copy() == entry
 		);
+	}
+
+	pub fn collect_garbage(&mut self, s: Session, min_duration: Duration) {
+		let entries = get_res_list_view(
+			s,
+			Cell::from_mut(&mut self.tou_head),
+			Cell::from_mut(&mut self.tou_tail),
+		);
+
+		let mut iter = entries.iter_backwards_interactive();
+		let now = Instant::now();
+
+		while let Some(entry) = iter.next(&entries) {
+			let entry = entry.unwrap();
+			let p_entry = entry.get(s);
+
+			// Ignore entries that haven't lived long enough.
+			if now.duration_since(p_entry.tou_time.get()) < min_duration {
+				continue;
+			}
+
+			// TODO
+		}
 	}
 
 	pub fn get_lock(&self) -> Lock {

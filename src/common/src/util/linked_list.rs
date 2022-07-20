@@ -33,7 +33,7 @@ where
 
 impl<'s, N, F> LinkedList<Option<N>> for ObjLinkedList<'s, N, F>
 where
-	N: 's + Copy,
+	N: 's + Copy + Eq,
 	F: Fn(Session<'s>, N) -> (&'s Cell<Option<N>>, &'s Cell<Option<N>>),
 {
 	fn sentinel(&self) -> Option<N> {

@@ -45,21 +45,18 @@ impl GameSceneBundle {
 		main_lock: Lock,
 	) -> Owned<Self> {
 		// Create voxel services
+		let voxel_data_guard = VoxelWorldData::default().box_obj_rw(s, main_lock);
+		let voxel_mesh_guard = VoxelWorldMesh::default().box_obj_rw(s, main_lock);
 		let voxel_uniforms_guard = {
-			// Get dependencies
 			let gfx = engine.gfx(s);
 			let mut res_mgr = engine.res_mgr(s).borrow_mut();
 
-			// Create `VoxelUniforms`
 			VoxelUniforms::new(s, gfx, &mut res_mgr).box_obj(s)
 		};
 
-		let voxel_data_guard = VoxelWorldData::default().box_obj_rw(s, main_lock);
-		let voxel_mesh_guard = VoxelWorldMesh::default().box_obj_rw(s, main_lock);
-
+		// Create event handlers
 		let local_camera_guard = FreeCamController::default().box_obj_rw(s, main_lock);
 
-		// Create event handlers
 		let (handlers_guard, handlers) = GameSceneBundleHandlers { viewport }
 			.box_obj(s)
 			.to_guard_ref_pair();
@@ -79,24 +76,23 @@ impl GameSceneBundle {
 		);
 
 		// Create starter chunk
-		let (chunk_guard, chunk) = ChunkBundle::new(s, main_lock).to_guard_ref_pair();
+		{
+			let scene = scene_guard.weak_copy();
 
-		scene_guard
-			.weak_copy()
-			.voxel_data(s)
-			.borrow_mut()
-			.add_chunk(
+			let mut p_voxel_data = scene.voxel_data(s).borrow_mut();
+			let mut p_voxel_mesh = scene.voxel_mesh(s).borrow_mut();
+
+			let (chunk_guard, chunk) = ChunkBundle::new(s, main_lock).to_guard_ref_pair();
+
+			p_voxel_data.add_chunk(
 				s,
 				ChunkPos::new(0, 0, 0),
 				scene_guard.weak_copy().raw(),
 				chunk_guard.raw(),
 			);
 
-		scene_guard
-			.weak_copy()
-			.voxel_mesh(s)
-			.borrow_mut()
-			.flag_chunk(s, main_lock, chunk.raw());
+			p_voxel_mesh.flag_chunk(s, main_lock, chunk.raw());
+		}
 
 		scene_guard
 	}
