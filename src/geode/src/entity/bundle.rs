@@ -7,7 +7,6 @@ use std::{
 	cell::{Ref, RefCell, RefMut},
 	fmt, hash,
 	marker::PhantomData,
-	mem::transmute,
 };
 
 use crate::core::{
@@ -119,7 +118,9 @@ impl<T: ComponentBundle> Owned<T> {
 
 pub type EntityWithRw<T> = EntityWith<RefCell<T>>;
 
+#[derive(TransparentWrapper)]
 #[repr(transparent)]
+#[transparent(Entity)]
 pub struct EntityWith<T: ?Sized + ObjPointee> {
 	_ty: PhantomInvariant<T>,
 	entity: Entity,
@@ -146,8 +147,7 @@ impl<T: ?Sized + ObjPointee> ComponentBundle for EntityWith<T> {
 	}
 
 	fn force_cast_ref(entity: &Entity) -> &Self {
-		// `derive(TransparentWrapper)` crashes on this struct so we just have to do this manually.
-		unsafe { transmute(entity) }
+		<Self as TransparentWrapper<Entity>>::wrap_ref(entity)
 	}
 }
 
@@ -213,10 +213,16 @@ impl<T: ?Sized + ObjPointee> Destructible for EntityWith<T> {
 	}
 }
 
+// TODO: Optional components to replace the old "trust me bro I'm gonna initialize this later" system.
 pub macro component_bundle {
     () => {},
     (
-        $vis:vis struct $bundle_name:ident($bundle_ctor_name:ident) {
+        $vis:vis struct $bundle_name:ident
+			$(<
+				$($para_name:ident),*
+				$(,)?
+			>)?
+		{
             $(..$ext_name:ident: $ext_ty:ty;)*
 
             $(
@@ -227,55 +233,46 @@ pub macro component_bundle {
 
         $($rest:tt)*
     ) => {
-        component_bundle! {
-            $vis struct $bundle_name {
-                $(..$ext_name: $ext_ty;)*
-
-                $(
-                    $field_name$([$key])?: $field_ty
-                ),*
-            }
-
-            $($rest)*
-        }
-
-        #[derive(Debug)]
-        $vis struct $bundle_ctor_name {
-            $(pub $ext_name: <$ext_ty as ComponentBundle>::CompList,)*
-            $(pub $field_name: Option<OwnedOrWeak<$field_ty>>,)*
-        }
-
-        impl ComponentList for $bundle_ctor_name {
-            #[allow(unused)]  // `registry` may be unused in empty bundles.
-            fn push_values(self, registry: &mut ComponentAttachTarget) {
-                $(ComponentList::push_values(self.$ext_name, registry);)*
-                $(SingleComponent::push_value_under(self.$field_name, registry, prefer_left!(
-                    $({$key})? {typed_key()}
-                ));)*
-            }
-        }
-
-        impl ComponentBundleWithCtor for $bundle_name {
-            type CompList = $bundle_ctor_name;
-        }
-    },
-    (
-        $vis:vis struct $bundle_name:ident {
-            $(..$ext_name:ident: $ext_ty:ty;)*
-
-            $(
-                $field_name:ident$([$key:expr])?: $field_ty:ty
-            ),*
-            $(,)?
-        }
-
-        $($rest:tt)*
-    ) => {
-        #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, TransparentWrapper)]
+        #[derive(TransparentWrapper)]
         #[repr(transparent)]
-        $vis struct $bundle_name(Entity);
+		#[transparent(Entity)]
+        $vis struct $bundle_name$(<$($para_name: ?Sized + ObjPointee),*>)? {
+			$(_invariant: PhantomData<fn($($para_name),*)>,)?
+			// Seriously, don't name this field in the macro. `decl_macro` hygiene is far from finished.
+			do_not_name_this_field_hygiene_is_jank: Entity,
+		}
 
-        impl ComponentBundle for $bundle_name {
+		impl$(<$($para_name: ?Sized + ObjPointee),*>)? fmt::Debug for $bundle_name$(<$($para_name),*>)? {
+			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+				f.debug_struct(stringify!($bundle_name))
+					.field("entity", ComponentBundle::raw_ref(self))
+					.finish_non_exhaustive()
+			}
+		}
+
+		impl$(<$($para_name: ?Sized + ObjPointee),*>)? Copy for $bundle_name$(<$($para_name),*>)? {}
+
+		impl$(<$($para_name: ?Sized + ObjPointee),*>)? Clone for $bundle_name$(<$($para_name),*>)? {
+			fn clone(&self) -> Self {
+				*self
+			}
+		}
+
+		impl$(<$($para_name: ?Sized + ObjPointee),*>)? hash::Hash for $bundle_name$(<$($para_name),*>)? {
+			fn hash<H: hash::Hasher>(&self, state: &mut H) {
+				ComponentBundle::raw_ref(self).hash(state);
+			}
+		}
+
+		impl$(<$($para_name: ?Sized + ObjPointee),*>)? Eq for $bundle_name$(<$($para_name),*>)? {}
+
+		impl$(<$($para_name: ?Sized + ObjPointee),*>)? PartialEq for $bundle_name$(<$($para_name),*>)? {
+			fn eq(&self, other: &Self) -> bool {
+				ComponentBundle::raw_ref(self) == ComponentBundle::raw_ref(other)
+			}
+		}
+
+        impl$(<$($para_name: ?Sized + ObjPointee),*>)? ComponentBundle for $bundle_name$(<$($para_name),*>)? {
             #[allow(unused)]  // `session` and `BUNDLE_MAKE_ERR` may be unused in empty bundles.
             fn try_cast(session: Session, entity: Entity) -> anyhow::Result<Self> {
                 const BUNDLE_MAKE_ERR: &'static str = concat!(
@@ -302,7 +299,7 @@ pub macro component_bundle {
             }
 
             fn force_cast(entity: Entity) -> Self {
-                Self(entity)
+                <Self as TransparentWrapper<Entity>>::wrap(entity)
             }
 
             fn force_cast_ref(entity: &Entity) -> &Self {
@@ -310,7 +307,7 @@ pub macro component_bundle {
             }
         }
 
-		impl $bundle_name {
+		impl$(<$($para_name: ?Sized + ObjPointee),*>)? $bundle_name$(<$($para_name),*>)? {
 			$(
                 pub fn $ext_name(&self) -> $ext_ty {
                     *self.as_ref()
@@ -327,26 +324,68 @@ pub macro component_bundle {
             )*
 		}
 
-        $(
-            impl Borrow<$ext_ty> for $bundle_name {
-                fn borrow(&self) -> &$ext_ty {
-                    <$ext_ty as ComponentBundle>::force_cast_ref(self.raw_ref())
-                }
-            }
-        )*
-
-        impl Borrow<Entity> for $bundle_name {
+        impl$(<$($para_name: ?Sized + ObjPointee),*>)? Borrow<Entity> for $bundle_name$(<$($para_name),*>)? {
             fn borrow(&self) -> &Entity {
                 <Self as TransparentWrapper<Entity>>::peel_ref(self)
             }
         }
 
-        impl Destructible for $bundle_name {
+        impl$(<$($para_name: ?Sized + ObjPointee),*>)? Destructible for $bundle_name$(<$($para_name),*>)? {
             fn destruct(self) {
                 <Self as TransparentWrapper<Entity>>::peel(self).destruct();
             }
         }
 
         component_bundle!($($rest)*);
-    }
+    },
+	(
+        $vis:vis struct $bundle_name:ident
+		$(<
+			$($para_name:ident),*
+			$(,)?
+		>)?
+		($bundle_ctor_name:ident)
+		{
+            $(..$ext_name:ident: $ext_ty:ty;)*
+
+            $(
+                $field_name:ident$([$key:expr])?: $field_ty:ty
+            ),*
+            $(,)?
+        }
+
+        $($rest:tt)*
+    ) => {
+        component_bundle! {
+            $vis struct $bundle_name $(<$($para_name),*>)? {
+                $(..$ext_name: $ext_ty;)*
+
+                $(
+                    $field_name$([$key])?: $field_ty
+                ),*
+            }
+
+            $($rest)*
+        }
+
+        #[derive(Debug)]
+        $vis struct $bundle_ctor_name$(<$($para_name: ?Sized + ObjPointee),*>)? {
+            $(pub $ext_name: <$ext_ty as ComponentBundle>::CompList,)*
+            $(pub $field_name: Option<OwnedOrWeak<$field_ty>>,)*
+        }
+
+        impl$(<$($para_name: ?Sized + ObjPointee),*>)? ComponentList for $bundle_ctor_name$(<$($para_name),*>)? {
+            #[allow(unused)]  // `registry` may be unused in empty bundles.
+            fn push_values(self, registry: &mut ComponentAttachTarget) {
+                $(ComponentList::push_values(self.$ext_name, registry);)*
+                $(SingleComponent::push_value_under(self.$field_name, registry, prefer_left!(
+                    $({$key})? {typed_key()}
+                ));)*
+            }
+        }
+
+        impl$(<$($para_name: ?Sized + ObjPointee),*>)? ComponentBundleWithCtor for $bundle_name$(<$($para_name),*>)? {
+            type CompList = $bundle_ctor_name$(<$($para_name),*>)?;
+        }
+    },
 }

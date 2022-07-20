@@ -4,7 +4,7 @@ use crucible_common::voxel::{
 	container::{VoxelChunkData, VoxelWorldData},
 	math::{BlockPos, BlockPosExt, ChunkPos},
 };
-use geode::{entity::event::EventHandlerTerminal, prelude::*};
+use geode::prelude::*;
 use typed_glam::glam::Mat4;
 use winit::event::VirtualKeyCode;
 
@@ -247,7 +247,7 @@ impl EventHandlerTerminal<ViewportRenderEvent> for GameSceneBundleHandlers {
 				},
 			);
 
-			pass.set_pipeline(pipeline.get(s));
+			pass.set_pipeline(pipeline.resource(s));
 
 			// Render mesh
 			me.voxel_mesh(s)

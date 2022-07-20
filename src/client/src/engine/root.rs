@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use anyhow::Context;
-use geode::{entity::event::EventHandlerTerminal, prelude::*};
+use geode::prelude::*;
 use winit::{
 	dpi::LogicalSize,
 	event_loop::EventLoop,

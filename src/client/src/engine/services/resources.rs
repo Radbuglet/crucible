@@ -22,18 +22,26 @@ use once_cell::unsync::OnceCell;
 
 // === ManagedResourceAliveQuery === //
 
-#[derive(Debug, Clone)]
-pub struct ShouldKeepAliveEvent<'a> {
-	pub session: Session<'a>,
-	pub me: Entity,
+pub type ShouldKeepAliveSignal = Signal<dyn EventHandler<ShouldKeepAliveEvent>>;
+
+component_bundle! {
+	pub struct ResourceBundle<T>(ResourceBundleCtor) {
+		resource: T,
+		should_keep_alive: ShouldKeepAliveSignal,
+	}
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ShouldKeepAliveEvent {
 	verdict: KeepAliveVerdict,
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Default)]
 pub enum KeepAliveVerdict {
 	/// This verdict means that no [ManagedResourceAliveQuery] handler has either `testify`'ied or
 	/// `condemn`'ed the resource. This is typically taken as an indication that the resource is no
 	/// longer needed.
+	#[default]
 	Undecided,
 
 	/// This verdict means that at least one [ManagedResourceAliveQuery] handler `condemn`'ed the
@@ -57,7 +65,7 @@ impl KeepAliveVerdict {
 	}
 }
 
-impl<'a> ShouldKeepAliveEvent<'a> {
+impl ShouldKeepAliveEvent {
 	pub fn testify(&mut self) {
 		if self.verdict == KeepAliveVerdict::Undecided {
 			self.verdict = KeepAliveVerdict::Supported;
@@ -91,7 +99,7 @@ c_enum! {
 // === ResourceDescriptor === //
 
 pub struct CreatedResource<R: ?Sized + ObjPointee> {
-	pub resource: Owned<EntityWith<R>>,
+	pub resource: Owned<ResourceBundle<R>>,
 	pub costs: ResourceCostSet,
 }
 
@@ -185,7 +193,7 @@ impl ResourceManager {
 		s: Session,
 		ctx: C,
 		descriptor: D,
-	) -> Result<EntityWith<D::Resource>, D::Error>
+	) -> Result<ResourceBundle<D::Resource>, D::Error>
 	where
 		D: ResourceDescriptor<C>,
 	{
@@ -228,7 +236,7 @@ impl ResourceManager {
 			.insert_head(Some(entry.weak_copy()));
 			p_entry.tou_time.set(Instant::now());
 
-			Ok(EntityWith::cast(resource))
+			Ok(ResourceBundle::cast(resource))
 		} else {
 			// Box the descriptor.
 			let (descriptor_guard, descriptor) = descriptor.box_obj(s).to_guard_ref_pair();
@@ -291,7 +299,7 @@ impl ResourceManager {
 		}
 	}
 
-	pub fn load<C, D>(&mut self, s: Session, ctx: C, descriptor: D) -> EntityWith<D::Resource>
+	pub fn load<C, D>(&mut self, s: Session, ctx: C, descriptor: D) -> ResourceBundle<D::Resource>
 	where
 		D: ResourceDescriptor<C>,
 	{
@@ -344,12 +352,34 @@ impl ResourceManager {
 				continue;
 			}
 
+			// Check if the resource is still alive.
+			let value = match p_entry.value.get() {
+				Some(value) => value,
+				None => continue,
+			};
+
+			let mut should_keep_alive = ShouldKeepAliveEvent::default();
+
+			value
+				.resource
+				.get::<dyn EventHandler<ShouldKeepAliveEvent>>(s)
+				.fire(s, value.resource.weak_copy(), &mut should_keep_alive);
+
+			if should_keep_alive.verdict().is_truthy() {
+				continue;
+			}
+
+			// The resource is dead!
 			// TODO
 		}
 	}
 
 	pub fn get_lock(&self) -> Lock {
 		self.lock
+	}
+
+	pub fn make_keep_alive_signal(&self, s: Session) -> Owned<Obj<ShouldKeepAliveSignal>> {
+		Signal::new(self.get_lock()).box_obj_in(s, self.get_lock())
 	}
 }
 

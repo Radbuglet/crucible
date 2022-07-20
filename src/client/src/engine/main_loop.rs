@@ -1,10 +1,13 @@
-use geode::{entity::event::EventHandlerTerminal, prelude::*};
+use geode::prelude::*;
 use winit::{
 	event::{Event, WindowEvent},
 	event_loop::{ControlFlow, EventLoop},
 };
 
-use crate::{engine::services::viewport::ViewportRenderEvent, util::winit::WinitEventBundle};
+use crate::{
+	engine::{root::ViewportBundle, services::viewport::ViewportRenderEvent},
+	util::winit::WinitEventBundle,
+};
 
 use super::{
 	root::EngineRootBundle,
@@ -156,23 +159,23 @@ pub fn main_inner() -> anyhow::Result<()> {
 					Some(viewport) => viewport,
 					None => return,
 				};
+				let viewport = ViewportBundle::cast(viewport);
 
 				let frame = viewport
-					.borrow_mut::<Viewport>(s)
+					.viewport(s)
+					.borrow_mut()
 					.present(gfx)
 					.expect("failed to get frame");
 
-				viewport
-					.get::<dyn EventHandlerTerminal<ViewportRenderEvent>>(s)
-					.fire(
-						s,
-						viewport,
-						ViewportRenderEvent {
-							viewport,
-							engine: engine.raw(),
-							frame,
-						},
-					);
+				viewport.render_handler(s).fire(
+					s,
+					viewport.raw(),
+					ViewportRenderEvent {
+						viewport: viewport.raw(),
+						engine: engine.raw(),
+						frame,
+					},
+				);
 			}
 			Event::RedrawEventsCleared => {}
 

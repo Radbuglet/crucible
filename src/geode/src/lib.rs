@@ -29,7 +29,7 @@ pub mod prelude {
 				EntityWithRw,
 			},
 			entity::{Entity, EntityGetErrorExt, ExposeUsing},
-			event::{EventHandler, EventHandlerMut},
+			event::{EventHandler, EventHandlerMut, EventHandlerTerminal, EventHandlerTerminalMut},
 			key::{proxy_key, typed_key, ProxyKeyType},
 		},
 	};

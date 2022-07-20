@@ -1,6 +1,6 @@
 #![feature(bench_black_box)]
 
-use geode::{core::session::LocalSessionGuard, prelude::*};
+use geode::prelude::*;
 use std::{
 	hint::black_box,
 	time::{Duration, Instant},

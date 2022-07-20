@@ -9,7 +9,10 @@ use typed_glam::glam;
 
 use crate::engine::services::{
 	gfx::GfxContext,
-	resources::{CreatedResource, ResourceCostSet, ResourceDescriptor, ResourceManager},
+	resources::{
+		CreatedResource, ResourceBundle, ResourceBundleCtor, ResourceCostSet, ResourceDescriptor,
+		ResourceManager,
+	},
 };
 
 // === OpaqueBlockShader === //
@@ -24,9 +27,11 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for OpaqueBlockShaderDesc {
 	fn create(
 		&self,
 		s: Session,
-		_res_mgr: &mut ResourceManager,
+		res_mgr: &mut ResourceManager,
 		gfx: &'a GfxContext,
 	) -> Result<CreatedResource<Self::Resource>, Self::Error> {
+		let should_keep_alive = res_mgr.make_keep_alive_signal(s);
+
 		let opaque_block_module = gfx
 			.device
 			.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -38,7 +43,13 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for OpaqueBlockShaderDesc {
 			.box_obj(s);
 
 		Ok(CreatedResource {
-			resource: EntityWith::spawn(s, opaque_block_module.into()),
+			resource: ResourceBundle::spawn(
+				s,
+				ResourceBundleCtor {
+					should_keep_alive: should_keep_alive.into(),
+					resource: opaque_block_module.into(),
+				},
+			),
 			costs: ResourceCostSet::new(),
 		})
 	}
@@ -61,9 +72,11 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelPipelineLayoutDesc {
 	fn create(
 		&self,
 		s: Session,
-		_res_mgr: &mut ResourceManager,
+		res_mgr: &mut ResourceManager,
 		gfx: &'a GfxContext,
 	) -> Result<CreatedResource<Self::Resource>, Self::Error> {
+		let should_keep_alive = res_mgr.make_keep_alive_signal(s);
+
 		let uniform_group_layout =
 			gfx.device
 				.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -95,7 +108,13 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelPipelineLayoutDesc {
 		.box_obj(s);
 
 		Ok(CreatedResource {
-			resource: EntityWith::spawn(s, bundle.into()),
+			resource: ResourceBundle::spawn(
+				s,
+				ResourceBundleCtor {
+					should_keep_alive: should_keep_alive.into(),
+					resource: bundle.into(),
+				},
+			),
 			costs: ResourceCostSet::new(),
 		})
 	}
@@ -121,8 +140,10 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelRenderingPipelineDesc {
 		res_mgr: &mut ResourceManager,
 		gfx: &'a GfxContext,
 	) -> Result<CreatedResource<Self::Resource>, Self::Error> {
-		let shader = res_mgr.load(s, gfx, OpaqueBlockShaderDesc).get(s);
-		let layout = res_mgr.load(s, gfx, VoxelPipelineLayoutDesc).get(s);
+		let should_keep_alive = res_mgr.make_keep_alive_signal(s);
+
+		let shader = res_mgr.load(s, gfx, OpaqueBlockShaderDesc).resource(s);
+		let layout = res_mgr.load(s, gfx, VoxelPipelineLayoutDesc).resource(s);
 
 		let pipeline = gfx
 			.device
@@ -181,7 +202,13 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelRenderingPipelineDesc {
 			.box_obj(s);
 
 		Ok(CreatedResource {
-			resource: EntityWith::spawn(s, pipeline.into()),
+			resource: ResourceBundle::spawn(
+				s,
+				ResourceBundleCtor {
+					should_keep_alive: should_keep_alive.into(),
+					resource: pipeline.into(),
+				},
+			),
 			costs: ResourceCostSet::new(),
 		})
 	}
@@ -196,7 +223,7 @@ pub struct VoxelUniforms {
 
 impl VoxelUniforms {
 	pub fn new(s: Session, gfx: &GfxContext, res_mgr: &mut ResourceManager) -> Self {
-		let layout = res_mgr.load(s, gfx, VoxelPipelineLayoutDesc).get(s);
+		let layout = res_mgr.load(s, gfx, VoxelPipelineLayoutDesc).resource(s);
 
 		let uniform_buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("uniform buffer"),
