@@ -6,9 +6,9 @@ use crate::{
 	core::{
 		obj::{Lock, Obj, ObjCtorExt, ObjPointee},
 		owned::Owned,
-		session::{LocalSessionGuard, Session},
+		session::Session,
 	},
-	entity::event::EventHandler,
+	entity::{entity::Entity, event::EventHandler},
 };
 
 type HandlerList<T> = Vec<Owned<Obj<Connection<T>>>>;
@@ -29,12 +29,14 @@ impl<T: ?Sized + ObjPointee> Signal<T> {
 	pub fn connect(
 		&self,
 		s: Session,
+		entity: Entity,
 		handler: Obj<T>,
 		conn_info: ConnectionInfo<T>,
 	) -> ConnectionHandle<T> {
 		let mut handlers = self.connections.borrow_mut();
 
 		let (conn_guard, conn) = Connection {
+			entity,
 			handler,
 			index: Cell::new(handlers.len()),
 			#[cfg(debug_assertions)]
@@ -97,14 +99,11 @@ where
 	E: ?Sized,
 	T: EventHandler<E>,
 {
-	fn fire(&self, event: &mut E) {
-		let session = LocalSessionGuard::new(); // TODO: We should get this directly from the event (blocked on static providers)
-		let s = session.handle();
-
+	fn fire(&self, s: Session, _: Entity, event: &mut E) {
 		self.connections.borrow_mut().retain_mut(|conn| {
 			let p_conn = conn.get(s);
 			if let Ok(handler) = p_conn.handler.weak_get(s) {
-				handler.fire(event);
+				handler.fire(s, p_conn.entity, event);
 				true
 			} else {
 				#[cfg(debug_assertions)]
@@ -121,6 +120,7 @@ where
 }
 
 struct Connection<T: ?Sized + ObjPointee> {
+	entity: Entity,
 	handler: Obj<T>,
 	index: Cell<usize>,
 	#[cfg(debug_assertions)]

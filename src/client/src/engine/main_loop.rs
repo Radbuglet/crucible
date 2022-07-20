@@ -1,18 +1,18 @@
-use geode::prelude::*;
+use geode::{entity::event::EventHandlerTerminal, prelude::*};
 use winit::{
 	event::{Event, WindowEvent},
 	event_loop::{ControlFlow, EventLoop},
 };
 
-use crate::{engine::services::viewport::ViewportRenderHandler, util::winit::WinitEventBundle};
+use crate::{engine::services::viewport::ViewportRenderEvent, util::winit::WinitEventBundle};
 
 use super::{
 	root::EngineRootBundle,
-	services::{input::InputTracker, scene::SceneUpdateHandler, viewport::Viewport},
+	services::{input::InputTracker, scene::SceneUpdateEvent, viewport::Viewport},
 };
 
 pub fn main_inner() -> anyhow::Result<()> {
-	let (engine_root, event_loop) = {
+	let (engine, event_loop) = {
 		// Create initialization session
 		let session = LocalSessionGuard::new();
 		let s = session.handle();
@@ -22,19 +22,19 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 		// Create engine root
 		let event_loop = EventLoop::new();
-		let engine_root = EngineRootBundle::new(s, main_lock_guard, &event_loop)?;
+		let engine = EngineRootBundle::new(s, main_lock_guard, &event_loop)?;
 
 		// Make all viewports visible
-		let p_viewport_mgr = engine_root.weak_copy().viewport_mgr(s).borrow_mut();
+		let p_viewport_mgr = engine.weak_copy().viewport_mgr(s).borrow_mut();
 
 		for (_, _viewport, window) in p_viewport_mgr.mounted_viewports(s) {
 			window.set_visible(true);
 		}
 
 		// We want to execute this destructor in the loop teardown phase instead of the unwinding phase.
-		let engine_root = engine_root.manually_destruct();
+		let engine = engine.manually_destruct();
 
-		(engine_root, event_loop)
+		(engine, event_loop)
 	};
 
 	// Enter main loop
@@ -45,14 +45,14 @@ pub fn main_inner() -> anyhow::Result<()> {
 		let session = LocalSessionGuard::new();
 		let s = session.handle();
 
-		let main_lock = engine_root.main_lock(s);
+		let main_lock = engine.main_lock(s);
 		s.acquire_locks([main_lock.weak_copy()]);
 
 		// Acquire root context
 		let bundle = WinitEventBundle { event, proxy, flow };
 
 		// Acquire services
-		let gfx = engine_root.gfx(s);
+		let gfx = engine.gfx(s);
 
 		// Process events
 		match &bundle.event {
@@ -63,7 +63,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 			// Then, window, device, and user events are triggered.
 			Event::WindowEvent { event, window_id } => {
-				let mut viewport_mgr = engine_root.viewport_mgr(s).borrow_mut();
+				let mut viewport_mgr = engine.viewport_mgr(s).borrow_mut();
 
 				let viewport = match viewport_mgr.get_viewport(*window_id) {
 					Some(viewport) => viewport,
@@ -96,7 +96,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 				}
 			}
 			Event::DeviceEvent { device_id, event } => {
-				let viewport_mgr = engine_root.viewport_mgr(s).borrow();
+				let viewport_mgr = engine.viewport_mgr(s).borrow();
 				for (_, viewport) in viewport_mgr.all_viewports() {
 					viewport
 						.borrow_mut::<InputTracker>(s)
@@ -115,7 +115,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 				let should_update = true; // TODO: Tick-rate limit
 
 				if should_update {
-					let sm = engine_root.scene_mgr(s);
+					let sm = engine.scene_mgr(s);
 
 					// Swap scenes
 					sm.borrow_mut().swap_scenes();
@@ -123,15 +123,19 @@ pub fn main_inner() -> anyhow::Result<()> {
 					// Allow scene to run update logic
 					let sm = sm.borrow();
 					let current_scene = sm.current_scene();
-					current_scene.get::<dyn SceneUpdateHandler>(s).on_update(
-						s,
-						current_scene,
-						engine_root.raw(),
-					);
+					current_scene
+						.get::<dyn EventHandler<SceneUpdateEvent>>(s)
+						.fire(
+							s,
+							current_scene,
+							&mut SceneUpdateEvent {
+								engine: engine.raw(),
+							},
+						);
 				}
 
 				// Ensure that all viewports have a chance to render
-				let viewport_mgr = engine_root.viewport_mgr(s).borrow();
+				let viewport_mgr = engine.viewport_mgr(s).borrow();
 				for (_, viewport, window) in viewport_mgr.mounted_viewports(s) {
 					// The update handler has just processed these inputs. Clear them for the next
 					// logical frame.
@@ -147,7 +151,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 			// Redraws are processed
 			Event::RedrawRequested(window_id) => {
-				let viewport_mgr = engine_root.viewport_mgr(s).borrow();
+				let viewport_mgr = engine.viewport_mgr(s).borrow();
 				let viewport = match viewport_mgr.get_viewport(*window_id) {
 					Some(viewport) => viewport,
 					None => return,
@@ -158,13 +162,17 @@ pub fn main_inner() -> anyhow::Result<()> {
 					.present(gfx)
 					.expect("failed to get frame");
 
-				viewport.get::<dyn ViewportRenderHandler>(s).on_render(
-					frame,
-					s,
-					viewport,
-					viewport,
-					engine_root.raw(),
-				);
+				viewport
+					.get::<dyn EventHandlerTerminal<ViewportRenderEvent>>(s)
+					.fire(
+						s,
+						viewport,
+						ViewportRenderEvent {
+							viewport,
+							engine: engine.raw(),
+							frame,
+						},
+					);
 			}
 			Event::RedrawEventsCleared => {}
 
@@ -174,7 +182,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 				log::info!("Tearing down engine...");
 
 				// Destroy the engine root to run remaining finalizers
-				engine_root.raw().destroy(s);
+				engine.raw().destroy(s);
 
 				// Then, log goodbye.
 				log::info!("Goodbye!");

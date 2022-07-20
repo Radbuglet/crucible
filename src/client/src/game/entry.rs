@@ -4,13 +4,13 @@ use crucible_common::voxel::{
 	container::{VoxelChunkData, VoxelWorldData},
 	math::{BlockPos, BlockPosExt, ChunkPos},
 };
-use geode::prelude::*;
+use geode::{entity::event::EventHandlerTerminal, prelude::*};
 use typed_glam::glam::Mat4;
 use winit::event::VirtualKeyCode;
 
 use crate::engine::{
 	root::{EngineRootBundle, ViewportBundle},
-	services::{scene::SceneUpdateHandler, viewport::ViewportRenderHandler},
+	services::{scene::SceneUpdateEvent, viewport::ViewportRenderEvent},
 };
 
 use super::{
@@ -27,8 +27,8 @@ component_bundle! {
 		voxel_data: RefCell<VoxelWorldData>,
 		voxel_mesh: RefCell<VoxelWorldMesh>,
 		handlers: GameSceneBundleHandlers,
-		update_handler: dyn SceneUpdateHandler,
-		render_handler: dyn ViewportRenderHandler,
+		update_handler: dyn EventHandler<SceneUpdateEvent>,
+		render_handler: dyn EventHandlerTerminal<ViewportRenderEvent>,
 		local_camera: RefCell<FreeCamController>,
 	}
 
@@ -127,8 +127,10 @@ pub struct GameSceneBundleHandlers {
 	viewport: ViewportBundle,
 }
 
-impl SceneUpdateHandler for GameSceneBundleHandlers {
-	fn on_update(&self, s: Session, me: Entity, engine: Entity) {
+impl EventHandler<SceneUpdateEvent> for GameSceneBundleHandlers {
+	fn fire(&self, s: Session, me: Entity, event: &mut SceneUpdateEvent) {
+		let engine = event.engine;
+
 		if !self.viewport.raw().is_alive_now(s) {
 			return;
 		}
@@ -162,32 +164,25 @@ impl SceneUpdateHandler for GameSceneBundleHandlers {
 	}
 }
 
-impl ViewportRenderHandler for GameSceneBundleHandlers {
-	fn on_render(
-		&self,
-		frame: Option<wgpu::SurfaceTexture>,
-		s: Session,
-		me: Entity,
-		viewport: Entity,
-		engine: Entity,
-	) {
+impl EventHandlerTerminal<ViewportRenderEvent> for GameSceneBundleHandlers {
+	fn fire(&self, s: Session, me: Entity, event: ViewportRenderEvent) {
 		// Acquire services
 		let me = GameSceneBundle::cast(me);
 
 		let p_voxel_uniforms = me.voxel_uniforms(s);
 		let p_local_camera = me.local_camera(s).borrow();
 
-		let engine = EngineRootBundle::cast(engine);
+		let engine = EngineRootBundle::cast(event.engine);
 		let p_gfx = engine.gfx(s);
 		let mut p_res_mgr = engine.res_mgr(s).borrow_mut();
 
-		let viewport = ViewportBundle::cast(viewport);
+		let viewport = ViewportBundle::cast(event.viewport);
 		let p_viewport_handle = viewport.viewport(s).borrow();
 		let mut p_depth_texture = viewport.depth_texture(s).borrow_mut();
 		let p_input_tracker = viewport.input_tracker(s).borrow();
 
 		// Acquire frame and create a view to it
-		let frame = match frame {
+		let frame = match event.frame {
 			Some(frame) => frame,
 			None => return,
 		};

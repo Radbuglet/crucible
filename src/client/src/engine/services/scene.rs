@@ -1,6 +1,11 @@
 use geode::prelude::*;
 use parking_lot::Mutex;
 
+#[derive(Debug, Clone)]
+pub struct SceneUpdateEvent {
+	pub engine: Entity,
+}
+
 #[derive(Debug)]
 pub struct SceneManager {
 	scene: Option<Owned<Entity>>,
@@ -48,8 +53,4 @@ impl SceneManager {
 			.expect("Called `current_scene` before an initial scene was provided.")
 			.weak_copy()
 	}
-}
-
-delegate! {
-	pub trait SceneUpdateHandler::on_update(&self, s: Session, me: Entity, engine_root: Entity);
 }

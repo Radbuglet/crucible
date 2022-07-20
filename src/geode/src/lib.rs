@@ -15,6 +15,7 @@ pub mod entity;
 
 pub mod prelude {
 	pub use crate::{
+		container::signal::Signal,
 		core::{
 			debug::NoLabel,
 			obj::{Lock, Obj, ObjCtorExt, ObjPointee, ObjRw, RawObj},
@@ -28,7 +29,7 @@ pub mod prelude {
 				EntityWithRw,
 			},
 			entity::{Entity, EntityGetErrorExt, ExposeUsing},
-			event::delegate,
+			event::{EventHandler, EventHandlerMut},
 			key::{proxy_key, typed_key, ProxyKeyType},
 		},
 	};

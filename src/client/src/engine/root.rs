@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use anyhow::Context;
-use geode::prelude::*;
+use geode::{entity::event::EventHandlerTerminal, prelude::*};
 use winit::{
 	dpi::LogicalSize,
 	event_loop::EventLoop,
@@ -22,7 +22,7 @@ use super::services::{
 	resources::ResourceManager,
 	scene::SceneManager,
 	viewport::{
-		DepthTextureKey, ScreenTexture, Viewport, ViewportManager, ViewportRenderHandler,
+		DepthTextureKey, ScreenTexture, Viewport, ViewportManager, ViewportRenderEvent,
 		DEFAULT_DEPTH_BUFFER_FORMAT,
 	},
 };
@@ -43,7 +43,7 @@ component_bundle! {
 	pub struct ViewportBundle(ViewportBundleCtor) {
 		viewport: RefCell<Viewport>,
 		input_tracker: RefCell<InputTracker>,
-		render_handler: dyn ViewportRenderHandler,
+		render_handler: dyn EventHandlerTerminal<ViewportRenderEvent>,
 		depth_texture[DepthTextureKey::key()]: RefCell<ScreenTexture>,
 	}
 }
@@ -54,7 +54,7 @@ impl EngineRootBundle {
 		main_lock_guard: Owned<Lock>,
 		event_loop: &EventLoop<()>,
 	) -> anyhow::Result<Owned<Self>> {
-		let (engine_root_guard, engine_root) = Entity::new(s).to_guard_ref_pair();
+		let (engine_guard, engine) = Entity::new(s).to_guard_ref_pair();
 		let main_lock = main_lock_guard.weak_copy();
 
 		// Create the main window for which we'll create our main surface
@@ -74,7 +74,7 @@ impl EngineRootBundle {
 		let main_viewport = {
 			let gfx = gfx.get(s);
 			let (main_viewport_guard, main_viewport) =
-				ViewportBundle::new(s, main_lock, gfx, engine_root).to_guard_ref_pair();
+				ViewportBundle::new(s, main_lock, gfx, engine).to_guard_ref_pair();
 
 			viewport_mgr_guard.borrow_mut(s).register(
 				s,
@@ -97,9 +97,9 @@ impl EngineRootBundle {
 		let res_mgr_guard = ResourceManager::new(main_lock).box_obj_rw(s, main_lock);
 
 		// Create root entity
-		let (engine_root_guard, engine_root) = EngineRootBundle::add_onto_owned(
+		let (engine_guard, engine) = EngineRootBundle::add_onto_owned(
 			s,
-			engine_root_guard,
+			engine_guard,
 			EngineRootBundleCtor {
 				gfx: gfx_guard.into(),
 				viewport_mgr: viewport_mgr_guard.into(),
@@ -113,9 +113,9 @@ impl EngineRootBundle {
 		// Setup initial scene
 		scene_mgr
 			.borrow_mut(s)
-			.init_scene(GameSceneBundle::new(s, engine_root, main_viewport, main_lock).raw());
+			.init_scene(GameSceneBundle::new(s, engine, main_viewport, main_lock).raw());
 
-		Ok(engine_root_guard)
+		Ok(engine_guard)
 	}
 
 	fn init_gfx(main_window: &Window) -> anyhow::Result<(GfxContext, wgpu::Surface)> {
@@ -175,22 +175,21 @@ impl EngineRootBundle {
 }
 
 impl ViewportBundle {
-	pub fn new(s: Session, main_lock: Lock, gfx: &GfxContext, engine_root: Entity) -> Owned<Self> {
+	pub fn new(s: Session, main_lock: Lock, gfx: &GfxContext, engine: Entity) -> Owned<Self> {
 		// Construct main viewport
 		let input_tracker = InputTracker::default().box_obj_rw(s, main_lock);
-		let render_handler = Obj::new(s, move |frame, s: Session, _me, viewport, engine| {
-			let p_scene_mgr = engine_root.borrow::<SceneManager>(s);
-			let current_scene = p_scene_mgr.current_scene();
+		let render_handler = Obj::new(
+			s,
+			move |s: Session, _me: Entity, event: ViewportRenderEvent| {
+				let p_scene_mgr = engine.borrow::<SceneManager>(s);
+				let current_scene = p_scene_mgr.current_scene();
 
-			current_scene.get::<dyn ViewportRenderHandler>(s).on_render(
-				frame,
-				s,
-				current_scene,
-				viewport,
-				engine,
-			);
-		})
-		.to_unsized::<dyn ViewportRenderHandler>();
+				current_scene
+					.get::<dyn EventHandlerTerminal<ViewportRenderEvent>>(s)
+					.fire(s, current_scene, event);
+			},
+		)
+		.to_unsized::<dyn EventHandlerTerminal<ViewportRenderEvent>>();
 
 		let depth_texture = ScreenTexture::new(
 			gfx,

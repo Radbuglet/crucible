@@ -22,10 +22,6 @@ use once_cell::unsync::OnceCell;
 
 // === ManagedResourceAliveQuery === //
 
-delegate! {
-	pub trait ManagedResourceAliveQuery::should_keep_alive(&self, event: ShouldKeepAliveEvent);
-}
-
 #[derive(Debug, Clone)]
 pub struct ShouldKeepAliveEvent<'a> {
 	pub session: Session<'a>,
