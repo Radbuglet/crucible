@@ -15,7 +15,7 @@ pub mod entity;
 
 pub mod prelude {
 	pub use crate::{
-		container::signal::Signal,
+		container::{cell::CellExt, signal::Signal},
 		core::{
 			debug::NoLabel,
 			obj::{Lock, Obj, ObjCtorExt, ObjPointee, ObjRw, RawObj},

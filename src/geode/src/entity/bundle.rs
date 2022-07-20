@@ -368,7 +368,6 @@ pub macro component_bundle {
             $($rest)*
         }
 
-        #[derive(Debug)]
         $vis struct $bundle_ctor_name$(<$($para_name: ?Sized + ObjPointee),*>)? {
             $(pub $ext_name: <$ext_ty as ComponentBundle>::CompList,)*
             $(pub $field_name: Option<OwnedOrWeak<$field_ty>>,)*

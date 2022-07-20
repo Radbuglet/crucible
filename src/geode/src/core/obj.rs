@@ -163,7 +163,7 @@ pub struct RawObj {
 impl fmt::Debug for RawObj {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct("RawObj")
-			.field("gen", &self.gen.gen())
+			.field("gen", &self.ptr_gen())
 			.finish_non_exhaustive()
 	}
 }
@@ -246,8 +246,13 @@ impl RawObj {
 		self.get_ptr(session)
 	}
 
+	// Lifecycle management
 	pub fn is_alive_now(&self, _session: Session) -> bool {
 		self.slot.is_alive(self.gen)
+	}
+
+	pub fn ptr_gen(&self) -> u64 {
+		self.gen.gen()
 	}
 
 	pub fn destroy(&self, session: Session) -> bool {
@@ -278,6 +283,10 @@ impl Owned<RawObj> {
 
 	pub fn is_alive_now(&self, session: Session) -> bool {
 		self.weak_copy().is_alive_now(session)
+	}
+
+	pub fn ptr_gen(&self) -> u64 {
+		self.weak_copy().ptr_gen()
 	}
 
 	pub fn destroy(self, session: Session) -> bool {
@@ -334,6 +343,7 @@ impl<T: Sized + ObjPointee> Obj<T> {
 }
 
 impl<T: ?Sized + ObjPointee> Obj<T> {
+	// Fetching
 	pub fn try_get<'a>(&self, session: Session<'a>) -> Result<&'a T, ObjGetError> {
 		let base_addr = self.raw.try_get_ptr(session)?;
 		let ptr = std::ptr::from_raw_parts(base_addr.as_ptr() as *const (), self.meta);
@@ -349,14 +359,7 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 		ObjGetError::unwrap_weak(self.try_get(session))
 	}
 
-	pub fn is_alive_now(&self, session: Session) -> bool {
-		self.raw.is_alive_now(session)
-	}
-
-	pub fn destroy(&self, session: Session) -> bool {
-		self.raw.destroy(session)
-	}
-
+	// Casting
 	pub fn as_raw(&self) -> RawObj {
 		self.raw
 	}
@@ -371,12 +374,31 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 			meta: T::transform_meta(self.meta),
 		}
 	}
+
+	// Lifecycle management
+	pub fn is_alive_now(&self, session: Session) -> bool {
+		self.raw.is_alive_now(session)
+	}
+
+	pub fn ptr_gen(&self) -> u64 {
+		self.raw.ptr_gen()
+	}
+
+	pub fn destroy(&self, session: Session) -> bool {
+		self.raw.destroy(session)
+	}
 }
 
-impl<T: ?Sized + ObjPointee> fmt::Debug for Obj<T> {
+impl<T: ?Sized + ObjPointee + fmt::Debug> fmt::Debug for Obj<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let session = LocalSessionGuard::new();
+		let s = session.handle();
+
+		let value = self.try_get(s);
+
 		f.debug_struct("Obj")
 			.field("gen", &self.raw.gen.gen())
+			.field("value", &value)
 			.finish_non_exhaustive()
 	}
 }
@@ -424,14 +446,6 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 		self.weak_copy().weak_get(session)
 	}
 
-	pub fn is_alive_now(&self, session: Session) -> bool {
-		self.weak_copy().is_alive_now(session)
-	}
-
-	pub fn destroy(self, session: Session) -> bool {
-		self.manually_destruct().destroy(session)
-	}
-
 	pub fn as_raw(self) -> Owned<RawObj> {
 		self.map_owned(|obj| obj.as_raw())
 	}
@@ -442,6 +456,18 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 		U: ?Sized + ObjPointee,
 	{
 		self.map_owned(|obj| obj.cast())
+	}
+
+	pub fn is_alive_now(&self, session: Session) -> bool {
+		self.weak_copy().is_alive_now(session)
+	}
+
+	pub fn ptr_gen(&self) -> u64 {
+		self.weak_copy().ptr_gen()
+	}
+
+	pub fn destroy(self, session: Session) -> bool {
+		self.manually_destruct().destroy(session)
 	}
 }
 

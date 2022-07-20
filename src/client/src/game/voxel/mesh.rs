@@ -109,22 +109,15 @@ impl VoxelWorldMesh {
 			self.chunks.insert(dirty);
 
 			// Replace buffer
-			let replaced = chunk_mesh.buffer.replace(Some(
+			chunk_mesh.buffer.replace(Some(
 				gfx.device
 					.create_buffer_init(&wgpu::util::BufferInitDescriptor {
 						label: None,
 						contents: bytemuck::cast_slice(vertices.as_slice()),
 						usage: wgpu::BufferUsages::VERTEX,
 					})
-					.box_obj(s)
-					.manually_destruct(),
+					.box_obj(s),
 			));
-
-			// TODO: This type of logic should be removed once we write our extension methods for
-			//  `Cell<Owned<T>>`.
-			if let Some(replaced) = replaced {
-				replaced.destroy(s);
-			}
 
 			// Log some debug info
 			log::info!(
@@ -137,7 +130,6 @@ impl VoxelWorldMesh {
 				},
 				dirty,
 			);
-			// log::info!("Mesh data: {:#?}", vertices);
 
 			// Check if we've elapsed our time limit. Do this at the end of the loop to ensure that
 			// at least one chunk has the opportunity to be meshed.
@@ -166,7 +158,7 @@ impl VoxelWorldMesh {
 			// Otherwise, acquire the buffer and render.
 			let buffer = mesh
 				.buffer
-				.get()
+				.get_inner()
 				.expect("unmeshed chunk should not be in the chunk set")
 				.get(s);
 
@@ -179,5 +171,5 @@ impl VoxelWorldMesh {
 struct VoxelChunkMesh {
 	still_dirty: Cell<bool>,
 	vertex_count: Cell<u32>,
-	buffer: Cell<Option<Obj<wgpu::Buffer>>>,
+	buffer: Cell<Option<Owned<Obj<wgpu::Buffer>>>>,
 }

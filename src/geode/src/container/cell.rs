@@ -8,19 +8,19 @@ pub unsafe trait CopyInner {
 	fn copy_inner(of: &Self) -> Self::Inner;
 }
 
-unsafe impl<T: Copy> CopyInner for T {
-	type Inner = T;
-
-	fn copy_inner(of: &Self) -> Self::Inner {
-		*of
-	}
-}
-
 unsafe impl<T: Destructible> CopyInner for Owned<T> {
 	type Inner = T;
 
 	fn copy_inner(of: &Self) -> Self::Inner {
 		of.weak_copy()
+	}
+}
+
+unsafe impl<T: CopyInner> CopyInner for Option<T> {
+	type Inner = Option<T::Inner>;
+
+	fn copy_inner(of: &Self) -> Self::Inner {
+		of.as_ref().map(CopyInner::copy_inner)
 	}
 }
 

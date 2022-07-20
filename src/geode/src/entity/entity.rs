@@ -19,7 +19,7 @@ use super::key::{typed_key, RawTypedKey, TypedKey};
 
 // === `Entity` core === //
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Entity {
 	obj: Obj<Mutex<EntityInner>>,
 }
@@ -170,6 +170,23 @@ impl Destructible for Entity {
 	}
 }
 
+impl fmt::Debug for Entity {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let session = LocalSessionGuard::new();
+		let s = session.handle();
+
+		let keys = self
+			.obj
+			.try_get(s)
+			.map(|mutex| mutex.lock().map.keys().copied().collect::<Vec<_>>());
+
+		f.debug_struct("Entity")
+			.field("gen", &self.obj.ptr_gen())
+			.field("components", &keys)
+			.finish()
+	}
+}
+
 // === `Entity` error types === //
 
 #[derive(Debug, Copy, Clone, Error)]
@@ -303,18 +320,10 @@ impl<T: ?Sized + ObjPointee> SingleComponent for Owned<Obj<T>> {
 	}
 }
 
+#[derive(Debug)]
 pub enum OwnedOrWeak<T: ?Sized + ObjPointee> {
 	Owned(Owned<Obj<T>>),
 	Weak(Obj<T>),
-}
-
-impl<T: ?Sized + ObjPointee> fmt::Debug for OwnedOrWeak<T> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			OwnedOrWeak::Owned(owned) => f.debug_tuple("OwnedOrWeak::Owned").field(owned).finish(),
-			OwnedOrWeak::Weak(weak) => f.debug_tuple("OwnedOrWeak::Weak").field(weak).finish(),
-		}
-	}
 }
 
 impl<T: ?Sized + ObjPointee> SingleComponent for OwnedOrWeak<T> {
