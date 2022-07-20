@@ -18,6 +18,7 @@ pub trait LinkedList<N: Copy + Eq> {
 	}
 
 	fn get_prev(&self, node: N) -> N;
+
 	fn get_next(&self, node: N) -> N;
 
 	fn set_pair(&mut self, node: N, prev: N, next: N) {
@@ -26,6 +27,7 @@ pub trait LinkedList<N: Copy + Eq> {
 	}
 
 	fn set_prev(&mut self, node: N, val: N);
+
 	fn set_next(&mut self, node: N, val: N);
 
 	fn replace_pair(&mut self, node: N, prev: N, next: N) -> (N, N) {
@@ -51,8 +53,8 @@ pub trait LinkedList<N: Copy + Eq> {
 
 	fn bond_trio(&mut self, prev: N, middle: N, next: N) {
 		self.set_next(prev, middle);
-		self.set_pair(middle, prev, next);
 		self.set_prev(next, middle);
+		self.set_pair(middle, prev, next);
 	}
 
 	fn bond_replace(&mut self, prev: N, next: N) -> (N, N) {
@@ -67,8 +69,6 @@ pub trait LinkedList<N: Copy + Eq> {
 	}
 
 	fn insert_before(&mut self, node: N, next: N) {
-		self.unlink(node);
-
 		// New layout:
 		// [prev] [node] [next]
 		// (4 connections)
@@ -76,8 +76,6 @@ pub trait LinkedList<N: Copy + Eq> {
 	}
 
 	fn insert_after(&mut self, node: N, prev: N) {
-		self.unlink(node);
-
 		// New layout:
 		// [prev] [node] [next]
 		// (4 connections)
@@ -136,6 +134,7 @@ where
 		}
 
 		self.next_yielded = list.get_next(self.next_yielded);
+		debug_assert!(self.next_yielded != node);
 
 		Some(node)
 	}
@@ -162,6 +161,7 @@ where
 		}
 
 		self.next_yielded = list.get_prev(self.next_yielded);
+		debug_assert!(self.next_yielded != node);
 
 		Some(node)
 	}

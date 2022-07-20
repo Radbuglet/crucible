@@ -9,10 +9,7 @@ use typed_glam::glam;
 
 use crate::engine::services::{
 	gfx::GfxContext,
-	resources::{
-		CreatedResource, ResourceBundle, ResourceBundleCtor, ResourceCostSet, ResourceDescriptor,
-		ResourceManager,
-	},
+	resources::{ResourceBundle, ResourceBundleCtor, ResourceDescriptor, ResourceManager},
 };
 
 // === OpaqueBlockShader === //
@@ -27,11 +24,9 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for OpaqueBlockShaderDesc {
 	fn create(
 		&self,
 		s: Session,
-		res_mgr: &mut ResourceManager,
+		_res_mgr: &mut ResourceManager,
 		gfx: &'a GfxContext,
-	) -> Result<CreatedResource<Self::Resource>, Self::Error> {
-		let should_keep_alive = res_mgr.make_keep_alive_signal(s);
-
+	) -> Result<Owned<ResourceBundle<Self::Resource>>, Self::Error> {
 		let opaque_block_module = gfx
 			.device
 			.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -42,16 +37,12 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for OpaqueBlockShaderDesc {
 			})
 			.box_obj(s);
 
-		Ok(CreatedResource {
-			resource: ResourceBundle::spawn(
-				s,
-				ResourceBundleCtor {
-					should_keep_alive: should_keep_alive.into(),
-					resource: opaque_block_module.into(),
-				},
-			),
-			costs: ResourceCostSet::new(),
-		})
+		Ok(ResourceBundle::spawn(
+			s,
+			ResourceBundleCtor {
+				resource: opaque_block_module.into(),
+			},
+		))
 	}
 }
 
@@ -72,11 +63,9 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelPipelineLayoutDesc {
 	fn create(
 		&self,
 		s: Session,
-		res_mgr: &mut ResourceManager,
+		_res_mgr: &mut ResourceManager,
 		gfx: &'a GfxContext,
-	) -> Result<CreatedResource<Self::Resource>, Self::Error> {
-		let should_keep_alive = res_mgr.make_keep_alive_signal(s);
-
+	) -> Result<Owned<ResourceBundle<Self::Resource>>, Self::Error> {
 		let uniform_group_layout =
 			gfx.device
 				.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -107,16 +96,12 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelPipelineLayoutDesc {
 		}
 		.box_obj(s);
 
-		Ok(CreatedResource {
-			resource: ResourceBundle::spawn(
-				s,
-				ResourceBundleCtor {
-					should_keep_alive: should_keep_alive.into(),
-					resource: bundle.into(),
-				},
-			),
-			costs: ResourceCostSet::new(),
-		})
+		Ok(ResourceBundle::spawn(
+			s,
+			ResourceBundleCtor {
+				resource: bundle.into(),
+			},
+		))
 	}
 }
 
@@ -139,9 +124,7 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelRenderingPipelineDesc {
 		s: Session,
 		res_mgr: &mut ResourceManager,
 		gfx: &'a GfxContext,
-	) -> Result<CreatedResource<Self::Resource>, Self::Error> {
-		let should_keep_alive = res_mgr.make_keep_alive_signal(s);
-
+	) -> Result<Owned<ResourceBundle<Self::Resource>>, Self::Error> {
 		let shader = res_mgr.load(s, gfx, OpaqueBlockShaderDesc).resource(s);
 		let layout = res_mgr.load(s, gfx, VoxelPipelineLayoutDesc).resource(s);
 
@@ -201,16 +184,12 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelRenderingPipelineDesc {
 			})
 			.box_obj(s);
 
-		Ok(CreatedResource {
-			resource: ResourceBundle::spawn(
-				s,
-				ResourceBundleCtor {
-					should_keep_alive: should_keep_alive.into(),
-					resource: pipeline.into(),
-				},
-			),
-			costs: ResourceCostSet::new(),
-		})
+		Ok(ResourceBundle::spawn(
+			s,
+			ResourceBundleCtor {
+				resource: pipeline.into(),
+			},
+		))
 	}
 }
 

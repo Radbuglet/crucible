@@ -3,7 +3,7 @@ use std::{
 	cell::Cell,
 	collections::hash_map::RandomState,
 	error::Error,
-	hash,
+	fmt, hash,
 	time::{Duration, Instant},
 };
 
@@ -11,99 +11,20 @@ use crucible_common::util::linked_list::ObjLinkedList;
 use hashbrown::raw::RawTable;
 
 use crucible_core::{
-	c_enum::{c_enum, CEnumMap},
-	contextual_iter::ContextualIter,
-	error::ResultExt,
-	hasher::hash_one,
-	linked_list::LinkedList,
+	contextual_iter::ContextualIter, error::ResultExt, hasher::hash_one, linked_list::LinkedList,
 };
 use geode::prelude::*;
 use once_cell::unsync::OnceCell;
 
-// === ManagedResourceAliveQuery === //
-
-pub type ShouldKeepAliveSignal = Signal<dyn EventHandler<ShouldKeepAliveEvent>>;
+// === ResourceDescriptor === //
 
 component_bundle! {
 	pub struct ResourceBundle<T>(ResourceBundleCtor) {
 		resource: T,
-		should_keep_alive: ShouldKeepAliveSignal,
 	}
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ShouldKeepAliveEvent {
-	verdict: KeepAliveVerdict,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Default)]
-pub enum KeepAliveVerdict {
-	/// This verdict means that no [ManagedResourceAliveQuery] handler has either `testify`'ied or
-	/// `condemn`'ed the resource. This is typically taken as an indication that the resource is no
-	/// longer needed.
-	#[default]
-	Undecided,
-
-	/// This verdict means that at least one [ManagedResourceAliveQuery] handler `condemn`'ed the
-	/// resource. Condemnation categorically overpowers all testimony supporting the use of a
-	/// resource.
-	Condemned,
-
-	/// This verdict means that at least one [ManagedResourceAliveQuery] handler `testify`'ied for
-	/// this resource's continued use and no other handler overruled that testimony through a
-	/// `condemn`'ation.
-	Supported,
-}
-
-impl KeepAliveVerdict {
-	pub fn is_truthy(&self) -> bool {
-		match self {
-			KeepAliveVerdict::Undecided => false,
-			KeepAliveVerdict::Condemned => false,
-			KeepAliveVerdict::Supported => true,
-		}
-	}
-}
-
-impl ShouldKeepAliveEvent {
-	pub fn testify(&mut self) {
-		if self.verdict == KeepAliveVerdict::Undecided {
-			self.verdict = KeepAliveVerdict::Supported;
-		}
-	}
-
-	pub fn condemn(&mut self) {
-		self.verdict = KeepAliveVerdict::Condemned;
-	}
-
-	pub fn verdict(&self) -> KeepAliveVerdict {
-		self.verdict
-	}
-}
-
-// === CostCategory === //
-
-pub type ResourceCostSet = CEnumMap<CostCategory, u64>;
-
-c_enum! {
-	pub enum CostCategory {
-		AssetCount,
-		CpuMemory,
-		GpuMemory,
-		GpuTextureCount,
-		GpuBufferCount,
-		GpuPipelineCount,
-	}
-}
-
-// === ResourceDescriptor === //
-
-pub struct CreatedResource<R: ?Sized + ObjPointee> {
-	pub resource: Owned<ResourceBundle<R>>,
-	pub costs: ResourceCostSet,
-}
-
-pub trait ResourceDescriptor<C>: ObjPointee + hash::Hash + Eq + Sync {
+pub trait ResourceDescriptor<C>: fmt::Debug + ObjPointee + hash::Hash + Eq + Sync {
 	type Resource: ObjPointee;
 	type Error: Error;
 
@@ -112,22 +33,23 @@ pub trait ResourceDescriptor<C>: ObjPointee + hash::Hash + Eq + Sync {
 		s: Session,
 		res_mgr: &mut ResourceManager,
 		ctx: C,
-	) -> Result<CreatedResource<Self::Resource>, Self::Error>;
+	) -> Result<Owned<ResourceBundle<Self::Resource>>, Self::Error>;
 }
 
 // === ResourceManager === //
 
 type ResListLink<'s> = &'s Cell<Option<Obj<ResourceEntry>>>;
+type TouLinkedList<'s> = ObjLinkedList<
+	's,
+	Obj<ResourceEntry>,
+	fn(Session<'s>, Obj<ResourceEntry>) -> (ResListLink<'s>, ResListLink<'s>),
+>;
 
 fn get_res_list_view<'s>(
 	session: Session<'s>,
 	head: ResListLink<'s>,
 	tail: ResListLink<'s>,
-) -> ObjLinkedList<
-	's,
-	Obj<ResourceEntry>,
-	fn(Session<'s>, Obj<ResourceEntry>) -> (ResListLink<'s>, ResListLink<'s>),
-> {
+) -> TouLinkedList<'s> {
 	ObjLinkedList {
 		session,
 		head,
@@ -142,10 +64,7 @@ fn get_res_list_view<'s>(
 pub struct ResourceManager {
 	/// A map from resource descriptors to [ManagedResource] entries. Hashes are cached to prevent
 	/// very large amounts of dynamic dispatch during rehashing.
-	resource_map: RawTable<(u64, Owned<Obj<ResourceEntry>>)>,
-
-	/// The sum of all the resource's [ResourceCostSet]s.
-	total_cost: ResourceCostSet,
+	resource_map: RawTable<Owned<Obj<ResourceEntry>>>,
 
 	/// The [BuildHasher] for the `resource_map`.
 	hash_builder: RandomState,
@@ -161,9 +80,11 @@ pub struct ResourceManager {
 }
 
 struct ResourceEntry {
+	hash: u64,
+
 	// === Resource state === //
 	descriptor: Owned<Obj<dyn Any + Send>>,
-	value: OnceCell<ResourceEntryData>,
+	value: OnceCell<Owned<Entity>>,
 
 	// === TOU state === //
 	tou_left: Cell<Option<Obj<ResourceEntry>>>,
@@ -171,16 +92,10 @@ struct ResourceEntry {
 	tou_time: Cell<Instant>,
 }
 
-struct ResourceEntryData {
-	resource: Owned<Entity>,
-	costs: ResourceCostSet,
-}
-
 impl ResourceManager {
 	pub fn new(lock: Lock) -> Self {
 		Self {
 			resource_map: Default::default(),
-			total_cost: Default::default(),
 			hash_builder: Default::default(),
 			tou_head: Default::default(),
 			tou_tail: Default::default(),
@@ -200,8 +115,8 @@ impl ResourceManager {
 		// Find existing resource
 		let hash = hash_one(&self.hash_builder, &descriptor);
 
-		let entry = self.resource_map.get(hash, |(entry_hash, entry)| {
-			if hash != *entry_hash {
+		let entry = self.resource_map.get(hash, |entry| {
+			if hash != entry.get(s).hash {
 				return false;
 			}
 
@@ -217,23 +132,24 @@ impl ResourceManager {
 			true
 		});
 
-		if let Some((_, entry)) = entry {
+		if let Some(entry) = entry {
 			// Fetch the resource
 			let p_entry = entry.get(s);
 			let resource = p_entry
 				.value
 				.get()
 				.unwrap_or_else(|| panic!("cannot load a resource that is currently being loaded"))
-				.resource
 				.weak_copy();
 
 			// Update the TOU
-			get_res_list_view(
+			let mut entries = get_res_list_view(
 				s,
 				Cell::from_mut(&mut self.tou_head),
 				Cell::from_mut(&mut self.tou_tail),
-			)
-			.insert_head(Some(entry.weak_copy()));
+			);
+
+			entries.unlink(Some(entry.weak_copy()));
+			entries.insert_head(Some(entry.weak_copy()));
 			p_entry.tou_time.set(Instant::now());
 
 			Ok(ResourceBundle::cast(resource))
@@ -243,6 +159,7 @@ impl ResourceManager {
 
 			// Box the entry
 			let (entry_guard, entry) = ResourceEntry {
+				hash,
 				descriptor: descriptor_guard.cast(),
 				value: OnceCell::new(),
 				tou_time: Cell::new(Instant::now()),
@@ -256,43 +173,37 @@ impl ResourceManager {
 			#[rustfmt::skip]
 			self.resource_map.insert(
 				hash,
-				(hash, entry_guard),
-				|(hash, _)| *hash
+				entry_guard,
+				|entry| entry.get(s).hash
 			);
 
 			// Register it in the TOU linked list.
-			// N.B. we do this after the resource map insertion since the former is more panic prone
-			// and, if we panic there, the registry should be placed in a valid state.
-			get_res_list_view(
+			let mut entries = get_res_list_view(
 				s,
 				Cell::from_mut(&mut self.tou_head),
 				Cell::from_mut(&mut self.tou_tail),
-			)
-			.insert_head(Some(entry));
+			);
+
+			// N.B. we do this after the resource map insertion since the former is more panic prone
+			// and, if we panic there, the registry should be placed in a valid state.
+			entries.insert_head(Some(entry));
 
 			// Release `RefCell` and create the resource.
 			let created = descriptor.get(s).create(s, self, ctx);
+			log::info!("Loaded resource with descriptor {descriptor:?} from scratch.");
 
 			// Register the new resource and return it
 			match created {
-				Ok(CreatedResource { resource, costs }) => {
-					// Update total cost counters
-					for (key, cost) in costs.iter() {
-						*self.total_cost.entry_mut(key).get_or_insert(0) += *cost;
-					}
-
+				Ok(resource_guard) => {
 					// Register resource
-					let resource_weak = resource.weak_copy();
+					let resource = resource_guard.weak_copy();
 
-					let _ = entry.get(s).value.set(ResourceEntryData {
-						resource: resource.raw(),
-						costs,
-					});
+					let _ = entry.get(s).value.set(resource_guard.raw());
 
-					Ok(resource_weak)
+					Ok(resource)
 				}
 				Err(err) => {
-					self.unregister_resource(s, hash, entry);
+					self.unregister_resource(s, entry);
 					Err(err)
 				}
 			}
@@ -306,35 +217,40 @@ impl ResourceManager {
 		self.try_load(s, ctx, descriptor).unwrap_pretty()
 	}
 
-	fn unregister_resource(&mut self, s: Session, hash: u64, entry: Obj<ResourceEntry>) {
-		// Decrement cost counter
-		if let Some(data) = entry.get(s).value.get() {
-			// Update total cost counters
-			for (key, cost) in data.costs.iter() {
-				*self.total_cost.entry_mut(key).get_or_insert(0) -= *cost;
-			}
-		}
-
+	fn unregister_resource_inner(
+		s: Session,
+		entries: &mut TouLinkedList,
+		resource_map: &mut RawTable<Owned<Obj<ResourceEntry>>>,
+		entry: Obj<ResourceEntry>,
+	) {
 		// Remove from the linked list
 		// N.B. we do this first because `resource_map.remove_entry` is more panic prone than we are
 		// and we'd like to keep the registry in as much of a valid state as possible.
-		get_res_list_view(
-			s,
-			Cell::from_mut(&mut self.tou_head),
-			Cell::from_mut(&mut self.tou_tail),
-		)
-		.unlink(Some(entry));
+		entries.unlink(Some(entry));
 
 		// Remove from the map.
 		#[rustfmt::skip]
-		let _ = self.resource_map.remove_entry(
-			hash,
-			|(_, obj)| obj.weak_copy() == entry
+		let _ = resource_map.remove_entry(
+			entry.get(s).hash,
+			|other_entry| other_entry.weak_copy() == entry
 		);
 	}
 
-	pub fn collect_garbage(&mut self, s: Session, min_duration: Duration) {
-		let entries = get_res_list_view(
+	fn unregister_resource(&mut self, s: Session, entry: Obj<ResourceEntry>) {
+		Self::unregister_resource_inner(
+			s,
+			&mut get_res_list_view(
+				s,
+				Cell::from_mut(&mut self.tou_head),
+				Cell::from_mut(&mut self.tou_tail),
+			),
+			&mut self.resource_map,
+			entry,
+		);
+	}
+
+	pub fn collect_unused(&mut self, s: Session, max_tou: Duration) {
+		let mut entries = get_res_list_view(
 			s,
 			Cell::from_mut(&mut self.tou_head),
 			Cell::from_mut(&mut self.tou_tail),
@@ -347,42 +263,17 @@ impl ResourceManager {
 			let entry = entry.unwrap();
 			let p_entry = entry.get(s);
 
-			// Ignore entries that haven't lived long enough.
-			if now.duration_since(p_entry.tou_time.get()) < min_duration {
-				continue;
+			let elapsed = now.duration_since(p_entry.tou_time.get());
+
+			// TODO: Bring back the keep-alive system!
+			if elapsed > max_tou {
+				Self::unregister_resource_inner(s, &mut entries, &mut self.resource_map, entry);
+				log::info!("Freed resource that hadn't been used for {elapsed:?}");
 			}
-
-			// Check if the resource is still alive.
-			let value = match p_entry.value.get() {
-				Some(value) => value,
-				None => continue,
-			};
-
-			let mut should_keep_alive = ShouldKeepAliveEvent::default();
-
-			value
-				.resource
-				.get::<dyn EventHandler<ShouldKeepAliveEvent>>(s)
-				.fire(s, value.resource.weak_copy(), &mut should_keep_alive);
-
-			if should_keep_alive.verdict().is_truthy() {
-				continue;
-			}
-
-			// The resource is dead!
-			// TODO
 		}
 	}
 
 	pub fn get_lock(&self) -> Lock {
 		self.lock
 	}
-
-	pub fn make_keep_alive_signal(&self, s: Session) -> Owned<Obj<ShouldKeepAliveSignal>> {
-		Signal::new(self.get_lock()).box_obj_in(s, self.get_lock())
-	}
 }
-
-// === Standard Validator Components === //
-
-// TODO

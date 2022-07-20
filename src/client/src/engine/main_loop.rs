@@ -1,4 +1,5 @@
 use geode::prelude::*;
+use std::time::Duration;
 use winit::{
 	event::{Event, WindowEvent},
 	event_loop::{ControlFlow, EventLoop},
@@ -114,6 +115,12 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 			// After all user events have been triggered, this event is triggered.
 			Event::MainEventsCleared => {
+				// Handle garbage collection
+				engine
+					.res_mgr(s)
+					.borrow_mut()
+					.collect_unused(s, Duration::from_secs(1));
+
 				// Handle scene manager update logic.
 				let should_update = true; // TODO: Tick-rate limit
 

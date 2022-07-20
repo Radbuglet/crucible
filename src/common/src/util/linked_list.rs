@@ -18,14 +18,14 @@ where
 {
 	pub fn get_prev_cell(&self, node: Option<N>) -> &'s Cell<Option<N>> {
 		match node {
-			Some(val) => &(self.access)(self.session, val).0,
+			Some(node) => &(self.access)(self.session, node).0,
 			None => self.tail,
 		}
 	}
 
 	pub fn get_next_cell(&self, node: Option<N>) -> &'s Cell<Option<N>> {
 		match node {
-			Some(val) => &(self.access)(self.session, val).1,
+			Some(node) => &(self.access)(self.session, node).1,
 			None => self.head,
 		}
 	}

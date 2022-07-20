@@ -163,8 +163,7 @@ pub struct RawObj {
 impl fmt::Debug for RawObj {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct("RawObj")
-			.field("slot", &(self.slot as *const Slot))
-			.field("gen", &self.gen)
+			.field("gen", &self.gen.gen())
 			.finish_non_exhaustive()
 	}
 }
@@ -377,7 +376,7 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 impl<T: ?Sized + ObjPointee> fmt::Debug for Obj<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct("Obj")
-			.field("raw", &self.raw)
+			.field("gen", &self.raw.gen.gen())
 			.finish_non_exhaustive()
 	}
 }
