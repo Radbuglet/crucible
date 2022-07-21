@@ -506,6 +506,7 @@ dependencies = [
  "log",
  "num-traits",
  "sealed",
+ "smallvec",
  "typed-glam",
 ]
 

@@ -5,7 +5,7 @@ use std::{
 };
 
 use crucible_common::voxel::{
-	container::VoxelChunkData,
+	data::VoxelChunkData,
 	math::{BlockFace, BlockPos, BlockPosExt, WorldPos, WorldPosExt},
 };
 use crucible_core::c_enum::ExposesVariants;

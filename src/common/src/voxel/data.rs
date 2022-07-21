@@ -2,9 +2,14 @@ use std::{cell::Cell, collections::HashMap, fmt, hash};
 
 use crucible_core::array::arr;
 use geode::prelude::*;
+use smallvec::SmallVec;
+use typed_glam::glam::DVec3;
+
+use crate::voxel::math::Line3;
 
 use super::math::{
-	Axis3, BlockFace, BlockPos, BlockPosExt, ChunkPos, Sign, WorldPos, WorldPosExt, CHUNK_VOLUME,
+	Axis3, BlockFace, BlockPos, BlockPosExt, ChunkPos, EntityPos, EntityPosExt, Sign, WorldPos,
+	WorldPosExt, CHUNK_VOLUME,
 };
 
 use crucible_core::c_enum::ExposesVariants;
@@ -282,4 +287,75 @@ impl VoxelPointer {
 	pub fn pos(self) -> WorldPos {
 		self.pos
 	}
+}
+
+pub struct VoxelRayCast {
+	pointer: VoxelPointer,
+	pos: EntityPos,
+	direction: DVec3,
+	distance: f64,
+}
+
+impl VoxelRayCast {
+	pub fn new(world: &VoxelWorldData, origin: EntityPos, direction: DVec3) -> Self {
+		debug_assert!(direction.is_normalized());
+
+		Self {
+			pointer: VoxelPointer::new_cached(world, origin.world_pos()),
+			pos: origin,
+			direction,
+			distance: 0.,
+		}
+	}
+
+	pub fn step(&mut self, s: Session) -> SmallVec<[RayCastIntersection; 3]> {
+		let mut local_intersections = SmallVec::new();
+
+		// Compute step info
+		let step = Line3 {
+			start: self.pos,
+			end: self.pos + self.direction,
+		};
+		let start_block = step.start.world_pos();
+		let end_block = step.end.world_pos();
+		let block_delta = end_block - start_block;
+
+		// Handle block step
+		for axis in Axis3::variants() {
+			let axis_delta = block_delta[axis];
+			debug_assert!((-1..=1).contains(&axis_delta));
+
+			let crossing_face = match Sign::of(axis_delta) {
+				Some(sign) => BlockFace::compose(axis, sign),
+				None => continue, // No special handling if we haven't breached the block barrier.
+			};
+
+			// Find intersection
+			let crossed_layer_depth = self.pointer.pos().block_face_layer(crossing_face);
+			let (percent, pos) = axis.aabb_intersect(crossed_layer_depth, step);
+			debug_assert!(percent.abs() <= 1.);
+
+			local_intersections.push(RayCastIntersection {
+				pos,
+				axis,
+				distance: self.distance + step.start.distance(pos),
+			});
+
+			// Update pointer
+			self.pointer = self.pointer.get_neighbor(s, crossing_face);
+		}
+
+		// Update positional info
+		self.pos += self.direction;
+		self.distance += 1.;
+
+		local_intersections
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct RayCastIntersection {
+	pub pos: EntityPos,
+	pub axis: Axis3,
+	pub distance: f64,
 }

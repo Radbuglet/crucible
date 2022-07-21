@@ -2,7 +2,7 @@ use std::ops::{Index, IndexMut};
 
 use num_traits::Signed;
 use typed_glam::{
-	glam::{self, IVec3},
+	glam::{self, DVec3, IVec3, UVec3, Vec3},
 	TypedVector, TypedVectorImpl, VecFlavor,
 };
 
@@ -29,6 +29,8 @@ pub trait WorldPosExt: Sized {
 	fn decompose(self) -> (ChunkPos, BlockPos);
 	fn chunk(self) -> ChunkPos;
 	fn block(self) -> BlockPos;
+	fn min_corner_entity_pos(self) -> EntityPos;
+	fn block_face_layer(self, face: BlockFace) -> f64;
 }
 
 impl WorldPosExt for WorldPos {
@@ -58,6 +60,21 @@ impl WorldPosExt for WorldPos {
 			raw.y.rem_euclid(CHUNK_EDGE),
 			raw.z.rem_euclid(CHUNK_EDGE),
 		)
+	}
+
+	fn min_corner_entity_pos(self) -> EntityPos {
+		EntityPos::from_raw(self.into_raw().as_dvec3())
+	}
+
+	fn block_face_layer(self, face: BlockFace) -> f64 {
+		let corner = self.min_corner_entity_pos();
+		let (axis, sign) = face.decompose();
+
+		if sign == Sign::Positive {
+			corner[axis] + 1.
+		} else {
+			corner[axis]
+		}
 	}
 }
 
@@ -163,7 +180,35 @@ impl Iterator for BlockPosIter {
 	}
 }
 
-// === Block Faces === //
+// === EntityPos === //
+
+/// The world-space position of an entity, represented with double precision floats to ensure that
+/// the `i32`-wide block position can fit into the space.
+///
+/// ## Conventions
+///
+/// A block position, when converted to a floating point, represents the most negative corner of a
+/// given block. For example, the block position `(-2, -3, 1)` occupies the space
+/// `(-2..-1, -3..-2, 1..2)`.
+pub type EntityPos = TypedVector<EntityPosFlavor>;
+
+pub struct EntityPosFlavor(!);
+
+impl VecFlavor for EntityPosFlavor {
+	type Backing = DVec3;
+}
+
+pub trait EntityPosExt {
+	fn world_pos(self) -> WorldPos;
+}
+
+impl EntityPosExt for EntityPos {
+	fn world_pos(self) -> WorldPos {
+		WorldPos::from_raw(self.raw().floor().as_ivec3())
+	}
+}
+
+// === Enums === //
 
 c_enum! {
 	pub enum BlockFace {
@@ -281,6 +326,12 @@ impl Axis3 {
 			Self::Z => (Self::Y, Self::X),
 		}
 	}
+
+	pub fn aabb_intersect(self, layer: f64, line: Line3) -> (f64, EntityPos) {
+		let depth_percent = lerp_percent_at(layer, line.start[self], line.end[self]);
+
+		(depth_percent, line.start.lerp(line.end, depth_percent))
+	}
 }
 
 impl<F: VecFlavor<Backing = IVec3>> Index<Axis3> for TypedVectorImpl<IVec3, F> {
@@ -292,6 +343,48 @@ impl<F: VecFlavor<Backing = IVec3>> Index<Axis3> for TypedVectorImpl<IVec3, F> {
 }
 
 impl<F: VecFlavor<Backing = IVec3>> IndexMut<Axis3> for TypedVectorImpl<IVec3, F> {
+	fn index_mut(&mut self, index: Axis3) -> &mut Self::Output {
+		&mut self[index as usize]
+	}
+}
+
+impl<F: VecFlavor<Backing = UVec3>> Index<Axis3> for TypedVectorImpl<UVec3, F> {
+	type Output = u32;
+
+	fn index(&self, index: Axis3) -> &Self::Output {
+		&self[index as usize]
+	}
+}
+
+impl<F: VecFlavor<Backing = UVec3>> IndexMut<Axis3> for TypedVectorImpl<UVec3, F> {
+	fn index_mut(&mut self, index: Axis3) -> &mut Self::Output {
+		&mut self[index as usize]
+	}
+}
+
+impl<F: VecFlavor<Backing = Vec3>> Index<Axis3> for TypedVectorImpl<Vec3, F> {
+	type Output = f32;
+
+	fn index(&self, index: Axis3) -> &Self::Output {
+		&self[index as usize]
+	}
+}
+
+impl<F: VecFlavor<Backing = Vec3>> IndexMut<Axis3> for TypedVectorImpl<Vec3, F> {
+	fn index_mut(&mut self, index: Axis3) -> &mut Self::Output {
+		&mut self[index as usize]
+	}
+}
+
+impl<F: VecFlavor<Backing = DVec3>> Index<Axis3> for TypedVectorImpl<DVec3, F> {
+	type Output = f64;
+
+	fn index(&self, index: Axis3) -> &Self::Output {
+		&self[index as usize]
+	}
+}
+
+impl<F: VecFlavor<Backing = DVec3>> IndexMut<Axis3> for TypedVectorImpl<DVec3, F> {
 	fn index_mut(&mut self, index: Axis3) -> &mut Self::Output {
 		&mut self[index as usize]
 	}
@@ -326,4 +419,20 @@ impl Sign {
 			Negative => -T::one(),
 		}
 	}
+}
+
+// === Line3 === //
+
+#[derive(Debug, Copy, Clone)]
+pub struct Line3 {
+	pub start: EntityPos,
+	pub end: EntityPos,
+}
+
+// === Misc Math === //
+
+pub fn lerp_percent_at(val: f64, start: f64, end: f64) -> f64 {
+	// start + (end - start) * percent = val
+	// (val - start) / (end - start) = percent
+	(val - start) / (end - start)
 }

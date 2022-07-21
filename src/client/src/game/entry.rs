@@ -1,12 +1,12 @@
 use std::cell::RefCell;
 
 use crucible_common::voxel::{
-	container::{VoxelChunkData, VoxelWorldData},
-	math::{BlockPos, BlockPosExt, ChunkPos},
+	data::{VoxelChunkData, VoxelWorldData},
+	math::{WorldPos, WorldPosExt},
 };
 use geode::prelude::*;
 use typed_glam::glam::Mat4;
-use winit::event::VirtualKeyCode;
+use winit::event::{MouseButton, VirtualKeyCode};
 
 use crate::engine::{
 	root::{EngineRootBundle, ViewportBundle},
@@ -75,51 +75,20 @@ impl GameSceneBundle {
 			},
 		);
 
-		// Create starter chunk
-		{
-			let scene = scene_guard.weak_copy();
-
-			let mut p_voxel_data = scene.voxel_data(s).borrow_mut();
-			let mut p_voxel_mesh = scene.voxel_mesh(s).borrow_mut();
-
-			let (chunk_guard, chunk) = ChunkBundle::new(s, main_lock).to_guard_ref_pair();
-
-			p_voxel_data.add_chunk(
-				s,
-				ChunkPos::new(0, 0, 0),
-				scene_guard.weak_copy().raw(),
-				chunk_guard.raw(),
-			);
-
-			p_voxel_mesh.flag_chunk(s, main_lock, chunk.raw());
-		}
-
 		scene_guard
 	}
 }
 
 impl ChunkBundle {
 	pub fn new(s: Session, main_lock: Lock) -> Owned<Self> {
-		{
-			let (chunk_data_guard, chunk_data) = VoxelChunkData::default()
-				.box_obj_in(s, main_lock)
-				.to_guard_ref_pair();
+		let chunk_data_guard = VoxelChunkData::default().box_obj_in(s, main_lock);
 
-			let p_chunk_data = chunk_data.get(s);
-
-			for pos in BlockPos::iter() {
-				if fastrand::bool() {
-					p_chunk_data.block_state_of(pos).set_material(1);
-				}
-			}
-
-			ChunkBundle::spawn(
-				s,
-				ChunkBundleCtor {
-					chunk_data: chunk_data_guard.into(),
-				},
-			)
-		}
+		ChunkBundle::spawn(
+			s,
+			ChunkBundleCtor {
+				chunk_data: chunk_data_guard.into(),
+			},
+		)
 	}
 }
 
@@ -138,15 +107,16 @@ impl EventHandler<SceneUpdateEvent> for GameSceneBundleHandlers {
 		let me = GameSceneBundle::cast(me);
 		let engine = EngineRootBundle::cast(engine);
 
+		let p_lock = engine.main_lock(s).weak_copy();
 		let p_input_tracker = self.viewport.input_tracker(s).borrow();
-
 		let p_gfx = engine.gfx(s);
 
 		let mut p_local_camera = me.local_camera(s).borrow_mut();
-		let mut p_voxel_mesh = me.voxel_mesh(s).borrow_mut();
+		let mut p_world_data = me.voxel_data(s).borrow_mut();
+		let mut p_world_mesh = me.voxel_mesh(s).borrow_mut();
 
 		// Update chunk meshes
-		p_voxel_mesh.update_chunks(s, p_gfx, None);
+		p_world_mesh.update_chunks(s, p_gfx, None);
 
 		// Update camera
 		if p_input_tracker.has_focus() {
@@ -160,6 +130,31 @@ impl EventHandler<SceneUpdateEvent> for GameSceneBundleHandlers {
 				fore: p_input_tracker.key(VirtualKeyCode::W).state(),
 				back: p_input_tracker.key(VirtualKeyCode::S).state(),
 			});
+		}
+
+		// Try placing blocks
+		if p_input_tracker.button(MouseButton::Right).state() {
+			// TODO: Automate with the `VoxelWorldFacade`.
+
+			let pos = p_local_camera.pos();
+			let world_pos = WorldPos::from_raw(pos.floor().as_ivec3());
+			let (chunk_pos, block_pos) = world_pos.decompose();
+
+			let chunk = match p_world_data.get_chunk(world_pos.chunk()) {
+				Some(chunk) => ChunkBundle::cast(chunk),
+				None => {
+					let (chunk_guard, chunk) = ChunkBundle::new(s, p_lock).to_guard_ref_pair();
+					p_world_data.add_chunk(s, chunk_pos, me.raw(), chunk_guard.raw());
+					chunk
+				}
+			};
+
+			chunk
+				.chunk_data(s)
+				.block_state_of(block_pos)
+				.set_material(1);
+
+			p_world_mesh.flag_chunk(s, p_lock, chunk.raw());
 		}
 	}
 }
