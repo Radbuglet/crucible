@@ -1,9 +1,15 @@
-use std::{cell::Cell, hint::unreachable_unchecked, marker::PhantomData};
+use std::{
+	cell::{Cell, UnsafeCell},
+	fmt, hash,
+	hint::unreachable_unchecked,
+	marker::PhantomData,
+};
 
 use crucible_core::{
 	array::arr,
-	cell::MutexedUnsafeCell,
+	cell::{CellExt, MutexedUnsafeCell},
 	marker::{PhantomNoSendOrSync, PhantomNoSync},
+	sync::AssertSync,
 	transmute::super_unchecked_transmute,
 };
 use parking_lot::Mutex;
@@ -30,7 +36,11 @@ impl Drop for UnregisterGuard {
 /// Panics if a session initializer panics or too many sessions have been created. If it panics
 /// during initialization, no IDs will be leaked.
 ///
-fn allocate_session() -> u8 {
+/// ## Safety
+///
+/// `PrimaryStorageEntry` truly only lives until the session is deallocated.
+///
+fn allocate_session() -> &'static PrimaryStorageEntry {
 	// Allocate ID and set up an unregistry guard to trigger on panic. We mark the session ID as
 	// registered here and employ a guard because `init_session` can call `allocate_session` (making
 	// it reentrant) and we need to prevent that semi-initialized ID from being reused.
@@ -40,16 +50,16 @@ fn allocate_session() -> u8 {
 	let unregister_guard = UnregisterGuard(id);
 
 	// Initialize all critical session info instances.
-	unsafe {
+	let primary_ptr = unsafe {
 		// Safety: this is a new session to which no one else has access.
-		<() as StaticStorageHygieneBreak>::init_session(id);
-	}
+		<() as StaticStorageHygieneBreak>::init_session(id)
+	};
 
 	// Defuse the `unregister_guard`. A user-facing guard designed to call `dealloc_session` will be
 	// created in its place.
 	std::mem::forget(unregister_guard);
 
-	id
+	primary_ptr
 }
 
 /// Deallocates an existing session.
@@ -70,20 +80,29 @@ fn dealloc_session(id: u8) {
 
 // === Sessions === //
 
-#[thread_local]
-static LOCAL_SESSION: Cell<LocalSessionInfo> = Cell::new(LocalSessionInfo { id: 0xFF, rc: 0 });
-
 #[derive(Copy, Clone)]
 struct LocalSessionInfo {
-	id: u8,
+	ptr: Option<&'static PrimaryStorageEntry>,
 	rc: u64,
 }
 
+#[thread_local]
+static LOCAL_SESSION: Cell<LocalSessionInfo> = Cell::new(LocalSessionInfo { ptr: None, rc: 0 });
+
 // Movable
-#[derive(Debug)]
 pub struct MovableSessionGuard {
+	// `ptr` is actually `Sync` for convenience sake. See `PrimaryStorageEntryOf`'s item comment for
+	// details.
 	_no_sync: PhantomNoSync,
-	id: u8,
+	ptr: &'static PrimaryStorageEntry,
+}
+
+impl fmt::Debug for MovableSessionGuard {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("MovableSessionGuard")
+			.field("slot", &self.handle().slot())
+			.finish()
+	}
 }
 
 impl Default for MovableSessionGuard {
@@ -96,7 +115,7 @@ impl MovableSessionGuard {
 	pub fn new() -> Self {
 		Self {
 			_no_sync: PhantomData,
-			id: allocate_session(),
+			ptr: allocate_session(),
 		}
 	}
 
@@ -154,7 +173,7 @@ impl MovableSessionGuard {
 	}
 
 	pub fn handle(&self) -> Session<'_> {
-		Session::new_internal(self.id)
+		Session { ptr: self.ptr }
 	}
 
 	pub fn make_local(self) -> LocalSessionGuard {
@@ -164,10 +183,14 @@ impl MovableSessionGuard {
 			0,
 			"Cannot call `make_local` if the current thread already has a local thread."
 		);
+		debug_assert!(LOCAL_SESSION.get().ptr.is_none());
 
 		// Update the local session
-		let id = self.id;
-		LOCAL_SESSION.set(LocalSessionInfo { id, rc: 1 });
+		let ptr = self.ptr;
+		LOCAL_SESSION.set(LocalSessionInfo {
+			ptr: Some(ptr),
+			rc: 1,
+		});
 
 		// Ensure that we don't run our destructor since we're effectively transforming this
 		// session instance into a `LocalSessionGuard`.
@@ -176,14 +199,14 @@ impl MovableSessionGuard {
 		// Construct handle
 		LocalSessionGuard {
 			_no_threading: PhantomData,
-			id,
+			ptr,
 		}
 	}
 }
 
 impl Drop for MovableSessionGuard {
 	fn drop(&mut self) {
-		dealloc_session(self.id);
+		dealloc_session(self.handle().slot());
 	}
 }
 
@@ -198,27 +221,30 @@ impl Iterator for SessionManyAllocIter {
 	fn next(&mut self) -> Option<Self::Item> {
 		let id = self.remaining.reserve_set_bit()?;
 
+		let ptr = unsafe {
+			// Safety: this is a new session to which no one else has access.
+			<() as StaticStorageHygieneBreak>::init_session(id)
+		};
+
 		Some(MovableSessionGuard {
 			_no_sync: PhantomData,
-			id,
+			ptr,
 		})
 	}
 }
 
-impl Drop for SessionManyAllocIter {
-	fn drop(&mut self) {
-		// Drain remaining sessions and run their destructors.
-		for guard in self {
-			drop(guard);
-		}
-	}
-}
-
 // Local
-#[derive(Debug)]
 pub struct LocalSessionGuard {
 	_no_threading: PhantomNoSendOrSync,
-	id: u8,
+	ptr: &'static PrimaryStorageEntry,
+}
+
+impl fmt::Debug for LocalSessionGuard {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("LocalSessionGuard")
+			.field("slot", &self.handle().slot())
+			.finish()
+	}
 }
 
 impl Default for LocalSessionGuard {
@@ -259,13 +285,17 @@ impl LocalSessionGuard {
 	pub fn try_reuse() -> Option<Self> {
 		let mut copy = LOCAL_SESSION.get();
 
-		if copy.rc > 0 {
+		if let Some(ptr) = copy.ptr {
+			debug_assert!(copy.rc > 0);
+
+			// Increment RC
 			copy.rc += 1;
 			LOCAL_SESSION.set(copy);
 
+			// Construct guard
 			Some(LocalSessionGuard {
 				_no_threading: PhantomData,
-				id: copy.id,
+				ptr,
 			})
 		} else {
 			None
@@ -274,7 +304,7 @@ impl LocalSessionGuard {
 
 	#[inline(always)]
 	pub fn handle(&self) -> Session<'_> {
-		Session::new_internal(self.id)
+		Session { ptr: self.ptr }
 	}
 }
 
@@ -288,68 +318,85 @@ impl Drop for LocalSessionGuard {
 	fn drop(&mut self) {
 		#[cold]
 		#[inline(never)]
-		fn drop_cold(id: u8) {
-			dealloc_session(id)
+		fn drop_cold(ptr: Option<&'static PrimaryStorageEntry>) {
+			dealloc_session(ptr.unwrap().0)
 		}
 
 		let mut copy = LOCAL_SESSION.get();
 
 		copy.rc -= 1;
-		LOCAL_SESSION.set(copy);
 
 		if copy.rc == 0 {
-			drop_cold(copy.id);
+			let ptr = copy.ptr;
+			copy.ptr = None;
+			LOCAL_SESSION.set(copy);
+
+			drop_cold(ptr);
+		} else {
+			LOCAL_SESSION.set(copy);
 		}
 	}
 }
 
 // Session handle
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Session<'a> {
-	_lifetime: PhantomData<&'a MovableSessionGuard>,
-	_no_threading: PhantomNoSendOrSync,
-	id: u8,
+	ptr: &'a PrimaryStorageEntry,
 }
 
 impl Session<'_> {
-	fn new_internal(id: u8) -> Self {
-		Self {
-			_lifetime: PhantomData,
-			_no_threading: PhantomData,
-			id,
-		}
-	}
-
 	pub fn slot(self) -> u8 {
-		debug_assert_ne!(self.id, 0xFF);
-		self.id
+		debug_assert_ne!(self.ptr.0, 0xFF);
+		self.ptr.0
+	}
+}
+
+impl fmt::Debug for Session<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Session").field("id", &self.slot()).finish()
+	}
+}
+
+impl Copy for Session<'_> {}
+
+impl Clone for Session<'_> {
+	fn clone(&self) -> Self {
+		*self
+	}
+}
+
+impl hash::Hash for Session<'_> {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		self.slot().hash(state);
+	}
+}
+
+impl Eq for Session<'_> {}
+
+impl PartialEq for Session<'_> {
+	fn eq(&self, other: &Self) -> bool {
+		self.slot() == other.slot()
 	}
 }
 
 // === Session Storage === //
 
-pub type OptionSessionStorage<T> = SessionStorage<Option<T>>;
-
 pub struct SessionStorage<T> {
-	slots: [MutexedUnsafeCell<T>; 256],
-}
-
-impl<T> OptionSessionStorage<T> {
-	pub const fn new() -> Self {
-		Self::new_with(arr![None; 256])
-	}
+	slots: [AssertSync<T>; 256],
 }
 
 impl<T> SessionStorage<T> {
-	pub const fn new_with(arr: [T; 256]) -> Self {
+	pub const fn new(arr: [T; 256]) -> Self {
 		Self {
 			slots: unsafe {
-				// Safety: `MutexedUnsafeCell` is `repr(transparent)` so the two types have the same
-				// layout. These two types are not wrapped in anything so we're not susceptible to
-				// e.g. the super dangerous `&T` to `&UnsafeCell<T>` cast.
-				super_unchecked_transmute::<[T; 256], [MutexedUnsafeCell<T>; 256]>(arr)
+				// Safety: `AssertSync` is `repr(transparent)` so the two types have the same layout.
+				super_unchecked_transmute::<[T; 256], [AssertSync<T>; 256]>(arr)
 			},
 		}
+	}
+
+	pub unsafe fn get_raw<'a>(&'a self, id: u8) -> &'a T {
+		// Safety: provided by caller
+		self.slots[id as usize].get()
 	}
 
 	#[inline(always)]
@@ -357,33 +404,36 @@ impl<T> SessionStorage<T> {
 		unsafe {
 			// Safety: we know, by the fact that `session` cannot be shared between threads, that
 			// we are on the only thread with access to this value.
-			self.slots[session.slot() as usize].get_ref_unchecked()
+			self.slots[session.slot() as usize].get()
 		}
-	}
-
-	#[allow(clippy::mut_from_ref)] // That's the users' problem.
-	#[inline(always)]
-	pub unsafe fn get_mut_unchecked<'a>(&'a self, session: Session<'a>) -> &'a mut T {
-		// Safety: a combination of the validity of `.get` with an additional user-supplied
-		// guarantee that no one else on the same thread is borrowing the value simultaneously.
-		self.slots[session.slot() as usize].get_mut_unchecked()
 	}
 }
 
 pub struct LazySessionStorage<T> {
-	raw: OptionSessionStorage<T>,
+	/// The [SessionStorage] backing the lazy init storage.
+	///
+	/// ## Invariants
+	///
+	/// External users can only ever get an immutable reference to the `Option`'s contents. If the
+	/// `Option` is `None`, no reference will have been given to the user.
+	///
+	raw: SessionStorage<UnsafeCell<Option<T>>>,
 }
 
 impl<T> LazySessionStorage<T> {
 	pub const fn new() -> Self {
 		Self {
-			raw: OptionSessionStorage::new(),
+			raw: SessionStorage::new(arr![UnsafeCell::new(None); 256]),
 		}
 	}
 
 	#[inline(always)]
 	pub fn get<'a>(&'a self, session: Session<'a>) -> Option<&'a T> {
-		self.raw.get(session).as_ref()
+		let option = unsafe {
+			// Safety: users can only ever get an immutable reference to the contents of the option.
+			self.raw.get(session).get_ref_unchecked()
+		};
+		option.as_ref()
 	}
 
 	#[inline(always)]
@@ -415,21 +465,18 @@ impl<T> LazySessionStorage<T> {
 		);
 
 		// Initialize and return
-		unsafe {
+		let slot = unsafe {
 			// Safety: we know that no references to the `Option` because it is still `None` and
 			// we only return references to the inner value of the `Option` if it is not `None`.
-			// Because we have a session for this slot, we can assume that our thread has exclusive
-			// access to this slot.
-			// Thus, this is safe.
-			let slot = self.raw.get_mut_unchecked(session);
+			&mut *self.raw.get(session).get()
+		};
 
-			// This cannot run a destructor to observe the mutable borrow because we already checked
-			// that it was none.
-			*slot = Some(value);
+		// This cannot run a destructor to observe the mutable borrow because we already checked
+		// that it was none.
+		*slot = Some(value);
 
-			// Safety: we just need to make sure to return an immutable reference now.
-			slot.as_ref().unwrap()
-		}
+		// Safety: we just need to make sure to return an immutable reference now.
+		slot.as_ref().unwrap()
 	}
 }
 
@@ -450,6 +497,8 @@ impl<T: Default> LazySessionStorage<T> {
 /// Only [register_static_storages] can safely implement this trait.
 ///
 unsafe trait StaticStorageHygieneBreak {
+	type PrimaryStorage: PrimaryStaticStorage;
+
 	/// Runs all session initializers for a session with the specified `id`.
 	///
 	/// ## Panics
@@ -460,7 +509,7 @@ unsafe trait StaticStorageHygieneBreak {
 	///
 	/// Only supply a session for which no [Session] handles are available to untrusted code.
 	///
-	unsafe fn init_session(id: u8);
+	unsafe fn init_session(id: u8) -> &'static PrimaryStorageEntry;
 
 	/// Runs all session initializers for a session with the specified `id`.
 	///
@@ -517,66 +566,189 @@ pub(crate) trait StaticStorageHandler {
 /// **This trait is not to be implemented manually.** Instead, users should implement
 /// [StaticStorageHandler] to define the actual storage's properties and then derive this trait by
 /// registering the struct in the singleton call to [register_static_storages].
-pub(crate) unsafe trait StaticStorage: StaticStorageHandler {
-	unsafe fn backing_storage() -> &'static SessionStorage<Option<Self::Comp>>;
+pub(crate) trait StaticStorage: StaticStorageHandler {
+	fn get(session: Session) -> &Self::Comp;
+}
 
-	#[inline(always)]
-	fn get(session: Session) -> &Self::Comp {
-		unsafe {
-			match Self::backing_storage().get(session) {
-				Some(comp) => comp,
-				None => unreachable_unchecked(),
-			}
+// N.B. we made this `Sync`, even though `SessionStorage` doesn't need it, because we consistently
+// take references to the value and these would automatically become `!Send` if the pointee were `!Sync`.
+type PrimaryStorageEntryOf<T> = (u8, MutexedUnsafeCell<Option<T>>);
+
+type PrimaryStorageEntry = PrimaryStorageEntryOf<
+	<<() as StaticStorageHygieneBreak>::PrimaryStorage as StaticStorageHandler>::Comp,
+>;
+
+unsafe trait PrimaryStaticStorage: StaticStorage {
+	fn name() -> &'static str;
+
+	unsafe fn backing_storage() -> &'static SessionStorage<PrimaryStorageEntryOf<Self::Comp>>;
+
+	unsafe fn init(id: u8) -> &'static PrimaryStorageEntryOf<Self::Comp> {
+		// Safety: trust us, we're professionals. (this method is unsafe just to make sure
+		// that external users keep away from our stuff)
+		let storage = Self::backing_storage();
+
+		// Safety: We're the only thread with access to this ID.
+		let slot = storage.get_raw(id);
+
+		// Initialize the state and ensure that the user hasn't messed anything up.
+		let state = &mut *slot.1.get();
+		Self::init_comp(state);
+		assert!(
+			state.is_some(),
+			"`{}::init_comp` failed to initialize component.",
+			Self::name(),
+		);
+
+		slot
+	}
+
+	unsafe fn deinit(id: u8) {
+		// Safety: trust us, we're professionals. (this method is unsafe just to make sure
+		// that external users keep away from our stuff)
+		let storage = Self::backing_storage();
+
+		// Safety: We're accessing this state after everyone else has given up access to it.
+		let state = &mut *storage.get_raw(id).1.get();
+
+		// As a gesture of kindness, we tell the compiler that the state is not `None` at this
+		// point so the user can unwrap it for free.
+		match state {
+			Some(_) => {}
+			// Safety: if this invariant didn't hold up, we'd be dead long ago.
+			None => unreachable_unchecked(),
 		}
+
+		// Users can do whatever they want here.
+		Self::deinit_comp(state);
 	}
 }
 
-macro register_static_storages($($target:path),*$(,)?) {
+unsafe trait SecondaryStaticStorage: StaticStorage {
+	fn name() -> &'static str;
+
+	unsafe fn backing_storage() -> &'static SessionStorage<UnsafeCell<Option<Self::Comp>>>;
+
+	unsafe fn init(id: u8) {
+		// Safety: trust us, we're professionals. (this method is unsafe just to make sure
+		// that external users keep away from our stuff)
+		let storage = Self::backing_storage();
+
+		// Safety: We're accessing this state before anyone else even has access to this
+		// session and we release the reference before anyone else gets to read it.
+		let state = &mut *storage.get_raw(id).get();
+
+		// Initialize the state and ensure that the user hasn't messed anything up.
+		Self::init_comp(state);
+		assert!(
+			state.is_some(),
+			"`{}::init_comp` failed to initialize component.",
+			Self::name(),
+		);
+	}
+
+	unsafe fn deinit(id: u8) {
+		// Safety: trust us, we're professionals. (this method is unsafe just to make sure
+		// that external users keep away from our stuff)
+		let storage = Self::backing_storage();
+
+		// Safety: We're accessing this state after everyone else has given up access to it.
+		let state = &mut *storage.get_raw(id).get();
+
+		// As a gesture of kindness, we tell the compiler that the state is not `None` at this
+		// point so the user can unwrap it for free.
+		match state {
+			Some(_) => {}
+			// Safety: if this invariant didn't hold up, we'd be dead long ago.
+			None => unreachable_unchecked(),
+		}
+
+		// Users can do whatever they want here.
+		Self::deinit_comp(state);
+	}
+}
+
+macro register_static_storages(
+	$first_target:path
+	$(,$target:path)*
+	$(,)?
+) {
 	unsafe impl StaticStorageHygieneBreak for () {
-		unsafe fn init_session(id: u8) {
-			$({
-				// Safety: trust us, we're professionals. (this method is unsafe just to make sure
-				// that external users keep away from our stuff)
-				let storage = <$target as StaticStorage>::backing_storage();
+		type PrimaryStorage = $first_target;
 
-				// Safety: We're accessing this state before anyone else even has access to this
-				// session and we release the reference before anyone else gets to read it.
-				let state = storage.get_mut_unchecked(Session::new_internal(id));
-
-				// Initialize the state and ensure that the user hasn't messed anything up.
-				<$target as StaticStorageHandler>::init_comp(state);
-				assert!(state.is_some(), "`{}::init_comp` failed to initialize component.", stringify!($target));
-			};)*
+		unsafe fn init_session(id: u8) -> &'static PrimaryStorageEntry {
+			let ptr = <$first_target as PrimaryStaticStorage>::init(id);
+			$(<$target as SecondaryStaticStorage>::init(id);)*
+			ptr
 		}
 
 		unsafe fn deinit_session(id: u8) {
-			$({
-				// Safety: trust us, we're professionals. (this method is unsafe just to make sure
-				// that external users keep away from our stuff)
-				let storage = <$target as StaticStorage>::backing_storage();
+			<$first_target as PrimaryStaticStorage>::deinit(id);
+			$(<$target as SecondaryStaticStorage>::deinit(id);)*
+		}
+	}
 
-				// Safety: We're accessing this state after everyone else has given up access to it.
-				let state = storage.get_mut_unchecked(Session::new_internal(id));
+	impl StaticStorage for $first_target {
+		fn get<'a>(session: Session<'a>) -> &'a <Self as StaticStorageHandler>::Comp {
+			unsafe {
+				let entry = &session.ptr.1;
+				let entry = entry.get_ref_unchecked();
 
-				// As a gesture of kindness, we tell the compiler that the state is not `None` at this
-				// point so the user can unwrap it for free.
-				match state {
-					Some(_) => {}
-					// Safety: if this invariant didn't hold up, we'd be dead long ago.
+				match entry {
+					Some(comp) => comp,
 					None => unreachable_unchecked(),
 				}
+			}
+		}
+	}
 
-				// Users can do whatever they want here.
-				<$target as StaticStorageHandler>::deinit_comp(state);
-			};)*
+	unsafe impl PrimaryStaticStorage for $first_target {
+		fn name() -> &'static str {
+			stringify!($first_target)
+		}
+
+		unsafe fn backing_storage() -> &'static SessionStorage<PrimaryStorageEntry> {
+			static STORAGE: SessionStorage<PrimaryStorageEntry> = {
+				let mut i = 0;
+
+				SessionStorage::new(arr![(
+					{
+						let old = i;
+						if i != u8::MAX {
+							i += 1;
+						}
+						old
+					},
+					MutexedUnsafeCell::new(None),
+				); 256])
+			};
+			&STORAGE
 		}
 	}
 
 	$(
-		unsafe impl StaticStorage for $target {
-			#[inline(always)]
-			unsafe fn backing_storage() -> &'static SessionStorage<Option<Self::Comp>> {
-				static STORAGE: OptionSessionStorage<<$target as StaticStorageHandler>::Comp> = OptionSessionStorage::new();
+		impl StaticStorage for $target {
+			fn get<'a>(session: Session<'a>) -> &'a <Self as StaticStorageHandler>::Comp {
+				unsafe {
+					let entry = Self::backing_storage().get(session);
+					let entry = entry.get_ref_unchecked();
+
+					match entry {
+						Some(comp) => comp,
+						None => unreachable_unchecked(),
+					}
+				}
+			}
+		}
+
+		unsafe impl SecondaryStaticStorage for $target {
+			fn name() -> &'static str {
+				stringify!($target)
+			}
+
+			unsafe fn backing_storage() -> &'static SessionStorage<UnsafeCell<Option<<Self as StaticStorageHandler>::Comp>>> {
+				static STORAGE: SessionStorage<UnsafeCell<Option<<$target as StaticStorageHandler>::Comp>>> =
+					SessionStorage::new(arr![UnsafeCell::new(None); 256]);
 				&STORAGE
 			}
 		}

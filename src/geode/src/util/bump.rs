@@ -1,5 +1,5 @@
 use bumpalo::Bump;
-use crucible_core::cell::OnlyMut;
+use crucible_core::sync::OnlyMut;
 use std::mem::ManuallyDrop;
 
 #[derive(Debug, Default)]

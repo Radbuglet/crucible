@@ -40,3 +40,7 @@ pub mod prelude {
 }
 
 // pub use prelude::*;
+
+pub fn obj_deref(s: prelude::Session, obj: prelude::Obj<u32>) -> u32 {
+	*obj.get(s)
+}

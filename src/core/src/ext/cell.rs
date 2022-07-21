@@ -1,4 +1,4 @@
-use core::{any::type_name, cell::{Ref, RefMut, UnsafeCell}, fmt};
+use core::cell::{Ref, RefMut, UnsafeCell};
 
 use bytemuck::TransparentWrapper;
 
@@ -68,11 +68,45 @@ where
 	}
 }
 
+// === CellExt === //
+
+pub unsafe trait CellExt {
+	type Inner: ?Sized;
+
+	fn get(&self) -> *mut Self::Inner;
+
+	fn get_mut(&mut self) -> &mut Self::Inner {
+		unsafe { &mut *self.get() }
+	}
+
+	unsafe fn get_ref_unchecked(&self) -> &Self::Inner {
+		&*self.get()
+	}
+
+	#[allow(clippy::mut_from_ref)] // That's the users' problem.
+	unsafe fn get_mut_unchecked(&self) -> &mut Self::Inner {
+		&mut *self.get()
+	}
+}
+
+unsafe impl<T: ?Sized> CellExt for UnsafeCell<T> {
+	type Inner = T;
+
+	fn get(&self) -> *mut Self::Inner {
+		// This is shadowed by the inherent `impl`.
+		self.get()
+	}
+
+	fn get_mut(&mut self) -> &mut Self::Inner {
+		self.get_mut()
+	}
+}
+
 // === MutexedUnsafeCell === //
 
 /// A type of [UnsafeCell] that asserts that the given cell will only be accessed by one thread at a
 /// given time.
-#[derive(Default)]
+#[derive(Default, TransparentWrapper)]
 #[repr(transparent)]
 pub struct MutexedUnsafeCell<T: ?Sized>(UnsafeCell<T>);
 
@@ -91,54 +125,12 @@ impl<T> MutexedUnsafeCell<T> {
 	}
 }
 
-impl<T: ?Sized> MutexedUnsafeCell<T> {
-	pub fn get_mut(&mut self) -> &mut T {
-		self.0.get_mut()
-	}
+unsafe impl<T: ?Sized> CellExt for MutexedUnsafeCell<T> {
+	type Inner = T;
 
-	pub fn get(&self) -> *mut T {
+	fn get(&self) -> *mut Self::Inner {
 		self.0.get()
-	}
-
-	pub unsafe fn get_ref_unchecked(&self) -> &T {
-		&*self.get()
-	}
-
-	#[allow(clippy::mut_from_ref)] // That's the users' problem.
-	pub unsafe fn get_mut_unchecked(&self) -> &mut T {
-		&mut *self.get()
 	}
 }
 
 // impl<T, U> CoerceUnsized<MutexedUnsafeCell<U>> for MutexedUnsafeCell<T> where T: CoerceUnsized<U> {}
-
-// === OnlyMut === //
-
-#[derive(Default)]
-pub struct OnlyMut<T: ?Sized>(T);
-
-impl<T> OnlyMut<T> {
-	pub fn new(value: T) -> Self {
-		Self(value)
-	}
-}
-
-impl<T: ?Sized> fmt::Debug for OnlyMut<T> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct(format!("MakeSync<{}>", type_name::<T>()).as_str())
-			.finish_non_exhaustive()
-	}
-}
-
-impl<T: ?Sized> OnlyMut<T> {
-	pub fn get(&mut self) -> &mut T {
-		&mut self.0
-	}
-}
-
-// Safe because we only give out references to the contents when a thread has exclusive access to the
-// `OnlyMut` wrapper, thereby proving that the contents are not accessed by any other thread for the
-// duration of the outer borrow.
-unsafe impl<T: ?Sized + Send> Sync for OnlyMut<T> {}
-
-// impl<T, U> CoerceUnsized<OnlyMut<U>> for OnlyMut<T> where T: CoerceUnsized<U> {}

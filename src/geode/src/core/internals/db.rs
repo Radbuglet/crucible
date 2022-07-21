@@ -6,7 +6,10 @@
 
 use std::{alloc::Layout, borrow::Cow, fmt, sync::atomic::AtomicU64};
 
-use crucible_core::{array::arr, cell::MutexedUnsafeCell};
+use crucible_core::{
+	array::arr,
+	cell::{CellExt, MutexedUnsafeCell},
+};
 use parking_lot::Mutex;
 
 use crate::{
