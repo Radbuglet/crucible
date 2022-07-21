@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{cell::RefCell, time::Instant};
 
 use bumpalo::Bump;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -48,6 +48,31 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 		let my_box = Box::new(3u32);
 
 		b.iter(|| *my_box);
+	});
+
+	c.bench_function("borrow_mut", |b| {
+		let val = RefCell::new(3u32);
+
+		b.iter(|| {
+			let mut val = val.borrow_mut();
+			*val += 1;
+			*val
+		});
+	});
+
+	c.bench_function("borrow_mut_obj", |b| {
+		let my_lock = Lock::new(NoLabel);
+		let session = LocalSessionGuard::new();
+		let s = session.handle();
+		s.acquire_locks([my_lock.weak_copy()]);
+
+		let val = 3u32.box_obj_rw(s, my_lock.weak_copy());
+
+		b.iter(|| {
+			let mut val = val.borrow_mut(s);
+			*val += 1;
+			*val
+		});
 	});
 }
 

@@ -1,7 +1,4 @@
-use crucible_core::{
-	error::{AnyhowConvertExt, ErrorFormatExt},
-	marker::PhantomInvariant,
-};
+use crucible_core::marker::PhantomInvariant;
 use std::{
 	borrow::Borrow,
 	cell::{Ref, RefCell, RefMut},
@@ -12,7 +9,7 @@ use std::{
 use crate::core::{
 	obj::ObjPointee,
 	owned::{Destructible, Owned},
-	session::{LocalSessionGuard, Session},
+	session::Session,
 };
 
 use super::entity::{ComponentList, Entity};
@@ -57,6 +54,9 @@ pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> {
 	fn cast(entity: Entity) -> Self {
 		#[cfg(debug_assertions)]
 		{
+			use crate::core::session::LocalSessionGuard;
+			use crucible_core::error::{AnyhowConvertExt, ErrorFormatExt};
+
 			if let Err(err) =
 				Self::try_cast(LocalSessionGuard::new().handle(), entity).into_std_error()
 			{

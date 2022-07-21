@@ -7,7 +7,7 @@ use std::{
 	ptr::{self, NonNull, Pointee},
 };
 
-use crucible_core::error::ResultExt;
+use crucible_core::error::{ErrorFormatExt, ResultExt};
 use thiserror::Error;
 
 use super::{
@@ -204,24 +204,28 @@ impl RawObj {
 	}
 
 	// Fetching
+	fn decode_error(session: Session, requested: RawObj, slot_gen: ExtendedGen) -> ObjGetError {
+		let lock_id = slot_gen.meta();
+
+		if !db::is_lock_held_by(session, lock_id) {
+			return ObjGetError::Locked(ObjLockedError {
+				requested,
+				lock: Lock(lock_id),
+			});
+		}
+
+		debug_assert_ne!(slot_gen.gen(), requested.gen.gen());
+		ObjGetError::Dead(ObjDeadError {
+			requested,
+			new_gen: slot_gen.gen(),
+		})
+	}
+
 	pub fn try_get_ptr(&self, session: Session) -> Result<NonNull<u8>, ObjGetError> {
 		#[cold]
 		#[inline(never)]
 		fn decode_error(session: Session, requested: RawObj, slot_gen: ExtendedGen) -> ObjGetError {
-			let lock_id = slot_gen.meta();
-
-			if !db::is_lock_held_by(session, lock_id) {
-				return ObjGetError::Locked(ObjLockedError {
-					requested,
-					lock: Lock(lock_id),
-				});
-			}
-
-			debug_assert_ne!(slot_gen.gen(), requested.gen.gen());
-			ObjGetError::Dead(ObjDeadError {
-				requested,
-				new_gen: slot_gen.gen(),
-			})
+			RawObj::decode_error(session, requested, slot_gen)
 		}
 
 		match db::try_get_obj_ptr(session, self.slot, self.gen) {
@@ -234,7 +238,21 @@ impl RawObj {
 	}
 
 	pub fn get_ptr(&self, session: Session) -> NonNull<u8> {
-		self.try_get_ptr(session).unwrap_pretty()
+		// N.B. we don't `.unwrap_pretty()` on `try_get_ptr` because we want the entire cold path
+		// to be in its own function to reduce codegen output size.
+		#[cold]
+		#[inline(never)]
+		fn raise_error(session: Session, requested: RawObj, slot_gen: ExtendedGen) -> ! {
+			RawObj::decode_error(session, requested, slot_gen).raise()
+		}
+
+		match db::try_get_obj_ptr(session, self.slot, self.gen) {
+			Ok(ptr) => unsafe {
+				// Safety: `RawObj` never points to a null pointer while alive.
+				NonNull::new_unchecked(ptr.cast::<u8>())
+			},
+			Err(slot_gen) => raise_error(session, *self, slot_gen),
+		}
 	}
 
 	pub fn weak_get_ptr(&self, session: Session) -> Result<NonNull<u8>, ObjDeadError> {
@@ -352,7 +370,10 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 	}
 
 	pub fn get<'a>(&self, session: Session<'a>) -> &'a T {
-		self.try_get(session).unwrap_pretty()
+		let base_addr = self.raw.get_ptr(session);
+		let ptr = std::ptr::from_raw_parts(base_addr.as_ptr() as *const (), self.meta);
+
+		unsafe { &*ptr }
 	}
 
 	pub fn weak_get<'a>(&self, session: Session<'a>) -> Result<&'a T, ObjDeadError> {
