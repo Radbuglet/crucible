@@ -43,7 +43,7 @@ component_bundle! {
 	pub struct ViewportBundle(ViewportBundleCtor) {
 		viewport: RefCell<Viewport>,
 		input_tracker: RefCell<InputTracker>,
-		render_handler: dyn EventHandlerTerminal<ViewportRenderEvent>,
+		render_handler: dyn EventHandlerOnce<ViewportRenderEvent>,
 		depth_texture[DepthTextureKey::key()]: RefCell<ScreenTexture>,
 	}
 }
@@ -185,11 +185,11 @@ impl ViewportBundle {
 				let current_scene = p_scene_mgr.current_scene();
 
 				current_scene
-					.get::<dyn EventHandlerTerminal<ViewportRenderEvent>>(s)
+					.get::<dyn EventHandlerOnce<ViewportRenderEvent>>(s)
 					.fire(s, current_scene, event);
 			},
 		)
-		.to_unsized::<dyn EventHandlerTerminal<ViewportRenderEvent>>();
+		.to_unsized::<dyn EventHandlerOnce<ViewportRenderEvent>>();
 
 		let depth_texture = ScreenTexture::new(
 			gfx,

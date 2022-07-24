@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Default)]
+use bytemuck::TransparentWrapper;
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Default, TransparentWrapper)]
 #[repr(transparent)]
 pub struct Owned<T: Destructible>(T);
 

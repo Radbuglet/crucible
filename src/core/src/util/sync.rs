@@ -1,9 +1,11 @@
 use core::any::type_name;
 use core::fmt;
 
+use bytemuck::TransparentWrapper;
+
 // === AssertSync === //
 
-#[derive(Default)]
+#[derive(TransparentWrapper, Default)]
 #[repr(transparent)]
 pub struct AssertSync<T: ?Sized>(T);
 

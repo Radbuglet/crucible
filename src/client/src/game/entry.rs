@@ -28,7 +28,7 @@ component_bundle! {
 		voxel_mesh: RefCell<VoxelWorldMesh>,
 		handlers: GameSceneBundleHandlers,
 		update_handler: dyn EventHandler<SceneUpdateEvent>,
-		render_handler: dyn EventHandlerTerminal<ViewportRenderEvent>,
+		render_handler: dyn EventHandlerOnce<ViewportRenderEvent>,
 		local_camera: RefCell<FreeCamController>,
 	}
 
@@ -159,7 +159,7 @@ impl EventHandler<SceneUpdateEvent> for GameSceneBundleHandlers {
 	}
 }
 
-impl EventHandlerTerminal<ViewportRenderEvent> for GameSceneBundleHandlers {
+impl EventHandlerOnce<ViewportRenderEvent> for GameSceneBundleHandlers {
 	fn fire(&self, s: Session, me: Entity, event: ViewportRenderEvent) {
 		// Acquire services
 		let me = GameSceneBundle::cast(me);
