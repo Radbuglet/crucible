@@ -41,20 +41,25 @@ impl<T, const N: usize> MacroArrayBuilder<T, N> {
 			len: N,
 		}
 	}
+
+	pub const unsafe fn unwrap(self) -> [T; N] {
+		// Safety: `array` is the first element of this `repr(C)` structure so we can transmute an
+		// owned instance of the structure into an owned instance of this field. We also perform an
+		// implicit transmute from `[MaybeUninit<T>; N]` to `[T; N]`, whose safety is guaranteed by
+		// the caller.
+		super_unchecked_transmute(self)
+	}
 }
 
 impl<T, const N: usize> Drop for MacroArrayBuilder<T, N> {
 	fn drop(&mut self) {
 		for i in 0..self.init_count {
-			unsafe { self.array[i].assume_init_drop() };
+			unsafe {
+				// Safety: provided during call to `MacroArrayBuilder::new`.
+				self.array[i].assume_init_drop()
+			};
 		}
 	}
-}
-
-pub const unsafe fn unwrap_macro_array_builder<T, const N: usize>(
-	builder: MacroArrayBuilder<T, N>,
-) -> [T; N] {
-	super_unchecked_transmute(builder)
 }
 
 pub macro arr($ctor:expr; $size:expr) {{
@@ -65,7 +70,7 @@ pub macro arr($ctor:expr; $size:expr) {{
 		arr.init_count += 1;
 	}
 
-	unsafe { unwrap_macro_array_builder(arr) }
+	unsafe { arr.unwrap() }
 }}
 
 // === Boxed array creation === //

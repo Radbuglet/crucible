@@ -68,9 +68,9 @@ where
 	}
 }
 
-// === CellExt === //
+// === UnsafeCellExt === //
 
-pub unsafe trait CellExt {
+pub unsafe trait UnsafeCellExt {
 	type Inner: ?Sized;
 
 	fn get(&self) -> *mut Self::Inner;
@@ -89,7 +89,7 @@ pub unsafe trait CellExt {
 	}
 }
 
-unsafe impl<T: ?Sized> CellExt for UnsafeCell<T> {
+unsafe impl<T: ?Sized> UnsafeCellExt for UnsafeCell<T> {
 	type Inner = T;
 
 	fn get(&self) -> *mut Self::Inner {
@@ -125,7 +125,7 @@ impl<T> MutexedUnsafeCell<T> {
 	}
 }
 
-unsafe impl<T: ?Sized> CellExt for MutexedUnsafeCell<T> {
+unsafe impl<T: ?Sized> UnsafeCellExt for MutexedUnsafeCell<T> {
 	type Inner = T;
 
 	fn get(&self) -> *mut Self::Inner {

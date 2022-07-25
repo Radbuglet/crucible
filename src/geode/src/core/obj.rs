@@ -13,7 +13,7 @@ use thiserror::Error;
 use super::{
 	debug::DebugLabel,
 	internals::{db, gen::ExtendedGen, heap::Slot},
-	owned::{Destructible, Owned},
+	owned::{Destructible, MaybeOwned, Owned},
 	reflect::ReflectType,
 	session::{LocalSessionGuard, Session},
 };
@@ -264,32 +264,6 @@ impl Destructible for RawObj {
 	}
 }
 
-impl Owned<RawObj> {
-	pub fn try_get_ptr(&self, session: Session) -> Result<NonNull<u8>, ObjGetError> {
-		self.weak_copy().try_get_ptr(session)
-	}
-
-	pub fn get_ptr(&self, session: Session) -> NonNull<u8> {
-		self.weak_copy().get_ptr(session)
-	}
-
-	pub fn weak_get_ptr(&self, session: Session) -> Result<NonNull<u8>, ObjDeadError> {
-		self.weak_copy().weak_get_ptr(session)
-	}
-
-	pub fn is_alive_now(&self, session: Session) -> bool {
-		self.weak_copy().is_alive_now(session)
-	}
-
-	pub fn ptr_gen(&self) -> u64 {
-		self.weak_copy().ptr_gen()
-	}
-
-	pub fn destroy(self, session: Session) -> bool {
-		self.manually_destruct().destroy(session)
-	}
-}
-
 // === Obj === //
 
 pub unsafe trait ObjPointee: 'static + Send {}
@@ -299,6 +273,50 @@ unsafe impl<T: ?Sized + 'static + Send> ObjPointee for T {}
 pub struct Obj<T: ?Sized + ObjPointee> {
 	raw: RawObj,
 	meta: <T as Pointee>::Metadata,
+}
+
+impl<T: ?Sized + ObjPointee + fmt::Debug> fmt::Debug for Obj<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let session = LocalSessionGuard::new();
+		let s = session.handle();
+
+		let value = self.try_get(s);
+
+		f.debug_struct("Obj")
+			.field("gen", &self.raw.gen.gen())
+			.field("value", &value)
+			.finish_non_exhaustive()
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Copy for Obj<T> {}
+
+impl<T: ?Sized + ObjPointee> Clone for Obj<T> {
+	fn clone(&self) -> Self {
+		*self
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Eq for Obj<T> {}
+
+impl<T: ?Sized + ObjPointee> PartialEq for Obj<T> {
+	fn eq(&self, other: &Self) -> bool {
+		self.raw == other.raw
+	}
+}
+
+impl<T: ?Sized + ObjPointee> hash::Hash for Obj<T> {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		self.raw.hash(state);
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Destructible for Obj<T> {
+	fn destruct(self) {
+		LocalSessionGuard::with_new(|session| {
+			self.destroy(session.handle());
+		})
+	}
 }
 
 impl<T: Sized + ObjPointee + Sync> Obj<T> {
@@ -397,49 +415,61 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 	}
 }
 
-impl<T: ?Sized + ObjPointee + fmt::Debug> fmt::Debug for Obj<T> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let session = LocalSessionGuard::new();
-		let s = session.handle();
+// === Owned<RawObj> Forwards === //
 
-		let value = self.try_get(s);
+impl Owned<RawObj> {
+	pub fn try_get_ptr(&self, session: Session) -> Result<NonNull<u8>, ObjGetError> {
+		self.weak_copy().try_get_ptr(session)
+	}
 
-		f.debug_struct("Obj")
-			.field("gen", &self.raw.gen.gen())
-			.field("value", &value)
-			.finish_non_exhaustive()
+	pub fn get_ptr(&self, session: Session) -> NonNull<u8> {
+		self.weak_copy().get_ptr(session)
+	}
+
+	pub fn weak_get_ptr(&self, session: Session) -> Result<NonNull<u8>, ObjDeadError> {
+		self.weak_copy().weak_get_ptr(session)
+	}
+
+	pub fn is_alive_now(&self, session: Session) -> bool {
+		self.weak_copy().is_alive_now(session)
+	}
+
+	pub fn ptr_gen(&self) -> u64 {
+		self.weak_copy().ptr_gen()
+	}
+
+	pub fn destroy(self, session: Session) -> bool {
+		self.manually_destruct().destroy(session)
 	}
 }
 
-impl<T: ?Sized + ObjPointee> Copy for Obj<T> {}
+impl MaybeOwned<RawObj> {
+	pub fn try_get_ptr(&self, session: Session) -> Result<NonNull<u8>, ObjGetError> {
+		self.weak_copy().try_get_ptr(session)
+	}
 
-impl<T: ?Sized + ObjPointee> Clone for Obj<T> {
-	fn clone(&self) -> Self {
-		*self
+	pub fn get_ptr(&self, session: Session) -> NonNull<u8> {
+		self.weak_copy().get_ptr(session)
+	}
+
+	pub fn weak_get_ptr(&self, session: Session) -> Result<NonNull<u8>, ObjDeadError> {
+		self.weak_copy().weak_get_ptr(session)
+	}
+
+	pub fn is_alive_now(&self, session: Session) -> bool {
+		self.weak_copy().is_alive_now(session)
+	}
+
+	pub fn ptr_gen(&self) -> u64 {
+		self.weak_copy().ptr_gen()
+	}
+
+	pub fn destroy(self, session: Session) -> bool {
+		self.manually_destruct().destroy(session)
 	}
 }
 
-impl<T: ?Sized + ObjPointee> Eq for Obj<T> {}
-
-impl<T: ?Sized + ObjPointee> PartialEq for Obj<T> {
-	fn eq(&self, other: &Self) -> bool {
-		self.raw == other.raw
-	}
-}
-
-impl<T: ?Sized + ObjPointee> hash::Hash for Obj<T> {
-	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		self.raw.hash(state);
-	}
-}
-
-impl<T: ?Sized + ObjPointee> Destructible for Obj<T> {
-	fn destruct(self) {
-		LocalSessionGuard::with_new(|session| {
-			self.destroy(session.handle());
-		})
-	}
-}
+// === Owned<Obj> Forwards === //
 
 impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 	pub fn try_get<'a>(&self, session: Session<'a>) -> Result<&'a T, ObjGetError> {
@@ -472,6 +502,52 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 		U: ?Sized + ObjPointee,
 	{
 		self.map_owned(|obj| obj.unsize())
+	}
+
+	pub fn is_alive_now(&self, session: Session) -> bool {
+		self.weak_copy().is_alive_now(session)
+	}
+
+	pub fn ptr_gen(&self) -> u64 {
+		self.weak_copy().ptr_gen()
+	}
+
+	pub fn destroy(self, session: Session) -> bool {
+		self.manually_destruct().destroy(session)
+	}
+}
+
+impl<T: ?Sized + ObjPointee> MaybeOwned<Obj<T>> {
+	pub fn try_get<'a>(&self, session: Session<'a>) -> Result<&'a T, ObjGetError> {
+		self.weak_copy().try_get(session)
+	}
+
+	pub fn get<'a>(&self, session: Session<'a>) -> &'a T {
+		self.weak_copy().get(session)
+	}
+
+	pub fn weak_get<'a>(&self, session: Session<'a>) -> Result<&'a T, ObjDeadError> {
+		self.weak_copy().weak_get(session)
+	}
+
+	pub fn raw(self) -> MaybeOwned<RawObj> {
+		self.map(|obj| obj.raw())
+	}
+
+	pub unsafe fn transmute_unchecked<U: ?Sized + ObjPointee>(
+		self,
+		meta: <U as Pointee>::Metadata,
+	) -> MaybeOwned<Obj<U>> {
+		// Safety: provided by caller
+		self.map(|obj| obj.transmute_unchecked(meta))
+	}
+
+	pub fn unsize<U>(self) -> MaybeOwned<Obj<U>>
+	where
+		T: Unsize<U>,
+		U: ?Sized + ObjPointee,
+	{
+		self.map(|obj| obj.unsize())
 	}
 
 	pub fn is_alive_now(&self, session: Session) -> bool {

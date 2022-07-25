@@ -14,7 +14,7 @@ use super::math::{
 
 // === Voxel Data Containers === //
 
-pub type ChunkFactory = OwnedOrWeak<Obj<dyn Factory<ChunkFactoryRequest, Owned<Entity>>>>;
+pub type ChunkFactory = dyn Factory<ChunkFactoryRequest, Owned<Entity>>;
 
 #[derive(Debug)]
 pub struct ChunkFactoryRequest {
@@ -23,12 +23,12 @@ pub struct ChunkFactoryRequest {
 }
 
 pub struct VoxelWorldData {
-	chunk_factory: ChunkFactory,
+	chunk_factory: MaybeOwned<Obj<ChunkFactory>>,
 	chunks: HashMap<ChunkPos, Owned<Entity>>,
 }
 
 impl VoxelWorldData {
-	pub fn new(chunk_factory: ChunkFactory) -> Self {
+	pub fn new(chunk_factory: MaybeOwned<Obj<ChunkFactory>>) -> Self {
 		Self {
 			chunk_factory,
 			chunks: Default::default(),
@@ -45,7 +45,6 @@ impl VoxelWorldData {
 		// Create chunk
 		let (chunk, weak_chunk) = self
 			.chunk_factory
-			.weak_copy()
 			.get(s)
 			.create(
 				s,

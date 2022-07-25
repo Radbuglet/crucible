@@ -19,7 +19,7 @@ pub mod prelude {
 		core::{
 			debug::NoLabel,
 			obj::{Lock, Obj, ObjCtorExt, ObjPointee, ObjRw, RawObj},
-			owned::{Owned, OwnedOrWeak},
+			owned::{MaybeOwned, Owned},
 			reflect::ReflectType,
 			session::{LocalSessionGuard, Session},
 		},

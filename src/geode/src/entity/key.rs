@@ -4,9 +4,7 @@ use std::{
 	sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
 };
 
-use crucible_core::marker::PhantomInvariant;
-
-use crate::core::reflect::NamedTypeId;
+use crucible_core::{marker::PhantomInvariant, type_id::NamedTypeId};
 
 // === `TypedKey` === //
 

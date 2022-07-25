@@ -12,7 +12,7 @@ pub unsafe trait SmartAllocator {
 	unsafe fn smart_deallocate_no_ctx(&self, handle: Self::Handle, layout: Layout);
 }
 
-pub unsafe trait SmartAllocatorFor<'a, C: 'a + Copy>: SmartAllocator {
+pub unsafe trait SmartAllocatorFor<'c, C: 'c + Copy>: SmartAllocator {
 	fn deref_handle(&self, context: C, handle: Self::Handle) -> NonNull<u8>;
 
 	fn smart_allocate(
@@ -105,7 +105,7 @@ unsafe impl<A: ?Sized + Allocator> SmartAllocator for A {
 	}
 }
 
-unsafe impl<'a, A> SmartAllocatorFor<'a, ()> for A
+unsafe impl<'c, A> SmartAllocatorFor<'c, ()> for A
 where
 	A: ?Sized + Allocator,
 {
@@ -180,14 +180,14 @@ unsafe impl SmartAllocator for ObjAllocator {
 	}
 }
 
-unsafe impl<'a> SmartAllocatorFor<'a, Session<'a>> for ObjAllocator {
-	fn deref_handle(&self, session: Session<'a>, handle: Self::Handle) -> NonNull<u8> {
+unsafe impl<'c> SmartAllocatorFor<'c, Session<'c>> for ObjAllocator {
+	fn deref_handle(&self, session: Session<'c>, handle: Self::Handle) -> NonNull<u8> {
 		handle.get_ptr(session)
 	}
 
 	fn smart_allocate(
 		&self,
-		session: Session<'a>,
+		session: Session<'c>,
 		layout: Layout,
 	) -> Result<(Self::Handle, NonNull<[u8]>), AllocError> {
 		let (handle, ptr) = RawObj::new_dynamic(session, layout);
@@ -199,7 +199,7 @@ unsafe impl<'a> SmartAllocatorFor<'a, Session<'a>> for ObjAllocator {
 		))
 	}
 
-	unsafe fn smart_deallocate(&self, session: Session<'a>, ptr: Self::Handle, _layout: Layout) {
+	unsafe fn smart_deallocate(&self, session: Session<'c>, ptr: Self::Handle, _layout: Layout) {
 		ptr.destroy(session);
 	}
 }

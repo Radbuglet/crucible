@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::core::{
 	obj::{Obj, ObjGetError, ObjLockedError, ObjPointee},
-	owned::{Destructible, Owned, OwnedOrWeak},
+	owned::{Destructible, MaybeOwned, Owned},
 	session::{LocalSessionGuard, Session},
 };
 
@@ -113,6 +113,33 @@ impl Entity {
 	}
 }
 
+impl Destructible for Entity {
+	fn destruct(self) {
+		LocalSessionGuard::with_new(|session| {
+			self.destroy(session.handle());
+		});
+	}
+}
+
+impl fmt::Debug for Entity {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let session = LocalSessionGuard::new();
+		let s = session.handle();
+
+		let keys = self
+			.obj
+			.try_get(s)
+			.map(|mutex| mutex.lock().map.keys().copied().collect::<Vec<_>>());
+
+		f.debug_struct("Entity")
+			.field("gen", &self.obj.ptr_gen())
+			.field("components", &keys)
+			.finish()
+	}
+}
+
+// === `Owned<Entity>` Forwards === //
+
 impl Owned<Entity> {
 	pub fn add<L: ComponentList>(&self, session: Session, components: L) {
 		self.weak_copy().add(session, components)
@@ -162,28 +189,52 @@ impl Owned<Entity> {
 	}
 }
 
-impl Destructible for Entity {
-	fn destruct(self) {
-		LocalSessionGuard::with_new(|session| {
-			self.destroy(session.handle());
-		});
+impl MaybeOwned<Entity> {
+	pub fn add<L: ComponentList>(&self, session: Session, components: L) {
+		self.weak_copy().add(session, components)
 	}
-}
 
-impl fmt::Debug for Entity {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let session = LocalSessionGuard::new();
-		let s = session.handle();
+	pub fn fallible_get_in<'a, T: ?Sized + ObjPointee>(
+		&self,
+		session: Session<'a>,
+		key: TypedKey<T>,
+	) -> Result<&'a T, EntityGetError> {
+		self.weak_copy().fallible_get_in(session, key)
+	}
 
-		let keys = self
-			.obj
-			.try_get(s)
-			.map(|mutex| mutex.lock().map.keys().copied().collect::<Vec<_>>());
+	pub fn fallible_get<'a, T: ?Sized + ObjPointee>(
+		&self,
+		session: Session<'a>,
+	) -> Result<&'a T, EntityGetError> {
+		self.weak_copy().fallible_get(session)
+	}
 
-		f.debug_struct("Entity")
-			.field("gen", &self.obj.ptr_gen())
-			.field("components", &keys)
-			.finish()
+	pub fn get_in<'a, T: ?Sized + ObjPointee>(
+		&self,
+		session: Session<'a>,
+		key: TypedKey<T>,
+	) -> &'a T {
+		self.weak_copy().get_in(session, key)
+	}
+
+	pub fn get<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> &'a T {
+		self.weak_copy().get(session)
+	}
+
+	pub fn borrow<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> Ref<'a, T> {
+		self.weak_copy().borrow(session)
+	}
+
+	pub fn borrow_mut<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> RefMut<'a, T> {
+		self.weak_copy().borrow_mut(session)
+	}
+
+	pub fn is_alive_now(&self, session: Session) -> bool {
+		self.weak_copy().is_alive_now(session)
+	}
+
+	pub fn destroy(self, session: Session) -> bool {
+		self.manually_destruct().destroy(session)
 	}
 }
 
@@ -320,39 +371,39 @@ impl<T: ?Sized + ObjPointee> SingleComponent for Owned<Obj<T>> {
 	}
 }
 
-impl<T: ?Sized + ObjPointee> SingleComponent for OwnedOrWeak<Obj<T>> {
+impl<T: ?Sized + ObjPointee> SingleComponent for MaybeOwned<Obj<T>> {
 	type Value = T;
 
 	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
 		match self {
-			OwnedOrWeak::Owned(owned) => registry.add_owned(key, owned),
-			OwnedOrWeak::Weak(weak) => registry.add_weak(key, weak),
+			MaybeOwned::Owned(owned) => registry.add_owned(key, owned),
+			MaybeOwned::Weak(weak) => registry.add_weak(key, weak),
 		}
 	}
 }
 
-// `Option<OwnedOrWeak<T>>` conversions
+// `Option<MaybeOwned<T>>` conversions
 
-impl<T: ?Sized + ObjPointee> SingleComponent for Option<OwnedOrWeak<Obj<T>>> {
+impl<T: ?Sized + ObjPointee> SingleComponent for Option<MaybeOwned<Obj<T>>> {
 	type Value = T;
 
 	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
 		match self {
-			Some(OwnedOrWeak::Owned(owned)) => registry.add_owned(key, owned),
-			Some(OwnedOrWeak::Weak(weak)) => registry.add_weak(key, weak),
+			Some(MaybeOwned::Owned(owned)) => registry.add_owned(key, owned),
+			Some(MaybeOwned::Weak(weak)) => registry.add_weak(key, weak),
 			None => {}
 		}
 	}
 }
 
-impl<T: ?Sized + ObjPointee> From<Owned<Obj<T>>> for Option<OwnedOrWeak<Obj<T>>> {
+impl<T: ?Sized + ObjPointee> From<Owned<Obj<T>>> for Option<MaybeOwned<Obj<T>>> {
 	fn from(owned: Owned<Obj<T>>) -> Self {
-		Some(OwnedOrWeak::Owned(owned))
+		Some(MaybeOwned::Owned(owned))
 	}
 }
 
-impl<T: ?Sized + ObjPointee> From<Obj<T>> for Option<OwnedOrWeak<Obj<T>>> {
+impl<T: ?Sized + ObjPointee> From<Obj<T>> for Option<MaybeOwned<Obj<T>>> {
 	fn from(weak: Obj<T>) -> Self {
-		Some(OwnedOrWeak::Weak(weak))
+		Some(MaybeOwned::Weak(weak))
 	}
 }

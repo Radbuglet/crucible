@@ -17,5 +17,5 @@ thiserror = "1.0.31"
 criterion = "0.3.6"
 
 [[bench]]
-name = "obj_alloc"
+name = "bench"
 harness = false

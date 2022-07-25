@@ -8,7 +8,7 @@ use std::{alloc::Layout, borrow::Cow, fmt, sync::atomic::AtomicU64};
 
 use crucible_core::{
 	array::arr,
-	cell::{CellExt, MutexedUnsafeCell},
+	cell::{MutexedUnsafeCell, UnsafeCellExt},
 };
 use parking_lot::Mutex;
 
@@ -39,7 +39,8 @@ struct GlobalMutexedData {
 	/// A bit set of reserved locks.
 	reserved_locks: U8BitSet,
 
-	/// A bit set of locks held by a session. A lock can be held without being reserved.
+	/// A bit set of locks held by a session. A lock can be held without being reserved if it is
+	/// released during its reservation.
 	held_locks: U8BitSet,
 
 	/// Debug names for the various locks.

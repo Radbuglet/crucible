@@ -7,7 +7,7 @@ use std::{
 
 use crucible_core::{
 	array::arr,
-	cell::{CellExt, MutexedUnsafeCell},
+	cell::{MutexedUnsafeCell, UnsafeCellExt},
 	marker::{PhantomNoSendOrSync, PhantomNoSync},
 	sync::AssertSync,
 	transmute::super_unchecked_transmute,
