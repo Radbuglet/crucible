@@ -126,7 +126,7 @@ pub struct RawBlockState<'a> {
 	/// Format:
 	///
 	/// ```text
-	/// LSB
+	/// LSB                                      MSB
 	/// ---- ---- ~~~~ ~~~~ | ---- ---- | ~~~~ ~~~~ |
 	/// Material Data       | Variant   | Light lvl |
 	/// (u16)               | (u8)      | (u8)      |

@@ -16,7 +16,7 @@ pub const MAX_OBJ_GEN_EXCLUSIVE: u64 = 2u64.pow(64 - 8);
 /// - By keeping the session IDs the same size as our lock ID, we can define the bytes comprising
 ///   a [SessionLocks] collection as being XOR masks from the associated lock+gen ID to the
 ///   associated `ONE+gen` ID, which we can then directly compare against the [ExtendedGen]
-///   present in the [Obj](crate::Obj).
+///   present in the [Obj](crate::prelude::Obj).
 ///
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct ExtendedGen(u64);

@@ -71,36 +71,6 @@ impl Session<'_> {
 	}
 }
 
-// === `ObjCast` Trait === //
-
-pub unsafe trait ObjCast<T: ?Sized> {
-	fn transform_meta(meta: <Self as Pointee>::Metadata) -> <T as Pointee>::Metadata;
-
-	fn cast_ref(&self) -> &T {
-		let (base, meta) = (self as *const Self).to_raw_parts();
-		let ptr = ptr::from_raw_parts(base, Self::transform_meta(meta));
-		unsafe { &*ptr }
-	}
-
-	fn cast_mut(&mut self) -> &mut T {
-		let (base, meta) = (self as *mut Self).to_raw_parts();
-		let ptr = ptr::from_raw_parts_mut(base, Self::transform_meta(meta));
-		unsafe { &mut *ptr }
-	}
-}
-
-unsafe impl<A, B> ObjCast<B> for A
-where
-	A: ?Sized + Unsize<B>,
-	B: ?Sized,
-{
-	fn transform_meta(meta: <Self as Pointee>::Metadata) -> <B as Pointee>::Metadata {
-		let ptr = ptr::from_raw_parts::<A>(ptr::null(), meta) as *const B;
-		let (_, meta) = ptr.to_raw_parts();
-		meta
-	}
-}
-
 // === Obj Errors === //
 
 #[derive(Debug, Copy, Clone, Error)]
@@ -264,6 +234,14 @@ impl RawObj {
 		self.get_ptr(session)
 	}
 
+	// Casting
+	pub unsafe fn to_typed_unchecked<T: ?Sized + ObjPointee>(
+		&self,
+		meta: <T as Pointee>::Metadata,
+	) -> Obj<T> {
+		Obj { raw: *self, meta }
+	}
+
 	// Lifecycle management
 	pub fn is_alive_now(&self, _session: Session) -> bool {
 		self.slot.is_alive(self.gen)
@@ -381,19 +359,28 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 	}
 
 	// Casting
-	pub fn as_raw(&self) -> RawObj {
+	pub fn raw(&self) -> RawObj {
 		self.raw
 	}
 
-	pub fn cast<U>(&self) -> Obj<U>
+	pub unsafe fn transmute_unchecked<U: ?Sized + ObjPointee>(
+		&self,
+		meta: <U as Pointee>::Metadata,
+	) -> Obj<U> {
+		// Safety: provided by caller
+		self.raw().to_typed_unchecked(meta)
+	}
+
+	pub fn unsize<U>(&self) -> Obj<U>
 	where
-		T: ObjCast<U>,
+		T: Unsize<U>,
 		U: ?Sized + ObjPointee,
 	{
-		Obj {
-			raw: self.raw,
-			meta: T::transform_meta(self.meta),
-		}
+		let ptr = ptr::from_raw_parts::<T>(ptr::null(), self.meta);
+		let ptr = ptr as *const U;
+		let (_, meta) = ptr.to_raw_parts();
+
+		unsafe { self.transmute_unchecked(meta) }
 	}
 
 	// Lifecycle management
@@ -467,16 +454,24 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 		self.weak_copy().weak_get(session)
 	}
 
-	pub fn as_raw(self) -> Owned<RawObj> {
-		self.map_owned(|obj| obj.as_raw())
+	pub fn raw(self) -> Owned<RawObj> {
+		self.map_owned(|obj| obj.raw())
 	}
 
-	pub fn cast<U>(self) -> Owned<Obj<U>>
+	pub unsafe fn transmute_unchecked<U: ?Sized + ObjPointee>(
+		self,
+		meta: <U as Pointee>::Metadata,
+	) -> Owned<Obj<U>> {
+		// Safety: provided by caller
+		self.map_owned(|obj| obj.transmute_unchecked(meta))
+	}
+
+	pub fn unsize<U>(self) -> Owned<Obj<U>>
 	where
-		T: ObjCast<U>,
+		T: Unsize<U>,
 		U: ?Sized + ObjPointee,
 	{
-		self.map_owned(|obj| obj.cast())
+		self.map_owned(|obj| obj.unsize())
 	}
 
 	pub fn is_alive_now(&self, session: Session) -> bool {
@@ -547,10 +542,10 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 		T: Unsize<U>,
 		U: ?Sized + ObjPointee,
 	{
-		Owned::new(self.manually_destruct().cast::<U>())
+		Owned::new(self.manually_destruct().unsize::<U>())
 	}
 
 	pub fn to_raw(self) -> Owned<RawObj> {
-		Owned::new(self.manually_destruct().as_raw())
+		Owned::new(self.manually_destruct().raw())
 	}
 }

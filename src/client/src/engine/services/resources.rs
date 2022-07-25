@@ -148,7 +148,7 @@ impl ResourceManager {
 			// Box the entry
 			let (entry_guard, entry) = ResourceEntry {
 				hash,
-				descriptor: descriptor_guard.cast(),
+				descriptor: descriptor_guard.unsize(),
 				value: OnceCell::new(),
 				tou_time: Cell::new(Instant::now()),
 				tou_left: Cell::new(None), // We'll initialize these down below.

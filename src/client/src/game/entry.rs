@@ -69,8 +69,8 @@ impl GameSceneBundle {
 				voxel_data: voxel_data_guard.into(),
 				voxel_mesh: voxel_mesh_guard.into(),
 				handlers: handlers_guard.into(),
-				update_handler: handlers.cast().into(),
-				render_handler: handlers.cast().into(),
+				update_handler: handlers.unsize().into(),
+				render_handler: handlers.unsize().into(),
 				local_camera: local_camera_guard.into(),
 			},
 		);
