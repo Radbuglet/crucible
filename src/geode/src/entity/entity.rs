@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::core::{
 	obj::{Obj, ObjGetError, ObjLockedError, ObjPointee},
-	owned::{Destructible, Owned},
+	owned::{Destructible, Owned, OwnedOrWeak},
 	session::{LocalSessionGuard, Session},
 };
 
@@ -320,13 +320,7 @@ impl<T: ?Sized + ObjPointee> SingleComponent for Owned<Obj<T>> {
 	}
 }
 
-#[derive(Debug)]
-pub enum OwnedOrWeak<T: ?Sized + ObjPointee> {
-	Owned(Owned<Obj<T>>),
-	Weak(Obj<T>),
-}
-
-impl<T: ?Sized + ObjPointee> SingleComponent for OwnedOrWeak<T> {
+impl<T: ?Sized + ObjPointee> SingleComponent for OwnedOrWeak<Obj<T>> {
 	type Value = T;
 
 	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
@@ -337,21 +331,9 @@ impl<T: ?Sized + ObjPointee> SingleComponent for OwnedOrWeak<T> {
 	}
 }
 
-impl<T: ?Sized + ObjPointee> From<Owned<Obj<T>>> for OwnedOrWeak<T> {
-	fn from(owned: Owned<Obj<T>>) -> Self {
-		Self::Owned(owned)
-	}
-}
-
-impl<T: ?Sized + ObjPointee> From<Obj<T>> for OwnedOrWeak<T> {
-	fn from(weak: Obj<T>) -> Self {
-		Self::Weak(weak)
-	}
-}
-
 // `Option<OwnedOrWeak<T>>` conversions
 
-impl<T: ?Sized + ObjPointee> SingleComponent for Option<OwnedOrWeak<T>> {
+impl<T: ?Sized + ObjPointee> SingleComponent for Option<OwnedOrWeak<Obj<T>>> {
 	type Value = T;
 
 	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
@@ -363,13 +345,13 @@ impl<T: ?Sized + ObjPointee> SingleComponent for Option<OwnedOrWeak<T>> {
 	}
 }
 
-impl<T: ?Sized + ObjPointee> From<Owned<Obj<T>>> for Option<OwnedOrWeak<T>> {
+impl<T: ?Sized + ObjPointee> From<Owned<Obj<T>>> for Option<OwnedOrWeak<Obj<T>>> {
 	fn from(owned: Owned<Obj<T>>) -> Self {
 		Some(OwnedOrWeak::Owned(owned))
 	}
 }
 
-impl<T: ?Sized + ObjPointee> From<Obj<T>> for Option<OwnedOrWeak<T>> {
+impl<T: ?Sized + ObjPointee> From<Obj<T>> for Option<OwnedOrWeak<Obj<T>>> {
 	fn from(weak: Obj<T>) -> Self {
 		Some(OwnedOrWeak::Weak(weak))
 	}

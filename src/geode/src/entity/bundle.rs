@@ -17,9 +17,10 @@ use super::entity::{ComponentList, Entity};
 #[allow(unused)] // Actually captured by the macro
 use {
 	super::{
-		entity::{ComponentAttachTarget, OwnedOrWeak, SingleComponent},
+		entity::{ComponentAttachTarget, SingleComponent},
 		key::typed_key,
 	},
+	crate::core::{obj::Obj, owned::OwnedOrWeak},
 	bytemuck::TransparentWrapper,
 	crucible_core::macros::prefer_left,
 };
@@ -152,7 +153,7 @@ impl<T: ?Sized + ObjPointee> ComponentBundle for EntityWith<T> {
 }
 
 impl<T: ?Sized + ObjPointee> ComponentBundleWithCtor for EntityWith<T> {
-	type CompList = Option<OwnedOrWeak<T>>;
+	type CompList = Option<OwnedOrWeak<Obj<T>>>;
 }
 
 impl<T: ?Sized + ObjPointee> fmt::Debug for EntityWith<T> {
@@ -370,7 +371,7 @@ pub macro component_bundle {
 
         $vis struct $bundle_ctor_name$(<$($para_name: ?Sized + ObjPointee),*>)? {
             $(pub $ext_name: <$ext_ty as ComponentBundle>::CompList,)*
-            $(pub $field_name: Option<OwnedOrWeak<$field_ty>>,)*
+            $(pub $field_name: Option<OwnedOrWeak<Obj<$field_ty>>>,)*
         }
 
         impl$(<$($para_name: ?Sized + ObjPointee),*>)? ComponentList for $bundle_ctor_name$(<$($para_name),*>)? {

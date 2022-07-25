@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use crucible_common::voxel::{
-	data::{VoxelChunkData, VoxelWorldData},
+	data::{BlockState, ChunkFactoryRequest, VoxelChunkData, VoxelWorldData},
 	math::{WorldPos, WorldPosExt},
 };
 use geode::prelude::*;
@@ -45,7 +45,13 @@ impl GameSceneBundle {
 		main_lock: Lock,
 	) -> Owned<Self> {
 		// Create voxel services
-		let voxel_data_guard = VoxelWorldData::default().box_obj_rw(s, main_lock);
+		let chunk_factory = Obj::new(s, |s: Session, req: ChunkFactoryRequest| {
+			let chunk = ChunkBundle::new(s, req.data_lock);
+			chunk.raw()
+		})
+		.unsize();
+
+		let voxel_data_guard = VoxelWorldData::new(chunk_factory.into()).box_obj_rw(s, main_lock);
 		let voxel_mesh_guard = VoxelWorldMesh::default().box_obj_rw(s, main_lock);
 		let voxel_uniforms_guard = {
 			let gfx = engine.gfx(s);
@@ -141,18 +147,21 @@ impl EventHandler<SceneUpdateEvent> for GameSceneBundleHandlers {
 			let (chunk_pos, block_pos) = world_pos.decompose();
 
 			let chunk = match p_world_data.get_chunk(world_pos.chunk()) {
-				Some(chunk) => ChunkBundle::cast(chunk),
+				Some(chunk) => chunk,
 				None => {
-					let (chunk_guard, chunk) = ChunkBundle::new(s, p_lock).to_guard_ref_pair();
-					p_world_data.add_chunk(s, chunk_pos, me.raw(), chunk_guard.raw());
+					let (chunk, _) = p_world_data.add_chunk(s, me.raw(), p_lock, chunk_pos);
 					chunk
 				}
 			};
+			let chunk = ChunkBundle::cast(chunk);
 
-			chunk
-				.chunk_data(s)
-				.block_state_of(block_pos)
-				.set_material(1);
+			chunk.chunk_data(s).set_block(
+				block_pos,
+				BlockState {
+					material: 1,
+					..Default::default()
+				},
+			);
 
 			p_world_mesh.flag_chunk(s, p_lock, chunk.raw());
 		}

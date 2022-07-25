@@ -189,7 +189,7 @@ impl ViewportBundle {
 					.fire(s, current_scene, event);
 			},
 		)
-		.to_unsized::<dyn EventHandlerOnce<ViewportRenderEvent>>();
+		.unsize::<dyn EventHandlerOnce<ViewportRenderEvent>>();
 
 		let depth_texture = ScreenTexture::new(
 			gfx,

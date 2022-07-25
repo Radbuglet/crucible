@@ -1,6 +1,6 @@
-use std::{cell::Cell, collections::HashMap, fmt, hash};
+use std::{cell::Cell, collections::HashMap, hash};
 
-use crucible_core::array::arr;
+use crucible_core::{array::arr, c_enum::ExposesVariants};
 use geode::prelude::*;
 use smallvec::SmallVec;
 use typed_glam::glam::DVec3;
@@ -12,29 +12,51 @@ use super::math::{
 	WorldPosExt, CHUNK_VOLUME,
 };
 
-use crucible_core::c_enum::ExposesVariants;
+// === Voxel Data Containers === //
 
-#[derive(Debug, Default)]
+pub type ChunkFactory = OwnedOrWeak<Obj<dyn Factory<ChunkFactoryRequest, Owned<Entity>>>>;
+
+#[derive(Debug)]
+pub struct ChunkFactoryRequest {
+	pub world_entity: Entity,
+	pub data_lock: Lock,
+}
+
 pub struct VoxelWorldData {
+	chunk_factory: ChunkFactory,
 	chunks: HashMap<ChunkPos, Owned<Entity>>,
 }
 
 impl VoxelWorldData {
+	pub fn new(chunk_factory: ChunkFactory) -> Self {
+		Self {
+			chunk_factory,
+			chunks: Default::default(),
+		}
+	}
+
 	pub fn add_chunk(
 		&mut self,
 		s: Session,
-		pos: ChunkPos,
 		me: Entity,
-		chunk: Owned<Entity>,
-	) -> Option<Owned<Entity>> {
-		let weak_chunk = chunk.weak_copy();
+		data_lock: Lock,
+		pos: ChunkPos,
+	) -> (Entity, Option<Owned<Entity>>) {
+		// Create chunk
+		let (chunk, weak_chunk) = self
+			.chunk_factory
+			.weak_copy()
+			.get(s)
+			.create(
+				s,
+				ChunkFactoryRequest {
+					world_entity: me,
+					data_lock,
+				},
+			)
+			.to_guard_ref_pair();
+
 		let chunk_data = chunk.get::<VoxelChunkData>(s);
-
-		// Validate chunk's current world
-		if chunk_data.world() == Some(me) {
-			return None;
-		}
-
 		assert_eq!(chunk_data.world(), None);
 
 		// Replace the old chunk with new chunk
@@ -66,7 +88,7 @@ impl VoxelWorldData {
 			}
 		}
 
-		replaced
+		(weak_chunk, replaced)
 	}
 
 	pub fn get_chunk(&self, pos: ChunkPos) -> Option<Entity> {
@@ -106,75 +128,54 @@ impl VoxelChunkData {
 		self.position.get()
 	}
 
-	pub fn block_state_of(&self, pos: BlockPos) -> RawBlockState<'_> {
-		RawBlockState {
-			cell: &self.blocks[pos.to_index()],
+	pub fn get_block(&self, pos: BlockPos) -> BlockState {
+		BlockState::decode(self.blocks[pos.to_index()].get())
+	}
+
+	pub fn set_block(&self, pos: BlockPos, state: BlockState) {
+		self.blocks[pos.to_index()].set(state.encode())
+	}
+}
+
+// === Block State Manipulation === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Default)]
+pub struct BlockState {
+	pub material: u16,
+	pub variant: u8,
+	pub light_level: u8,
+}
+
+// Format:
+//
+// ```text
+// LSB                                      MSB
+// ---- ---- ~~~~ ~~~~ | ---- ---- | ~~~~ ~~~~ |
+// Material Data       | Variant   | Light lvl |
+// (u16)               | (u8)      | (u8)      |
+// ```
+impl BlockState {
+	pub fn decode(word: u32) -> Self {
+		let material = word as u16;
+		let variant = word.to_be_bytes()[2];
+		let light_level = word.to_be_bytes()[3];
+
+		Self {
+			material,
+			variant,
+			light_level,
 		}
 	}
-}
 
-impl Drop for VoxelChunkData {
-	fn drop(&mut self) {
-		if let Some(_world) = self.world() {
-			// TODO
-		}
+	pub fn encode(&self) -> u32 {
+		let mut enc = self.material as u32;
+		enc += (self.variant as u32) << 16;
+		enc += (self.material as u32) << 24;
+		enc
 	}
 }
 
-#[derive(Copy, Clone)]
-pub struct RawBlockState<'a> {
-	/// Format:
-	///
-	/// ```text
-	/// LSB                                      MSB
-	/// ---- ---- ~~~~ ~~~~ | ---- ---- | ~~~~ ~~~~ |
-	/// Material Data       | Variant   | Light lvl |
-	/// (u16)               | (u8)      | (u8)      |
-	/// ```
-	cell: &'a Cell<u32>,
-}
-
-impl fmt::Debug for RawBlockState<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("RawBlockState")
-			.field("raw", &self.cell.get())
-			.field("material", &self.material())
-			.field("variant", &self.variant())
-			.field("light_level", &self.light_level())
-			.finish()
-	}
-}
-
-impl RawBlockState<'_> {
-	pub fn material(self) -> u16 {
-		self.cell.get() as u16
-	}
-
-	pub fn variant(self) -> u8 {
-		self.cell.get().to_be_bytes()[2]
-	}
-
-	pub fn light_level(self) -> u8 {
-		self.cell.get().to_be_bytes()[3]
-	}
-
-	pub fn set_material(self, id: u16) {
-		let value = self.cell.get() - self.material() as u32 + id as u32;
-		self.cell.set(value);
-	}
-
-	pub fn set_variant(self, variant: u8) {
-		let mut bytes = self.cell.get().to_be_bytes();
-		bytes[2] = variant;
-		self.cell.set(u32::from_be_bytes(bytes))
-	}
-
-	pub fn set_light_level(self, light_level: u8) {
-		let mut bytes = self.cell.get().to_be_bytes();
-		bytes[3] = light_level;
-		self.cell.set(u32::from_be_bytes(bytes))
-	}
-}
+// === Voxel Pointer === //
 
 #[derive(Debug, Copy, Clone)]
 pub struct VoxelPointer {
@@ -288,6 +289,8 @@ impl VoxelPointer {
 		self.pos
 	}
 }
+
+// === Voxel Ray Cast === //
 
 pub struct VoxelRayCast {
 	pointer: VoxelPointer,

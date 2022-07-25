@@ -19,7 +19,7 @@ pub mod prelude {
 		core::{
 			debug::NoLabel,
 			obj::{Lock, Obj, ObjCtorExt, ObjPointee, ObjRw, RawObj},
-			owned::Owned,
+			owned::{Owned, OwnedOrWeak},
 			reflect::ReflectType,
 			session::{LocalSessionGuard, Session},
 		},
@@ -29,7 +29,10 @@ pub mod prelude {
 				EntityWithRw,
 			},
 			entity::{Entity, EntityGetErrorExt, ExposeUsing},
-			event::{EventHandler, EventHandlerMut, EventHandlerOnce, EventHandlerOnceMut},
+			event::{
+				EventHandler, EventHandlerMut, EventHandlerOnce, EventHandlerOnceMut, Factory,
+				FactoryMut,
+			},
 			key::{proxy_key, typed_key, ProxyKeyType},
 		},
 	};

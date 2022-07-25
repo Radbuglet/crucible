@@ -4,11 +4,6 @@ use core::mem::MaybeUninit;
 
 // === Raw array creation === //
 
-pub const fn new_uninit_array<T, const N: usize>() -> [MaybeUninit<T>; N] {
-	let arr = MaybeUninit::<[T; N]>::uninit();
-	transmute_uninit_array_to_inner(arr)
-}
-
 pub const fn transmute_uninit_array_to_inner<T, const N: usize>(
 	arr: MaybeUninit<[T; N]>,
 ) -> [MaybeUninit<T>; N] {
@@ -19,6 +14,11 @@ pub const fn transmute_uninit_array_to_outer<T, const N: usize>(
 	arr: [MaybeUninit<T>; N],
 ) -> MaybeUninit<[T; N]> {
 	unsafe { super_unchecked_transmute(arr) }
+}
+
+pub const fn new_uninit_array<T, const N: usize>() -> [MaybeUninit<T>; N] {
+	let arr = MaybeUninit::<[T; N]>::uninit();
+	transmute_uninit_array_to_inner(arr)
 }
 
 pub const unsafe fn assume_init_array<T, const N: usize>(arr: [MaybeUninit<T>; N]) -> [T; N] {
@@ -77,16 +77,16 @@ where
 	iter::repeat_with(f).take(len)
 }
 
-pub fn vec_repeat_len<F, T>(f: F, len: usize) -> Vec<T>
+pub fn vec_from_fn<F, T>(f: F, len: usize) -> Vec<T>
 where
 	F: FnMut() -> T,
 {
 	iter_repeat_len(f, len).collect()
 }
 
-pub fn boxed_arr_repeat_len<F, T>(f: F, len: usize) -> Box<[T]>
+pub fn boxed_arr_from_fn<F, T>(f: F, len: usize) -> Box<[T]>
 where
 	F: FnMut() -> T,
 {
-	vec_repeat_len(f, len).into_boxed_slice()
+	vec_from_fn(f, len).into_boxed_slice()
 }

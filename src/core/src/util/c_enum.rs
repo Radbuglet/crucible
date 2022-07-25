@@ -1,6 +1,6 @@
 use core::{fmt, hash, ops::Index};
 
-use crate::ext::{array::boxed_arr_repeat_len, marker::PhantomInvariant};
+use crate::ext::{array::boxed_arr_from_fn, marker::PhantomInvariant};
 
 // === `ExposesVariants` === //
 
@@ -57,7 +57,7 @@ impl<K: ExposesVariants, V> Default for CEnumMap<K, V> {
 	fn default() -> Self {
 		Self {
 			_ty: Default::default(),
-			map: boxed_arr_repeat_len(|| None, K::COUNT),
+			map: boxed_arr_from_fn(|| None, K::COUNT),
 		}
 	}
 }

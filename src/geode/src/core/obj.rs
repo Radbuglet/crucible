@@ -535,17 +535,3 @@ pub trait ObjCtorExt: Sized + ObjPointee {
 }
 
 impl<T: Sized + ObjPointee> ObjCtorExt for T {}
-
-impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
-	pub fn to_unsized<U>(self) -> Owned<Obj<U>>
-	where
-		T: Unsize<U>,
-		U: ?Sized + ObjPointee,
-	{
-		Owned::new(self.manually_destruct().unsize::<U>())
-	}
-
-	pub fn to_raw(self) -> Owned<RawObj> {
-		Owned::new(self.manually_destruct().raw())
-	}
-}
