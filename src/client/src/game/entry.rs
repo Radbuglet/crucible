@@ -1,8 +1,10 @@
 use std::cell::RefCell;
 
 use crucible_common::voxel::{
-	data::{BlockState, ChunkFactoryRequest, VoxelChunkData, VoxelPointer, VoxelWorldData},
-	math::{BlockFace, WorldPos, WorldPosExt},
+	data::{
+		BlockLocation, BlockState, ChunkFactoryRequest, RayCast, VoxelChunkData, VoxelWorldData,
+	},
+	math::{WorldVec, WorldVecExt},
 };
 use geode::prelude::*;
 use typed_glam::glam::Mat4;
@@ -141,24 +143,97 @@ impl EventHandler<SceneUpdateEvent> for GameSceneEntry {
 		}
 
 		// Try placing blocks
-		if p_input_tracker.button(MouseButton::Right).state() {
+		if p_input_tracker.key(VirtualKeyCode::Key1).state() {
 			let pos = p_local_camera.pos();
-			let pos = WorldPos::from_raw(pos.floor().as_ivec3());
-			let mut pos = VoxelPointer::new_uncached(pos);
+			let pos = WorldVec::from_raw(pos.floor().as_ivec3());
+			let pos = BlockLocation::new_uncached(pos);
 
-			for _ in 0..10 {
-				pos = pos.get_neighbor(s, BlockFace::NegativeY);
+			for x in -3..3 {
+				for y in -3..3 {
+					for z in -3..3 {
+						let mut pos = pos.move_by(s, WorldVec::new(x, y, z));
 
-				let chunk = pos.chunk_or_add(s, &mut p_world_data);
-				chunk.comp(s).set_block(
-					pos.pos().block(),
-					BlockState {
-						material: 1,
-						..Default::default()
-					},
-				);
+						let chunk = pos.chunk_or_add(s, &mut p_world_data);
+						chunk.comp(s).set_block(
+							pos.vec().block(),
+							BlockState {
+								material: 1,
+								..Default::default()
+							},
+						);
 
-				p_world_mesh.flag_chunk(s, p_lock, chunk.raw());
+						// TODO: Automate mesh flagging
+						p_world_mesh.flag_chunk(s, p_lock, chunk.raw());
+					}
+				}
+			}
+		}
+
+		if p_input_tracker.button(MouseButton::Right).state() {
+			let mut ray = RayCast::new(
+				p_local_camera.pos().as_dvec3().into(),
+				p_local_camera.facing().as_dvec3().into(),
+			);
+
+			ray.block_loc().recompute_cache(s, &p_world_data);
+
+			'scan: for _ in 0..100 {
+				for isect in ray.step(s) {
+					let mut block_loc = isect.block_loc;
+					let chunk = match block_loc.chunk(s, &p_world_data) {
+						Some(chunk) => chunk,
+						None => continue,
+					};
+
+					if chunk.comp(s).get_block(block_loc.vec().block()).material != 0 {
+						let mut target_loc = block_loc.neighbor(s, isect.face.invert());
+						let chunk = target_loc.chunk_or_add(s, &mut p_world_data);
+
+						chunk.comp(s).set_block(
+							target_loc.vec().block(),
+							BlockState {
+								material: 1,
+								..Default::default()
+							},
+						);
+
+						// TODO: Automate mesh flagging
+						p_world_mesh.flag_chunk(s, p_lock, chunk.raw());
+
+						break 'scan;
+					}
+				}
+			}
+		}
+
+		if p_input_tracker.button(MouseButton::Left).state() {
+			let mut ray = RayCast::new(
+				p_local_camera.pos().as_dvec3().into(),
+				p_local_camera.facing().as_dvec3().into(),
+			);
+
+			ray.block_loc().recompute_cache(s, &p_world_data);
+
+			'scan: for _ in 0..100 {
+				for isect in ray.step(s) {
+					let mut block_loc = isect.block_loc;
+					let chunk = match block_loc.chunk(s, &p_world_data) {
+						Some(chunk) => chunk,
+						None => continue,
+					};
+
+					if chunk.comp(s).get_block(block_loc.vec().block()).material != 0 {
+						chunk.comp(s).set_block(
+							block_loc.vec().block(),
+							BlockState::default(),
+						);
+
+						// TODO: Automate mesh flagging
+						p_world_mesh.flag_chunk(s, p_lock, chunk.raw());
+
+						break 'scan;
+					}
+				}
 			}
 		}
 	}

@@ -1,6 +1,5 @@
 use crate::util::features::{FeatureDescriptor, FeatureList, FeatureScore};
 use anyhow::Context;
-use crucible_core::ord_f32::OrdF32;
 use std::fmt::Display;
 use winit::window::Window;
 
@@ -46,7 +45,7 @@ impl GfxContext {
 			adapter_info: AdapterInfoBundle,
 			descriptor: wgpu::DeviceDescriptor<'a>,
 			compat_table: T,
-			score: OrdF32,
+			score: f32,
 		}
 
 		let req = instance
@@ -87,7 +86,7 @@ impl GfxContext {
 					score: features.score().unwrap(),
 				})
 			})
-			.max_by(|a, b| a.score.cmp(&b.score))
+			.max_by(|a, b| a.score.total_cmp(&b.score))
 			.context("no adapters satisfy the application's minimum requirements")?;
 
 		let (device, queue) = req

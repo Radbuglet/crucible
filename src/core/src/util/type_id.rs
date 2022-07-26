@@ -1,5 +1,5 @@
 use core::{
-	any::{type_name, TypeId},
+	any::{self, TypeId},
 	fmt, hash,
 };
 
@@ -16,7 +16,7 @@ impl NamedTypeId {
 		Self {
 			id: TypeId::of::<T>(),
 			#[cfg(debug_assertions)]
-			name: type_name::<T>(),
+			name: any::type_name::<T>(),
 		}
 	}
 

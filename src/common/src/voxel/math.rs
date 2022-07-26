@@ -14,60 +14,60 @@ pub const CHUNK_EDGE: i32 = 16;
 pub const CHUNK_LAYER: i32 = CHUNK_EDGE.pow(2);
 pub const CHUNK_VOLUME: i32 = CHUNK_EDGE.pow(3);
 
-// === `WorldPos` === //
+// === `WorldVec` === //
 
-pub type WorldPos = TypedVector<WorldPosFlavor>;
+pub type WorldVec = TypedVector<WorldVecFlavor>;
 
-pub struct WorldPosFlavor(!);
+pub struct WorldVecFlavor(!);
 
-impl VecFlavor for WorldPosFlavor {
+impl VecFlavor for WorldVecFlavor {
 	type Backing = glam::i32::IVec3;
 }
 
-pub trait WorldPosExt: Sized {
-	fn compose(chunk: ChunkPos, block: BlockPos) -> Self;
-	fn decompose(self) -> (ChunkPos, BlockPos);
-	fn chunk(self) -> ChunkPos;
-	fn block(self) -> BlockPos;
-	fn min_corner_entity_pos(self) -> EntityPos;
-	fn block_face_layer(self, face: BlockFace) -> f64;
+pub trait WorldVecExt: Sized {
+	fn compose(chunk: ChunkVec, block: BlockVec) -> Self;
+	fn decompose(self) -> (ChunkVec, BlockVec);
+	fn chunk(self) -> ChunkVec;
+	fn block(self) -> BlockVec;
+	fn min_corner_pos(self) -> EntityVec;
+	fn block_interface_layer(self, face: BlockFace) -> f64;
 }
 
-impl WorldPosExt for WorldPos {
-	fn compose(chunk: ChunkPos, block: BlockPos) -> Self {
+impl WorldVecExt for WorldVec {
+	fn compose(chunk: ChunkVec, block: BlockVec) -> Self {
 		debug_assert!(chunk.is_valid());
 		debug_assert!(block.is_valid());
 		Self::from_raw(chunk.into_raw() * CHUNK_EDGE + block.into_raw())
 	}
 
-	fn decompose(self) -> (ChunkPos, BlockPos) {
+	fn decompose(self) -> (ChunkVec, BlockVec) {
 		(self.chunk(), self.block())
 	}
 
-	fn chunk(self) -> ChunkPos {
+	fn chunk(self) -> ChunkVec {
 		let raw = self.into_raw();
-		ChunkPos::new(
+		ChunkVec::new(
 			raw.x.div_euclid(CHUNK_EDGE),
 			raw.y.div_euclid(CHUNK_EDGE),
 			raw.z.div_euclid(CHUNK_EDGE),
 		)
 	}
 
-	fn block(self) -> BlockPos {
+	fn block(self) -> BlockVec {
 		let raw = self.into_raw();
-		BlockPos::new(
+		BlockVec::new(
 			raw.x.rem_euclid(CHUNK_EDGE),
 			raw.y.rem_euclid(CHUNK_EDGE),
 			raw.z.rem_euclid(CHUNK_EDGE),
 		)
 	}
 
-	fn min_corner_entity_pos(self) -> EntityPos {
-		EntityPos::from_raw(self.into_raw().as_dvec3())
+	fn min_corner_pos(self) -> EntityVec {
+		EntityVec::from_raw(self.into_raw().as_dvec3())
 	}
 
-	fn block_face_layer(self, face: BlockFace) -> f64 {
-		let corner = self.min_corner_entity_pos();
+	fn block_interface_layer(self, face: BlockFace) -> f64 {
+		let corner = self.min_corner_pos();
 		let (axis, sign) = face.decompose();
 
 		if sign == Sign::Positive {
@@ -78,37 +78,37 @@ impl WorldPosExt for WorldPos {
 	}
 }
 
-// === `ChunkPos` === //
+// === `ChunkVec` === //
 
-pub type ChunkPos = TypedVector<ChunkPosFlavor>;
+pub type ChunkVec = TypedVector<ChunkVecFlavor>;
 
-pub struct ChunkPosFlavor(!);
+pub struct ChunkVecFlavor(!);
 
-impl VecFlavor for ChunkPosFlavor {
+impl VecFlavor for ChunkVecFlavor {
 	type Backing = glam::i32::IVec3;
 }
 
-pub trait ChunkPosExt: Sized {
+pub trait ChunkVecExt: Sized {
 	fn is_valid(&self) -> bool;
 }
 
-impl ChunkPosExt for ChunkPos {
+impl ChunkVecExt for ChunkVec {
 	fn is_valid(&self) -> bool {
 		Axis3::variants().all(|comp| self[comp].checked_mul(CHUNK_EDGE).is_some())
 	}
 }
 
-// === `BlockPos` === //
+// === `BlockVec` === //
 
-pub type BlockPos = TypedVector<BlockPosFlavor>;
+pub type BlockVec = TypedVector<BlockVecFlavor>;
 
-pub struct BlockPosFlavor(!);
+pub struct BlockVecFlavor(!);
 
-impl VecFlavor for BlockPosFlavor {
+impl VecFlavor for BlockVecFlavor {
 	type Backing = glam::i32::IVec3;
 }
 
-pub trait BlockPosExt: Sized {
+pub trait BlockVecExt: Sized {
 	fn is_valid(&self) -> bool;
 	fn wrap(self) -> Self;
 	fn iter() -> BlockPosIter;
@@ -119,7 +119,7 @@ pub trait BlockPosExt: Sized {
 	fn is_valid_index(index: usize) -> bool;
 }
 
-impl BlockPosExt for BlockPos {
+impl BlockVecExt for BlockVec {
 	fn is_valid(&self) -> bool {
 		Axis3::variants().all(|comp| self[comp] >= 0 && self[comp] < CHUNK_EDGE)
 	}
@@ -171,40 +171,40 @@ impl BlockPosExt for BlockPos {
 pub struct BlockPosIter(usize);
 
 impl Iterator for BlockPosIter {
-	type Item = BlockPos;
+	type Item = BlockVec;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		let pos = BlockPos::try_from_index(self.0)?;
+		let pos = BlockVec::try_from_index(self.0)?;
 		self.0 += 1;
 		Some(pos)
 	}
 }
 
-// === EntityPos === //
+// === `EntityVec` === //
 
-/// The world-space position of an entity, represented with double precision floats to ensure that
-/// the `i32`-wide block position can fit into the space.
+/// A vector in the logical vector-space of valid entity positions. This is a double precision float
+/// vector because we need all world positions to be encodable as entity positions.
 ///
 /// ## Conventions
 ///
 /// A block position, when converted to a floating point, represents the most negative corner of a
 /// given block. For example, the block position `(-2, -3, 1)` occupies the space
 /// `(-2..-1, -3..-2, 1..2)`.
-pub type EntityPos = TypedVector<EntityPosFlavor>;
+pub type EntityVec = TypedVector<EntityVecFlavor>;
 
-pub struct EntityPosFlavor(!);
+pub struct EntityVecFlavor(!);
 
-impl VecFlavor for EntityPosFlavor {
+impl VecFlavor for EntityVecFlavor {
 	type Backing = DVec3;
 }
 
-pub trait EntityPosExt {
-	fn world_pos(self) -> WorldPos;
+pub trait EntityVecExt {
+	fn block_pos(self) -> WorldVec;
 }
 
-impl EntityPosExt for EntityPos {
-	fn world_pos(self) -> WorldPos {
-		WorldPos::from_raw(self.raw().floor().as_ivec3())
+impl EntityVecExt for EntityVec {
+	fn block_pos(self) -> WorldVec {
+		WorldVec::from_raw(self.raw().floor().as_ivec3())
 	}
 }
 
@@ -327,10 +327,9 @@ impl Axis3 {
 		}
 	}
 
-	pub fn aabb_intersect(self, layer: f64, line: Line3) -> (f64, EntityPos) {
-		let depth_percent = lerp_percent_at(layer, line.start[self], line.end[self]);
-
-		(depth_percent, line.start.lerp(line.end, depth_percent))
+	pub fn plane_intersect(self, layer: f64, line: Line3) -> (f64, EntityVec) {
+		let lerp = lerp_percent_at(layer, line.start[self], line.end[self]);
+		(lerp, line.start.lerp(line.end, lerp))
 	}
 }
 
@@ -425,8 +424,17 @@ impl Sign {
 
 #[derive(Debug, Copy, Clone)]
 pub struct Line3 {
-	pub start: EntityPos,
-	pub end: EntityPos,
+	pub start: EntityVec,
+	pub end: EntityVec,
+}
+
+impl Line3 {
+	pub fn new_origin_delta(start: EntityVec, delta: EntityVec) -> Self {
+		Self {
+			start: start,
+			end: start + delta,
+		}
+	}
 }
 
 // === Misc Math === //

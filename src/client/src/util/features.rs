@@ -1,4 +1,3 @@
-use crucible_core::ord_f32::OrdF32;
 use crucible_core::range::{unwrap_or_unbounded, AnyRange};
 use std::collections::Bound;
 use std::fmt::{Debug, Display};
@@ -19,7 +18,7 @@ pub struct FeatureList {
 	total_mandatory: usize,
 
 	/// The cumulative score of the feature list.
-	score: OrdF32,
+	score: f32,
 
 	/// The range of possible scores.
 	score_range: AnyRange<f32>,
@@ -77,7 +76,7 @@ pub enum FeatureScore {
 		/// A floating-point (potentially negative) score describing the overall weight of this
 		/// feature. A percentage will be computed and rendered instead of the raw score if a
 		/// `score_range` is provided.
-		score: OrdF32,
+		score: f32,
 
 		/// The range of scores this feature can take.
 		score_range: AnyRange<f32>,
@@ -105,7 +104,7 @@ impl Default for FeatureList {
 			entries: Vec::new(),
 			met_mandatory: 0,
 			met_optional: 0,
-			score: OrdF32::ZERO,
+			score: 0.0,
 			total_mandatory: 0,
 			score_range: AnyRange::new(0.0..=0.0),
 		}
@@ -224,7 +223,7 @@ impl FeatureList {
 		self.met_mandatory == self.total_mandatory
 	}
 
-	pub fn score(&self) -> Option<OrdF32> {
+	pub fn score(&self) -> Option<f32> {
 		if self.did_pass() {
 			Some(self.score)
 		} else {

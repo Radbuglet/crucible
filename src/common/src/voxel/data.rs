@@ -3,13 +3,10 @@ use std::{cell::Cell, collections::HashMap, hash};
 use crucible_core::{array::arr, c_enum::ExposesVariants};
 use geode::prelude::*;
 use smallvec::SmallVec;
-use typed_glam::glam::DVec3;
-
-use crate::voxel::math::Line3;
 
 use super::math::{
-	Axis3, BlockFace, BlockPos, BlockPosExt, ChunkPos, EntityPos, EntityPosExt, Sign, WorldPos,
-	WorldPosExt, CHUNK_VOLUME,
+	Axis3, BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, EntityVecExt, Line3, Sign,
+	WorldVec, WorldVecExt, CHUNK_VOLUME,
 };
 
 // === Voxel Data Containers === //
@@ -27,7 +24,7 @@ pub struct ChunkFactoryRequest {
 pub struct VoxelWorldData {
 	me: WorldEntity,
 	chunk_factory: MaybeOwned<Obj<ChunkFactory>>,
-	chunks: HashMap<ChunkPos, Owned<ChunkEntity>>,
+	chunks: HashMap<ChunkVec, Owned<ChunkEntity>>,
 }
 
 impl VoxelWorldData {
@@ -46,7 +43,7 @@ impl VoxelWorldData {
 	pub fn add_chunk(
 		&mut self,
 		s: Session,
-		pos: ChunkPos,
+		pos: ChunkVec,
 	) -> (ChunkEntity, Option<Owned<ChunkEntity>>) {
 		// Create chunk
 		let (chunk_guard, chunk) = self
@@ -70,7 +67,7 @@ impl VoxelWorldData {
 
 		// Link new chunk to neighbors
 		for face in BlockFace::variants() {
-			let rel = ChunkPos::from_raw(face.unit());
+			let rel = ChunkVec::from_raw(face.unit());
 			let neighbor_pos = pos + rel;
 			let neighbor = self
 				.chunks
@@ -89,11 +86,11 @@ impl VoxelWorldData {
 		(chunk, replaced)
 	}
 
-	pub fn get_chunk(&self, pos: ChunkPos) -> Option<ChunkEntity> {
+	pub fn get_chunk(&self, pos: ChunkVec) -> Option<ChunkEntity> {
 		self.chunks.get(&pos).map(|chunk| chunk.weak_copy())
 	}
 
-	pub fn get_chunk_or_add(&mut self, s: Session, pos: ChunkPos) -> ChunkEntity {
+	pub fn get_chunk_or_add(&mut self, s: Session, pos: ChunkVec) -> ChunkEntity {
 		if let Some(chunk) = self.get_chunk(pos) {
 			chunk
 		} else {
@@ -106,7 +103,7 @@ impl VoxelWorldData {
 pub struct VoxelChunkData {
 	world: Cell<Option<WorldEntity>>,
 	neighbors: [Cell<Option<ChunkEntity>>; BlockFace::COUNT],
-	position: Cell<ChunkPos>,
+	position: Cell<ChunkVec>,
 	blocks: Box<[Cell<u32>; CHUNK_VOLUME as usize]>,
 }
 
@@ -130,15 +127,15 @@ impl VoxelChunkData {
 		self.neighbors[face as usize].get()
 	}
 
-	pub fn pos(&self) -> ChunkPos {
+	pub fn pos(&self) -> ChunkVec {
 		self.position.get()
 	}
 
-	pub fn get_block(&self, pos: BlockPos) -> BlockState {
+	pub fn get_block(&self, pos: BlockVec) -> BlockState {
 		BlockState::decode(self.blocks[pos.to_index()].get())
 	}
 
-	pub fn set_block(&self, pos: BlockPos, state: BlockState) {
+	pub fn set_block(&self, pos: BlockVec, state: BlockState) {
 		self.blocks[pos.to_index()].set(state.encode())
 	}
 }
@@ -181,64 +178,75 @@ impl BlockState {
 	}
 }
 
-// === Voxel Pointer === //
+// === `BlockLocation` === //
 
 #[derive(Debug, Copy, Clone)]
-pub struct VoxelPointer {
+pub struct BlockLocation {
 	chunk_cache: Option<ChunkEntity>,
-	pos: WorldPos,
+	pos: WorldVec,
 }
 
-impl hash::Hash for VoxelPointer {
+impl hash::Hash for BlockLocation {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
 		self.pos.hash(state);
 	}
 }
 
-impl Eq for VoxelPointer {}
+impl Eq for BlockLocation {}
 
-impl PartialEq for VoxelPointer {
+impl PartialEq for BlockLocation {
 	fn eq(&self, other: &Self) -> bool {
 		self.pos == other.pos
 	}
 }
 
-impl VoxelPointer {
-	pub fn new_cached(world: &VoxelWorldData, pos: WorldPos) -> Self {
-		let chunk_pos = pos.chunk();
-		let chunk_cache = world.get_chunk(chunk_pos);
-		Self { chunk_cache, pos }
-	}
-
-	pub fn new_uncached(pos: WorldPos) -> Self {
+impl BlockLocation {
+	pub fn new_uncached(pos: WorldVec) -> Self {
 		Self {
 			chunk_cache: None,
 			pos,
 		}
 	}
 
-	pub fn get_absolute(self, s: Session, pos: WorldPos) -> Self {
-		self.get_relative(s, pos - self.pos)
+	pub fn new_cached(world: &VoxelWorldData, pos: WorldVec) -> Self {
+		let chunk_pos = pos.chunk();
+		let chunk_cache = world.get_chunk(chunk_pos);
+		Self { chunk_cache, pos }
 	}
 
-	pub fn get_relative(mut self, s: Session, delta: WorldPos) -> Self {
+	pub fn vec(self) -> WorldVec {
+		self.pos
+	}
+
+	pub fn update<F: FnOnce(WorldVec) -> WorldVec>(self, s: Session, f: F) -> Self {
+		Self::move_to(self, s, f(self.vec()))
+	}
+
+	pub fn move_to(self, s: Session, pos: WorldVec) -> Self {
+		self.move_by(s, pos - self.pos)
+	}
+
+	pub fn move_to_emit_delta(self, s: Session, pos: WorldVec) -> (Self, WorldVec) {
+		let delta = pos - self.pos;
+		let loc = self.move_by(s, delta);
+		(loc, delta)
+	}
+
+	pub fn move_by(mut self, s: Session, delta: WorldVec) -> Self {
 		for axis in Axis3::variants() {
 			if let Some(sign) = Sign::of(delta[axis]) {
-				self = self.get_neighbor_with_stride(
-					s,
-					BlockFace::compose(axis, sign),
-					delta[axis].abs(),
-				);
+				self =
+					self.neighbor_with_stride(s, BlockFace::compose(axis, sign), delta[axis].abs());
 			}
 		}
 		self
 	}
 
-	pub fn get_neighbor(self, s: Session, face: BlockFace) -> Self {
-		self.get_neighbor_with_stride(s, face, 1)
+	pub fn neighbor(self, s: Session, face: BlockFace) -> Self {
+		self.neighbor_with_stride(s, face, 1)
 	}
 
-	pub fn get_neighbor_with_stride(mut self, s: Session, face: BlockFace, stride: i32) -> Self {
+	pub fn neighbor_with_stride(mut self, s: Session, face: BlockFace, stride: i32) -> Self {
 		debug_assert!(stride >= 0);
 
 		// Update position, keeping track of our chunk positions.
@@ -301,81 +309,95 @@ impl VoxelPointer {
 		self.recompute_cache_or_add(s, world_data);
 		self.chunk_cache.unwrap()
 	}
-
-	pub fn pos(self) -> WorldPos {
-		self.pos
-	}
 }
 
 // === Voxel Ray Cast === //
 
-pub struct VoxelRayCast {
-	pointer: VoxelPointer,
-	pos: EntityPos,
-	direction: DVec3,
-	distance: f64,
+#[derive(Debug, Clone)]
+pub struct RayCast {
+	b_loc: BlockLocation,
+	f_pos: EntityVec,
+	f_dir: EntityVec,
+	dist: f64,
 }
 
-impl VoxelRayCast {
-	pub fn new(world: &VoxelWorldData, origin: EntityPos, direction: DVec3) -> Self {
-		debug_assert!(direction.is_normalized());
-
+impl RayCast {
+	pub fn new(origin: EntityVec, dir: EntityVec) -> Self {
 		Self {
-			pointer: VoxelPointer::new_cached(world, origin.world_pos()),
-			pos: origin,
-			direction,
-			distance: 0.,
+			b_loc: BlockLocation::new_uncached(origin.block_pos()),
+			f_pos: origin,
+			f_dir: dir.normalize_or_zero(),
+			dist: 0.0,
 		}
 	}
 
+	pub fn block_loc(&mut self) -> &mut BlockLocation {
+		&mut self.b_loc
+	}
+
+	pub fn f_pos(&self) -> EntityVec {
+		self.f_pos
+	}
+
+	pub fn f_dir(&self) -> EntityVec {
+		self.f_dir
+	}
+
 	pub fn step(&mut self, s: Session) -> SmallVec<[RayCastIntersection; 3]> {
-		let mut local_intersections = SmallVec::new();
+		debug_assert_eq!(self.b_loc.vec(), self.f_pos.block_pos());
 
-		// Compute step info
-		let step = Line3 {
-			start: self.pos,
-			end: self.pos + self.direction,
-		};
-		let start_block = step.start.world_pos();
-		let end_block = step.end.world_pos();
-		let block_delta = end_block - start_block;
+		let mut intersections = SmallVec::<[RayCastIntersection; 3]>::new();
 
-		// Handle block step
-		for axis in Axis3::variants() {
-			let axis_delta = block_delta[axis];
-			debug_assert!((-1..=1).contains(&axis_delta));
+		// Collect intersections
+		{
+			let step_line = Line3::new_origin_delta(self.f_pos, self.f_dir);
+			self.f_pos += self.f_dir;
 
-			let crossing_face = match Sign::of(axis_delta) {
-				Some(sign) => BlockFace::compose(axis, sign),
-				None => continue, // No special handling if we haven't breached the block barrier.
-			};
+			let start_block = step_line.start.block_pos();
+			let end_block = step_line.end.block_pos();
+			let block_delta = end_block - start_block;
 
-			// Find intersection
-			let crossed_layer_depth = self.pointer.pos().block_face_layer(crossing_face);
-			let (percent, pos) = axis.aabb_intersect(crossed_layer_depth, step);
-			debug_assert!(percent.abs() <= 1.);
+			for axis in Axis3::variants() {
+				let delta = block_delta[axis];
+				debug_assert!((-1..=1).contains(&delta));
 
-			local_intersections.push(RayCastIntersection {
-				pos,
-				axis,
-				distance: self.distance + step.start.distance(pos),
-			});
+				let sign = match Sign::of(delta) {
+					Some(sign) => sign,
+					None => continue,
+				};
 
-			// Update pointer
-			self.pointer = self.pointer.get_neighbor(s, crossing_face);
+				let face = BlockFace::compose(axis, sign);
+
+				let isect_layer = start_block.block_interface_layer(face);
+				let (isect_lerp, isect_pos) = axis.plane_intersect(isect_layer, step_line);
+
+				intersections.push(RayCastIntersection {
+					_non_exhaustive: (),
+					block_loc: self.b_loc, // This will be updated in a bit.
+					face,
+					distance: self.dist + isect_lerp,
+					pos: isect_pos,
+				});
+			}
+
+			intersections.sort_by(|a, b| a.distance.total_cmp(&b.distance));
 		}
 
-		// Update positional info
-		self.pos += self.direction;
-		self.distance += 1.;
+		// Update block positions
+		for isect in &mut intersections {
+			isect.block_loc = self.b_loc.neighbor(s, isect.face);
+			self.b_loc = isect.block_loc;
+		}
 
-		local_intersections
+		intersections
 	}
 }
 
 #[derive(Debug, Clone)]
 pub struct RayCastIntersection {
-	pub pos: EntityPos,
-	pub axis: Axis3,
+	_non_exhaustive: (),
+	pub block_loc: BlockLocation,
+	pub face: BlockFace,
+	pub pos: EntityVec,
 	pub distance: f64,
 }

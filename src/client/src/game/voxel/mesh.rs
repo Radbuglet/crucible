@@ -6,7 +6,7 @@ use std::{
 
 use crucible_common::voxel::{
 	data::VoxelChunkData,
-	math::{BlockFace, BlockPos, BlockPosExt, WorldPos, WorldPosExt},
+	math::{BlockFace, BlockVec, BlockVecExt, WorldVec, WorldVecExt},
 };
 use crucible_core::c_enum::ExposesVariants;
 use geode::{
@@ -66,7 +66,7 @@ impl VoxelWorldMesh {
 			// Generate mesh
 			let vertices = {
 				let mut vertices = Vec::new();
-				for center_pos in BlockPos::iter() {
+				for center_pos in BlockVec::iter() {
 					// Don't mesh air blocks
 					if chunk_data.get_block(center_pos).material == 0 {
 						continue;
@@ -92,7 +92,7 @@ impl VoxelWorldMesh {
 						}
 
 						// Mesh it!
-						let center_pos = WorldPos::compose(chunk_data.pos(), center_pos);
+						let center_pos = WorldVec::compose(chunk_data.pos(), center_pos);
 						VoxelVertex::push_quad(
 							&mut vertices,
 							center_pos.into_raw().as_vec3(),
