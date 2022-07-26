@@ -266,9 +266,9 @@ impl Destructible for RawObj {
 
 // === Obj === //
 
-pub unsafe trait ObjPointee: 'static + Send {}
+pub trait ObjPointee: 'static + Send {}
 
-unsafe impl<T: ?Sized + 'static + Send> ObjPointee for T {}
+impl<T: ?Sized + 'static + Send> ObjPointee for T {}
 
 pub struct Obj<T: ?Sized + ObjPointee> {
 	raw: RawObj,

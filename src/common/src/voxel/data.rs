@@ -14,58 +14,58 @@ use super::math::{
 
 // === Voxel Data Containers === //
 
-pub type ChunkFactory = dyn Factory<ChunkFactoryRequest, Owned<Entity>>;
+type WorldEntity = EntityWithRw<VoxelWorldData>;
+type ChunkEntity = EntityWith<VoxelChunkData>;
+
+pub type ChunkFactory = dyn Factory<ChunkFactoryRequest, Owned<ChunkEntity>>;
 
 #[derive(Debug)]
 pub struct ChunkFactoryRequest {
-	pub world_entity: Entity,
-	pub data_lock: Lock,
+	pub world: WorldEntity,
 }
 
 pub struct VoxelWorldData {
+	me: WorldEntity,
 	chunk_factory: MaybeOwned<Obj<ChunkFactory>>,
-	chunks: HashMap<ChunkPos, Owned<Entity>>,
+	chunks: HashMap<ChunkPos, Owned<ChunkEntity>>,
 }
 
 impl VoxelWorldData {
-	pub fn new(chunk_factory: MaybeOwned<Obj<ChunkFactory>>) -> Self {
+	pub fn new(world: Entity, chunk_factory: MaybeOwned<Obj<ChunkFactory>>) -> Self {
 		Self {
+			me: WorldEntity::force_cast(world),
 			chunk_factory,
 			chunks: Default::default(),
 		}
 	}
 
+	pub fn entity(&self) -> WorldEntity {
+		self.me
+	}
+
 	pub fn add_chunk(
 		&mut self,
 		s: Session,
-		me: Entity,
-		data_lock: Lock,
 		pos: ChunkPos,
-	) -> (Entity, Option<Owned<Entity>>) {
+	) -> (ChunkEntity, Option<Owned<ChunkEntity>>) {
 		// Create chunk
-		let (chunk, weak_chunk) = self
+		let (chunk_guard, chunk) = self
 			.chunk_factory
 			.get(s)
-			.create(
-				s,
-				ChunkFactoryRequest {
-					world_entity: me,
-					data_lock,
-				},
-			)
+			.create(s, ChunkFactoryRequest { world: self.me })
 			.to_guard_ref_pair();
 
-		let chunk_data = chunk.get::<VoxelChunkData>(s);
+		let chunk_data = chunk_guard.comp(s);
 		assert_eq!(chunk_data.world(), None);
 
 		// Replace the old chunk with new chunk
-		let replaced = self.chunks.insert(pos, chunk);
+		let replaced = self.chunks.insert(pos, chunk_guard);
 		if let Some(replaced) = replaced.as_ref() {
-			replaced.get::<VoxelChunkData>(s).world.set(None);
+			replaced.comp(s).world.set(None);
 		}
 
 		// Update `chunk_data` state
-		chunk_data.world.set(Some(me));
+		chunk_data.world.set(Some(self.me));
 		chunk_data.position.set(pos);
 
 		// Link new chunk to neighbors
@@ -82,23 +82,30 @@ impl VoxelWorldData {
 
 			// Link the neighboring chunk to us
 			if let Some(neighbor) = neighbor {
-				neighbor.get::<VoxelChunkData>(s).neighbors[face.invert().index()]
-					.set(Some(weak_chunk));
+				neighbor.comp(s).neighbors[face.invert().index()].set(Some(chunk));
 			}
 		}
 
-		(weak_chunk, replaced)
+		(chunk, replaced)
 	}
 
-	pub fn get_chunk(&self, pos: ChunkPos) -> Option<Entity> {
+	pub fn get_chunk(&self, pos: ChunkPos) -> Option<ChunkEntity> {
 		self.chunks.get(&pos).map(|chunk| chunk.weak_copy())
+	}
+
+	pub fn get_chunk_or_add(&mut self, s: Session, pos: ChunkPos) -> ChunkEntity {
+		if let Some(chunk) = self.get_chunk(pos) {
+			chunk
+		} else {
+			self.add_chunk(s, pos).0
+		}
 	}
 }
 
 #[derive(Debug)]
 pub struct VoxelChunkData {
-	world: Cell<Option<Entity>>,
-	neighbors: [Cell<Option<Entity>>; BlockFace::COUNT],
+	world: Cell<Option<WorldEntity>>,
+	neighbors: [Cell<Option<ChunkEntity>>; BlockFace::COUNT],
 	position: Cell<ChunkPos>,
 	blocks: Box<[Cell<u32>; CHUNK_VOLUME as usize]>,
 }
@@ -115,11 +122,11 @@ impl Default for VoxelChunkData {
 }
 
 impl VoxelChunkData {
-	pub fn world(&self) -> Option<Entity> {
+	pub fn world(&self) -> Option<WorldEntity> {
 		self.world.get()
 	}
 
-	pub fn neighbor(&self, face: BlockFace) -> Option<Entity> {
+	pub fn neighbor(&self, face: BlockFace) -> Option<ChunkEntity> {
 		self.neighbors[face as usize].get()
 	}
 
@@ -178,7 +185,7 @@ impl BlockState {
 
 #[derive(Debug, Copy, Clone)]
 pub struct VoxelPointer {
-	chunk_cache: Option<Entity>,
+	chunk_cache: Option<ChunkEntity>,
 	pos: WorldPos,
 }
 
@@ -250,7 +257,7 @@ impl VoxelPointer {
 					None => break,
 				};
 
-				self.chunk_cache = chunk_cache.get::<VoxelChunkData>(s).neighbor(face);
+				self.chunk_cache = chunk_cache.comp(s).neighbor(face);
 			}
 		} else {
 			// We've moved too far. Invalidate the chunk cache.
@@ -260,28 +267,39 @@ impl VoxelPointer {
 		self
 	}
 
-	pub fn recompute_cache(&mut self, s: Session, world: Entity, world_data: &VoxelWorldData) {
+	pub fn invalidate_stale_cache(&mut self, s: Session, world_data: &VoxelWorldData) {
 		// Ensure that our cached chunk is actually in the world.
 		if let Some(chunk_cache) = self.chunk_cache {
-			if chunk_cache.get::<VoxelChunkData>(s).world() != Some(world) {
+			if chunk_cache.comp(s).world() != Some(world_data.entity()) {
 				self.chunk_cache = None;
 			}
 		}
+	}
 
-		// Try to attach to the world if our chunk cache is stale.
+	pub fn recompute_cache(&mut self, s: Session, world_data: &VoxelWorldData) {
+		self.invalidate_stale_cache(s, world_data);
+
 		if self.chunk_cache.is_none() {
 			self.chunk_cache = world_data.get_chunk(self.pos.chunk());
 		}
 	}
 
-	pub fn chunk(
-		&mut self,
-		s: Session,
-		world: Entity,
-		world_data: &VoxelWorldData,
-	) -> Option<Entity> {
-		self.recompute_cache(s, world, world_data);
+	pub fn recompute_cache_or_add(&mut self, s: Session, world_data: &mut VoxelWorldData) {
+		self.invalidate_stale_cache(s, world_data);
+
+		if self.chunk_cache.is_none() {
+			self.chunk_cache = Some(world_data.get_chunk_or_add(s, self.pos.chunk()));
+		}
+	}
+
+	pub fn chunk(&mut self, s: Session, world_data: &VoxelWorldData) -> Option<ChunkEntity> {
+		self.recompute_cache(s, world_data);
 		self.chunk_cache
+	}
+
+	pub fn chunk_or_add(&mut self, s: Session, world_data: &mut VoxelWorldData) -> ChunkEntity {
+		self.recompute_cache_or_add(s, world_data);
+		self.chunk_cache.unwrap()
 	}
 
 	pub fn pos(self) -> WorldPos {

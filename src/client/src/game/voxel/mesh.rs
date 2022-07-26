@@ -81,7 +81,7 @@ impl VoxelWorldMesh {
 							chunk_data.get_block(neighbor_block).material != 0
 						} else {
 							chunk_data.neighbor(face).map_or(false, |neighbor_entity| {
-								let neighbor_chunk = neighbor_entity.get::<VoxelChunkData>(s);
+								let neighbor_chunk = neighbor_entity.comp(s);
 
 								neighbor_chunk.get_block(center_pos.wrap()).material != 0
 							})

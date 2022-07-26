@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 
 use crucible_common::voxel::{
-	data::{BlockState, ChunkFactoryRequest, VoxelChunkData, VoxelWorldData},
-	math::{WorldPos, WorldPosExt},
+	data::{BlockState, ChunkFactoryRequest, VoxelChunkData, VoxelPointer, VoxelWorldData},
+	math::{BlockFace, WorldPos, WorldPosExt},
 };
 use geode::prelude::*;
 use typed_glam::glam::Mat4;
@@ -26,7 +26,7 @@ component_bundle! {
 		voxel_uniforms: VoxelUniforms,
 		voxel_data: RefCell<VoxelWorldData>,
 		voxel_mesh: RefCell<VoxelWorldMesh>,
-		handlers: GameSceneBundleHandlers,
+		handlers: GameSceneEntry,
 		update_handler: dyn EventHandler<SceneUpdateEvent>,
 		render_handler: dyn EventHandlerOnce<ViewportRenderEvent>,
 		local_camera: RefCell<FreeCamController>,
@@ -44,14 +44,17 @@ impl GameSceneBundle {
 		viewport: ViewportBundle,
 		main_lock: Lock,
 	) -> Owned<Self> {
+		let scene_guard = Entity::new(s);
+
 		// Create voxel services
-		let chunk_factory = Obj::new(s, |s: Session, req: ChunkFactoryRequest| {
-			let chunk = ChunkBundle::new(s, req.data_lock);
-			chunk.raw()
+		let chunk_factory = Obj::new(s, move |s: Session, _req: ChunkFactoryRequest| {
+			let chunk = ChunkBundle::new(s, main_lock);
+			EntityWith::cast_owned(chunk.raw())
 		})
 		.unsize();
 
-		let voxel_data_guard = VoxelWorldData::new(chunk_factory.into()).box_obj_rw(s, main_lock);
+		let voxel_data_guard = VoxelWorldData::new(scene_guard.weak_copy(), chunk_factory.into())
+			.box_obj_rw(s, main_lock);
 		let voxel_mesh_guard = VoxelWorldMesh::default().box_obj_rw(s, main_lock);
 		let voxel_uniforms_guard = {
 			let gfx = engine.gfx(s);
@@ -63,13 +66,12 @@ impl GameSceneBundle {
 		// Create event handlers
 		let local_camera_guard = FreeCamController::default().box_obj_rw(s, main_lock);
 
-		let (handlers_guard, handlers) = GameSceneBundleHandlers { viewport }
-			.box_obj(s)
-			.to_guard_ref_pair();
+		let (handlers_guard, handlers) = GameSceneEntry { viewport }.box_obj(s).to_guard_ref_pair();
 
 		// Create main entity
-		let scene_guard = Self::spawn(
+		let scene_guard = Self::add_onto_owned(
 			s,
+			scene_guard,
 			GameSceneBundleCtor {
 				voxel_uniforms: voxel_uniforms_guard.into(),
 				voxel_data: voxel_data_guard.into(),
@@ -98,11 +100,11 @@ impl ChunkBundle {
 	}
 }
 
-pub struct GameSceneBundleHandlers {
+pub struct GameSceneEntry {
 	viewport: ViewportBundle,
 }
 
-impl EventHandler<SceneUpdateEvent> for GameSceneBundleHandlers {
+impl EventHandler<SceneUpdateEvent> for GameSceneEntry {
 	fn fire(&self, s: Session, me: Entity, event: &mut SceneUpdateEvent) {
 		let engine = event.engine;
 
@@ -140,35 +142,29 @@ impl EventHandler<SceneUpdateEvent> for GameSceneBundleHandlers {
 
 		// Try placing blocks
 		if p_input_tracker.button(MouseButton::Right).state() {
-			// TODO: Automate with the `VoxelWorldFacade`.
-
 			let pos = p_local_camera.pos();
-			let world_pos = WorldPos::from_raw(pos.floor().as_ivec3());
-			let (chunk_pos, block_pos) = world_pos.decompose();
+			let pos = WorldPos::from_raw(pos.floor().as_ivec3());
+			let mut pos = VoxelPointer::new_uncached(pos);
 
-			let chunk = match p_world_data.get_chunk(world_pos.chunk()) {
-				Some(chunk) => chunk,
-				None => {
-					let (chunk, _) = p_world_data.add_chunk(s, me.raw(), p_lock, chunk_pos);
-					chunk
-				}
-			};
-			let chunk = ChunkBundle::cast(chunk);
+			for _ in 0..10 {
+				pos = pos.get_neighbor(s, BlockFace::NegativeY);
 
-			chunk.chunk_data(s).set_block(
-				block_pos,
-				BlockState {
-					material: 1,
-					..Default::default()
-				},
-			);
+				let chunk = pos.chunk_or_add(s, &mut p_world_data);
+				chunk.comp(s).set_block(
+					pos.pos().block(),
+					BlockState {
+						material: 1,
+						..Default::default()
+					},
+				);
 
-			p_world_mesh.flag_chunk(s, p_lock, chunk.raw());
+				p_world_mesh.flag_chunk(s, p_lock, chunk.raw());
+			}
 		}
 	}
 }
 
-impl EventHandlerOnce<ViewportRenderEvent> for GameSceneBundleHandlers {
+impl EventHandlerOnce<ViewportRenderEvent> for GameSceneEntry {
 	fn fire(&self, s: Session, me: Entity, event: ViewportRenderEvent) {
 		// Acquire services
 		let me = GameSceneBundle::cast(me);

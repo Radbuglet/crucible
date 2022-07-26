@@ -16,7 +16,8 @@ impl fmt::Debug for ReflectType {
 		f.debug_struct("TypeMeta")
 			.field("id", &self.id)
 			.field("static_layout", &self.static_layout)
-			.finish_non_exhaustive()
+			.field("drop_fn", &(self.drop_fn.map(|f| f as *const ())))
+			.finish()
 	}
 }
 

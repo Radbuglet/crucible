@@ -123,10 +123,7 @@ delegate! {
 
 	pub trait EventHandlerOnce(EventHandlerOnceMut)::<E>::fire(s: Session, me: Entity, event: E);
 
-	pub trait Factory(FactoryMut)::<A, O>::create(s: Session, args: A) -> O
-	where {
-		O: core::fmt::Debug,
-	};
+	pub trait Factory(FactoryMut)::<A, O>::create(s: Session, args: A) -> O;
 }
 
 // Multiplexing

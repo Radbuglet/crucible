@@ -44,7 +44,7 @@ pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> {
 		entity.map_owned(|entity| Self::force_cast(entity))
 	}
 
-	fn unchecked_cast_owned(entity: Owned<Entity>) -> Owned<Self> {
+	fn cast_owned(entity: Owned<Entity>) -> Owned<Self> {
 		entity.map_owned(|entity| Self::cast(entity))
 	}
 
@@ -127,35 +127,6 @@ pub struct EntityWith<T: ?Sized + ObjPointee> {
 	entity: Entity,
 }
 
-impl<T: ?Sized + ObjPointee> ComponentBundle for EntityWith<T> {
-	fn try_cast(session: Session, entity: Entity) -> anyhow::Result<Self> {
-		if let Err(err) = entity.fallible_get::<T>(session) {
-			if err.as_permission_error().is_none() {
-				return Err(anyhow::Error::new(err).context(format!(
-					"failed to construct `EntityWith<{}>` component bundle",
-					std::any::type_name::<T>()
-				)));
-			}
-		}
-		Ok(Self::force_cast(entity))
-	}
-
-	fn force_cast(entity: Entity) -> Self {
-		Self {
-			_ty: PhantomData,
-			entity,
-		}
-	}
-
-	fn force_cast_ref(entity: &Entity) -> &Self {
-		<Self as TransparentWrapper<Entity>>::wrap_ref(entity)
-	}
-}
-
-impl<T: ?Sized + ObjPointee> ComponentBundleWithCtor for EntityWith<T> {
-	type CompList = Option<MaybeOwned<Obj<T>>>;
-}
-
 impl<T: ?Sized + ObjPointee> fmt::Debug for EntityWith<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct("EntityWith")
@@ -192,27 +163,74 @@ impl<T: ?Sized + ObjPointee> Borrow<Entity> for EntityWith<T> {
 	}
 }
 
-impl<T: ?Sized + ObjPointee> EntityWith<T> {
-	pub fn get<'a>(&self, session: Session<'a>) -> &'a T {
-		self.entity.get::<T>(session)
-	}
-}
-
-impl<T: ?Sized + ObjPointee> EntityWithRw<T> {
-	pub fn borrow(self, session: Session) -> Ref<T> {
-		self.entity.borrow::<T>(session)
-	}
-
-	pub fn borrow_mut(self, session: Session) -> RefMut<T> {
-		self.entity.borrow_mut::<T>(session)
-	}
-}
-
 impl<T: ?Sized + ObjPointee> Destructible for EntityWith<T> {
 	fn destruct(self) {
 		self.entity.destruct();
 	}
 }
+
+impl<T: ?Sized + ObjPointee> ComponentBundle for EntityWith<T> {
+	fn try_cast(session: Session, entity: Entity) -> anyhow::Result<Self> {
+		if let Err(err) = entity.fallible_get::<T>(session) {
+			if err.as_permission_error().is_none() {
+				return Err(anyhow::Error::new(err).context(format!(
+					"failed to construct `EntityWith<{}>` component bundle",
+					std::any::type_name::<T>()
+				)));
+			}
+		}
+		Ok(Self::force_cast(entity))
+	}
+
+	fn force_cast(entity: Entity) -> Self {
+		Self {
+			_ty: PhantomData,
+			entity,
+		}
+	}
+
+	fn force_cast_ref(entity: &Entity) -> &Self {
+		<Self as TransparentWrapper<Entity>>::wrap_ref(entity)
+	}
+}
+
+impl<T: ?Sized + ObjPointee> ComponentBundleWithCtor for EntityWith<T> {
+	type CompList = Option<MaybeOwned<Obj<T>>>;
+}
+
+impl<T: ?Sized + ObjPointee> EntityWith<T> {
+	pub fn comp<'a>(&self, session: Session<'a>) -> &'a T {
+		self.entity.get::<T>(session)
+	}
+}
+
+impl<T: ?Sized + ObjPointee> EntityWithRw<T> {
+	pub fn borrow_comp(self, session: Session) -> Ref<T> {
+		self.entity.borrow::<T>(session)
+	}
+
+	pub fn borrow_comp_mut(self, session: Session) -> RefMut<T> {
+		self.entity.borrow_mut::<T>(session)
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Owned<EntityWith<T>> {
+	pub fn comp<'a>(&self, session: Session<'a>) -> &'a T {
+		self.weak_copy().comp(session)
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Owned<EntityWithRw<T>> {
+	pub fn borrow_comp<'s>(&self, session: Session<'s>) -> Ref<'s, T> {
+		self.weak_copy().borrow_comp(session)
+	}
+
+	pub fn borrow_comp_mut<'s>(&self, session: Session<'s>) -> RefMut<'s, T> {
+		self.weak_copy().borrow_comp_mut(session)
+	}
+}
+
+// === `component_bundle` === //
 
 // TODO: Optional components to replace the old "trust me bro I'm gonna initialize this later" system.
 pub macro component_bundle {
