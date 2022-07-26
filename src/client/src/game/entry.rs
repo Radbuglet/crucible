@@ -4,8 +4,9 @@ use crucible_common::voxel::{
 	data::{
 		BlockLocation, BlockState, ChunkFactoryRequest, RayCast, VoxelChunkData, VoxelWorldData,
 	},
-	math::{WorldVec, WorldVecExt},
+	math::{BlockFace, WorldVec, WorldVecExt},
 };
+use crucible_core::c_enum::ExposesVariants;
 use geode::prelude::*;
 use typed_glam::glam::Mat4;
 use winit::event::{MouseButton, VirtualKeyCode};
@@ -91,10 +92,12 @@ impl GameSceneBundle {
 
 impl ChunkBundle {
 	pub fn new(s: Session, main_lock: Lock) -> Owned<Self> {
-		let chunk_data_guard = VoxelChunkData::default().box_obj_in(s, main_lock);
+		let (chunk_guard, chunk) = Entity::new(s).to_guard_ref_pair();
+		let chunk_data_guard = VoxelChunkData::new(chunk).box_obj_in(s, main_lock);
 
-		ChunkBundle::spawn(
+		ChunkBundle::add_onto_owned(
 			s,
+			chunk_guard,
 			ChunkBundleCtor {
 				chunk_data: chunk_data_guard.into(),
 			},
@@ -125,9 +128,6 @@ impl EventHandler<SceneUpdateEvent> for GameSceneEntry {
 		let mut p_world_data = me.voxel_data(s).borrow_mut();
 		let mut p_world_mesh = me.voxel_mesh(s).borrow_mut();
 
-		// Update chunk meshes
-		p_world_mesh.update_chunks(s, p_gfx, None);
-
 		// Update camera
 		if p_input_tracker.has_focus() {
 			p_local_camera.handle_mouse_move(p_input_tracker.mouse_delta());
@@ -142,7 +142,7 @@ impl EventHandler<SceneUpdateEvent> for GameSceneEntry {
 			});
 		}
 
-		// Try placing blocks
+		// Handle block interactions
 		if p_input_tracker.key(VirtualKeyCode::Key1).state() {
 			let pos = p_local_camera.pos();
 			let pos = WorldVec::from_raw(pos.floor().as_ivec3());
@@ -154,16 +154,14 @@ impl EventHandler<SceneUpdateEvent> for GameSceneEntry {
 						let mut pos = pos.move_by(s, WorldVec::new(x, y, z));
 
 						let chunk = pos.chunk_or_add(s, &mut p_world_data);
-						chunk.comp(s).set_block(
+						chunk.comp(s).set_block_state(
+							&mut p_world_data,
 							pos.vec().block(),
 							BlockState {
 								material: 1,
 								..Default::default()
 							},
 						);
-
-						// TODO: Automate mesh flagging
-						p_world_mesh.flag_chunk(s, p_lock, chunk.raw());
 					}
 				}
 			}
@@ -185,20 +183,22 @@ impl EventHandler<SceneUpdateEvent> for GameSceneEntry {
 						None => continue,
 					};
 
-					if chunk.comp(s).get_block(block_loc.vec().block()).material != 0 {
+					if chunk
+						.comp(s)
+						.get_block_state(block_loc.vec().block())
+						.material != 0
+					{
 						let mut target_loc = block_loc.neighbor(s, isect.face.invert());
 						let chunk = target_loc.chunk_or_add(s, &mut p_world_data);
 
-						chunk.comp(s).set_block(
+						chunk.comp(s).set_block_state(
+							&mut p_world_data,
 							target_loc.vec().block(),
 							BlockState {
 								material: 1,
 								..Default::default()
 							},
 						);
-
-						// TODO: Automate mesh flagging
-						p_world_mesh.flag_chunk(s, p_lock, chunk.raw());
 
 						break 'scan;
 					}
@@ -222,20 +222,40 @@ impl EventHandler<SceneUpdateEvent> for GameSceneEntry {
 						None => continue,
 					};
 
-					if chunk.comp(s).get_block(block_loc.vec().block()).material != 0 {
-						chunk.comp(s).set_block(
+					if chunk
+						.comp(s)
+						.get_block_state(block_loc.vec().block())
+						.material != 0
+					{
+						chunk.comp(s).set_block_state(
+							&mut p_world_data,
 							block_loc.vec().block(),
 							BlockState::default(),
 						);
-
-						// TODO: Automate mesh flagging
-						p_world_mesh.flag_chunk(s, p_lock, chunk.raw());
 
 						break 'scan;
 					}
 				}
 			}
 		}
+
+		// Update chunk meshes
+		for chunk in p_world_data.dirty_chunks() {
+			p_world_mesh.flag_chunk(s, p_lock, chunk.raw());
+
+			// TODO: Make this more conservative.
+			for face in BlockFace::variants() {
+				let neighbor = match chunk.comp(s).neighbor(face) {
+					Some(neighbor) => neighbor,
+					None => continue,
+				};
+
+				p_world_mesh.flag_chunk(s, p_lock, neighbor.raw());
+			}
+		}
+
+		p_world_mesh.update_chunks(s, p_gfx, None);
+		p_world_data.clear_dirty_chunks();
 	}
 }
 

@@ -68,7 +68,7 @@ impl VoxelWorldMesh {
 				let mut vertices = Vec::new();
 				for center_pos in BlockVec::iter() {
 					// Don't mesh air blocks
-					if chunk_data.get_block(center_pos).material == 0 {
+					if chunk_data.get_block_state(center_pos).material == 0 {
 						continue;
 					}
 
@@ -78,12 +78,14 @@ impl VoxelWorldMesh {
 
 						// If the neighbor isn't solid...
 						let is_solid = if neighbor_block.is_valid() {
-							chunk_data.get_block(neighbor_block).material != 0
+							chunk_data.get_block_state(neighbor_block).material != 0
 						} else {
 							chunk_data.neighbor(face).map_or(false, |neighbor_entity| {
 								let neighbor_chunk = neighbor_entity.comp(s);
 
-								neighbor_chunk.get_block(center_pos.wrap()).material != 0
+								neighbor_chunk
+									.get_block_state(neighbor_block.wrap())
+									.material != 0
 							})
 						};
 

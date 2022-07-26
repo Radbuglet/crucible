@@ -1,4 +1,8 @@
-use std::{cell::Cell, collections::HashMap, hash};
+use std::{
+	cell::Cell,
+	collections::{HashMap, HashSet},
+	hash,
+};
 
 use crucible_core::{array::arr, c_enum::ExposesVariants};
 use geode::prelude::*;
@@ -25,18 +29,20 @@ pub struct VoxelWorldData {
 	me: WorldEntity,
 	chunk_factory: MaybeOwned<Obj<ChunkFactory>>,
 	chunks: HashMap<ChunkVec, Owned<ChunkEntity>>,
+	dirty_chunks: HashSet<ChunkEntity>,
 }
 
 impl VoxelWorldData {
-	pub fn new(world: Entity, chunk_factory: MaybeOwned<Obj<ChunkFactory>>) -> Self {
+	pub fn new(me: Entity, chunk_factory: MaybeOwned<Obj<ChunkFactory>>) -> Self {
 		Self {
-			me: WorldEntity::force_cast(world),
+			me: WorldEntity::force_cast(me),
 			chunk_factory,
 			chunks: Default::default(),
+			dirty_chunks: Default::default(),
 		}
 	}
 
-	pub fn entity(&self) -> WorldEntity {
+	pub fn me(&self) -> WorldEntity {
 		self.me
 	}
 
@@ -97,28 +103,40 @@ impl VoxelWorldData {
 			self.add_chunk(s, pos).0
 		}
 	}
+
+	pub fn dirty_chunks(&self) -> impl Iterator<Item = ChunkEntity> + '_ {
+		self.dirty_chunks.iter().copied()
+	}
+
+	pub fn clear_dirty_chunks(&mut self) {
+		self.dirty_chunks.clear();
+	}
 }
 
 #[derive(Debug)]
 pub struct VoxelChunkData {
+	me: ChunkEntity,
 	world: Cell<Option<WorldEntity>>,
 	neighbors: [Cell<Option<ChunkEntity>>; BlockFace::COUNT],
 	position: Cell<ChunkVec>,
 	blocks: Box<[Cell<u32>; CHUNK_VOLUME as usize]>,
 }
 
-impl Default for VoxelChunkData {
-	fn default() -> Self {
+impl VoxelChunkData {
+	pub fn new(me: Entity) -> Self {
 		Self {
+			me: ChunkEntity::force_cast(me),
 			world: Default::default(),
 			neighbors: Default::default(),
 			position: Default::default(),
 			blocks: Box::new(arr![Cell::new(0); CHUNK_VOLUME as usize]),
 		}
 	}
-}
 
-impl VoxelChunkData {
+	pub fn me(&self) -> ChunkEntity {
+		self.me
+	}
+
 	pub fn world(&self) -> Option<WorldEntity> {
 		self.world.get()
 	}
@@ -131,12 +149,18 @@ impl VoxelChunkData {
 		self.position.get()
 	}
 
-	pub fn get_block(&self, pos: BlockVec) -> BlockState {
+	pub fn get_block_state(&self, pos: BlockVec) -> BlockState {
 		BlockState::decode(self.blocks[pos.to_index()].get())
 	}
 
-	pub fn set_block(&self, pos: BlockVec, state: BlockState) {
-		self.blocks[pos.to_index()].set(state.encode())
+	pub fn set_block_state(
+		&self,
+		world_data: &mut VoxelWorldData,
+		pos: BlockVec,
+		state: BlockState,
+	) {
+		world_data.dirty_chunks.insert(self.me);
+		self.blocks[pos.to_index()].set(state.encode());
 	}
 }
 
@@ -275,10 +299,12 @@ impl BlockLocation {
 		self
 	}
 
+	// === Chunk Querying === //
+
 	pub fn invalidate_stale_cache(&mut self, s: Session, world_data: &VoxelWorldData) {
 		// Ensure that our cached chunk is actually in the world.
 		if let Some(chunk_cache) = self.chunk_cache {
-			if chunk_cache.comp(s).world() != Some(world_data.entity()) {
+			if chunk_cache.comp(s).world() != Some(world_data.me()) {
 				self.chunk_cache = None;
 			}
 		}
