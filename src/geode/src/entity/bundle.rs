@@ -41,11 +41,11 @@ pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> {
 	}
 
 	fn force_cast_owned(entity: Owned<Entity>) -> Owned<Self> {
-		entity.map_owned(|entity| Self::force_cast(entity))
+		entity.map(|entity| Self::force_cast(entity))
 	}
 
 	fn cast_owned(entity: Owned<Entity>) -> Owned<Self> {
-		entity.map_owned(|entity| Self::cast(entity))
+		entity.map(|entity| Self::cast(entity))
 	}
 
 	fn can_cast(session: Session, entity: Entity) -> bool {
@@ -109,7 +109,7 @@ pub trait ComponentBundleWithCtor: ComponentBundle {
 
 impl<T: ComponentBundle> Owned<T> {
 	pub fn raw(self) -> Owned<Entity> {
-		self.map_owned(|bundle| bundle.raw())
+		self.map(|bundle| bundle.raw())
 	}
 }
 

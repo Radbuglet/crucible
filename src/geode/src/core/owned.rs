@@ -29,7 +29,7 @@ impl<T: Destructible> Owned<T> {
 		Ok(Owned::new(f(self.manually_destruct())?))
 	}
 
-	pub fn map_owned<F, R>(self, f: F) -> Owned<R>
+	pub fn map<F, R>(self, f: F) -> Owned<R>
 	where
 		F: FnOnce(T) -> R,
 		R: Destructible,
@@ -90,7 +90,7 @@ impl<T: Destructible> MaybeOwned<T> {
 		R: Destructible,
 	{
 		match self {
-			MaybeOwned::Owned(owned) => MaybeOwned::Owned(owned.map_owned(f)),
+			MaybeOwned::Owned(owned) => MaybeOwned::Owned(owned.map(f)),
 			MaybeOwned::Weak(weak) => MaybeOwned::Weak(f(weak)),
 		}
 	}

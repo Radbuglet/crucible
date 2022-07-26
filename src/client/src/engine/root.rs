@@ -80,7 +80,7 @@ impl EngineRootBundle {
 				s,
 				main_lock,
 				gfx,
-				main_viewport_guard.map_owned(ViewportBundle::raw),
+				main_viewport_guard.map(ViewportBundle::raw),
 				main_window,
 				main_surface,
 			);

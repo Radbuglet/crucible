@@ -1,5 +1,5 @@
 use std::{
-	cell::{RefCell, RefMut},
+	cell::{Ref, RefCell, RefMut},
 	ops::{Deref, DerefMut},
 };
 
@@ -10,18 +10,25 @@ use crate::core::session::Session;
 
 // === Delegate Core === //
 
-pub trait PromoteMut<'a> {
+pub trait RuntimeBorrow<'a> {
 	type Value: ?Sized;
-	type Guard: DerefMut<Target = Self::Value>;
+	type RefGuard: Deref<Target = Self::Value>;
+	type MutGuard: DerefMut<Target = Self::Value>;
 
-	fn promote_mut(&'a self) -> Self::Guard;
+	fn promote(&'a self) -> Self::RefGuard;
+	fn promote_mut(&'a self) -> Self::MutGuard;
 }
 
-impl<'a, T: ?Sized + 'a> PromoteMut<'a> for RefCell<T> {
+impl<'a, T: ?Sized + 'a> RuntimeBorrow<'a> for RefCell<T> {
 	type Value = T;
-	type Guard = RefMut<'a, Self::Value>;
+	type RefGuard = Ref<'a, Self::Value>;
+	type MutGuard = RefMut<'a, Self::Value>;
 
-	fn promote_mut(&'a self) -> Self::Guard {
+	fn promote(&'a self) -> Self::RefGuard {
+		self.borrow()
+	}
+
+	fn promote_mut(&'a self) -> Self::MutGuard {
 		self.borrow_mut()
 	}
 }
@@ -30,19 +37,9 @@ impl<'a, T: ?Sized + 'a> PromoteMut<'a> for RefCell<T> {
 #[repr(transparent)]
 pub struct DelegateAutoBorrow<T: ?Sized>(pub T);
 
-impl<T: ?Sized> Deref for DelegateAutoBorrow<T> {
-	type Target = T;
-
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl<T: ?Sized> DerefMut for DelegateAutoBorrow<T> {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.0
-	}
-}
+#[derive(Debug, TransparentWrapper)]
+#[repr(transparent)]
+pub struct DelegateAutoBorrowMut<T: ?Sized>(pub T);
 
 pub macro delegate($(
 	$(#[$attr:meta])*
@@ -100,15 +97,28 @@ pub macro delegate($(
 	}
 
 	impl<
-		__Target: ?Sized + $trait_name_mut$(<$($($generic_lt)? $($generic_para)?),*>)?,
-		__Ptr: ?Sized + Send + for<'a> PromoteMut<'a, Value = __Target>
+		__Target: ?Sized + $trait_name$(<$($($generic_lt)? $($generic_para)?),*>)?,
+		__Ptr: ?Sized + Send + for<'a> RuntimeBorrow<'a, Value = __Target>
 		$($(, $($generic_lt)? $($generic_para)?)*)?
 	>
 		$trait_name$(<$($($generic_lt)? $($generic_para)?),*>)? for DelegateAutoBorrow<__Ptr>
 		$(where $($where)*)?
 	{
 		fn $fn_name(&self, $($arg_name: $arg_ty),*) $(-> $ret_ty)? {
-			self.promote_mut().$fn_name($($arg_name),*)
+			self.0.promote().$fn_name($($arg_name),*)
+		}
+	}
+
+	impl<
+		__Target: ?Sized + $trait_name_mut$(<$($($generic_lt)? $($generic_para)?),*>)?,
+		__Ptr: ?Sized + Send + for<'a> RuntimeBorrow<'a, Value = __Target>
+		$($(, $($generic_lt)? $($generic_para)?)*)?
+	>
+		$trait_name$(<$($($generic_lt)? $($generic_para)?),*>)? for DelegateAutoBorrowMut<__Ptr>
+		$(where $($where)*)?
+	{
+		fn $fn_name(&self, $($arg_name: $arg_ty),*) $(-> $ret_ty)? {
+			self.0.promote_mut().$fn_name($($arg_name),*)
 		}
 	}
 )*}

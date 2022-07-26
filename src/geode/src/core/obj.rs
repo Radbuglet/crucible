@@ -10,6 +10,8 @@ use std::{
 use crucible_core::error::{ErrorFormatExt, ResultExt};
 use thiserror::Error;
 
+use crate::entity::event::{DelegateAutoBorrow, DelegateAutoBorrowMut};
+
 use super::{
 	debug::DebugLabel,
 	internals::{db, gen::ExtendedGen, heap::Slot},
@@ -401,6 +403,32 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 		unsafe { self.transmute_unchecked(meta) }
 	}
 
+	pub fn unsize_delegate_borrow<U>(&self) -> Obj<U>
+	where
+		DelegateAutoBorrow<T>: Unsize<U> + Pointee<Metadata = <T as Pointee>::Metadata>,
+		U: ?Sized + ObjPointee,
+	{
+		let wrapper = unsafe {
+			// Safety: `DelegateAutoBorrow<T>` is `repr(transparent)`
+			self.transmute_unchecked::<DelegateAutoBorrow<T>>(self.meta)
+		};
+
+		wrapper.unsize()
+	}
+
+	pub fn unsize_delegate_borrow_mut<U>(&self) -> Obj<U>
+	where
+		DelegateAutoBorrowMut<T>: Unsize<U> + Pointee<Metadata = <T as Pointee>::Metadata>,
+		U: ?Sized + ObjPointee,
+	{
+		let wrapper = unsafe {
+			// Safety: `DelegateAutoBorrowMut<T>` is `repr(transparent)`
+			self.transmute_unchecked::<DelegateAutoBorrowMut<T>>(self.meta)
+		};
+
+		wrapper.unsize()
+	}
+
 	// Lifecycle management
 	pub fn is_alive_now(&self, session: Session) -> bool {
 		self.raw.is_alive_now(session)
@@ -485,7 +513,7 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 	}
 
 	pub fn raw(self) -> Owned<RawObj> {
-		self.map_owned(|obj| obj.raw())
+		self.map(|obj| obj.raw())
 	}
 
 	pub unsafe fn transmute_unchecked<U: ?Sized + ObjPointee>(
@@ -493,7 +521,7 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 		meta: <U as Pointee>::Metadata,
 	) -> Owned<Obj<U>> {
 		// Safety: provided by caller
-		self.map_owned(|obj| obj.transmute_unchecked(meta))
+		self.map(|obj| obj.transmute_unchecked(meta))
 	}
 
 	pub fn unsize<U>(self) -> Owned<Obj<U>>
@@ -501,7 +529,23 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 		T: Unsize<U>,
 		U: ?Sized + ObjPointee,
 	{
-		self.map_owned(|obj| obj.unsize())
+		self.map(|obj| obj.unsize())
+	}
+
+	pub fn unsize_delegate_borrow<U>(self) -> Owned<Obj<U>>
+	where
+		DelegateAutoBorrow<T>: Unsize<U> + Pointee<Metadata = <T as Pointee>::Metadata>,
+		U: ?Sized + ObjPointee,
+	{
+		self.map(|obj| obj.unsize_delegate_borrow())
+	}
+
+	pub fn unsize_delegate_borrow_mut<U>(self) -> Owned<Obj<U>>
+	where
+		DelegateAutoBorrowMut<T>: Unsize<U> + Pointee<Metadata = <T as Pointee>::Metadata>,
+		U: ?Sized + ObjPointee,
+	{
+		self.map(|obj| obj.unsize_delegate_borrow_mut())
 	}
 
 	pub fn is_alive_now(&self, session: Session) -> bool {
@@ -548,6 +592,22 @@ impl<T: ?Sized + ObjPointee> MaybeOwned<Obj<T>> {
 		U: ?Sized + ObjPointee,
 	{
 		self.map(|obj| obj.unsize())
+	}
+
+	pub fn unsize_delegate_borrow<U>(self) -> MaybeOwned<Obj<U>>
+	where
+		DelegateAutoBorrow<T>: Unsize<U> + Pointee<Metadata = <T as Pointee>::Metadata>,
+		U: ?Sized + ObjPointee,
+	{
+		self.map(|obj| obj.unsize_delegate_borrow())
+	}
+
+	pub fn unsize_delegate_borrow_mut<U>(self) -> MaybeOwned<Obj<U>>
+	where
+		DelegateAutoBorrowMut<T>: Unsize<U> + Pointee<Metadata = <T as Pointee>::Metadata>,
+		U: ?Sized + ObjPointee,
+	{
+		self.map(|obj| obj.unsize_delegate_borrow_mut())
 	}
 
 	pub fn is_alive_now(&self, session: Session) -> bool {

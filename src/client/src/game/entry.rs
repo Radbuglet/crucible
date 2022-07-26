@@ -29,7 +29,7 @@ component_bundle! {
 		voxel_uniforms: VoxelUniforms,
 		voxel_data: RefCell<VoxelWorldData>,
 		voxel_mesh: RefCell<VoxelWorldMesh>,
-		handlers: GameSceneEntry,
+		entry: RefCell<GameSceneEntry>,
 		update_handler: dyn EventHandler<SceneUpdateEvent>,
 		render_handler: dyn EventHandlerOnce<ViewportRenderEvent>,
 		local_camera: RefCell<FreeCamController>,
@@ -69,7 +69,12 @@ impl GameSceneBundle {
 		// Create event handlers
 		let local_camera_guard = FreeCamController::default().box_obj_rw(s, main_lock);
 
-		let (handlers_guard, handlers) = GameSceneEntry { viewport }.box_obj(s).to_guard_ref_pair();
+		let (entry_guard, entry) = GameSceneEntry {
+			viewport,
+			has_control: false,
+		}
+		.box_obj_rw(s, main_lock)
+		.to_guard_ref_pair();
 
 		// Create main entity
 		let scene_guard = Self::add_onto_owned(
@@ -79,9 +84,9 @@ impl GameSceneBundle {
 				voxel_uniforms: voxel_uniforms_guard.into(),
 				voxel_data: voxel_data_guard.into(),
 				voxel_mesh: voxel_mesh_guard.into(),
-				handlers: handlers_guard.into(),
-				update_handler: handlers.unsize().into(),
-				render_handler: handlers.unsize().into(),
+				entry: entry_guard.into(),
+				update_handler: entry.unsize_delegate_borrow_mut().into(),
+				render_handler: entry.unsize_delegate_borrow().into(),
 				local_camera: local_camera_guard.into(),
 			},
 		);
@@ -107,29 +112,69 @@ impl ChunkBundle {
 
 pub struct GameSceneEntry {
 	viewport: ViewportBundle,
+	has_control: bool,
 }
 
-impl EventHandler<SceneUpdateEvent> for GameSceneEntry {
-	fn fire(&self, s: Session, me: Entity, event: &mut SceneUpdateEvent) {
-		let engine = event.engine;
-
+impl EventHandlerMut<SceneUpdateEvent> for GameSceneEntry {
+	fn fire(&mut self, s: Session, me: Entity, event: &mut SceneUpdateEvent) {
+		// Ensure that we're still connected to a viewport.
 		if !self.viewport.raw().is_alive_now(s) {
 			return;
 		}
 
+		// Get all dependencies
 		let me = GameSceneBundle::cast(me);
+		let engine = event.engine;
 		let engine = EngineRootBundle::cast(engine);
 
 		let p_lock = engine.main_lock(s).weak_copy();
 		let p_input_tracker = self.viewport.input_tracker(s).borrow();
+		let p_viewport = self.viewport.viewport(s).borrow();
 		let p_gfx = engine.gfx(s);
 
 		let mut p_local_camera = me.local_camera(s).borrow_mut();
 		let mut p_world_data = me.voxel_data(s).borrow_mut();
 		let mut p_world_mesh = me.voxel_mesh(s).borrow_mut();
 
-		// Update camera
-		if p_input_tracker.has_focus() {
+		// Handle window focus loss
+		if !p_input_tracker.has_focus() {
+			self.has_control = false;
+		}
+
+		// Ensure that our window is still open
+		let p_window = match p_viewport.window() {
+			Some(window) => window,
+			None => return,
+		};
+
+		// Handle interactions
+		let esc_pressed = p_input_tracker
+			.key(VirtualKeyCode::Escape)
+			.recently_pressed();
+
+		let left_pressed = p_input_tracker.button(MouseButton::Left).recently_pressed();
+
+		let right_pressed = p_input_tracker
+			.button(MouseButton::Right)
+			.recently_pressed();
+
+		if esc_pressed && self.has_control {
+			p_window.set_cursor_visible(true);
+			let _ = p_window.set_cursor_grab(false);
+			self.has_control = false;
+		}
+
+		if !self.has_control {
+			if left_pressed || right_pressed {
+				p_window.set_cursor_visible(false);
+				let _ = p_window.set_cursor_grab(true);
+
+				self.has_control = true;
+			}
+		}
+
+		if self.has_control {
+			// Update camera
 			p_local_camera.handle_mouse_move(p_input_tracker.mouse_delta());
 
 			p_local_camera.process(InputActions {
@@ -140,9 +185,76 @@ impl EventHandler<SceneUpdateEvent> for GameSceneEntry {
 				fore: p_input_tracker.key(VirtualKeyCode::W).state(),
 				back: p_input_tracker.key(VirtualKeyCode::S).state(),
 			});
+
+			// Handle block placement
+			if right_pressed {
+				let mut ray = RayCast::new_cached(
+					&p_world_data,
+					p_local_camera.pos().as_dvec3().into(),
+					p_local_camera.facing().as_dvec3().into(),
+				);
+
+				for isect in ray.step_for(s, 7.) {
+					let mut block_loc = isect.block_loc;
+					let chunk = match block_loc.chunk(s, &p_world_data) {
+						Some(chunk) => chunk,
+						None => continue,
+					};
+
+					if chunk
+						.comp(s)
+						.get_block_state(block_loc.vec().block())
+						.material != 0
+					{
+						let mut target_loc = block_loc.neighbor(s, isect.face.invert());
+						let chunk = target_loc.chunk_or_add(s, &mut p_world_data);
+
+						chunk.comp(s).set_block_state(
+							&mut p_world_data,
+							target_loc.vec().block(),
+							BlockState {
+								material: 1,
+								..Default::default()
+							},
+						);
+
+						break;
+					}
+				}
+			}
+
+			// Handle block breaking
+			if left_pressed {
+				let mut ray = RayCast::new_cached(
+					&p_world_data,
+					p_local_camera.pos().as_dvec3().into(),
+					p_local_camera.facing().as_dvec3().into(),
+				);
+
+				for isect in ray.step_for(s, 100.) {
+					let mut block_loc = isect.block_loc;
+					let chunk = match block_loc.chunk(s, &p_world_data) {
+						Some(chunk) => chunk,
+						None => continue,
+					};
+
+					if chunk
+						.comp(s)
+						.get_block_state(block_loc.vec().block())
+						.material != 0
+					{
+						chunk.comp(s).set_block_state(
+							&mut p_world_data,
+							block_loc.vec().block(),
+							BlockState::default(),
+						);
+
+						break;
+					}
+				}
+			}
 		}
 
-		// Handle block interactions
 		if p_input_tracker.key(VirtualKeyCode::Key1).state() {
 			let pos = p_local_camera.pos();
 			let pos = WorldVec::from_raw(pos.floor().as_ivec3());
@@ -163,75 +275,6 @@ impl EventHandler<SceneUpdateEvent> for GameSceneEntry {
 							},
 						);
 					}
-				}
-			}
-		}
-
-		if p_input_tracker
-			.button(MouseButton::Right)
-			.recently_pressed()
-		{
-			let mut ray = RayCast::new_cached(
-				&p_world_data,
-				p_local_camera.pos().as_dvec3().into(),
-				p_local_camera.facing().as_dvec3().into(),
-			);
-
-			for isect in ray.step_for(s, 7.) {
-				let mut block_loc = isect.block_loc;
-				let chunk = match block_loc.chunk(s, &p_world_data) {
-					Some(chunk) => chunk,
-					None => continue,
-				};
-
-				if chunk
-					.comp(s)
-					.get_block_state(block_loc.vec().block())
-					.material != 0
-				{
-					let mut target_loc = block_loc.neighbor(s, isect.face.invert());
-					let chunk = target_loc.chunk_or_add(s, &mut p_world_data);
-
-					chunk.comp(s).set_block_state(
-						&mut p_world_data,
-						target_loc.vec().block(),
-						BlockState {
-							material: 1,
-							..Default::default()
-						},
-					);
-
-					break;
-				}
-			}
-		}
-
-		if p_input_tracker.button(MouseButton::Left).recently_pressed() {
-			let mut ray = RayCast::new_cached(
-				&p_world_data,
-				p_local_camera.pos().as_dvec3().into(),
-				p_local_camera.facing().as_dvec3().into(),
-			);
-
-			for isect in ray.step_for(s, 100.) {
-				let mut block_loc = isect.block_loc;
-				let chunk = match block_loc.chunk(s, &p_world_data) {
-					Some(chunk) => chunk,
-					None => continue,
-				};
-
-				if chunk
-					.comp(s)
-					.get_block_state(block_loc.vec().block())
-					.material != 0
-				{
-					chunk.comp(s).set_block_state(
-						&mut p_world_data,
-						block_loc.vec().block(),
-						BlockState::default(),
-					);
-
-					break;
 				}
 			}
 		}
