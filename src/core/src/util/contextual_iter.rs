@@ -6,7 +6,6 @@ pub struct WithContext<C, I: ContextualIter<C>> {
 
 impl<C, I> Iterator for WithContext<C, I>
 where
-	C: Clone,
 	I: ContextualIter<C>,
 {
 	type Item = I::Item;

@@ -4,7 +4,11 @@ use std::{
 	hash,
 };
 
-use crucible_core::{array::arr, c_enum::ExposesVariants};
+use crucible_core::{
+	array::arr,
+	c_enum::ExposesVariants,
+	contextual_iter::{ContextualIter, WithContext},
+};
 use geode::prelude::*;
 use smallvec::SmallVec;
 
@@ -348,13 +352,37 @@ pub struct RayCast {
 }
 
 impl RayCast {
-	pub fn new(origin: EntityVec, dir: EntityVec) -> Self {
+	pub fn new_with_ptr(origin_loc: BlockLocation, origin: EntityVec, dir: EntityVec) -> Self {
+		debug_assert_eq!(origin_loc.vec(), origin.block_pos());
+
+		let (dir, dist) = {
+			let dir_len_recip = dir.length_recip();
+
+			if dir_len_recip.is_finite() && dir_len_recip > 0.0 {
+				(dir * dir_len_recip, 1.)
+			} else {
+				(EntityVec::ZERO, f64::INFINITY)
+			}
+		};
+
 		Self {
-			b_loc: BlockLocation::new_uncached(origin.block_pos()),
+			b_loc: origin_loc,
 			f_pos: origin,
 			f_dir: dir.normalize_or_zero(),
-			dist: 0.0,
+			dist,
 		}
+	}
+
+	pub fn new_uncached(origin: EntityVec, dir: EntityVec) -> Self {
+		Self::new_with_ptr(BlockLocation::new_uncached(origin.block_pos()), origin, dir)
+	}
+
+	pub fn new_cached(world_data: &VoxelWorldData, origin: EntityVec, dir: EntityVec) -> Self {
+		Self::new_with_ptr(
+			BlockLocation::new_cached(world_data, origin.block_pos()),
+			origin,
+			dir,
+		)
 	}
 
 	pub fn block_loc(&mut self) -> &mut BlockLocation {
@@ -367,6 +395,10 @@ impl RayCast {
 
 	pub fn f_dir(&self) -> EntityVec {
 		self.f_dir
+	}
+
+	pub fn dist(&self) -> f64 {
+		self.dist
 	}
 
 	pub fn step(&mut self, s: Session) -> SmallVec<[RayCastIntersection; 3]> {
@@ -415,7 +447,20 @@ impl RayCast {
 			self.b_loc = isect.block_loc;
 		}
 
+		// Update distance accumulator
+		// N.B. the direction is either normalized, in which case the step was of length 1, or we're
+		// zero, in which case the distance is infinity.
+		self.dist += 1.;
+
 		intersections
+	}
+
+	pub fn step_for<'a>(&'a mut self, s: Session<'a>, max_dist: f64) -> RayCastIter<'a> {
+		ContextualRayCastIter {
+			max_dist,
+			back_log: SmallVec::new(),
+		}
+		.with_context((s, self))
 	}
 }
 
@@ -426,4 +471,46 @@ pub struct RayCastIntersection {
 	pub face: BlockFace,
 	pub pos: EntityVec,
 	pub distance: f64,
+}
+
+pub type RayCastIter<'a> = WithContext<(Session<'a>, &'a mut RayCast), ContextualRayCastIter>;
+
+#[derive(Debug, Clone)]
+pub struct ContextualRayCastIter {
+	pub max_dist: f64,
+	back_log: SmallVec<[RayCastIntersection; 3]>,
+}
+
+impl<'a> ContextualIter<(Session<'a>, &'a mut RayCast)> for ContextualRayCastIter {
+	type Item = RayCastIntersection;
+
+	fn next_on_ref(&mut self, (s, ray): &mut (Session<'a>, &'a mut RayCast)) -> Option<Self::Item> {
+		while self.back_log.is_empty() {
+			self.back_log = ray.step(*s);
+		}
+
+		let next = if !self.back_log.is_empty() {
+			self.back_log.remove(0)
+		} else if ray.dist() < self.max_dist {
+			self.back_log = ray.step(*s);
+
+			// It is possible that the ray needs to travel more than 1 unit to get out of a block.
+			// The furthest it can travel is `sqrt(3 * 1^2) ~= 1.7` so we have to call this method
+			// at most twice. Also, yes, this handles a zero-vector direction because rays with no
+			// direction automatically get infinite distance.
+			if self.back_log.is_empty() {
+				self.back_log = ray.step(*s);
+			}
+
+			self.back_log.remove(0)
+		} else {
+			return None;
+		};
+
+		if next.distance <= self.max_dist {
+			Some(next)
+		} else {
+			None
+		}
+	}
 }

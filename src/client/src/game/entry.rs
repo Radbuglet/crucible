@@ -167,74 +167,71 @@ impl EventHandler<SceneUpdateEvent> for GameSceneEntry {
 			}
 		}
 
-		if p_input_tracker.button(MouseButton::Right).state() {
-			let mut ray = RayCast::new(
+		if p_input_tracker
+			.button(MouseButton::Right)
+			.recently_pressed()
+		{
+			let mut ray = RayCast::new_cached(
+				&p_world_data,
 				p_local_camera.pos().as_dvec3().into(),
 				p_local_camera.facing().as_dvec3().into(),
 			);
 
-			ray.block_loc().recompute_cache(s, &p_world_data);
+			for isect in ray.step_for(s, 7.) {
+				let mut block_loc = isect.block_loc;
+				let chunk = match block_loc.chunk(s, &p_world_data) {
+					Some(chunk) => chunk,
+					None => continue,
+				};
 
-			'scan: for _ in 0..100 {
-				for isect in ray.step(s) {
-					let mut block_loc = isect.block_loc;
-					let chunk = match block_loc.chunk(s, &p_world_data) {
-						Some(chunk) => chunk,
-						None => continue,
-					};
+				if chunk
+					.comp(s)
+					.get_block_state(block_loc.vec().block())
+					.material != 0
+				{
+					let mut target_loc = block_loc.neighbor(s, isect.face.invert());
+					let chunk = target_loc.chunk_or_add(s, &mut p_world_data);
 
-					if chunk
-						.comp(s)
-						.get_block_state(block_loc.vec().block())
-						.material != 0
-					{
-						let mut target_loc = block_loc.neighbor(s, isect.face.invert());
-						let chunk = target_loc.chunk_or_add(s, &mut p_world_data);
+					chunk.comp(s).set_block_state(
+						&mut p_world_data,
+						target_loc.vec().block(),
+						BlockState {
+							material: 1,
+							..Default::default()
+						},
+					);
 
-						chunk.comp(s).set_block_state(
-							&mut p_world_data,
-							target_loc.vec().block(),
-							BlockState {
-								material: 1,
-								..Default::default()
-							},
-						);
-
-						break 'scan;
-					}
+					break;
 				}
 			}
 		}
 
-		if p_input_tracker.button(MouseButton::Left).state() {
-			let mut ray = RayCast::new(
+		if p_input_tracker.button(MouseButton::Left).recently_pressed() {
+			let mut ray = RayCast::new_cached(
+				&p_world_data,
 				p_local_camera.pos().as_dvec3().into(),
 				p_local_camera.facing().as_dvec3().into(),
 			);
 
-			ray.block_loc().recompute_cache(s, &p_world_data);
+			for isect in ray.step_for(s, 100.) {
+				let mut block_loc = isect.block_loc;
+				let chunk = match block_loc.chunk(s, &p_world_data) {
+					Some(chunk) => chunk,
+					None => continue,
+				};
 
-			'scan: for _ in 0..100 {
-				for isect in ray.step(s) {
-					let mut block_loc = isect.block_loc;
-					let chunk = match block_loc.chunk(s, &p_world_data) {
-						Some(chunk) => chunk,
-						None => continue,
-					};
+				if chunk
+					.comp(s)
+					.get_block_state(block_loc.vec().block())
+					.material != 0
+				{
+					chunk.comp(s).set_block_state(
+						&mut p_world_data,
+						block_loc.vec().block(),
+						BlockState::default(),
+					);
 
-					if chunk
-						.comp(s)
-						.get_block_state(block_loc.vec().block())
-						.material != 0
-					{
-						chunk.comp(s).set_block_state(
-							&mut p_world_data,
-							block_loc.vec().block(),
-							BlockState::default(),
-						);
-
-						break 'scan;
-					}
+					break;
 				}
 			}
 		}
