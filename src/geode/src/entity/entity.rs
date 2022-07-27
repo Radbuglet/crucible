@@ -53,12 +53,13 @@ impl Entity {
 		components.push_values(&mut ComponentAttachTarget { map });
 	}
 
-	pub fn fallible_get_in<'a, T: ?Sized + ObjPointee>(
+	pub fn fallible_get_obj_in<T: ?Sized + ObjPointee>(
 		&self,
-		session: Session<'a>,
+		session: Session,
 		key: TypedKey<T>,
-	) -> Result<&'a T, EntityGetError> {
-		self.obj
+	) -> Result<Obj<T>, EntityGetError> {
+		Ok(self
+			.obj
 			// Acquire `Entity` heap handle
 			.try_get(session)
 			.map_err(EntityGetError::EntityDerefError)?
@@ -71,10 +72,25 @@ impl Entity {
 				EntityGetError::ComponentMissing(ComponentMissingError { key: key.raw() })
 			})?
 			.downcast_ref::<Obj<T>>()
-			.unwrap()
-			// Deref component
+			.copied()
+			.unwrap())
+	}
+
+	pub fn fallible_get_in<'a, T: ?Sized + ObjPointee>(
+		&self,
+		session: Session<'a>,
+		key: TypedKey<T>,
+	) -> Result<&'a T, EntityGetError> {
+		self.fallible_get_obj_in(session, key)?
 			.try_get(session)
 			.map_err(|err| EntityGetError::CompDerefError(key.raw(), err))
+	}
+
+	pub fn fallible_get_obj<T: ?Sized + ObjPointee>(
+		&self,
+		session: Session,
+	) -> Result<Obj<T>, EntityGetError> {
+		self.fallible_get_obj_in(session, typed_key::<T>())
 	}
 
 	pub fn fallible_get<'a, T: ?Sized + ObjPointee>(
@@ -84,12 +100,20 @@ impl Entity {
 		self.fallible_get_in(session, typed_key::<T>())
 	}
 
+	pub fn get_obj_in<T: ?Sized + ObjPointee>(&self, session: Session, key: TypedKey<T>) -> Obj<T> {
+		self.fallible_get_obj_in(session, key).unwrap_pretty()
+	}
+
 	pub fn get_in<'a, T: ?Sized + ObjPointee>(
 		&self,
 		session: Session<'a>,
 		key: TypedKey<T>,
 	) -> &'a T {
 		self.fallible_get_in(session, key).unwrap_pretty()
+	}
+
+	pub fn get_obj<T: ?Sized + ObjPointee>(&self, session: Session) -> Obj<T> {
+		self.get_obj_in(session, typed_key::<T>())
 	}
 
 	pub fn get<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> &'a T {
@@ -145,12 +169,27 @@ impl Owned<Entity> {
 		self.weak_copy().add(session, components)
 	}
 
+	pub fn fallible_get_obj_in<T: ?Sized + ObjPointee>(
+		&self,
+		session: Session,
+		key: TypedKey<T>,
+	) -> Result<Obj<T>, EntityGetError> {
+		self.weak_copy().fallible_get_obj_in(session, key)
+	}
+
 	pub fn fallible_get_in<'a, T: ?Sized + ObjPointee>(
 		&self,
 		session: Session<'a>,
 		key: TypedKey<T>,
 	) -> Result<&'a T, EntityGetError> {
 		self.weak_copy().fallible_get_in(session, key)
+	}
+
+	pub fn fallible_get_obj<T: ?Sized + ObjPointee>(
+		&self,
+		session: Session,
+	) -> Result<Obj<T>, EntityGetError> {
+		self.weak_copy().fallible_get_obj(session)
 	}
 
 	pub fn fallible_get<'a, T: ?Sized + ObjPointee>(
@@ -160,12 +199,20 @@ impl Owned<Entity> {
 		self.weak_copy().fallible_get(session)
 	}
 
+	pub fn get_obj_in<T: ?Sized + ObjPointee>(&self, session: Session, key: TypedKey<T>) -> Obj<T> {
+		self.weak_copy().get_obj_in(session, key)
+	}
+
 	pub fn get_in<'a, T: ?Sized + ObjPointee>(
 		&self,
 		session: Session<'a>,
 		key: TypedKey<T>,
 	) -> &'a T {
 		self.weak_copy().get_in(session, key)
+	}
+
+	pub fn get_obj<T: ?Sized + ObjPointee>(&self, session: Session) -> Obj<T> {
+		self.weak_copy().get_obj(session)
 	}
 
 	pub fn get<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> &'a T {
@@ -194,12 +241,27 @@ impl MaybeOwned<Entity> {
 		self.weak_copy().add(session, components)
 	}
 
+	pub fn fallible_get_obj_in<T: ?Sized + ObjPointee>(
+		&self,
+		session: Session,
+		key: TypedKey<T>,
+	) -> Result<Obj<T>, EntityGetError> {
+		self.weak_copy().fallible_get_obj_in(session, key)
+	}
+
 	pub fn fallible_get_in<'a, T: ?Sized + ObjPointee>(
 		&self,
 		session: Session<'a>,
 		key: TypedKey<T>,
 	) -> Result<&'a T, EntityGetError> {
 		self.weak_copy().fallible_get_in(session, key)
+	}
+
+	pub fn fallible_get_obj<T: ?Sized + ObjPointee>(
+		&self,
+		session: Session,
+	) -> Result<Obj<T>, EntityGetError> {
+		self.weak_copy().fallible_get_obj(session)
 	}
 
 	pub fn fallible_get<'a, T: ?Sized + ObjPointee>(
@@ -209,12 +271,20 @@ impl MaybeOwned<Entity> {
 		self.weak_copy().fallible_get(session)
 	}
 
+	pub fn get_obj_in<T: ?Sized + ObjPointee>(&self, session: Session, key: TypedKey<T>) -> Obj<T> {
+		self.weak_copy().get_obj_in(session, key)
+	}
+
 	pub fn get_in<'a, T: ?Sized + ObjPointee>(
 		&self,
 		session: Session<'a>,
 		key: TypedKey<T>,
 	) -> &'a T {
 		self.weak_copy().get_in(session, key)
+	}
+
+	pub fn get_obj<T: ?Sized + ObjPointee>(&self, session: Session) -> Obj<T> {
+		self.weak_copy().get_obj(session)
 	}
 
 	pub fn get<'a, T: ?Sized + ObjPointee>(&self, session: Session<'a>) -> &'a T {

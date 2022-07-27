@@ -53,6 +53,10 @@ impl<T: Destructible> Owned<T> {
 		&self.0
 	}
 
+	pub fn weak_mut(&mut self) -> &mut T {
+		&mut self.0
+	}
+
 	pub fn weak_copy(&self) -> T
 	where
 		T: Copy,
@@ -110,6 +114,13 @@ impl<T: Destructible> MaybeOwned<T> {
 	pub fn weak_ref(&self) -> &T {
 		match self {
 			MaybeOwned::Owned(owned) => owned.weak_ref(),
+			MaybeOwned::Weak(weak) => weak,
+		}
+	}
+
+	pub fn weak_mut(&mut self) -> &mut T {
+		match self {
+			MaybeOwned::Owned(owned) => owned.weak_mut(),
 			MaybeOwned::Weak(weak) => weak,
 		}
 	}

@@ -3,8 +3,6 @@ use std::{
 	ops::{Deref, DerefMut},
 };
 
-use bytemuck::TransparentWrapper;
-
 use super::entity::Entity;
 use crate::core::session::Session;
 
@@ -33,11 +31,11 @@ impl<'a, T: ?Sized + 'a> RuntimeBorrow<'a> for RefCell<T> {
 	}
 }
 
-#[derive(Debug, TransparentWrapper)]
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct DelegateAutoBorrow<T: ?Sized>(pub T);
 
-#[derive(Debug, TransparentWrapper)]
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct DelegateAutoBorrowMut<T: ?Sized>(pub T);
 

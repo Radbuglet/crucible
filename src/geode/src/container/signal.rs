@@ -28,7 +28,7 @@ impl<T: ?Sized + ObjPointee> Signal<T> {
 
 	pub fn connect(
 		&self,
-		s: Session,
+		session: Session,
 		entity: Entity,
 		handler: Obj<T>,
 		conn_info: ConnectionInfo<T>,
@@ -42,7 +42,7 @@ impl<T: ?Sized + ObjPointee> Signal<T> {
 			#[cfg(debug_assertions)]
 			debug_is_weak: conn_info.weakly_connect,
 		}
-		.box_obj_in(s, self.lock)
+		.box_obj_in(session, self.lock)
 		.to_guard_ref_pair();
 
 		handlers.push(conn_guard);
@@ -51,16 +51,16 @@ impl<T: ?Sized + ObjPointee> Signal<T> {
 	}
 
 	fn index_if_connected(
-		s: Session,
+		session: Session,
 		handlers: &HandlerList<T>,
 		conn: ConnectionHandle<T>,
 	) -> Option<usize> {
-		let p_conn = conn.obj.get(s);
+		let p_conn = conn.obj.get(session);
 		let index = p_conn.index.get();
 
 		if matches!(
 			handlers.get(index),
-			Some(owned_conn) if owned_conn.weak_copy() == conn.obj && p_conn.handler.is_alive_now(s)
+			Some(owned_conn) if owned_conn.weak_copy() == conn.obj && p_conn.handler.is_alive_now(session)
 		) {
 			Some(index)
 		} else {
@@ -68,14 +68,14 @@ impl<T: ?Sized + ObjPointee> Signal<T> {
 		}
 	}
 
-	pub fn is_connected(&self, s: Session, conn: ConnectionHandle<T>) -> bool {
-		Self::index_if_connected(s, &self.connections.borrow(), conn).is_some()
+	pub fn is_connected(&self, session: Session, conn: ConnectionHandle<T>) -> bool {
+		Self::index_if_connected(session, &self.connections.borrow(), conn).is_some()
 	}
 
-	pub fn disconnect(&self, s: Session, conn: ConnectionHandle<T>) -> bool {
+	pub fn disconnect(&self, session: Session, conn: ConnectionHandle<T>) -> bool {
 		let mut handlers = self.connections.borrow_mut();
 
-		let conn_index = match Self::index_if_connected(s, &mut handlers, conn) {
+		let conn_index = match Self::index_if_connected(session, &mut handlers, conn) {
 			Some(index) => index,
 			None => return false,
 		};
@@ -83,13 +83,13 @@ impl<T: ?Sized + ObjPointee> Signal<T> {
 		let _ = handlers.swap_remove(conn_index);
 
 		if let Some(dirty) = handlers.last() {
-			dirty.get(s).index.set(handlers.len() - 1);
+			dirty.get(session).index.set(handlers.len() - 1);
 		}
 
 		true
 	}
 
-	pub fn clear(&self, _s: Session) {
+	pub fn clear(&self, _session: Session) {
 		self.connections.borrow_mut().clear();
 	}
 }
@@ -99,11 +99,11 @@ where
 	E: ?Sized,
 	T: EventHandler<E>,
 {
-	fn fire(&self, s: Session, _: Entity, event: &mut E) {
+	fn fire(&self, session: Session, _: Entity, event: &mut E) {
 		self.connections.borrow_mut().retain_mut(|conn| {
-			let p_conn = conn.get(s);
-			if let Ok(handler) = p_conn.handler.weak_get(s) {
-				handler.fire(s, p_conn.entity, event);
+			let p_conn = conn.get(session);
+			if let Ok(handler) = p_conn.handler.weak_get(session) {
+				handler.fire(session, p_conn.entity, event);
 				true
 			} else {
 				#[cfg(debug_assertions)]

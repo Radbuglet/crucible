@@ -25,8 +25,8 @@ pub mod prelude {
 		},
 		entity::{
 			bundle::{
-				component_bundle, ComponentBundle, ComponentBundleWithCtor, EntityWith,
-				EntityWithRw,
+				component_bundle, BackrefEntityWith, CachedEntityWith, CachedEntityWithRw,
+				ComponentBundle, ComponentBundleWithCtor, EntityWith, EntityWithRw, ObjBackref,
 			},
 			entity::{Entity, EntityGetErrorExt, ExposeUsing},
 			event::{

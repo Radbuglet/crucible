@@ -9,10 +9,13 @@ use std::{
 use crate::core::{
 	obj::ObjPointee,
 	owned::{Destructible, Owned},
-	session::Session,
+	session::{LocalSessionGuard, Session},
 };
 
-use super::entity::{ComponentList, Entity};
+use super::{
+	entity::{ComponentList, Entity},
+	key::TypedKey,
+};
 
 #[allow(unused)] // Actually captured by the macro
 use {
@@ -31,8 +34,6 @@ pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> {
 	fn try_cast(session: Session, entity: Entity) -> anyhow::Result<Self>;
 
 	fn late_cast(entity: Entity) -> Self;
-
-	fn late_cast_ref(entity: &Entity) -> &Self;
 
 	// === Derived casting methods === //
 
@@ -55,7 +56,6 @@ pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> {
 	fn cast(entity: Entity) -> Self {
 		#[cfg(debug_assertions)]
 		{
-			use crate::core::session::LocalSessionGuard;
 			use crucible_core::error::{AnyhowConvertExt, ErrorFormatExt};
 
 			if let Err(err) =
@@ -119,9 +119,6 @@ impl<T: ComponentBundle> Owned<T> {
 
 pub type EntityWithRw<T> = EntityWith<RefCell<T>>;
 
-#[derive(TransparentWrapper)]
-#[repr(transparent)]
-#[transparent(Entity)]
 pub struct EntityWith<T: ?Sized + ObjPointee> {
 	_ty: PhantomInvariant<T>,
 	entity: Entity,
@@ -188,10 +185,6 @@ impl<T: ?Sized + ObjPointee> ComponentBundle for EntityWith<T> {
 			entity,
 		}
 	}
-
-	fn late_cast_ref(entity: &Entity) -> &Self {
-		<Self as TransparentWrapper<Entity>>::wrap_ref(entity)
-	}
 }
 
 impl<T: ?Sized + ObjPointee> ComponentBundleWithCtor for EntityWith<T> {
@@ -243,6 +236,275 @@ impl<T: ?Sized + ObjPointee> MaybeOwned<EntityWithRw<T>> {
 
 	pub fn borrow_comp_mut<'s>(&self, session: Session<'s>) -> RefMut<'s, T> {
 		self.weak_copy().borrow_comp_mut(session)
+	}
+}
+
+// === `CachedEntityWith` === //
+
+pub type CachedEntityWithRw<T> = CachedEntityWith<RefCell<T>>;
+
+pub struct CachedEntityWith<T: ?Sized + ObjPointee> {
+	entity: Entity,
+	cache: Option<Obj<T>>,
+}
+
+impl<T: ?Sized + ObjPointee> fmt::Debug for CachedEntityWith<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("CachedEntityWith")
+			.field("entity", &self.entity)
+			.finish_non_exhaustive()
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Copy for CachedEntityWith<T> {}
+
+impl<T: ?Sized + ObjPointee> Clone for CachedEntityWith<T> {
+	fn clone(&self) -> Self {
+		*self
+	}
+}
+
+impl<T: ?Sized + ObjPointee> hash::Hash for CachedEntityWith<T> {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		self.entity.hash(state);
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Eq for CachedEntityWith<T> {}
+
+impl<T: ?Sized + ObjPointee> PartialEq for CachedEntityWith<T> {
+	fn eq(&self, other: &Self) -> bool {
+		self.entity == other.entity
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Borrow<Entity> for CachedEntityWith<T> {
+	fn borrow(&self) -> &Entity {
+		&self.entity
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Destructible for CachedEntityWith<T> {
+	fn destruct(self) {
+		self.entity.destruct();
+	}
+}
+
+impl<T: ?Sized + ObjPointee> ComponentBundle for CachedEntityWith<T> {
+	fn try_cast(session: Session, entity: Entity) -> anyhow::Result<Self> {
+		match entity.fallible_get_obj::<T>(session) {
+			Ok(obj) => Ok(Self {
+				entity,
+				cache: Some(obj),
+			}),
+			Err(err) => {
+				if err.as_permission_error().is_none() {
+					Err(anyhow::Error::new(err).context(format!(
+						"failed to construct `CachedEntityWith<{}>` component bundle",
+						std::any::type_name::<T>()
+					)))
+				} else {
+					Ok(Self {
+						entity,
+						cache: None,
+					})
+				}
+			}
+		}
+	}
+
+	fn late_cast(entity: Entity) -> Self {
+		Self {
+			entity,
+			cache: None,
+		}
+	}
+}
+
+impl<T: ?Sized + ObjPointee> ComponentBundleWithCtor for CachedEntityWith<T> {
+	type CompList = Option<MaybeOwned<Obj<T>>>;
+}
+
+impl<T: ?Sized + ObjPointee> CachedEntityWith<T> {
+	pub fn invalidate_cache(&mut self) {
+		self.cache = None;
+	}
+
+	pub fn comp<'s>(&mut self, session: Session<'s>) -> &'s T {
+		let obj = self
+			.cache
+			.get_or_insert_with(|| self.entity.get_obj::<T>(session));
+
+		obj.get(session)
+	}
+}
+
+impl<T: ?Sized + ObjPointee> CachedEntityWithRw<T> {
+	pub fn borrow_comp<'s>(&mut self, session: Session<'s>) -> Ref<'s, T> {
+		self.comp(session).borrow()
+	}
+
+	pub fn borrow_comp_mut<'s>(&mut self, session: Session<'s>) -> RefMut<'s, T> {
+		self.comp(session).borrow_mut()
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Owned<CachedEntityWith<T>> {
+	pub fn comp<'s>(&mut self, session: Session<'s>) -> &'s T {
+		self.weak_mut().comp(session)
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Owned<CachedEntityWithRw<T>> {
+	pub fn borrow_comp<'s>(&mut self, session: Session<'s>) -> Ref<'s, T> {
+		self.weak_mut().borrow_comp(session)
+	}
+
+	pub fn borrow_comp_mut<'s>(&mut self, session: Session<'s>) -> RefMut<'s, T> {
+		self.weak_mut().borrow_comp_mut(session)
+	}
+}
+
+impl<T: ?Sized + ObjPointee> MaybeOwned<CachedEntityWith<T>> {
+	pub fn comp<'a>(&mut self, session: Session<'a>) -> &'a T {
+		self.weak_mut().comp(session)
+	}
+}
+
+impl<T: ?Sized + ObjPointee> MaybeOwned<CachedEntityWithRw<T>> {
+	pub fn borrow_comp<'s>(&mut self, session: Session<'s>) -> Ref<'s, T> {
+		self.weak_mut().borrow_comp(session)
+	}
+
+	pub fn borrow_comp_mut<'s>(&mut self, session: Session<'s>) -> RefMut<'s, T> {
+		self.weak_mut().borrow_comp_mut(session)
+	}
+}
+
+// === `CompEntity` === //
+
+pub trait ObjBackref: ObjPointee {
+	fn entity(&self) -> Entity;
+}
+
+pub struct BackrefEntityWith<T: ?Sized + ObjBackref> {
+	obj: Obj<T>,
+}
+
+impl<T: ?Sized + ObjBackref> fmt::Debug for BackrefEntityWith<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let session = LocalSessionGuard::new();
+		let s = session.handle();
+
+		f.debug_struct("BackrefEntityWith")
+			.field("entity", &self.entity(s))
+			.finish()
+	}
+}
+
+impl<T: ?Sized + ObjBackref> Copy for BackrefEntityWith<T> {}
+
+impl<T: ?Sized + ObjBackref> Clone for BackrefEntityWith<T> {
+	fn clone(&self) -> Self {
+		*self
+	}
+}
+
+// N.B. we don't derive comparison operations because it's unclear how these should be compared.
+// e.g. should they be compared like all the other `EntityWith` variants (i.e. by the entity) or
+// compared by their component instance. The former would incur a performance penalty from the
+// construction of `LocalSessionGuards`.
+
+impl<T: ?Sized + ObjBackref> Destructible for BackrefEntityWith<T> {
+	fn destruct(self) {
+		let session = LocalSessionGuard::new();
+		let s = session.handle();
+
+		if let Ok(obj) = self.obj.weak_get(s) {
+			obj.entity().destroy(s);
+		}
+	}
+}
+
+impl<T: ?Sized + ObjBackref> BackrefEntityWith<T> {
+	pub fn from_comp(obj: Obj<T>) -> Self {
+		Self { obj }
+	}
+
+	pub fn from_entity(session: Session, entity: Entity) -> Self {
+		Self {
+			obj: entity.get_obj::<T>(session),
+		}
+	}
+
+	pub fn from_entity_in(session: Session, entity: Entity, key: TypedKey<T>) -> Self {
+		Self {
+			obj: entity.get_obj_in::<T>(session, key),
+		}
+	}
+
+	pub fn entity(&self, session: Session) -> Entity {
+		self.obj.get(session).entity()
+	}
+
+	pub fn comp_obj(&self) -> Obj<T> {
+		self.obj
+	}
+
+	pub fn comp<'s>(&self, session: Session<'s>) -> &'s T {
+		self.obj.get(session)
+	}
+}
+
+impl<T: ?Sized + ObjBackref> Owned<BackrefEntityWith<T>> {
+	pub fn from_comp(obj: Owned<Obj<T>>) -> Self {
+		obj.map(|obj| BackrefEntityWith::from_comp(obj))
+	}
+
+	pub fn from_entity(session: Session, entity: Owned<Entity>) -> Self {
+		entity.map(|entity| BackrefEntityWith::from_entity(session, entity))
+	}
+
+	pub fn from_entity_in(session: Session, entity: Owned<Entity>, key: TypedKey<T>) -> Self {
+		entity.map(|entity| BackrefEntityWith::from_entity_in(session, entity, key))
+	}
+
+	pub fn entity(&self, session: Session) -> Entity {
+		self.weak_copy().entity(session)
+	}
+
+	pub fn comp_obj(&self) -> Obj<T> {
+		self.weak_copy().comp_obj()
+	}
+
+	pub fn comp<'s>(&self, session: Session<'s>) -> &'s T {
+		self.weak_copy().comp(session)
+	}
+}
+
+impl<T: ?Sized + ObjBackref> MaybeOwned<BackrefEntityWith<T>> {
+	pub fn from_comp(obj: MaybeOwned<Obj<T>>) -> Self {
+		obj.map(|obj| BackrefEntityWith::from_comp(obj))
+	}
+
+	pub fn from_entity(session: Session, entity: MaybeOwned<Entity>) -> Self {
+		entity.map(|entity| BackrefEntityWith::from_entity(session, entity))
+	}
+
+	pub fn from_entity_in(session: Session, entity: MaybeOwned<Entity>, key: TypedKey<T>) -> Self {
+		entity.map(|entity| BackrefEntityWith::from_entity_in(session, entity, key))
+	}
+
+	pub fn entity(&self, session: Session) -> Entity {
+		self.weak_copy().entity(session)
+	}
+
+	pub fn comp_obj(&self) -> Obj<T> {
+		self.weak_copy().comp_obj()
+	}
+
+	pub fn comp<'s>(&self, session: Session<'s>) -> &'s T {
+		self.weak_copy().comp(session)
 	}
 }
 
@@ -334,10 +596,6 @@ pub macro component_bundle {
 
             fn late_cast(entity: Entity) -> Self {
                 <Self as TransparentWrapper<Entity>>::wrap(entity)
-            }
-
-            fn late_cast_ref(entity: &Entity) -> &Self {
-                <Self as TransparentWrapper<Entity>>::wrap_ref(entity)
             }
         }
 
