@@ -30,18 +30,18 @@ pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> {
 
 	fn try_cast(session: Session, entity: Entity) -> anyhow::Result<Self>;
 
-	fn force_cast(entity: Entity) -> Self;
+	fn late_cast(entity: Entity) -> Self;
 
-	fn force_cast_ref(entity: &Entity) -> &Self;
+	fn late_cast_ref(entity: &Entity) -> &Self;
 
 	// === Derived casting methods === //
 
 	fn try_cast_owned(session: Session, entity: Owned<Entity>) -> anyhow::Result<Owned<Self>> {
-		entity.try_map_owned(|entity| Self::try_cast(session, entity))
+		entity.try_map(|entity| Self::try_cast(session, entity))
 	}
 
 	fn force_cast_owned(entity: Owned<Entity>) -> Owned<Self> {
-		entity.map(|entity| Self::force_cast(entity))
+		entity.map(|entity| Self::late_cast(entity))
 	}
 
 	fn cast_owned(entity: Owned<Entity>) -> Owned<Self> {
@@ -64,7 +64,7 @@ pub trait ComponentBundle: Sized + Destructible + Borrow<Entity> {
 				err.raise();
 			}
 		}
-		Self::force_cast(entity)
+		Self::late_cast(entity)
 	}
 
 	// === Deconstructors === //
@@ -85,14 +85,14 @@ pub trait ComponentBundleWithCtor: ComponentBundle {
 
 	fn spawn(session: Session, components: Self::CompList) -> Owned<Self> {
 		let entity = Entity::new_with(session, components).manually_destruct();
-		let bundled = Self::force_cast(entity);
+		let bundled = Self::late_cast(entity);
 
 		Owned::new(bundled)
 	}
 
 	fn add_onto(session: Session, entity: Entity, components: Self::CompList) -> Self {
 		entity.add(session, components);
-		Self::force_cast(entity)
+		Self::late_cast(entity)
 	}
 
 	fn add_onto_owned(
@@ -179,17 +179,17 @@ impl<T: ?Sized + ObjPointee> ComponentBundle for EntityWith<T> {
 				)));
 			}
 		}
-		Ok(Self::force_cast(entity))
+		Ok(Self::late_cast(entity))
 	}
 
-	fn force_cast(entity: Entity) -> Self {
+	fn late_cast(entity: Entity) -> Self {
 		Self {
 			_ty: PhantomData,
 			entity,
 		}
 	}
 
-	fn force_cast_ref(entity: &Entity) -> &Self {
+	fn late_cast_ref(entity: &Entity) -> &Self {
 		<Self as TransparentWrapper<Entity>>::wrap_ref(entity)
 	}
 }
@@ -230,9 +230,24 @@ impl<T: ?Sized + ObjPointee> Owned<EntityWithRw<T>> {
 	}
 }
 
+impl<T: ?Sized + ObjPointee> MaybeOwned<EntityWith<T>> {
+	pub fn comp<'a>(&self, session: Session<'a>) -> &'a T {
+		self.weak_copy().comp(session)
+	}
+}
+
+impl<T: ?Sized + ObjPointee> MaybeOwned<EntityWithRw<T>> {
+	pub fn borrow_comp<'s>(&self, session: Session<'s>) -> Ref<'s, T> {
+		self.weak_copy().borrow_comp(session)
+	}
+
+	pub fn borrow_comp_mut<'s>(&self, session: Session<'s>) -> RefMut<'s, T> {
+		self.weak_copy().borrow_comp_mut(session)
+	}
+}
+
 // === `component_bundle` === //
 
-// TODO: Optional components to replace the old "trust me bro I'm gonna initialize this later" system.
 pub macro component_bundle {
     () => {},
     (
@@ -314,14 +329,14 @@ pub macro component_bundle {
                         }
                     }
                 )*
-                Ok(Self::force_cast(entity))
+                Ok(Self::late_cast(entity))
             }
 
-            fn force_cast(entity: Entity) -> Self {
+            fn late_cast(entity: Entity) -> Self {
                 <Self as TransparentWrapper<Entity>>::wrap(entity)
             }
 
-            fn force_cast_ref(entity: &Entity) -> &Self {
+            fn late_cast_ref(entity: &Entity) -> &Self {
                 <Self as TransparentWrapper<Entity>>::wrap_ref(entity)
             }
         }

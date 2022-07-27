@@ -1,5 +1,6 @@
 use std::{
 	alloc::Layout,
+	borrow::Borrow,
 	cell::{Ref, RefCell, RefMut},
 	fmt::{self, Write},
 	hash,
@@ -151,6 +152,12 @@ impl Eq for RawObj {}
 impl PartialEq for RawObj {
 	fn eq(&self, other: &Self) -> bool {
 		self.gen == other.gen
+	}
+}
+
+impl<T: ?Sized + ObjPointee> From<Obj<T>> for RawObj {
+	fn from(obj: Obj<T>) -> Self {
+		obj.raw()
 	}
 }
 
@@ -310,6 +317,12 @@ impl<T: ?Sized + ObjPointee> PartialEq for Obj<T> {
 impl<T: ?Sized + ObjPointee> hash::Hash for Obj<T> {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
 		self.raw.hash(state);
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Borrow<RawObj> for Obj<T> {
+	fn borrow(&self) -> &RawObj {
+		&self.raw
 	}
 }
 

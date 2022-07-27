@@ -8,7 +8,7 @@ pub unsafe trait CopyInner {
 	fn copy_inner(of: &Self) -> Self::Inner;
 }
 
-unsafe impl<T: Destructible> CopyInner for Owned<T> {
+unsafe impl<T: Destructible + Copy> CopyInner for Owned<T> {
 	type Inner = T;
 
 	fn copy_inner(of: &Self) -> Self::Inner {

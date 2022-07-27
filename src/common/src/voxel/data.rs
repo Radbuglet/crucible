@@ -45,7 +45,7 @@ struct VoxelWorldDataInner {
 impl VoxelWorldData {
 	pub fn new(me: Entity, chunk_factory: MaybeOwned<Obj<ChunkFactory>>) -> Self {
 		Self {
-			me: WorldEntity::force_cast(me),
+			me: WorldEntity::late_cast(me),
 			chunk_factory,
 			inner: Default::default(),
 		}
@@ -136,7 +136,7 @@ pub struct VoxelChunkData {
 impl VoxelChunkData {
 	pub fn new(me: Entity) -> Self {
 		Self {
-			me: ChunkEntity::force_cast(me),
+			me: ChunkEntity::late_cast(me),
 			world: Default::default(),
 			neighbors: Default::default(),
 			position: Default::default(),

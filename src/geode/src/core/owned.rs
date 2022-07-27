@@ -1,14 +1,16 @@
+use std::{borrow::Borrow, mem::ManuallyDrop};
+
 use bytemuck::TransparentWrapper;
 
 // === Owned === //
 
-pub trait Destructible: Copy {
+pub trait Destructible {
 	fn destruct(self);
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Default, TransparentWrapper)]
 #[repr(transparent)]
-pub struct Owned<T: Destructible>(T);
+pub struct Owned<T: Destructible>(ManuallyDrop<T>);
 
 impl<T: Destructible> From<T> for Owned<T> {
 	fn from(inner: T) -> Self {
@@ -16,12 +18,18 @@ impl<T: Destructible> From<T> for Owned<T> {
 	}
 }
 
+impl<T: Destructible> Borrow<T> for Owned<T> {
+	fn borrow(&self) -> &T {
+		self.weak_ref()
+	}
+}
+
 impl<T: Destructible> Owned<T> {
 	pub fn new(inner: T) -> Self {
-		Self(inner)
+		Self(ManuallyDrop::new(inner))
 	}
 
-	pub fn try_map_owned<F, R, E>(self, f: F) -> Result<Owned<R>, E>
+	pub fn try_map<F, R, E>(self, f: F) -> Result<Owned<R>, E>
 	where
 		F: FnOnce(T) -> Result<R, E>,
 		R: Destructible,
@@ -38,20 +46,24 @@ impl<T: Destructible> Owned<T> {
 	}
 
 	pub fn manually_destruct(self) -> T {
-		let inner = self.0;
-		std::mem::forget(self);
-		inner
+		ManuallyDrop::into_inner(Self::peel(self))
 	}
 
-	pub fn weak_copy(&self) -> T {
-		self.0
-	}
-
-	pub fn weak_copy_ref(&self) -> &T {
+	pub fn weak_ref(&self) -> &T {
 		&self.0
 	}
 
-	pub fn to_guard_ref_pair(self) -> (Self, T) {
+	pub fn weak_copy(&self) -> T
+	where
+		T: Copy,
+	{
+		*self.0
+	}
+
+	pub fn to_guard_ref_pair(self) -> (Self, T)
+	where
+		T: Copy,
+	{
 		let copy = self.weak_copy();
 		(self, copy)
 	}
@@ -59,13 +71,13 @@ impl<T: Destructible> Owned<T> {
 
 impl<T: Destructible> Drop for Owned<T> {
 	fn drop(&mut self) {
-		self.0.destruct();
+		let inner = unsafe { ManuallyDrop::take(&mut self.0) };
+		inner.destruct();
 	}
 }
 
 // === MaybeOwned === //
 
-// TODO: Forward relevant `impl`'s in `MaybeOwned`.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum MaybeOwned<T: Destructible> {
 	Owned(Owned<T>),
@@ -79,7 +91,7 @@ impl<T: Destructible> MaybeOwned<T> {
 		R: Destructible,
 	{
 		match self {
-			MaybeOwned::Owned(owned) => Ok(MaybeOwned::Owned(owned.try_map_owned(f)?)),
+			MaybeOwned::Owned(owned) => Ok(MaybeOwned::Owned(owned.try_map(f)?)),
 			MaybeOwned::Weak(weak) => Ok(MaybeOwned::Weak(f(weak)?)),
 		}
 	}
@@ -95,17 +107,20 @@ impl<T: Destructible> MaybeOwned<T> {
 		}
 	}
 
-	pub fn weak_copy(&self) -> T {
+	pub fn weak_ref(&self) -> &T {
 		match self {
-			MaybeOwned::Owned(owned) => owned.weak_copy(),
-			MaybeOwned::Weak(weak) => *weak,
+			MaybeOwned::Owned(owned) => owned.weak_ref(),
+			MaybeOwned::Weak(weak) => weak,
 		}
 	}
 
-	pub fn weak_copy_ref(&self) -> &T {
+	pub fn weak_copy(&self) -> T
+	where
+		T: Copy,
+	{
 		match self {
-			MaybeOwned::Owned(owned) => owned.weak_copy_ref(),
-			MaybeOwned::Weak(weak) => weak,
+			MaybeOwned::Owned(owned) => owned.weak_copy(),
+			MaybeOwned::Weak(weak) => *weak,
 		}
 	}
 
@@ -130,5 +145,11 @@ impl<T: Destructible> From<T> for MaybeOwned<T> {
 impl<T: Destructible> From<Owned<T>> for MaybeOwned<T> {
 	fn from(owned: Owned<T>) -> Self {
 		Self::Owned(owned)
+	}
+}
+
+impl<T: Destructible> Borrow<T> for MaybeOwned<T> {
+	fn borrow(&self) -> &T {
+		self.weak_ref()
 	}
 }

@@ -9,6 +9,7 @@ pub struct ReflectType {
 	pub id: Option<NamedTypeId>,
 	pub static_layout: Option<Layout>,
 	pub drop_fn: Option<for<'a> unsafe fn(*mut (), Layout, Session)>,
+	pub post_drop: Option<&'static ReflectType>,
 }
 
 impl fmt::Debug for ReflectType {
@@ -30,7 +31,7 @@ impl ReflectType {
 		struct MetaProvider<T>(T);
 
 		impl<T: 'static> MetaProvider<T> {
-			const META: ReflectType = ReflectType {
+			const ALIVE: ReflectType = ReflectType {
 				id: Some(NamedTypeId::of::<T>()),
 				static_layout: Some(Layout::new::<T>()),
 				drop_fn: if std::mem::needs_drop::<T>() {
@@ -38,20 +39,36 @@ impl ReflectType {
 				} else {
 					None
 				},
+				post_drop: Some(&Self::DEAD),
+			};
+
+			const DEAD: ReflectType = ReflectType {
+				id: Some(NamedTypeId::of::<T>()),
+				static_layout: Some(Layout::new::<T>()),
+				drop_fn: None,
+				post_drop: None,
 			};
 		}
 
-		&MetaProvider::<T>::META
+		&MetaProvider::<T>::ALIVE
 	}
 
 	pub const fn dynamic_no_drop() -> &'static ReflectType {
-		const INSTANCE: ReflectType = ReflectType {
+		const ALIVE: ReflectType = ReflectType {
 			id: None,
 			static_layout: None,
 			drop_fn: None,
+			post_drop: Some(&DEAD),
 		};
 
-		&INSTANCE
+		const DEAD: ReflectType = ReflectType {
+			id: None,
+			static_layout: None,
+			drop_fn: None,
+			post_drop: None,
+		};
+
+		&ALIVE
 	}
 
 	pub const fn dynamic_with_drop<D>() -> &'static ReflectType
@@ -64,14 +81,26 @@ impl ReflectType {
 		}
 
 		impl<D: CustomDropHandler> MetaProvider<D> {
-			const META: ReflectType = ReflectType {
+			const ALIVE: ReflectType = ReflectType {
 				id: None,
 				static_layout: None,
 				drop_fn: Some(D::destruct),
+				post_drop: Some(&Self::DEAD),
+			};
+
+			const DEAD: ReflectType = ReflectType {
+				id: None,
+				static_layout: None,
+				drop_fn: None,
+				post_drop: None,
 			};
 		}
 
-		&MetaProvider::<FeatureGateBypass<D>>::META
+		&MetaProvider::<FeatureGateBypass<D>>::ALIVE
+	}
+
+	pub const fn is_alive(&self) -> bool {
+		self.post_drop.is_some()
 	}
 }
 
