@@ -27,7 +27,7 @@ use super::{
 component_bundle! {
 	pub struct GameSceneBundle(GameSceneBundleCtor) {
 		voxel_uniforms: VoxelUniforms,
-		voxel_data: RefCell<VoxelWorldData>,
+		voxel_data: VoxelWorldData,
 		voxel_mesh: RefCell<VoxelWorldMesh>,
 		entry: RefCell<GameSceneEntry>,
 		update_handler: dyn EventHandler<SceneUpdateEvent>,
@@ -57,7 +57,7 @@ impl GameSceneBundle {
 		.unsize();
 
 		let voxel_data_guard = VoxelWorldData::new(scene_guard.weak_copy(), chunk_factory.into())
-			.box_obj_rw(s, main_lock);
+			.box_obj_in(s, main_lock);
 		let voxel_mesh_guard = VoxelWorldMesh::default().box_obj_rw(s, main_lock);
 		let voxel_uniforms_guard = {
 			let gfx = engine.gfx(s);
@@ -133,7 +133,7 @@ impl EventHandlerMut<SceneUpdateEvent> for GameSceneEntry {
 		let p_gfx = engine.gfx(s);
 
 		let mut p_local_camera = me.local_camera(s).borrow_mut();
-		let mut p_world_data = me.voxel_data(s).borrow_mut();
+		let p_world_data = me.voxel_data(s);
 		let mut p_world_mesh = me.voxel_mesh(s).borrow_mut();
 
 		// Handle window focus loss
@@ -196,22 +196,17 @@ impl EventHandlerMut<SceneUpdateEvent> for GameSceneEntry {
 
 				for isect in ray.step_for(s, 7.) {
 					let mut block_loc = isect.block_loc;
-					let chunk = match block_loc.chunk(s, &p_world_data) {
-						Some(chunk) => chunk,
-						None => continue,
-					};
 
-					if chunk
-						.comp(s)
-						.get_block_state(block_loc.vec().block())
+					if block_loc
+						.get_block_state(s, p_world_data)
+						.unwrap_or_default()
 						.material != 0
 					{
 						let mut target_loc = block_loc.neighbor(s, isect.face.invert());
-						let chunk = target_loc.chunk_or_add(s, &mut p_world_data);
 
-						chunk.comp(s).set_block_state(
-							&mut p_world_data,
-							target_loc.vec().block(),
+						target_loc.set_block_state(
+							s,
+							p_world_data,
 							BlockState {
 								material: 1,
 								..Default::default()
@@ -244,7 +239,7 @@ impl EventHandlerMut<SceneUpdateEvent> for GameSceneEntry {
 						.material != 0
 					{
 						chunk.comp(s).set_block_state(
-							&mut p_world_data,
+							s,
 							block_loc.vec().block(),
 							BlockState::default(),
 						);
@@ -265,9 +260,9 @@ impl EventHandlerMut<SceneUpdateEvent> for GameSceneEntry {
 					for z in -3..3 {
 						let mut pos = pos.move_by(s, WorldVec::new(x, y, z));
 
-						let chunk = pos.chunk_or_add(s, &mut p_world_data);
+						let chunk = pos.chunk_or_add(s, &p_world_data);
 						chunk.comp(s).set_block_state(
-							&mut p_world_data,
+							s,
 							pos.vec().block(),
 							BlockState {
 								material: 1,
@@ -280,7 +275,7 @@ impl EventHandlerMut<SceneUpdateEvent> for GameSceneEntry {
 		}
 
 		// Update chunk meshes
-		for chunk in p_world_data.dirty_chunks() {
+		for chunk in p_world_data.flush_dirty_chunks() {
 			p_world_mesh.flag_chunk(s, p_lock, chunk.raw());
 
 			// TODO: Make this more conservative.
@@ -295,7 +290,6 @@ impl EventHandlerMut<SceneUpdateEvent> for GameSceneEntry {
 		}
 
 		p_world_mesh.update_chunks(s, p_gfx, None);
-		p_world_data.clear_dirty_chunks();
 	}
 }
 

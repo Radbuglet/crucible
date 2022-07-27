@@ -1,5 +1,5 @@
 use std::{
-	cell::Cell,
+	cell::{Cell, RefCell},
 	collections::{HashMap, HashSet},
 	hash,
 };
@@ -19,7 +19,7 @@ use super::math::{
 
 // === Voxel Data Containers === //
 
-type WorldEntity = EntityWithRw<VoxelWorldData>;
+type WorldEntity = EntityWith<VoxelWorldData>;
 type ChunkEntity = EntityWith<VoxelChunkData>;
 
 pub type ChunkFactory = dyn Factory<ChunkFactoryRequest, Owned<ChunkEntity>>;
@@ -32,6 +32,12 @@ pub struct ChunkFactoryRequest {
 pub struct VoxelWorldData {
 	me: WorldEntity,
 	chunk_factory: MaybeOwned<Obj<ChunkFactory>>,
+	inner: RefCell<VoxelWorldDataInner>,
+}
+
+// TODO: Move to `Copy` containers.
+#[derive(Default)]
+struct VoxelWorldDataInner {
 	chunks: HashMap<ChunkVec, Owned<ChunkEntity>>,
 	dirty_chunks: HashSet<ChunkEntity>,
 }
@@ -41,8 +47,7 @@ impl VoxelWorldData {
 		Self {
 			me: WorldEntity::force_cast(me),
 			chunk_factory,
-			chunks: Default::default(),
-			dirty_chunks: Default::default(),
+			inner: Default::default(),
 		}
 	}
 
@@ -51,10 +56,12 @@ impl VoxelWorldData {
 	}
 
 	pub fn add_chunk(
-		&mut self,
+		&self,
 		s: Session,
 		pos: ChunkVec,
 	) -> (ChunkEntity, Option<Owned<ChunkEntity>>) {
+		let mut inner = self.inner.borrow_mut();
+
 		// Create chunk
 		let (chunk_guard, chunk) = self
 			.chunk_factory
@@ -66,7 +73,7 @@ impl VoxelWorldData {
 		assert_eq!(chunk_data.world(), None);
 
 		// Replace the old chunk with new chunk
-		let replaced = self.chunks.insert(pos, chunk_guard);
+		let replaced = inner.chunks.insert(pos, chunk_guard);
 		if let Some(replaced) = replaced.as_ref() {
 			replaced.comp(s).world.set(None);
 		}
@@ -79,7 +86,7 @@ impl VoxelWorldData {
 		for face in BlockFace::variants() {
 			let rel = ChunkVec::from_raw(face.unit());
 			let neighbor_pos = pos + rel;
-			let neighbor = self
+			let neighbor = inner
 				.chunks
 				.get(&neighbor_pos)
 				.map(|neighbor| neighbor.weak_copy());
@@ -97,10 +104,14 @@ impl VoxelWorldData {
 	}
 
 	pub fn get_chunk(&self, pos: ChunkVec) -> Option<ChunkEntity> {
-		self.chunks.get(&pos).map(|chunk| chunk.weak_copy())
+		self.inner
+			.borrow()
+			.chunks
+			.get(&pos)
+			.map(|chunk| chunk.weak_copy())
 	}
 
-	pub fn get_chunk_or_add(&mut self, s: Session, pos: ChunkVec) -> ChunkEntity {
+	pub fn get_chunk_or_add(&self, s: Session, pos: ChunkVec) -> ChunkEntity {
 		if let Some(chunk) = self.get_chunk(pos) {
 			chunk
 		} else {
@@ -108,12 +119,8 @@ impl VoxelWorldData {
 		}
 	}
 
-	pub fn dirty_chunks(&self) -> impl Iterator<Item = ChunkEntity> + '_ {
-		self.dirty_chunks.iter().copied()
-	}
-
-	pub fn clear_dirty_chunks(&mut self) {
-		self.dirty_chunks.clear();
+	pub fn flush_dirty_chunks(&self) -> HashSet<ChunkEntity> {
+		std::mem::replace(&mut self.inner.borrow_mut().dirty_chunks, HashSet::new())
 	}
 }
 
@@ -157,13 +164,16 @@ impl VoxelChunkData {
 		BlockState::decode(self.blocks[pos.to_index()].get())
 	}
 
-	pub fn set_block_state(
-		&self,
-		world_data: &mut VoxelWorldData,
-		pos: BlockVec,
-		state: BlockState,
-	) {
-		world_data.dirty_chunks.insert(self.me);
+	pub fn set_block_state(&self, s: Session, pos: BlockVec, state: BlockState) {
+		if let Some(world) = self.world() {
+			world
+				.comp(s)
+				.inner
+				.borrow_mut()
+				.dirty_chunks
+				.insert(self.me);
+		}
+
 		self.blocks[pos.to_index()].set(state.encode());
 	}
 }
@@ -211,12 +221,12 @@ impl BlockState {
 #[derive(Debug, Copy, Clone)]
 pub struct BlockLocation {
 	chunk_cache: Option<ChunkEntity>,
-	pos: WorldVec,
+	vec: WorldVec,
 }
 
 impl hash::Hash for BlockLocation {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		self.pos.hash(state);
+		self.vec.hash(state);
 	}
 }
 
@@ -224,7 +234,7 @@ impl Eq for BlockLocation {}
 
 impl PartialEq for BlockLocation {
 	fn eq(&self, other: &Self) -> bool {
-		self.pos == other.pos
+		self.vec == other.vec
 	}
 }
 
@@ -232,18 +242,21 @@ impl BlockLocation {
 	pub fn new_uncached(pos: WorldVec) -> Self {
 		Self {
 			chunk_cache: None,
-			pos,
+			vec: pos,
 		}
 	}
 
 	pub fn new_cached(world: &VoxelWorldData, pos: WorldVec) -> Self {
 		let chunk_pos = pos.chunk();
 		let chunk_cache = world.get_chunk(chunk_pos);
-		Self { chunk_cache, pos }
+		Self {
+			chunk_cache,
+			vec: pos,
+		}
 	}
 
 	pub fn vec(self) -> WorldVec {
-		self.pos
+		self.vec
 	}
 
 	pub fn update<F: FnOnce(WorldVec) -> WorldVec>(self, s: Session, f: F) -> Self {
@@ -251,11 +264,11 @@ impl BlockLocation {
 	}
 
 	pub fn move_to(self, s: Session, pos: WorldVec) -> Self {
-		self.move_by(s, pos - self.pos)
+		self.move_by(s, pos - self.vec)
 	}
 
 	pub fn move_to_emit_delta(self, s: Session, pos: WorldVec) -> (Self, WorldVec) {
-		let delta = pos - self.pos;
+		let delta = pos - self.vec;
 		let loc = self.move_by(s, delta);
 		(loc, delta)
 	}
@@ -278,9 +291,9 @@ impl BlockLocation {
 		debug_assert!(stride >= 0);
 
 		// Update position, keeping track of our chunk positions.
-		let old_chunk_pos = self.pos.chunk();
-		self.pos += face.unit() * stride;
-		let new_chunk_pos = self.pos.chunk();
+		let old_chunk_pos = self.vec.chunk();
+		self.vec += face.unit() * stride;
+		let new_chunk_pos = self.vec.chunk();
 
 		// Attempt to update the chunk cache.
 		let chunks_moved = (new_chunk_pos[face.axis()] - old_chunk_pos[face.axis()]).abs();
@@ -318,15 +331,15 @@ impl BlockLocation {
 		self.invalidate_stale_cache(s, world_data);
 
 		if self.chunk_cache.is_none() {
-			self.chunk_cache = world_data.get_chunk(self.pos.chunk());
+			self.chunk_cache = world_data.get_chunk(self.vec.chunk());
 		}
 	}
 
-	pub fn recompute_cache_or_add(&mut self, s: Session, world_data: &mut VoxelWorldData) {
+	pub fn recompute_cache_or_add(&mut self, s: Session, world_data: &VoxelWorldData) {
 		self.invalidate_stale_cache(s, world_data);
 
 		if self.chunk_cache.is_none() {
-			self.chunk_cache = Some(world_data.get_chunk_or_add(s, self.pos.chunk()));
+			self.chunk_cache = Some(world_data.get_chunk_or_add(s, self.vec.chunk()));
 		}
 	}
 
@@ -335,9 +348,26 @@ impl BlockLocation {
 		self.chunk_cache
 	}
 
-	pub fn chunk_or_add(&mut self, s: Session, world_data: &mut VoxelWorldData) -> ChunkEntity {
+	pub fn chunk_or_add(&mut self, s: Session, world_data: &VoxelWorldData) -> ChunkEntity {
 		self.recompute_cache_or_add(s, world_data);
 		self.chunk_cache.unwrap()
+	}
+
+	// === Chunk Modification === //
+
+	pub fn get_block_state(
+		&mut self,
+		s: Session,
+		world_data: &VoxelWorldData,
+	) -> Option<BlockState> {
+		let chunk = self.chunk(s, world_data)?.comp(s);
+
+		Some(chunk.get_block_state(self.vec.block()))
+	}
+
+	pub fn set_block_state(&mut self, s: Session, world_data: &VoxelWorldData, state: BlockState) {
+		let chunk = self.chunk_or_add(s, world_data).comp(s);
+		chunk.set_block_state(s, self.vec.block(), state);
 	}
 }
 
