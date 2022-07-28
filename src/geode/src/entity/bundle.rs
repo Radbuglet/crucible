@@ -12,10 +12,7 @@ use crate::core::{
 	session::{LocalSessionGuard, Session},
 };
 
-use super::{
-	entity::{ComponentList, Entity},
-	key::TypedKey,
-};
+use super::entity::{ComponentList, Entity};
 
 #[allow(unused)] // Actually captured by the macro
 use {
@@ -378,133 +375,6 @@ impl<T: ?Sized + ObjPointee> MaybeOwned<CachedEntityWithRw<T>> {
 
 	pub fn borrow_comp_mut<'s>(&mut self, session: Session<'s>) -> RefMut<'s, T> {
 		self.weak_mut().borrow_comp_mut(session)
-	}
-}
-
-// === `CompEntity` === //
-
-pub trait ObjBackref: ObjPointee {
-	fn entity(&self) -> Entity;
-}
-
-pub struct BackrefEntityWith<T: ?Sized + ObjBackref> {
-	obj: Obj<T>,
-}
-
-impl<T: ?Sized + ObjBackref> fmt::Debug for BackrefEntityWith<T> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let session = LocalSessionGuard::new();
-		let s = session.handle();
-
-		f.debug_struct("BackrefEntityWith")
-			.field("entity", &self.entity(s))
-			.finish()
-	}
-}
-
-impl<T: ?Sized + ObjBackref> Copy for BackrefEntityWith<T> {}
-
-impl<T: ?Sized + ObjBackref> Clone for BackrefEntityWith<T> {
-	fn clone(&self) -> Self {
-		*self
-	}
-}
-
-// N.B. we don't derive comparison operations because it's unclear how these should be compared.
-// e.g. should they be compared like all the other `EntityWith` variants (i.e. by the entity) or
-// compared by their component instance. The former would incur a performance penalty from the
-// construction of `LocalSessionGuards`.
-
-impl<T: ?Sized + ObjBackref> Destructible for BackrefEntityWith<T> {
-	fn destruct(self) {
-		let session = LocalSessionGuard::new();
-		let s = session.handle();
-
-		if let Ok(obj) = self.obj.weak_get(s) {
-			obj.entity().destroy(s);
-		}
-	}
-}
-
-impl<T: ?Sized + ObjBackref> BackrefEntityWith<T> {
-	pub fn from_comp(obj: Obj<T>) -> Self {
-		Self { obj }
-	}
-
-	pub fn from_entity(session: Session, entity: Entity) -> Self {
-		Self {
-			obj: entity.get_obj::<T>(session),
-		}
-	}
-
-	pub fn from_entity_in(session: Session, entity: Entity, key: TypedKey<T>) -> Self {
-		Self {
-			obj: entity.get_obj_in::<T>(session, key),
-		}
-	}
-
-	pub fn entity(&self, session: Session) -> Entity {
-		self.obj.get(session).entity()
-	}
-
-	pub fn comp_obj(&self) -> Obj<T> {
-		self.obj
-	}
-
-	pub fn comp<'s>(&self, session: Session<'s>) -> &'s T {
-		self.obj.get(session)
-	}
-}
-
-impl<T: ?Sized + ObjBackref> Owned<BackrefEntityWith<T>> {
-	pub fn from_comp(obj: Owned<Obj<T>>) -> Self {
-		obj.map(|obj| BackrefEntityWith::from_comp(obj))
-	}
-
-	pub fn from_entity(session: Session, entity: Owned<Entity>) -> Self {
-		entity.map(|entity| BackrefEntityWith::from_entity(session, entity))
-	}
-
-	pub fn from_entity_in(session: Session, entity: Owned<Entity>, key: TypedKey<T>) -> Self {
-		entity.map(|entity| BackrefEntityWith::from_entity_in(session, entity, key))
-	}
-
-	pub fn entity(&self, session: Session) -> Entity {
-		self.weak_copy().entity(session)
-	}
-
-	pub fn comp_obj(&self) -> Obj<T> {
-		self.weak_copy().comp_obj()
-	}
-
-	pub fn comp<'s>(&self, session: Session<'s>) -> &'s T {
-		self.weak_copy().comp(session)
-	}
-}
-
-impl<T: ?Sized + ObjBackref> MaybeOwned<BackrefEntityWith<T>> {
-	pub fn from_comp(obj: MaybeOwned<Obj<T>>) -> Self {
-		obj.map(|obj| BackrefEntityWith::from_comp(obj))
-	}
-
-	pub fn from_entity(session: Session, entity: MaybeOwned<Entity>) -> Self {
-		entity.map(|entity| BackrefEntityWith::from_entity(session, entity))
-	}
-
-	pub fn from_entity_in(session: Session, entity: MaybeOwned<Entity>, key: TypedKey<T>) -> Self {
-		entity.map(|entity| BackrefEntityWith::from_entity_in(session, entity, key))
-	}
-
-	pub fn entity(&self, session: Session) -> Entity {
-		self.weak_copy().entity(session)
-	}
-
-	pub fn comp_obj(&self) -> Obj<T> {
-		self.weak_copy().comp_obj()
-	}
-
-	pub fn comp<'s>(&self, session: Session<'s>) -> &'s T {
-		self.weak_copy().comp(session)
 	}
 }
 

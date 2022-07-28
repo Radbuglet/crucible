@@ -5,6 +5,8 @@ use std::{
 	fmt::{self, Write},
 	hash,
 	marker::Unsize,
+	mem::MaybeUninit,
+	ops::{Deref, DerefMut},
 	ptr::{self, NonNull, Pointee},
 };
 
@@ -684,3 +686,33 @@ pub trait ObjCtorExt: Sized + ObjPointee {
 }
 
 impl<T: Sized + ObjPointee> ObjCtorExt for T {}
+
+// === `ObjTarget` === //
+
+pub struct ObjTarget<T: ?Sized + ObjPointee> {
+	backref: MaybeUninit<Obj<T>>,
+	value: T,
+}
+
+impl<T: ?Sized + ObjPointee> ObjTarget<T> {
+	pub fn obj(me: &Self) -> Obj<T> {
+		unsafe {
+			// Safety: `backref` is initialized before users get access to this value.
+			me.backref.assume_init()
+		}
+	}
+}
+
+impl<T: ?Sized + ObjPointee> Deref for ObjTarget<T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		&self.value
+	}
+}
+
+impl<T: ?Sized + ObjPointee> DerefMut for ObjTarget<T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.value
+	}
+}

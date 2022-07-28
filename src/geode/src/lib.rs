@@ -1,7 +1,5 @@
 #![allow(clippy::missing_safety_doc)] // TODO: Remove this lint once we have the bandwidth.
 #![feature(allocator_api)]
-#![feature(const_type_id)]
-#![feature(const_type_name)]
 #![feature(decl_macro)]
 #![feature(unsize)]
 #![feature(ptr_metadata)]
@@ -25,8 +23,8 @@ pub mod prelude {
 		},
 		entity::{
 			bundle::{
-				component_bundle, BackrefEntityWith, CachedEntityWith, CachedEntityWithRw,
-				ComponentBundle, ComponentBundleWithCtor, EntityWith, EntityWithRw, ObjBackref,
+				component_bundle, CachedEntityWith, CachedEntityWithRw, ComponentBundle,
+				ComponentBundleWithCtor, EntityWith, EntityWithRw,
 			},
 			entity::{Entity, EntityGetErrorExt, ExposeUsing},
 			event::{
