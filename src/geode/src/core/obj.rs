@@ -5,12 +5,14 @@ use std::{
 	fmt::{self, Write},
 	hash,
 	marker::Unsize,
-	mem::MaybeUninit,
-	ops::{Deref, DerefMut},
 	ptr::{self, NonNull, Pointee},
 };
 
-use crucible_core::error::{ErrorFormatExt, ResultExt};
+use bytemuck::TransparentWrapper;
+use crucible_core::{
+	error::{ErrorFormatExt, ResultExt},
+	transmute::sizealign_checked_transmute,
+};
 use thiserror::Error;
 
 use crate::entity::event::{DelegateAutoBorrow, DelegateAutoBorrowMut};
@@ -398,12 +400,16 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 		self.raw
 	}
 
-	pub unsafe fn transmute_unchecked<U: ?Sized + ObjPointee>(
+	pub unsafe fn transmute_unchecked_with_meta<U: ?Sized + ObjPointee>(
 		&self,
 		meta: <U as Pointee>::Metadata,
 	) -> Obj<U> {
 		// Safety: provided by caller
 		self.raw().to_typed_unchecked(meta)
+	}
+
+	pub unsafe fn transmute_unchecked<U: ?Sized + ObjPointee>(&self) -> Obj<U> {
+		self.transmute_unchecked_with_meta(sizealign_checked_transmute(self.meta))
 	}
 
 	pub fn unsize<U>(&self) -> Obj<U>
@@ -415,33 +421,45 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 		let ptr = ptr as *const U;
 		let (_, meta) = ptr.to_raw_parts();
 
-		unsafe { self.transmute_unchecked(meta) }
+		unsafe { self.transmute_unchecked_with_meta(meta) }
+	}
+
+	pub fn wrap_transparent<U>(&self) -> Obj<U>
+	where
+		U: TransparentWrapper<T>,
+		U: ?Sized + ObjPointee,
+	{
+		unsafe {
+			// Safety: provided by `TransparentWrapper`
+			self.transmute_unchecked()
+		}
+	}
+
+	pub fn peel_transparent<U>(&self) -> Obj<U>
+	where
+		T: TransparentWrapper<U>,
+		U: ?Sized + ObjPointee,
+	{
+		unsafe {
+			// Safety: provided by `TransparentWrapper`
+			self.transmute_unchecked()
+		}
 	}
 
 	pub fn unsize_delegate_borrow<U>(&self) -> Obj<U>
 	where
-		DelegateAutoBorrow<T>: Unsize<U> + Pointee<Metadata = <T as Pointee>::Metadata>,
+		DelegateAutoBorrow<T>: Unsize<U>,
 		U: ?Sized + ObjPointee,
 	{
-		let wrapper = unsafe {
-			// Safety: `DelegateAutoBorrow<T>` is `repr(transparent)`
-			self.transmute_unchecked::<DelegateAutoBorrow<T>>(self.meta)
-		};
-
-		wrapper.unsize()
+		self.wrap_transparent::<DelegateAutoBorrow<T>>().unsize()
 	}
 
 	pub fn unsize_delegate_borrow_mut<U>(&self) -> Obj<U>
 	where
-		DelegateAutoBorrowMut<T>: Unsize<U> + Pointee<Metadata = <T as Pointee>::Metadata>,
+		DelegateAutoBorrowMut<T>: Unsize<U>,
 		U: ?Sized + ObjPointee,
 	{
-		let wrapper = unsafe {
-			// Safety: `DelegateAutoBorrowMut<T>` is `repr(transparent)`
-			self.transmute_unchecked::<DelegateAutoBorrowMut<T>>(self.meta)
-		};
-
-		wrapper.unsize()
+		self.wrap_transparent::<DelegateAutoBorrowMut<T>>().unsize()
 	}
 
 	// Lifecycle management
@@ -531,12 +549,15 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 		self.map(|obj| obj.raw())
 	}
 
-	pub unsafe fn transmute_unchecked<U: ?Sized + ObjPointee>(
+	pub unsafe fn transmute_unchecked_with_meta<U: ?Sized + ObjPointee>(
 		self,
 		meta: <U as Pointee>::Metadata,
 	) -> Owned<Obj<U>> {
-		// Safety: provided by caller
-		self.map(|obj| obj.transmute_unchecked(meta))
+		self.map(|obj| obj.transmute_unchecked_with_meta(meta))
+	}
+
+	pub unsafe fn transmute_unchecked<U: ?Sized + ObjPointee>(self) -> Owned<Obj<U>> {
+		self.map(|obj| obj.transmute_unchecked())
 	}
 
 	pub fn unsize<U>(self) -> Owned<Obj<U>>
@@ -547,9 +568,25 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 		self.map(|obj| obj.unsize())
 	}
 
+	pub fn wrap_transparent<U>(self) -> Owned<Obj<U>>
+	where
+		U: TransparentWrapper<T>,
+		U: ?Sized + ObjPointee,
+	{
+		self.map(|obj| obj.wrap_transparent())
+	}
+
+	pub fn peel_transparent<U>(self) -> Owned<Obj<U>>
+	where
+		T: TransparentWrapper<U>,
+		U: ?Sized + ObjPointee,
+	{
+		self.map(|obj| obj.peel_transparent())
+	}
+
 	pub fn unsize_delegate_borrow<U>(self) -> Owned<Obj<U>>
 	where
-		DelegateAutoBorrow<T>: Unsize<U> + Pointee<Metadata = <T as Pointee>::Metadata>,
+		DelegateAutoBorrow<T>: Unsize<U>,
 		U: ?Sized + ObjPointee,
 	{
 		self.map(|obj| obj.unsize_delegate_borrow())
@@ -557,7 +594,7 @@ impl<T: ?Sized + ObjPointee> Owned<Obj<T>> {
 
 	pub fn unsize_delegate_borrow_mut<U>(self) -> Owned<Obj<U>>
 	where
-		DelegateAutoBorrowMut<T>: Unsize<U> + Pointee<Metadata = <T as Pointee>::Metadata>,
+		DelegateAutoBorrowMut<T>: Unsize<U>,
 		U: ?Sized + ObjPointee,
 	{
 		self.map(|obj| obj.unsize_delegate_borrow_mut())
@@ -593,12 +630,15 @@ impl<T: ?Sized + ObjPointee> MaybeOwned<Obj<T>> {
 		self.map(|obj| obj.raw())
 	}
 
-	pub unsafe fn transmute_unchecked<U: ?Sized + ObjPointee>(
+	pub unsafe fn transmute_unchecked_with_meta<U: ?Sized + ObjPointee>(
 		self,
 		meta: <U as Pointee>::Metadata,
 	) -> MaybeOwned<Obj<U>> {
-		// Safety: provided by caller
-		self.map(|obj| obj.transmute_unchecked(meta))
+		self.map(|obj| obj.transmute_unchecked_with_meta(meta))
+	}
+
+	pub unsafe fn transmute_unchecked<U: ?Sized + ObjPointee>(self) -> MaybeOwned<Obj<U>> {
+		self.map(|obj| obj.transmute_unchecked())
 	}
 
 	pub fn unsize<U>(self) -> MaybeOwned<Obj<U>>
@@ -609,9 +649,25 @@ impl<T: ?Sized + ObjPointee> MaybeOwned<Obj<T>> {
 		self.map(|obj| obj.unsize())
 	}
 
+	pub fn wrap_transparent<U>(self) -> MaybeOwned<Obj<U>>
+	where
+		U: TransparentWrapper<T>,
+		U: ?Sized + ObjPointee,
+	{
+		self.map(|obj| obj.wrap_transparent())
+	}
+
+	pub fn peel_transparent<U>(self) -> MaybeOwned<Obj<U>>
+	where
+		T: TransparentWrapper<U>,
+		U: ?Sized + ObjPointee,
+	{
+		self.map(|obj| obj.peel_transparent())
+	}
+
 	pub fn unsize_delegate_borrow<U>(self) -> MaybeOwned<Obj<U>>
 	where
-		DelegateAutoBorrow<T>: Unsize<U> + Pointee<Metadata = <T as Pointee>::Metadata>,
+		DelegateAutoBorrow<T>: Unsize<U>,
 		U: ?Sized + ObjPointee,
 	{
 		self.map(|obj| obj.unsize_delegate_borrow())
@@ -619,7 +675,7 @@ impl<T: ?Sized + ObjPointee> MaybeOwned<Obj<T>> {
 
 	pub fn unsize_delegate_borrow_mut<U>(self) -> MaybeOwned<Obj<U>>
 	where
-		DelegateAutoBorrowMut<T>: Unsize<U> + Pointee<Metadata = <T as Pointee>::Metadata>,
+		DelegateAutoBorrowMut<T>: Unsize<U>,
 		U: ?Sized + ObjPointee,
 	{
 		self.map(|obj| obj.unsize_delegate_borrow_mut())
@@ -686,33 +742,3 @@ pub trait ObjCtorExt: Sized + ObjPointee {
 }
 
 impl<T: Sized + ObjPointee> ObjCtorExt for T {}
-
-// === `ObjTarget` === //
-
-pub struct ObjTarget<T: ?Sized + ObjPointee> {
-	backref: MaybeUninit<Obj<T>>,
-	value: T,
-}
-
-impl<T: ?Sized + ObjPointee> ObjTarget<T> {
-	pub fn obj(me: &Self) -> Obj<T> {
-		unsafe {
-			// Safety: `backref` is initialized before users get access to this value.
-			me.backref.assume_init()
-		}
-	}
-}
-
-impl<T: ?Sized + ObjPointee> Deref for ObjTarget<T> {
-	type Target = T;
-
-	fn deref(&self) -> &Self::Target {
-		&self.value
-	}
-}
-
-impl<T: ?Sized + ObjPointee> DerefMut for ObjTarget<T> {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.value
-	}
-}

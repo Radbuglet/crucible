@@ -1,4 +1,4 @@
-use crate::ext::transmute::super_unchecked_transmute;
+use crate::ext::transmute::entirely_unchecked_transmute;
 use core::iter;
 use core::mem::MaybeUninit;
 
@@ -7,13 +7,13 @@ use core::mem::MaybeUninit;
 pub const fn transmute_uninit_array_to_inner<T, const N: usize>(
 	arr: MaybeUninit<[T; N]>,
 ) -> [MaybeUninit<T>; N] {
-	unsafe { super_unchecked_transmute(arr) }
+	unsafe { entirely_unchecked_transmute(arr) }
 }
 
 pub const fn transmute_uninit_array_to_outer<T, const N: usize>(
 	arr: [MaybeUninit<T>; N],
 ) -> MaybeUninit<[T; N]> {
-	unsafe { super_unchecked_transmute(arr) }
+	unsafe { entirely_unchecked_transmute(arr) }
 }
 
 pub const fn new_uninit_array<T, const N: usize>() -> [MaybeUninit<T>; N] {
@@ -47,7 +47,7 @@ impl<T, const N: usize> MacroArrayBuilder<T, N> {
 		// owned instance of the structure into an owned instance of this field. We also perform an
 		// implicit transmute from `[MaybeUninit<T>; N]` to `[T; N]`, whose safety is guaranteed by
 		// the caller.
-		super_unchecked_transmute(self)
+		entirely_unchecked_transmute(self)
 	}
 }
 
