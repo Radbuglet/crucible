@@ -1,6 +1,15 @@
 use super::file::Span;
-use crate::util::{intern::Intern, obj::Entity};
+use crate::util::intern::Intern;
+
+use geode::prelude::*;
 use smallvec::SmallVec;
+
+component_bundle! {
+	pub struct TokenBundle(TokenBundleCtor) {
+		kind: TokenKind,
+		as_ident: TokenIdent,
+	}
+}
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum TokenKind {

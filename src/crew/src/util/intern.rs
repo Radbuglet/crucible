@@ -1,10 +1,11 @@
 use hashbrown::raw::{RawIter, RawTable};
-use std::borrow::Borrow;
-use std::collections::hash_map::{DefaultHasher, RandomState};
-use std::fmt::Debug;
-use std::fmt::Display;
-use std::hash::{BuildHasher, Hasher};
-use std::marker::PhantomData;
+use std::{
+	borrow::Borrow,
+	collections::hash_map::{DefaultHasher, RandomState},
+	fmt,
+	hash::{BuildHasher, Hasher},
+	marker::PhantomData,
+};
 
 #[derive(Default)]
 pub struct Interner {
@@ -19,11 +20,11 @@ pub struct Interner {
 	hash_builder: RandomState,
 }
 
-impl Debug for Interner {
+impl fmt::Debug for Interner {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		struct InternerVis<'a>(&'a Interner);
 
-		impl Debug for InternerVis<'_> {
+		impl fmt::Debug for InternerVis<'_> {
 			fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 				let mut builder = f.debug_set();
 				let interner = self.0;
@@ -62,7 +63,7 @@ impl Interner {
 		self.begin_intern().with_char(char).finish()
 	}
 
-	pub fn intern_fmt<F: Display>(&mut self, text: F) -> Intern {
+	pub fn intern_fmt<F: fmt::Display>(&mut self, text: F) -> Intern {
 		self.begin_intern().with_fmt(text).finish()
 	}
 
@@ -115,7 +116,7 @@ impl<'a> ExactSizeIterator for InternIter<'a> {}
 
 pub struct InternBuilder<'a>(Option<InternBuilderInner<'a>>);
 
-impl Debug for InternBuilder<'_> {
+impl fmt::Debug for InternBuilder<'_> {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		let me = self.0.as_ref().unwrap();
 		let text = &me.interner.data[me.start..];
@@ -160,11 +161,11 @@ impl<'a> InternBuilder<'a> {
 		self
 	}
 
-	pub fn push_fmt<F: Display>(&mut self, text: F) {
+	pub fn push_fmt<F: fmt::Display>(&mut self, text: F) {
 		self.push_str(text.to_string());
 	}
 
-	pub fn with_fmt<F: Display>(mut self, text: F) -> Self {
+	pub fn with_fmt<F: fmt::Display>(mut self, text: F) -> Self {
 		self.push_fmt(text);
 		self
 	}

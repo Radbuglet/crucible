@@ -1,8 +1,5 @@
 use sealed::sealed;
-use std::cell::RefCell;
-use std::cmp::Ordering;
-use std::fmt::Display;
-use std::ops::DerefMut;
+use std::{cell::RefCell, cmp::Ordering, fmt, ops::DerefMut};
 
 // === Generic Cursor === //
 
@@ -255,7 +252,7 @@ impl<C: Cursor> Iterator for CursorDrain<C> {
 pub trait DiagnosticCursor: ForkableCursor {
 	fn error_reporter(&self) -> &ErrorReporter<Self>;
 
-	fn expect<D: Display>(&self, what: D) {
+	fn expect<D: fmt::Display>(&self, what: D) {
 		let mut furthest = self.error_reporter().furthest.borrow_mut();
 
 		match &mut *furthest {
@@ -299,6 +296,5 @@ impl<C: ForkableCursor> ErrorReporter<C> {
 
 pub struct ErrorReport<C: ForkableCursor> {
 	pub furthest_cursor: C,
-	// TODO: We might want support for dynamic hints and nested error reports.
 	pub unstuck_options: Vec<String>,
 }

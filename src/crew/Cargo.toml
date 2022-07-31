@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bumpalo = "3.10.0"
+geode = { path = "../geode" }
 hashbrown = { version = "0.12.1", features = ["raw"] }
-thiserror = "1.0.31"
 sealed = "0.4.0"
 smallvec = "1.9.0"
+thiserror = "1.0.31"

@@ -1,10 +1,15 @@
 use super::generic::ForkableCursor;
 use crate::parser::generic::{Atom, Cursor};
 use crate::util::iter_magic::limit_len;
-use crate::util::obj::Entity;
-use std::cmp::Ordering;
-use std::ops::{Bound, Range, RangeBounds};
-use std::str::from_utf8 as str_from_utf8;
+
+use geode::prelude::*;
+
+use std::{
+	cmp::Ordering,
+	ops::{Bound, Range, RangeBounds},
+	str::from_utf8 as str_from_utf8,
+};
+
 use thiserror::Error;
 
 // === Source file representations === //
