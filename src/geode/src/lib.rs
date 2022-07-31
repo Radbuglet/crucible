@@ -23,8 +23,8 @@ pub mod prelude {
 		},
 		entity::{
 			bundle::{
-				component_bundle, CachedEntityWith, CachedEntityWithRw, ComponentBundle,
-				ComponentBundleWithCtor, EntityWith, EntityWithRw,
+				component_bundle, ComponentBundle, ComponentBundleWithCtor, EntityWith,
+				EntityWithRw, MandatoryBundleComp,
 			},
 			entity::{Entity, EntityGetErrorExt, ExposeUsing},
 			event::{

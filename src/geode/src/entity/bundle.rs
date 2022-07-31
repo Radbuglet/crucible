@@ -12,7 +12,10 @@ use crate::core::{
 	session::{LocalSessionGuard, Session},
 };
 
-use super::entity::{ComponentList, Entity};
+use super::{
+	entity::{ComponentList, Entity},
+	key::TypedKey,
+};
 
 #[allow(unused)] // Actually captured by the macro
 use {
@@ -237,145 +240,28 @@ impl<T: ?Sized + ObjPointee> MaybeOwned<EntityWithRw<T>> {
 	}
 }
 
-// === `CachedEntityWith` === //
+// === `component_bundle` ctor helpers === //
 
-pub type CachedEntityWithRw<T> = CachedEntityWith<RefCell<T>>;
-
-pub struct CachedEntityWith<T: ?Sized + ObjPointee> {
-	entity: Entity,
-	cache: Option<Obj<T>>,
+// `MandatoryComp`
+pub enum MandatoryBundleComp<T: ?Sized + ObjPointee> {
+	Present(MaybeOwned<Obj<T>>),
+	Late,
 }
 
-impl<T: ?Sized + ObjPointee> fmt::Debug for CachedEntityWith<T> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("CachedEntityWith")
-			.field("entity", &self.entity)
-			.finish_non_exhaustive()
+impl<T: ?Sized + ObjPointee, S: Into<MaybeOwned<Obj<T>>>> From<S> for MandatoryBundleComp<T> {
+	fn from(val: S) -> Self {
+		Self::Present(val.into())
 	}
 }
 
-impl<T: ?Sized + ObjPointee> Copy for CachedEntityWith<T> {}
+impl<T: ?Sized + ObjPointee> SingleComponent for MandatoryBundleComp<T> {
+	type Value = T;
 
-impl<T: ?Sized + ObjPointee> Clone for CachedEntityWith<T> {
-	fn clone(&self) -> Self {
-		*self
-	}
-}
-
-impl<T: ?Sized + ObjPointee> hash::Hash for CachedEntityWith<T> {
-	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		self.entity.hash(state);
-	}
-}
-
-impl<T: ?Sized + ObjPointee> Eq for CachedEntityWith<T> {}
-
-impl<T: ?Sized + ObjPointee> PartialEq for CachedEntityWith<T> {
-	fn eq(&self, other: &Self) -> bool {
-		self.entity == other.entity
-	}
-}
-
-impl<T: ?Sized + ObjPointee> Borrow<Entity> for CachedEntityWith<T> {
-	fn borrow(&self) -> &Entity {
-		&self.entity
-	}
-}
-
-impl<T: ?Sized + ObjPointee> Destructible for CachedEntityWith<T> {
-	fn destruct(self) {
-		self.entity.destruct();
-	}
-}
-
-impl<T: ?Sized + ObjPointee> ComponentBundle for CachedEntityWith<T> {
-	fn try_cast(session: Session, entity: Entity) -> anyhow::Result<Self> {
-		match entity.fallible_get_obj::<T>(session) {
-			Ok(obj) => Ok(Self {
-				entity,
-				cache: Some(obj),
-			}),
-			Err(err) => {
-				if err.as_permission_error().is_none() {
-					Err(anyhow::Error::new(err).context(format!(
-						"failed to construct `CachedEntityWith<{}>` component bundle",
-						std::any::type_name::<T>()
-					)))
-				} else {
-					Ok(Self {
-						entity,
-						cache: None,
-					})
-				}
-			}
+	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
+		match self {
+			Self::Present(comp) => comp.push_value_under(registry, key),
+			Self::Late => {}
 		}
-	}
-
-	fn late_cast(entity: Entity) -> Self {
-		Self {
-			entity,
-			cache: None,
-		}
-	}
-}
-
-impl<T: ?Sized + ObjPointee> ComponentBundleWithCtor for CachedEntityWith<T> {
-	type CompList = Option<MaybeOwned<Obj<T>>>;
-}
-
-impl<T: ?Sized + ObjPointee> CachedEntityWith<T> {
-	pub fn invalidate_cache(&mut self) {
-		self.cache = None;
-	}
-
-	pub fn comp<'s>(&mut self, session: Session<'s>) -> &'s T {
-		let obj = self
-			.cache
-			.get_or_insert_with(|| self.entity.get_obj::<T>(session));
-
-		obj.get(session)
-	}
-}
-
-impl<T: ?Sized + ObjPointee> CachedEntityWithRw<T> {
-	pub fn borrow_comp<'s>(&mut self, session: Session<'s>) -> Ref<'s, T> {
-		self.comp(session).borrow()
-	}
-
-	pub fn borrow_comp_mut<'s>(&mut self, session: Session<'s>) -> RefMut<'s, T> {
-		self.comp(session).borrow_mut()
-	}
-}
-
-impl<T: ?Sized + ObjPointee> Owned<CachedEntityWith<T>> {
-	pub fn comp<'s>(&mut self, session: Session<'s>) -> &'s T {
-		self.weak_mut().comp(session)
-	}
-}
-
-impl<T: ?Sized + ObjPointee> Owned<CachedEntityWithRw<T>> {
-	pub fn borrow_comp<'s>(&mut self, session: Session<'s>) -> Ref<'s, T> {
-		self.weak_mut().borrow_comp(session)
-	}
-
-	pub fn borrow_comp_mut<'s>(&mut self, session: Session<'s>) -> RefMut<'s, T> {
-		self.weak_mut().borrow_comp_mut(session)
-	}
-}
-
-impl<T: ?Sized + ObjPointee> MaybeOwned<CachedEntityWith<T>> {
-	pub fn comp<'a>(&mut self, session: Session<'a>) -> &'a T {
-		self.weak_mut().comp(session)
-	}
-}
-
-impl<T: ?Sized + ObjPointee> MaybeOwned<CachedEntityWithRw<T>> {
-	pub fn borrow_comp<'s>(&mut self, session: Session<'s>) -> Ref<'s, T> {
-		self.weak_mut().borrow_comp(session)
-	}
-
-	pub fn borrow_comp_mut<'s>(&mut self, session: Session<'s>) -> RefMut<'s, T> {
-		self.weak_mut().borrow_comp_mut(session)
 	}
 }
 
@@ -601,8 +487,8 @@ macro component_bundle_derive_getters {
 		$(, $($rest:tt)*)?
 	) => {
 		pub fn $field_name<'s>(&self, session: Session<'s>) -> Result<&'s $field_ty, EntityGetError> {
-			<Self as TransparentWrapper<Entity>>::peel_ref(self).fallible_get_obj_in(session, prefer_left!(
-				$({$key})?
+			<Self as TransparentWrapper<Entity>>::peel_ref(self).fallible_get_in(session, prefer_left!(
+				$({$field_key})?
 				{ typed_key::<$field_ty>() }
 			))
 		}
@@ -649,7 +535,13 @@ macro component_bundle_try_derive_ctor {
 			$(
 				$(..$ext_name:ident: $ext_ty:ty)?
 				,  // <-- Janky hack
-				$($field_name:ident $([$field_key:expr])? $(?)?: $field_ty:ty)?
+				$(
+					$field_name:ident
+					$([$field_key:expr])?
+
+					$(?: $field_ty_optional:ty)?
+					$(: $field_ty:ty)?
+				)?
 			)*
 		};
 	) => {
@@ -657,11 +549,15 @@ macro component_bundle_try_derive_ctor {
 			$(pub $ext_name: <$ext_ty as ComponentBundle>::CompList,)?
 
 			// TODO: Differentiate between an intention uninit and an omission if possible.
-			$(pub $field_name: Option<MaybeOwned<Obj<$field_ty>>>,)?
+			$(
+				pub $field_name:
+					$(MandatoryBundleComp<$field_ty>)?
+					$(Option<MaybeOwned<Obj<$field_ty_optional>>>)?,
+			)?
 		)*}
 
 		impl<$($para_name: ?Sized + ObjPointee),*> ComponentList for $bundle_ctor_name<$($para_name),*> {
-			#[allow(unused)]  // `registry` may be unused in empty bundles.
+			#[allow(unused)]  // `registry` may go unused in empty bundles.
 			fn push_values(self, registry: &mut ComponentAttachTarget) {
 				$(
 					$(ComponentList::push_values(self.$ext_name, registry);)?

@@ -202,7 +202,7 @@ impl ViewportBundle {
 		Self::spawn(
 			s,
 			ViewportBundleCtor {
-				viewport: None, // (to be initialized by the viewport manager)
+				viewport: MandatoryBundleComp::Late, // (to be initialized by the viewport manager)
 				input_tracker: input_tracker.into(),
 				render_handler: render_handler.into(),
 				depth_texture: depth_texture.into(),

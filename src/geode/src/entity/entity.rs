@@ -452,28 +452,12 @@ impl<T: ?Sized + ObjPointee> SingleComponent for MaybeOwned<Obj<T>> {
 	}
 }
 
-// `Option<MaybeOwned<T>>` conversions
-
-impl<T: ?Sized + ObjPointee> SingleComponent for Option<MaybeOwned<Obj<T>>> {
-	type Value = T;
+impl<T: SingleComponent> SingleComponent for Option<T> {
+	type Value = T::Value;
 
 	fn push_value_under(self, registry: &mut ComponentAttachTarget, key: TypedKey<Self::Value>) {
-		match self {
-			Some(MaybeOwned::Owned(owned)) => registry.add_owned(key, owned),
-			Some(MaybeOwned::Weak(weak)) => registry.add_weak(key, weak),
-			None => {}
+		if let Some(val) = self {
+			val.push_value_under(registry, key);
 		}
-	}
-}
-
-impl<T: ?Sized + ObjPointee> From<Owned<Obj<T>>> for Option<MaybeOwned<Obj<T>>> {
-	fn from(owned: Owned<Obj<T>>) -> Self {
-		Some(MaybeOwned::Owned(owned))
-	}
-}
-
-impl<T: ?Sized + ObjPointee> From<Obj<T>> for Option<MaybeOwned<Obj<T>>> {
-	fn from(weak: Obj<T>) -> Self {
-		Some(MaybeOwned::Weak(weak))
 	}
 }
