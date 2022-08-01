@@ -34,14 +34,4 @@ pub mod prelude {
 			key::{proxy_key, typed_key, ProxyKeyType},
 		},
 	};
-
-	pub fn cg_test_alloc(s: Session) -> Owned<Obj<u8>> {
-		Obj::new(s, 1u8)
-	}
-}
-
-// pub use prelude::*;
-
-pub fn obj_deref(s: prelude::Session, obj: prelude::Obj<u32>) -> u32 {
-	*obj.get(s)
 }

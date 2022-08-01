@@ -165,6 +165,10 @@ impl VoxelChunkData {
 	}
 
 	pub fn set_block_state(&self, s: Session, pos: BlockVec, state: BlockState) {
+		if self.get_block_state(pos) == state {
+			return;
+		}
+
 		if let Some(world) = self.world() {
 			world
 				.comp(s)
@@ -198,20 +202,28 @@ pub struct BlockState {
 impl BlockState {
 	pub fn decode(word: u32) -> Self {
 		let material = word as u16;
-		let variant = word.to_be_bytes()[2];
-		let light_level = word.to_be_bytes()[3];
+		let variant = word.to_le_bytes()[2];
+		let light_level = word.to_le_bytes()[3];
 
-		Self {
+		let decoded = Self {
 			material,
 			variant,
 			light_level,
-		}
+		};
+
+		debug_assert_eq!(
+			word,
+			decoded.encode(),
+			"Decoding of {word} as {decoded:?} resulted in a different round-trip encoding. This is a bug."
+		);
+
+		decoded
 	}
 
 	pub fn encode(&self) -> u32 {
 		let mut enc = self.material as u32;
-		enc += (self.variant as u32) << 16;
-		enc += (self.material as u32) << 24;
+		enc += (self.variant as u32) << 17;
+		enc += (self.light_level as u32) << 25;
 		enc
 	}
 }
