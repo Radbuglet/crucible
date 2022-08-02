@@ -6,8 +6,8 @@ use std::{
 
 use crucible_core::{
 	array::arr,
-	c_enum::ExposesVariants,
-	contextual_iter::{ContextualIter, WithContext},
+	c_enum::CEnum,
+	iter::{ContextualIter, WithContext},
 };
 use geode::prelude::*;
 use smallvec::SmallVec;

@@ -5,7 +5,7 @@ use std::{
 	fmt,
 };
 
-use crucible_core::{error::ResultExt, macros::impl_tuples};
+use crucible_core::{error::ResultExt, macros::impl_tuples, std_traits::ResultLike};
 use parking_lot::Mutex;
 use thiserror::Error;
 
@@ -341,16 +341,12 @@ impl EntityGetError {
 	}
 }
 
-pub trait EntityGetErrorExt {
-	type OkTy;
-
-	fn ok_or_missing(self) -> Result<Self::OkTy, ComponentMissingError>;
+pub trait EntityGetErrorExt: ResultLike {
+	fn ok_or_missing(self) -> Result<Self::Success, ComponentMissingError>;
 }
 
 impl<T> EntityGetErrorExt for Result<T, EntityGetError> {
-	type OkTy = T;
-
-	fn ok_or_missing(self) -> Result<Self::OkTy, ComponentMissingError> {
+	fn ok_or_missing(self) -> Result<Self::Success, ComponentMissingError> {
 		EntityGetError::ok_or_missing(self)
 	}
 }

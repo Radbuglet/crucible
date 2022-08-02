@@ -1,12 +1,42 @@
 use sealed::sealed;
 
-pub fn limit_len<T>(slice: &[T], max_len: usize) -> &[T] {
-	if slice.len() > max_len {
-		&slice[..max_len]
-	} else {
-		slice
+// === `WithContext` === //
+
+#[derive(Debug, Clone)]
+pub struct WithContext<C, I: ContextualIter<C>> {
+	pub context: C,
+	pub iter: I,
+}
+
+impl<C, I> Iterator for WithContext<C, I>
+where
+	I: ContextualIter<C>,
+{
+	type Item = I::Item;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.iter.next_on_ref(&mut self.context)
 	}
 }
+
+pub trait ContextualIter<C>: Sized {
+	type Item;
+
+	fn next_on_ref(&mut self, context: &mut C) -> Option<Self::Item>;
+
+	fn next(&mut self, mut context: C) -> Option<Self::Item> {
+		self.next_on_ref(&mut context)
+	}
+
+	fn with_context(self, context: C) -> WithContext<C, Self> {
+		WithContext {
+			context,
+			iter: self,
+		}
+	}
+}
+
+// === Flow Iter === //
 
 #[sealed]
 pub trait FlowIterExt: Sized + Iterator {

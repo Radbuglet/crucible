@@ -1,6 +1,6 @@
 use super::generic::ForkableCursor;
 use crate::parser::generic::{Atom, Cursor};
-use crate::util::iter_magic::limit_len;
+use crate::util::slice::limit_len;
 
 use geode::prelude::*;
 
@@ -14,22 +14,22 @@ use thiserror::Error;
 
 // === Source file representations === //
 
+component_bundle! {
+	pub struct FileDescBundle(FileDescBundleCtor) {
+		info: SourceFileInfo,
+	}
+}
+
 /// Optional file descriptor metadata to help users find the corresponding source file.
 #[derive(Debug, Clone)]
 pub struct SourceFileInfo {
 	pub name: String,
 }
 
-/// Optional object span metadata to help users find the location of the element in its source file.
-#[derive(Debug, Clone)]
-pub struct Spanned {
-	pub span: Span,
-}
-
 /// A file whose contents have been loaded into memory.
 #[derive(Debug, Clone)]
 pub struct LoadedFile {
-	pub file_desc: Entity,
+	pub file_desc: FileDescBundle,
 	pub contents: Vec<u8>,
 }
 
@@ -186,7 +186,7 @@ impl Atom for Result<Option<char>, UnicodeParseError<'_>> {
 #[derive(Debug, Clone)]
 pub struct FileReader<'a> {
 	/// The descriptor of the file we're reading. Used to form `FileLocs`.
-	file_desc: Entity,
+	file_desc: FileDescBundle,
 
 	/// The underlying file codepoint reader.
 	codepoints: CodepointReader<'a>,
@@ -202,30 +202,32 @@ pub struct FileReader<'a> {
 	next_pos: FilePos,
 }
 
-fn fr_read_atom_untracked(codepoints: &mut CodepointReader<'_>) -> FileAtom {
-	let first = match codepoints.consume_atom() {
-		Ok(Some(first)) => first,
-		Ok(None) => return FileAtom::Eof,
-		Err(_) => return FileAtom::Malformed,
-	};
+impl FileReader<'_> {
+	fn read_atom_untracked(codepoints: &mut CodepointReader<'_>) -> FileAtom {
+		let first = match codepoints.consume_atom() {
+			Ok(Some(first)) => first,
+			Ok(None) => return FileAtom::Eof,
+			Err(_) => return FileAtom::Malformed,
+		};
 
-	match first {
-		'\n' => FileAtom::Newline {
-			kind: NewlineKind::Lf,
-		},
-		'\r' => {
-			let has_lf = codepoints
-				.lookahead(|codepoints| matches!(codepoints.consume_atom(), Ok(Some('\n'))));
+		match first {
+			'\n' => FileAtom::Newline {
+				kind: NewlineKind::Lf,
+			},
+			'\r' => {
+				let has_lf = codepoints
+					.lookahead(|codepoints| matches!(codepoints.consume_atom(), Ok(Some('\n'))));
 
-			let kind = if has_lf {
-				NewlineKind::Crlf
-			} else {
-				NewlineKind::Cr
-			};
+				let kind = if has_lf {
+					NewlineKind::Crlf
+				} else {
+					NewlineKind::Cr
+				};
 
-			FileAtom::Newline { kind }
+				FileAtom::Newline { kind }
+			}
+			char => FileAtom::Codepoint(char),
 		}
-		char => FileAtom::Codepoint(char),
 	}
 }
 
@@ -240,7 +242,7 @@ impl Cursor for FileReader<'_> {
 			pos: self.latest_pos.1,
 		};
 
-		let atom = fr_read_atom_untracked(&mut CodepointReader::new(
+		let atom = Self::read_atom_untracked(&mut CodepointReader::new(
 			&self.codepoints.contents[loc.byte_index..],
 		));
 
@@ -252,7 +254,7 @@ impl Cursor for FileReader<'_> {
 		self.latest_pos = (self.codepoints.peek_loc(), self.next_pos);
 
 		// Now, let's consume some atoms.
-		let atom = fr_read_atom_untracked(&mut self.codepoints);
+		let atom = Self::read_atom_untracked(&mut self.codepoints);
 
 		// ...and update the cursor location.
 		match &atom {
@@ -283,6 +285,24 @@ pub enum FileAtom {
 	Newline { kind: NewlineKind },
 }
 
+impl FileAtom {
+	pub fn as_char(&self) -> Option<char> {
+		match self {
+			FileAtom::Eof => None,
+			FileAtom::Codepoint(char) => Some(*char),
+			FileAtom::Malformed => Some(char::REPLACEMENT_CHARACTER),
+			FileAtom::Newline { .. } => Some('\n'),
+		}
+	}
+
+	pub fn as_codepoint(&self) -> Option<char> {
+		match self {
+			FileAtom::Codepoint(char) => Some(*char),
+			_ => None,
+		}
+	}
+}
+
 impl Atom for FileAtom {
 	fn is_eof(&self) -> bool {
 		matches!(self, FileAtom::Eof)
@@ -305,7 +325,7 @@ pub enum NewlineKind {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Span {
-	pub file_desc: Entity,
+	pub file_desc: FileDescBundle,
 	pub start_byte: usize,
 	pub start_pos: FilePos,
 	pub end_byte: usize,
@@ -365,9 +385,15 @@ impl Span {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct FileLoc {
-	pub file_desc: Entity,
+	pub file_desc: FileDescBundle,
 	pub byte_index: usize,
 	pub pos: FilePos,
+}
+
+impl FileLoc {
+	pub fn span(&self) -> Span {
+		Span::new(*self, *self)
+	}
 }
 
 impl Ord for FileLoc {

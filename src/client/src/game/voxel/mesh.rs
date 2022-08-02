@@ -8,7 +8,7 @@ use crucible_common::voxel::{
 	data::VoxelChunkData,
 	math::{BlockFace, BlockVec, BlockVecExt, WorldVec, WorldVecExt},
 };
-use crucible_core::c_enum::ExposesVariants;
+use crucible_core::c_enum::CEnum;
 use geode::{
 	entity::key::{dyn_key, TypedKey},
 	prelude::*,

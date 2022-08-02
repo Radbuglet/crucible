@@ -386,11 +386,13 @@ dependencies = [
 name = "crew"
 version = "0.1.0"
 dependencies = [
+ "crucible-core",
  "geode",
  "hashbrown 0.12.3",
  "sealed",
  "smallvec",
  "thiserror",
+ "unicode-xid",
 ]
 
 [[package]]
@@ -517,6 +519,7 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "log",
+ "sealed",
 ]
 
 [[package]]

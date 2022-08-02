@@ -1,4 +1,4 @@
-use crate::contextual_iter::{ContextualIter, WithContext};
+use crate::iter::{ContextualIter, WithContext};
 
 // TODO: Strongly type non-sentinel nodes so we can achieve better performance.
 pub trait LinkedList<N: Copy + Eq> {

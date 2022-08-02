@@ -1,4 +1,4 @@
-use crucible_core::range::{unwrap_or_unbounded, AnyRange};
+use crucible_core::range::{as_any_range_cloned, unwrap_or_unbounded, AnyRange};
 use std::collections::Bound;
 use std::fmt::{Debug, Display};
 
@@ -106,7 +106,7 @@ impl Default for FeatureList {
 			met_optional: 0,
 			score: 0.0,
 			total_mandatory: 0,
-			score_range: AnyRange::new(0.0..=0.0),
+			score_range: as_any_range_cloned(&(0.0..=0.0)),
 		}
 	}
 }
@@ -143,24 +143,24 @@ impl FeatureList {
 				// pretty much the same.
 				//
 				// - Fanatics of Infinitesimals
-				unwrap_or_unbounded(self.score_range.start),
-				unwrap_or_unbounded(score_range.start),
+				unwrap_or_unbounded(self.score_range.0),
+				unwrap_or_unbounded(score_range.0),
 			) {
-				self.score_range.start = Bound::Included(total_low + this_low);
+				self.score_range.0 = Bound::Included(total_low + this_low);
 			} else {
 				// Anything can be anything.
-				self.score_range.start = Bound::Unbounded;
+				self.score_range.0 = Bound::Unbounded;
 			}
 
 			// High
 			if let (Some(total_high), Some(this_high)) = (
-				unwrap_or_unbounded(self.score_range.end),
-				unwrap_or_unbounded(score_range.end),
+				unwrap_or_unbounded(self.score_range.1),
+				unwrap_or_unbounded(score_range.1),
 			) {
-				self.score_range.end = Bound::Included(total_high + this_high);
+				self.score_range.1 = Bound::Included(total_high + this_high);
 			} else {
 				// Anything can be anything.
-				self.score_range.end = Bound::Unbounded;
+				self.score_range.1 = Bound::Unbounded;
 			}
 		}
 

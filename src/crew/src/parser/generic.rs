@@ -1,5 +1,8 @@
+use std::{cmp::Ordering, fmt, ops::DerefMut};
+
+use crucible_core::std_traits::OptionLike;
 use sealed::sealed;
-use std::{cell::RefCell, cmp::Ordering, fmt, ops::DerefMut};
+use thiserror::Error;
 
 // === Generic Cursor === //
 
@@ -92,7 +95,6 @@ impl<P: DerefMut<Target = T>, T: Cursor> Cursor for P {
 
 /// An extension trait applied to all [Cursor] instances that support [Clone] which adds utility
 /// methods to consume the cursor contents with lookahead.
-#[sealed]
 pub trait ForkableCursor: Cursor + Clone {
 	/// Return the next location-atom pair to be returned by the cursor without modifying the cursor
 	/// state.
@@ -112,11 +114,11 @@ pub trait ForkableCursor: Cursor + Clone {
 		self.clone().consume_atom()
 	}
 
-	/// Applies a match closure to a fork of the reader, only committing the fork state when
+	/// Applies a match closure to a fork of the cursor, only committing the fork state when
 	/// [LookaheadResult::should_commit] returns true.
-	fn lookahead<F, R>(&mut self, mut f: F) -> R
+	fn lookahead<F, R>(&mut self, f: F) -> R
 	where
-		F: FnMut(&mut Self) -> R,
+		F: FnOnce(&mut Self) -> R,
 		R: LookaheadResult,
 	{
 		let mut fork = self.clone();
@@ -125,6 +127,23 @@ pub trait ForkableCursor: Cursor + Clone {
 			*self = fork;
 		}
 		res
+	}
+
+	/// Creates an iterator that continuously consumes atoms with `f`, breaking when `f` fails to
+	/// match.
+	fn lookahead_while<T, F>(&mut self, mut f: F)
+	where
+		F: FnMut(&mut Self) -> T,
+		T: LookaheadResult,
+	{
+		loop {
+			let mut fork = self.clone();
+			let res = f(&mut fork);
+			if !res.should_commit() {
+				break;
+			}
+			*self = fork;
+		}
 	}
 
 	/// Constructs a [BranchMatcher] builder object which allows the user to match against several
@@ -138,8 +157,13 @@ pub trait ForkableCursor: Cursor + Clone {
 	}
 
 	/// Returns an iterator which drains the remaining atoms from the cursor.
-	fn drain_remaining(&mut self) -> CursorDrain<&'_ mut Self> {
+	fn drain(&mut self) -> CursorDrain<&'_ mut Self> {
 		CursorDrain(self)
+	}
+
+	/// Consume `n` atoms and ignore them. Useful for recovery.
+	fn skip(&mut self, n: usize) {
+		for _ in self.drain().take(n) {}
 	}
 
 	/// Returns an iterator which yields the remaining atoms from the cursor without modifying the
@@ -149,11 +173,10 @@ pub trait ForkableCursor: Cursor + Clone {
 	}
 }
 
-#[sealed]
 impl<T: Cursor + Clone> ForkableCursor for T {}
 
 pub trait Atom: Clone {
-	/// Should return true if and only if the given atom is an ending delimiter.
+	/// Returns true if the given atom is an ending delimiter.
 	fn is_eof(&self) -> bool;
 }
 
@@ -186,9 +209,9 @@ pub struct BranchMatcher<'a, C: ForkableCursor, R> {
 }
 
 impl<'a, C: ForkableCursor, R> BranchMatcher<'a, C, R> {
-	pub fn case_proc<F, R2>(&mut self, mut f: F)
+	pub fn case_proc<F, R2>(&mut self, f: F)
 	where
-		F: FnMut(&mut C) -> R2,
+		F: FnOnce(&mut C) -> R2,
 		R2: LookaheadResult,
 		R2: Into<R>,
 	{
@@ -213,7 +236,7 @@ impl<'a, C: ForkableCursor, R> BranchMatcher<'a, C, R> {
 
 	pub fn case<F, R2>(mut self, f: F) -> Self
 	where
-		F: FnMut(&mut C) -> R2,
+		F: FnOnce(&mut C) -> R2,
 		R2: LookaheadResult,
 		R2: Into<R>,
 	{
@@ -247,19 +270,112 @@ impl<C: Cursor> Iterator for CursorDrain<C> {
 	}
 }
 
-// === Diagnostic Cursor === //
+// === PResult === //
 
-pub trait DiagnosticCursor: ForkableCursor {
-	fn error_reporter(&self) -> &ErrorReporter<Self>;
+pub type PResult<T> = Result<T, ParseError>;
 
-	fn expect<D: fmt::Display>(&self, what: D) {
-		let mut furthest = self.error_reporter().furthest.borrow_mut();
+#[derive(Debug, Copy, Clone, Error)]
+#[error("failed to match grammar")]
+pub struct ParseError;
 
-		match &mut *furthest {
-			Some(report) => match report.furthest_cursor.latest_loc().cmp(&self.latest_loc()) {
+impl<C, M> From<CursorRecovery<C, M>> for ParseError {
+	fn from(_: CursorRecovery<C, M>) -> Self {
+		Self
+	}
+}
+
+#[sealed]
+pub trait ParsingErrorExt: OptionLike {
+	fn or_recoverable<C, M>(
+		self,
+		recovery: &CursorRecovery<C, M>,
+	) -> Result<Self::Value, CursorRecovery<C, M>>
+	where
+		C: ForkableCursor,
+		M: Clone,
+	{
+		self.raw_option().ok_or_else(|| recovery.clone())
+	}
+}
+
+#[sealed]
+impl<T, C, M> ParsingErrorExt for Result<T, CursorRecovery<C, M>> {}
+
+#[sealed]
+impl<T> ParsingErrorExt for PResult<T> {}
+
+#[sealed]
+impl<T> ParsingErrorExt for Option<T> {}
+
+// === CursorRecovery === //
+
+#[derive(Debug, Clone)]
+pub struct CursorRecovery<C, M> {
+	pub furthest_cursor: C,
+	pub meta: M,
+}
+
+impl<C: ForkableCursor, M> CursorRecovery<C, M> {
+	pub fn new(cursor: &C, meta: M) -> Self {
+		Self {
+			furthest_cursor: cursor.clone(),
+			meta,
+		}
+	}
+
+	pub fn propose(&mut self, cursor: &C, meta: M) {
+		if cursor.latest_loc() > self.furthest_cursor.latest_loc() {
+			self.furthest_cursor = cursor.clone();
+			self.meta = meta;
+		}
+	}
+
+	pub fn recover(&self, cursor: &mut C) {
+		debug_assert!(cursor.latest_loc() <= self.furthest_cursor.latest_loc());
+		*cursor = self.furthest_cursor.clone();
+	}
+}
+
+// === CursorUnstuck === //
+
+#[derive(Debug)]
+pub struct CursorUnstuck<C> {
+	furthest: Option<UnstuckReport<C>>,
+}
+
+#[derive(Debug)]
+pub struct UnstuckReport<C> {
+	pub furthest_cursor: C,
+	pub unstuck_options: Vec<String>,
+}
+
+impl<C> Default for CursorUnstuck<C> {
+	fn default() -> Self {
+		Self { furthest: None }
+	}
+}
+
+impl<C: ForkableCursor> CursorUnstuck<C> {
+	pub fn expect_many<I, D>(&mut self, cursor: &C, what: I)
+	where
+		I: IntoIterator<Item = D>,
+		D: fmt::Display,
+	{
+		for what in what {
+			self.expect(cursor, what);
+		}
+	}
+
+	pub fn expect<D: fmt::Display>(&mut self, cursor: &C, what: D) {
+		match &mut self.furthest {
+			Some(report) => match report
+				.furthest_cursor
+				.latest_loc()
+				.cmp(&cursor.latest_loc())
+			{
 				Ordering::Less => {
-					*furthest = Some(ErrorReport {
-						furthest_cursor: self.clone(),
+					self.furthest = Some(UnstuckReport {
+						furthest_cursor: cursor.clone(),
 						unstuck_options: vec![what.to_string()],
 					});
 				}
@@ -267,34 +383,15 @@ pub trait DiagnosticCursor: ForkableCursor {
 				Ordering::Greater => { /* ignore report */ }
 			},
 			None => {
-				*furthest = Some(ErrorReport {
-					furthest_cursor: self.clone(),
+				self.furthest = Some(UnstuckReport {
+					furthest_cursor: cursor.clone(),
 					unstuck_options: vec![what.to_string()],
 				});
 			}
 		}
 	}
-}
 
-pub struct ErrorReporter<C: ForkableCursor> {
-	furthest: RefCell<Option<ErrorReport<C>>>,
-}
-
-impl<C: ForkableCursor> Default for ErrorReporter<C> {
-	fn default() -> Self {
-		Self {
-			furthest: Default::default(),
-		}
+	pub fn unstuck_hint(&self) -> Option<&UnstuckReport<C>> {
+		self.furthest.as_ref()
 	}
-}
-
-impl<C: ForkableCursor> ErrorReporter<C> {
-	pub fn report(&mut self) -> Option<&ErrorReport<C>> {
-		self.furthest.get_mut().as_ref()
-	}
-}
-
-pub struct ErrorReport<C: ForkableCursor> {
-	pub furthest_cursor: C,
-	pub unstuck_options: Vec<String>,
 }

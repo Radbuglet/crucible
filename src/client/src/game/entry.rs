@@ -6,7 +6,7 @@ use crucible_common::voxel::{
 	},
 	math::{BlockFace, WorldVec, WorldVecExt},
 };
-use crucible_core::c_enum::ExposesVariants;
+use crucible_core::c_enum::CEnum;
 use geode::prelude::*;
 use typed_glam::glam::Mat4;
 use winit::event::{MouseButton, VirtualKeyCode};

@@ -3,6 +3,8 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
+use crate::std_traits::ResultLike;
+
 // === Standard Error Extensions === //
 
 pub trait ErrorFormatExt: Error {
@@ -59,12 +61,12 @@ impl<T: ?Sized + Error> Display for FormattedError<'_, T> {
 	}
 }
 
-pub trait ResultExt<T, E: Error> {
-	fn unwrap_pretty(self) -> T;
-	fn log(self) -> Option<T>;
+pub trait ResultExt: ResultLike {
+	fn unwrap_pretty(self) -> Self::Success;
+	fn log(self) -> Option<Self::Success>;
 }
 
-impl<T, E: Error> ResultExt<T, E> for Result<T, E> {
+impl<T, E: Error> ResultExt for Result<T, E> {
 	fn unwrap_pretty(self) -> T {
 		match self {
 			Ok(val) => val,

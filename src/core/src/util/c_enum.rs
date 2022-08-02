@@ -6,7 +6,7 @@ use crate::ext::{array::boxed_arr_from_fn, marker::PhantomInvariant};
 
 pub type VariantIter<T> = std::iter::Copied<std::slice::Iter<'static, T>>;
 
-pub trait ExposesVariants: 'static + Sized + fmt::Debug + Copy + hash::Hash + Eq + Ord {
+pub trait CEnum: 'static + Sized + fmt::Debug + Copy + hash::Hash + Eq + Ord {
 	const COUNT: usize = Self::VARIANTS.len();
 	const VARIANTS: &'static [Self];
 
@@ -24,17 +24,23 @@ pub trait ExposesVariants: 'static + Sized + fmt::Debug + Copy + hash::Hash + Eq
 pub macro c_enum($(
     $(#[$attr_meta:meta])*
     $vis:vis enum $name:ident {
-        $($field:ident),*
+        $(
+			$(#[$field_meta:meta])*
+			$field:ident
+		),*
         $(,)?
     }
 )*) {$(
     $(#[$attr_meta])*
     #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
     $vis enum $name {
-        $($field),*
+        $(
+			$(#[$field_meta])*
+			$field
+		),*
     }
 
-    impl ExposesVariants for $name {
+    impl CEnum for $name {
         const VARIANTS: &'static [Self] = &[
             $(Self::$field),*
         ];
@@ -48,12 +54,12 @@ pub macro c_enum($(
 // === `CEnumMap` === //
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct CEnumMap<K: ExposesVariants, V> {
+pub struct CEnumMap<K: CEnum, V> {
 	_ty: PhantomInvariant<K>,
 	map: Box<[Option<V>]>,
 }
 
-impl<K: ExposesVariants, V> Default for CEnumMap<K, V> {
+impl<K: CEnum, V> Default for CEnumMap<K, V> {
 	fn default() -> Self {
 		Self {
 			_ty: Default::default(),
@@ -62,7 +68,7 @@ impl<K: ExposesVariants, V> Default for CEnumMap<K, V> {
 	}
 }
 
-impl<K: ExposesVariants, V> CEnumMap<K, V> {
+impl<K: CEnum, V> CEnumMap<K, V> {
 	pub fn new() -> Self {
 		Self::default()
 	}
@@ -106,7 +112,7 @@ impl<K: ExposesVariants, V> CEnumMap<K, V> {
 	}
 }
 
-impl<K: ExposesVariants, V> Index<K> for CEnumMap<K, V> {
+impl<K: CEnum, V> Index<K> for CEnumMap<K, V> {
 	type Output = V;
 
 	fn index(&self, index: K) -> &Self::Output {

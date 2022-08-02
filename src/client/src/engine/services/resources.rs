@@ -11,7 +11,7 @@ use crucible_common::util::linked_list::ObjLinkedList;
 use hashbrown::raw::RawTable;
 
 use crucible_core::{
-	contextual_iter::ContextualIter, error::ResultExt, hasher::hash_one, linked_list::LinkedList,
+	error::ResultExt, hasher::hash_one, iter::ContextualIter, linked_list::LinkedList,
 };
 use geode::prelude::*;
 use once_cell::unsync::OnceCell;
