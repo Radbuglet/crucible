@@ -1,4 +1,4 @@
-use crate::parser::{
+use crate::tokenizer::{
 	file::{FileDescBundle, FileDescBundleCtor, LoadedFile, SourceFileInfo},
 	generic::ForkableCursor,
 };

@@ -1,5 +1,5 @@
 use super::generic::ForkableCursor;
-use crate::parser::generic::{Atom, Cursor};
+use crate::tokenizer::generic::{Atom, Cursor};
 use crate::util::slice::limit_len;
 
 use geode::prelude::*;
@@ -41,6 +41,10 @@ impl LoadedFile {
 			latest_pos: (0, FilePos::START),
 			next_pos: FilePos::START,
 		}
+	}
+
+	pub fn sof_loc(&self) -> FileLoc {
+		self.reader().peek_loc()
 	}
 }
 

@@ -148,10 +148,12 @@ pub trait ForkableCursor: Cursor + Clone {
 
 	/// Constructs a [BranchMatcher] builder object which allows the user to match against several
 	/// grammars.
-	fn branch<R>(&mut self) -> BranchMatcher<Self, R> {
+	fn branch<R>(&mut self, result: R) -> BranchMatcher<Self, R> {
 		BranchMatcher {
 			target: self,
-			result: None,
+			matched_cursor: None,
+			result,
+			#[cfg(debug_assertions)]
 			barrier_has_val: false,
 		}
 	}
@@ -204,7 +206,9 @@ impl<T, E> LookaheadResult for Result<T, E> {
 
 pub struct BranchMatcher<'a, C: ForkableCursor, R> {
 	target: &'a mut C,
-	result: Option<(C, R)>,
+	matched_cursor: Option<C>,
+	result: R,
+	#[cfg(debug_assertions)]
 	barrier_has_val: bool,
 }
 
@@ -216,22 +220,29 @@ impl<'a, C: ForkableCursor, R> BranchMatcher<'a, C, R> {
 		R2: Into<R>,
 	{
 		let mut fork = self.target.clone();
-		let res = f(&mut fork);
+		let result = f(&mut fork);
 
-		if res.should_commit() {
+		if result.should_commit() {
 			// Debug checks to ensure that we don't have an ambiguous branch
-			assert!(!self.barrier_has_val, "ambiguous branch");
-			self.barrier_has_val = true;
+			#[cfg(debug_assertions)]
+			{
+				assert!(!self.barrier_has_val, "ambiguous branch");
+				self.barrier_has_val = true;
+			}
 
 			// Result committing
-			if self.result.is_none() {
-				self.result = Some((fork, res.into()));
+			if self.matched_cursor.is_none() {
+				self.matched_cursor = Some(fork);
+				self.result = result.into();
 			}
 		}
 	}
 
 	pub fn barrier_proc(&mut self) {
-		self.barrier_has_val = false;
+		#[cfg(debug_assertions)]
+		{
+			self.barrier_has_val = false;
+		}
 	}
 
 	pub fn case<F, R2>(mut self, f: F) -> Self
@@ -249,10 +260,12 @@ impl<'a, C: ForkableCursor, R> BranchMatcher<'a, C, R> {
 		self
 	}
 
-	pub fn finish(self) -> Option<R> {
-		let (fork, res) = self.result?;
-		*self.target = fork;
-		Some(res)
+	pub fn finish(self) -> R {
+		if let Some(fork) = self.matched_cursor {
+			*self.target = fork;
+		}
+
+		self.result
 	}
 }
 

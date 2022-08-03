@@ -1,5 +1,5 @@
 pub mod driver;
-pub mod parser;
+pub mod tokenizer;
 pub mod util;
 
 fn main() {

@@ -122,7 +122,7 @@ pub enum Token {
 pub struct TokenGroup {
 	pub span: Span,
 	pub delimiter: GroupDelimiterChar,
-	pub tokens: Vec<Owned<Obj<Token>>>,
+	pub tokens: Vec<BoxedToken>,
 }
 
 #[derive(Debug, Clone)]
@@ -153,7 +153,7 @@ pub struct TokenStringLit {
 #[derive(Debug, Clone)]
 pub enum TokenStringLitPart {
 	Literal { text: Intern, span: Span },
-	Group(Owned<Obj<Token>>),
+	Group(BoxedToken),
 }
 
 #[derive(Debug, Clone)]
