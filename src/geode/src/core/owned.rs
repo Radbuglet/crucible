@@ -8,7 +8,7 @@ pub trait Destructible {
 	fn destruct(self);
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Default, TransparentWrapper)]
+#[derive(Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Default, TransparentWrapper)]
 #[repr(transparent)]
 pub struct Owned<T: Destructible>(ManuallyDrop<T>);
 
@@ -82,7 +82,7 @@ impl<T: Destructible> Drop for Owned<T> {
 
 // === MaybeOwned === //
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub enum MaybeOwned<T: Destructible> {
 	Owned(Owned<T>),
 	Weak(T),

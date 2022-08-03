@@ -1,8 +1,9 @@
-use super::file::Span;
+use std::sync::Arc;
+
+use super::file::{FileLoc, Span};
 use crate::util::intern::Intern;
 use crucible_core::c_enum::{c_enum, CEnum};
 
-use geode::prelude::*;
 use smallvec::SmallVec;
 
 // === C enums === //
@@ -106,56 +107,73 @@ impl GroupDelimiterChar {
 
 // === Tree === //
 
-pub type BoxedToken = Owned<Obj<Token>>;
-
+// Token
 #[derive(Debug, Clone)]
 pub enum Token {
 	Group(TokenGroup),
 	Ident(TokenIdent),
 	Punct(TokenPunct),
 	CharLit(TokenCharLit),
-	StringLit(TokenStringLit),
+	StrLit(TokenStrLit),
 	NumberLit(TokenNumberLit),
 }
 
+// TokenGroup
 #[derive(Debug, Clone)]
 pub struct TokenGroup {
 	pub span: Span,
 	pub delimiter: GroupDelimiterChar,
-	pub tokens: Vec<BoxedToken>,
+	pub tokens: Arc<Vec<Token>>,
 }
 
+impl TokenGroup {
+	pub fn tokens_mut(&mut self) -> &mut Vec<Token> {
+		Arc::make_mut(&mut self.tokens)
+	}
+}
+
+// TokenIdent
 #[derive(Debug, Clone)]
 pub struct TokenIdent {
 	pub span: Span,
 	pub text: Intern,
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+// TokenPunct
+#[derive(Debug, Clone)]
 pub struct TokenPunct {
-	pub span: Span,
+	pub loc: FileLoc,
 	pub kind: PunctKind,
 	pub glued: bool,
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+// TokenCharLit
+#[derive(Debug, Clone)]
 pub struct TokenCharLit {
 	pub span: Span,
 	pub char: char,
 }
 
+// TokenStrLit
 #[derive(Debug, Clone)]
-pub struct TokenStringLit {
+pub struct TokenStrLit {
 	pub span: Span,
-	pub parts: SmallVec<[TokenStringLitPart; 1]>,
+	pub parts: SmallVec<[TokenStrLitPart; 1]>,
 }
 
 #[derive(Debug, Clone)]
-pub enum TokenStringLitPart {
-	Literal { text: Intern, span: Span },
-	Group(BoxedToken),
+pub enum TokenStrLitPart {
+	Textual(TokenStrLitTextualPart),
+	Group(TokenGroup),
 }
 
+#[derive(Debug, Clone)]
+pub struct TokenStrLitTextualPart {
+	span: Span,
+	text: Intern,
+}
+
+// TokenNumberLit
 #[derive(Debug, Clone)]
 pub struct TokenNumberLit {
 	pub span: Span,

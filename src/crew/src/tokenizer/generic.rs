@@ -148,7 +148,7 @@ pub trait ForkableCursor: Cursor + Clone {
 
 	/// Constructs a [BranchMatcher] builder object which allows the user to match against several
 	/// grammars.
-	fn branch<R>(&mut self, result: R) -> BranchMatcher<Self, R> {
+	fn lookahead_cases<R>(&mut self, result: R) -> BranchMatcher<Self, R> {
 		BranchMatcher {
 			target: self,
 			matched_cursor: None,

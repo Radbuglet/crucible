@@ -30,6 +30,21 @@ use super::{
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Lock(u8);
 
+impl fmt::Debug for Lock {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Lock")
+			.field("slot", &self.slot())
+			.field("debug_name", &db::get_lock_debug_name(self.slot()))
+			.finish()
+	}
+}
+
+impl Destructible for Lock {
+	fn destruct(self) {
+		db::unreserve_lock(self.slot())
+	}
+}
+
 impl Lock {
 	pub fn new<L: DebugLabel>(label: L) -> Owned<Self> {
 		let id = db::reserve_lock(label.to_debug_label());
@@ -42,21 +57,6 @@ impl Lock {
 
 	pub fn slot(self) -> u8 {
 		self.0
-	}
-}
-
-impl Destructible for Lock {
-	fn destruct(self) {
-		db::unreserve_lock(self.slot())
-	}
-}
-
-impl fmt::Debug for Lock {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("Lock")
-			.field("slot", &self.slot())
-			.field("debug_name", &db::get_lock_debug_name(self.slot()))
-			.finish()
 	}
 }
 
@@ -339,19 +339,16 @@ impl<T: ?Sized + ObjPointee> Destructible for Obj<T> {
 }
 
 impl<T: Sized + ObjPointee + Sync> Obj<T> {
-	#[inline(always)]
 	pub fn new(session: Session, value: T) -> Owned<Self> {
 		Self::new_in_raw(session, 0xFF, value)
 	}
 }
 
 impl<T: Sized + ObjPointee> Obj<T> {
-	#[inline(always)]
 	pub fn new_in(session: Session, lock: Lock, value: T) -> Owned<Self> {
 		Self::new_in_raw(session, lock.0, value)
 	}
 
-	#[inline(always)]
 	fn new_in_raw(session: Session, lock: u8, value: T) -> Owned<Self> {
 		// Allocate slot
 		let (slot, gen, initial_ptr) =
@@ -379,14 +376,14 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 	// Fetching
 	pub fn try_get<'a>(&self, session: Session<'a>) -> Result<&'a T, ObjGetError> {
 		let base_addr = self.raw.try_get_ptr(session)?;
-		let ptr = std::ptr::from_raw_parts(base_addr.as_ptr() as *const (), self.meta);
+		let ptr = ptr::from_raw_parts(base_addr.as_ptr() as *const (), self.meta);
 
 		Ok(unsafe { &*ptr })
 	}
 
 	pub fn get<'a>(&self, session: Session<'a>) -> &'a T {
 		let base_addr = self.raw.get_ptr(session);
-		let ptr = std::ptr::from_raw_parts(base_addr.as_ptr() as *const (), self.meta);
+		let ptr = ptr::from_raw_parts(base_addr.as_ptr() as *const (), self.meta);
 
 		unsafe { &*ptr }
 	}

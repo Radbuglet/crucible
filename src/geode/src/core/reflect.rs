@@ -14,7 +14,7 @@ pub struct ReflectType {
 
 impl fmt::Debug for ReflectType {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("TypeMeta")
+		f.debug_struct("ReflectType")
 			.field("id", &self.id)
 			.field("static_layout", &self.static_layout)
 			.field("drop_fn", &(self.drop_fn.map(|f| f as *const ())))

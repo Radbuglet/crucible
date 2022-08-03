@@ -1,5 +1,6 @@
-use crucible_core::c_enum::{c_enum, CEnum};
-use geode::prelude::*;
+use std::{cell::RefCell, rc::Rc};
+
+use crucible_core::c_enum::CEnum;
 use smallvec::SmallVec;
 use unicode_xid::UnicodeXID;
 
@@ -11,180 +12,51 @@ use super::{
 		Cursor, CursorRecovery, CursorUnstuck, ForkableCursor, PResult, ParseError, ParsingErrorExt,
 	},
 	token_ast::{
-		BoxedToken, GroupDelimiterChar, GroupDelimiterKind, PunctKind, Token, TokenCharLit,
-		TokenGroup, TokenIdent, TokenPunct, TokenStringLit, TokenStringLitPart,
+		GroupDelimiterChar, GroupDelimiterKind, PunctKind, Token, TokenCharLit, TokenGroup,
+		TokenIdent, TokenPunct, TokenStrLit, TokenStrLitPart,
 	},
 };
 
 // === Entry === //
 
-pub fn tokenize(sess: Session, interner: &mut Interner, file: &LoadedFile) -> BoxedToken {
+pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 	// Acquire all relevant context
-	let mut cx = TokenizerContext {
-		sess,
+	let mut cx = TokenizerCx {
 		interner,
 		unstuck: CursorUnstuck::default(),
 	};
+
 	let mut state = TokenizerState::new(file);
 	let mut reader = file.reader();
 
 	// Run main loop
 	loop {
-		match state.mode() {
-			TokenizerMode::Group => {
+		match state.top() {
+			TokenizerFrame::Group(group) => {
 				let mut recovery = CursorRecovery::new(&reader, ());
 
 				let result = reader
-					.branch(Err(ParseError))
+					.lookahead_cases(Err(ParseError))
+					// Group delimiters
 					.case(|reader| {
-						let start = reader.peek_loc();
+						let loc = reader.peek_loc();
 						let (kind, delimiter) = cx.match_group_delimiter(reader)?;
 
 						match kind {
-							GroupDelimiterKind::Open => state.push_group_frame(start, delimiter),
+							GroupDelimiterKind::Open => {
+								state.open_group_frame(loc, delimiter);
+								Ok(())
+							}
 							GroupDelimiterKind::Close => {
 								todo!()
 							}
 						}
-
-						Ok(())
 					})
+					//
 					.finish();
 			}
-			TokenizerMode::TemplatedString => todo!(),
-			TokenizerMode::BlockComment => todo!(),
-		}
-	}
-}
-
-// === `TokenizerState` === //
-
-struct TokenizerState {
-	frames: Vec<TokenizerFrame>,
-	block_comments: usize,
-}
-
-c_enum! {
-	enum TokenizerMode {
-		Group,
-		TemplatedString,
-		BlockComment,
-	}
-}
-
-enum TokenizerFrame {
-	Group {
-		start: FileLoc,
-		delimiter: GroupDelimiterChar,
-		tokens: Vec<BoxedToken>,
-	},
-	TemplatedString {
-		start: FileLoc,
-		parts: SmallVec<[TokenStringLitPart; 1]>,
-	},
-}
-
-impl TokenizerState {
-	pub fn new(file: &LoadedFile) -> Self {
-		Self {
-			frames: vec![TokenizerFrame::Group {
-				start: file.sof_loc(),
-				delimiter: GroupDelimiterChar::File,
-				tokens: Vec::new(),
-			}],
-			block_comments: 0,
-		}
-	}
-
-	// === Frame management === //
-
-	pub fn mode(&self) -> TokenizerMode {
-		if self.block_comments > 0 {
-			TokenizerMode::BlockComment
-		} else {
-			match self.frames.last().unwrap() {
-				TokenizerFrame::Group { .. } => TokenizerMode::Group,
-				TokenizerFrame::TemplatedString { .. } => TokenizerMode::TemplatedString,
-			}
-		}
-	}
-
-	pub fn push_group_frame(&mut self, start: FileLoc, delimiter: GroupDelimiterChar) {
-		debug_assert_eq!(self.block_comments, 0);
-
-		self.frames.push(TokenizerFrame::Group {
-			start,
-			delimiter,
-			tokens: Vec::new(),
-		});
-	}
-
-	pub fn push_string_lit_frame(&mut self, start: FileLoc) {
-		debug_assert_eq!(self.block_comments, 0);
-
-		self.frames.push(TokenizerFrame::TemplatedString {
-			start,
-			parts: SmallVec::new(),
-		})
-	}
-
-	pub fn pop_frame(&mut self, s: Session, end: FileLoc) -> Option<BoxedToken> {
-		if self.block_comments > 0 {
-			self.block_comments -= 1;
-			None
-		} else {
-			// Construct token from frame
-			let token = match self.frames.pop().unwrap() {
-				TokenizerFrame::Group {
-					start,
-					delimiter,
-					tokens,
-				} => Token::Group(TokenGroup {
-					span: Span::new(start, end),
-					delimiter,
-					tokens,
-				})
-				.box_obj(s),
-				TokenizerFrame::TemplatedString { start, parts } => {
-					Token::StringLit(TokenStringLit {
-						span: Span::new(start, end),
-						parts: parts,
-					})
-					.box_obj(s)
-				}
-			};
-
-			// Append to parent frame
-			if let Some(head) = self.frames.last_mut() {
-				match head {
-					TokenizerFrame::Group { tokens, .. } => {
-						tokens.push(token);
-					}
-					TokenizerFrame::TemplatedString { parts, .. } => {
-						parts.push(TokenStringLitPart::Group(token));
-					}
-				}
-
-				None
-			} else {
-				// If we're the root frame, return the token.
-				Some(token)
-			}
-		}
-	}
-
-	// === Frame building === //
-
-	pub fn push_token_to_group(&mut self, token: BoxedToken) {
-		debug_assert_eq!(self.mode(), TokenizerMode::Group);
-
-		match self.frames.last_mut().unwrap() {
-			TokenizerFrame::Group { tokens, .. } => {
-				tokens.push(token);
-			}
-			_ => panic!(
-				"`push_token` requires a `Group` tokenizer frame to be at the top of the stack."
-			),
+			TokenizerFrame::StrLit(str_lit) => todo!(),
+			TokenizerFrame::BlockComment => todo!(),
 		}
 	}
 }
@@ -193,13 +65,12 @@ impl TokenizerState {
 
 type PResultRecoverable<'a, T, M = ()> = Result<T, CursorRecovery<FileReader<'a>, M>>;
 
-struct TokenizerContext<'a> {
-	sess: Session<'a>,
+struct TokenizerCx<'a> {
 	unstuck: CursorUnstuck<FileReader<'a>>,
 	interner: &'a mut Interner,
 }
 
-impl<'a> TokenizerContext<'a> {
+impl<'a> TokenizerCx<'a> {
 	fn match_group_delimiter(
 		&mut self,
 		reader: &mut FileReader<'a>,
@@ -232,7 +103,7 @@ impl<'a> TokenizerContext<'a> {
 		})
 	}
 
-	fn match_ident(&mut self, reader: &mut FileReader<'a>) -> PResult<BoxedToken> {
+	fn match_ident(&mut self, reader: &mut FileReader<'a>) -> PResult<TokenIdent> {
 		reader.lookahead(|reader| {
 			self.unstuck.expect(reader, "identifier");
 
@@ -264,18 +135,15 @@ impl<'a> TokenizerContext<'a> {
 			let text = text.finish();
 			let span = Span::new(start_loc, reader.latest_loc());
 
-			Ok(Token::Ident(TokenIdent { span, text }).box_obj(self.sess))
+			Ok(TokenIdent { span, text })
 		})
 	}
 
-	fn match_punct(&mut self, reader: &mut FileReader<'a>, glued: bool) -> PResult<BoxedToken> {
-		let s = self.sess;
-
+	fn match_punct(&mut self, reader: &mut FileReader<'a>, glued: bool) -> PResult<TokenPunct> {
 		reader.lookahead(|reader| {
 			// Consume atom
 			self.unstuck.expect(reader, "punct");
 			let (loc, char) = reader.consume();
-			let span = loc.span();
 
 			// Parse punct mark
 			let char = char.as_codepoint().ok_or(ParseError)?;
@@ -284,14 +152,14 @@ impl<'a> TokenizerContext<'a> {
 				.ok_or(ParseError)?;
 
 			// Construct bundle
-			Ok(Token::Punct(TokenPunct { span, kind, glued }).box_obj(s))
+			Ok(TokenPunct { loc, kind, glued })
 		})
 	}
 
 	fn match_char_lit(
 		&mut self,
 		reader: &mut FileReader<'a>,
-	) -> PResultRecoverable<'a, BoxedToken> {
+	) -> PResultRecoverable<'a, TokenCharLit> {
 		let mut recovery = CursorRecovery::new(reader, ());
 
 		reader.lookahead(|reader| {
@@ -324,7 +192,7 @@ impl<'a> TokenizerContext<'a> {
 			// Construct token
 			let span = Span::new(start, reader.latest_loc());
 
-			Ok(Token::CharLit(TokenCharLit { span, char }).box_obj(self.sess))
+			Ok(TokenCharLit { span, char })
 		})
 	}
 
@@ -443,3 +311,173 @@ impl<'a> TokenizerContext<'a> {
 		})
 	}
 }
+
+// === `TokenizerState` === //
+
+mod tokenizer_state {
+	use std::sync::Arc;
+
+	use crate::tokenizer::token_ast::TokenStrLitTextualPart;
+
+	use super::*;
+
+	// === TokenizerState === //
+
+	#[derive(Debug)]
+	pub struct TokenizerState {
+		frames: Vec<(FileLoc, TokenizerFrameInternal)>,
+		block_comments: usize,
+	}
+
+	#[derive(Debug, Clone)]
+	enum TokenizerFrameInternal {
+		Group(GroupFrameBuilder),
+		StrLit(StrLitFrameBuilder),
+	}
+
+	impl TokenizerState {
+		pub fn new(file: &LoadedFile) -> Self {
+			Self {
+				frames: vec![(
+					file.sof_loc(),
+					TokenizerFrameInternal::Group(GroupFrameBuilder {
+						delimiter: GroupDelimiterChar::File,
+						tokens: Default::default(),
+					}),
+				)],
+				block_comments: 0,
+			}
+		}
+
+		// === Frame management === //
+
+		pub fn top(&self) -> TokenizerFrame {
+			if self.block_comments > 0 {
+				TokenizerFrame::BlockComment
+			} else {
+				let last = self.frames.last().unwrap().1.clone();
+
+				match last {
+					TokenizerFrameInternal::Group(group) => TokenizerFrame::Group(group),
+					TokenizerFrameInternal::StrLit(str_lit) => TokenizerFrame::StrLit(str_lit),
+				}
+			}
+		}
+
+		pub fn open_group_frame(&mut self, start: FileLoc, delimiter: GroupDelimiterChar) {
+			debug_assert_ne!(self.block_comments, 0);
+
+			self.frames.push((
+				start,
+				TokenizerFrameInternal::Group(GroupFrameBuilder {
+					delimiter,
+					tokens: Default::default(),
+				}),
+			));
+		}
+
+		pub fn open_str_lit_frame(&mut self, start: FileLoc) {
+			debug_assert!(matches!(self.top(), TokenizerFrame::Group(_)));
+
+			self.frames.push((
+				start,
+				TokenizerFrameInternal::StrLit(StrLitFrameBuilder {
+					parts: Default::default(),
+				}),
+			))
+		}
+
+		pub fn open_comment_frame(&mut self) {
+			// If they managed to nest more than `usize::MAX` comments, the user somehow made us
+			// process a file with at least `usize::MAX` characters, which would be impressive.
+			self.block_comments += 1;
+		}
+
+		pub fn close_frame(&mut self, end: FileLoc) -> Option<TokenGroup> {
+			if self.block_comments > 0 {
+				self.block_comments -= 1;
+				None
+			} else {
+				// Pop and close frame.
+				let frame = self.frames.pop().unwrap();
+
+				let token = match frame {
+					(start, TokenizerFrameInternal::Group(group)) => Token::Group(TokenGroup {
+						span: Span::new(start, end),
+						delimiter: group.delimiter,
+						tokens: Arc::new(group.tokens.replace(Vec::new())),
+					}),
+					(start, TokenizerFrameInternal::StrLit(str_lit)) => {
+						Token::StrLit(TokenStrLit {
+							span: Span::new(start, end),
+							parts: str_lit.parts.replace(SmallVec::new()),
+						})
+					}
+				};
+
+				// Update frame
+				if let Some((_, top)) = self.frames.last() {
+					match top {
+						TokenizerFrameInternal::Group(group) => {
+							group.push_token(token);
+						}
+						TokenizerFrameInternal::StrLit(str_lit) => {
+							str_lit.push_token_group(match token {
+								Token::Group(group) => group,
+								_ => unreachable!(),
+							})
+						}
+					};
+					None
+				} else {
+					Some(match token {
+						Token::Group(group) => group,
+						_ => unreachable!("the top-level frame must be a group"),
+					})
+				}
+			}
+		}
+	}
+
+	// === TokenizerFrame === //
+
+	#[derive(Debug, Clone)]
+	pub enum TokenizerFrame {
+		Group(GroupFrameBuilder),
+		StrLit(StrLitFrameBuilder),
+		BlockComment,
+	}
+
+	#[derive(Debug, Clone)]
+	pub struct GroupFrameBuilder {
+		delimiter: GroupDelimiterChar,
+		tokens: Rc<RefCell<Vec<Token>>>,
+	}
+
+	impl GroupFrameBuilder {
+		pub fn delimiter(&self) -> GroupDelimiterChar {
+			self.delimiter
+		}
+
+		pub fn push_token(&self, token: Token) {
+			self.tokens.borrow_mut().push(token);
+		}
+	}
+
+	#[derive(Debug, Clone)]
+	pub struct StrLitFrameBuilder {
+		parts: Rc<RefCell<SmallVec<[TokenStrLitPart; 1]>>>,
+	}
+
+	impl StrLitFrameBuilder {
+		pub fn push_token_group(&self, group: TokenGroup) {
+			self.parts.borrow_mut().push(TokenStrLitPart::Group(group));
+		}
+
+		pub fn push_textual(&self, lit: TokenStrLitTextualPart) {
+			self.parts.borrow_mut().push(TokenStrLitPart::Textual(lit));
+		}
+	}
+}
+
+use tokenizer_state::*;
