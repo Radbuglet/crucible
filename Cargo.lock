@@ -386,6 +386,7 @@ dependencies = [
 name = "crew"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "crucible-core",
  "geode",
  "hashbrown 0.12.3",

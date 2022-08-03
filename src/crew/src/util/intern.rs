@@ -1,3 +1,4 @@
+use bytemuck::TransparentWrapper;
 use hashbrown::raw::{RawIter, RawTable};
 use std::{
 	borrow::Borrow,
@@ -48,11 +49,11 @@ impl Interner {
 		let hasher = self.hash_builder.build_hasher();
 		let start = self.data.len();
 
-		InternBuilder(Some(InternBuilderInner {
+		InternBuilder(InternBuilderInner {
 			interner: self,
 			start,
 			hasher,
-		}))
+		})
 	}
 
 	pub fn intern_str<S: Borrow<str>>(&mut self, str: S) -> Intern {
@@ -114,11 +115,13 @@ impl<'a> Iterator for InternIter<'a> {
 
 impl<'a> ExactSizeIterator for InternIter<'a> {}
 
-pub struct InternBuilder<'a>(Option<InternBuilderInner<'a>>);
+#[derive(TransparentWrapper)]
+#[repr(transparent)]
+pub struct InternBuilder<'a>(InternBuilderInner<'a>);
 
 impl fmt::Debug for InternBuilder<'_> {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let me = self.0.as_ref().unwrap();
+		let me = &self.0;
 		let text = &me.interner.data[me.start..];
 
 		f.debug_struct("InternBuilder")
@@ -139,12 +142,8 @@ struct InternBuilderInner<'a> {
 }
 
 impl<'a> InternBuilder<'a> {
-	fn unwrap_inner_mut(&mut self) -> &mut InternBuilderInner<'a> {
-		self.0.as_mut().unwrap()
-	}
-
 	pub fn push_char(&mut self, char: char) {
-		self.unwrap_inner_mut().interner.data.push(char)
+		self.0.interner.data.push(char)
 	}
 
 	pub fn with_char(mut self, char: char) -> Self {
@@ -153,7 +152,7 @@ impl<'a> InternBuilder<'a> {
 	}
 
 	pub fn push_str<S: Borrow<str>>(&mut self, str: S) {
-		self.unwrap_inner_mut().interner.data.push_str(str.borrow())
+		self.0.interner.data.push_str(str.borrow())
 	}
 
 	pub fn with_str<S: Borrow<str>>(mut self, str: S) -> Self {
@@ -170,12 +169,16 @@ impl<'a> InternBuilder<'a> {
 		self
 	}
 
-	pub fn finish(mut self) -> Intern {
+	pub fn as_str(&self) -> &str {
+		&self.0.interner.data[self.0.start..]
+	}
+
+	pub fn finish(self) -> Intern {
 		let InternBuilderInner {
 			interner,
 			start,
 			hasher,
-		} = self.0.take().unwrap();
+		} = TransparentWrapper::peel(self);
 
 		// Ensure that we haven't already interned this string.
 		let text = &interner.data[start..];
@@ -202,9 +205,7 @@ impl<'a> InternBuilder<'a> {
 
 impl Drop for InternBuilder<'_> {
 	fn drop(&mut self) {
-		if let Some(me) = &mut self.0 {
-			me.interner.data.truncate(me.start);
-		}
+		self.0.interner.data.truncate(self.0.start);
 	}
 }
 

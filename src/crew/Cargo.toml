@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bytemuck = { version = "1.10.0", features = ["derive"] }
 crucible-core = { path = "../core" }
 geode = { path = "../geode" }
 hashbrown = { version = "0.12.1", features = ["raw"] }

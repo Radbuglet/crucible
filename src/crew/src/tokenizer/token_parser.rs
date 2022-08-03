@@ -1,19 +1,21 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use crucible_core::c_enum::CEnum;
 use smallvec::SmallVec;
 use unicode_xid::UnicodeXID;
 
-use crate::util::intern::Interner;
+use crate::util::intern::{Intern, Interner};
 
 use super::{
 	file::{FileAtom, FileLoc, FileReader, LoadedFile, Span},
 	generic::{
-		Cursor, CursorRecovery, CursorUnstuck, ForkableCursor, PResult, ParseError, ParsingErrorExt,
+		Cursor, CursorRecovery, CursorRecoveryExt, CursorUnstuck, ForkableCursor, PResult,
+		ParseError, ParsingErrorExt,
 	},
-	token_ast::{
-		GroupDelimiterChar, GroupDelimiterKind, PunctKind, Token, TokenCharLit, TokenGroup,
-		TokenIdent, TokenPunct, TokenStrLit, TokenStrLitPart,
+	token_ir::{
+		GroupDelimiterChar, GroupDelimiterKind, NumLitPrefix, PunctKind, Token, TokenCharLit,
+		TokenGroup, TokenIdent, TokenNumLit, TokenPunct, TokenStrLit, TokenStrLitPart,
+		TokenStrLitTextualPart,
 	},
 };
 
@@ -35,25 +37,82 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 			TokenizerFrame::Group(group) => {
 				let mut recovery = CursorRecovery::new(&reader, ());
 
+				enum LookaheadRes {
+					Token(Token),
+					OpenBlockComment,
+					OpenGroup(GroupDelimiterChar),
+					CloseGroup(GroupDelimiterChar),
+					OpenStrLit,
+					NoOperation,
+				}
+
 				let result = reader
 					.lookahead_cases(Err(ParseError))
+					// Identifiers
+					.case(|reader| {
+						let ident = cx.match_ident(reader)?;
+						Ok(LookaheadRes::Token(Token::Ident(ident)))
+					})
+					// Punctuation
+					.case(|reader| {
+						let punct = cx.match_punct(reader, group.just_matched_punct())?;
+						Ok(LookaheadRes::Token(Token::Punct(punct)))
+					})
+					// Character literal
+					.case(|reader| {
+						let char_lit = cx
+							.match_char_lit(reader)
+							.push_recovery(&mut recovery, |_| ())?;
+
+						Ok(LookaheadRes::Token(Token::CharLit(char_lit)))
+					})
+					// String literal start
+					.case(|reader| {
+						cx.match_seq(reader, "\"")?;
+						Ok(LookaheadRes::OpenStrLit)
+					})
+					// Numeric literal
+					.case(|reader| {
+						let num_lit = cx
+							.match_num_lit(reader)
+							.push_recovery(&mut recovery, |_| ())?;
+
+						Ok(LookaheadRes::Token(Token::NumLit(num_lit)))
+					})
+					// Line comment
+					.case(|reader| {
+						cx.match_line_comment(reader)?;
+						Ok(LookaheadRes::NoOperation)
+					})
+					// Whitespace (you have been living here for as long as you can remember)
+					.case(|reader| match reader.consume_atom() {
+						FileAtom::Codepoint(point) if point.is_whitespace() => {
+							Ok(LookaheadRes::NoOperation)
+						}
+						FileAtom::Newline { .. } => Ok(LookaheadRes::NoOperation),
+						_ => Err(ParseError),
+					})
 					// Group delimiters
 					.case(|reader| {
-						let loc = reader.peek_loc();
 						let (kind, delimiter) = cx.match_group_delimiter(reader)?;
 
 						match kind {
-							GroupDelimiterKind::Open => {
-								state.open_group_frame(loc, delimiter);
-								Ok(())
-							}
-							GroupDelimiterKind::Close => {
-								todo!()
-							}
+							GroupDelimiterKind::Open => Ok(LookaheadRes::OpenGroup(delimiter)),
+							GroupDelimiterKind::Close => Ok(LookaheadRes::CloseGroup(delimiter)),
 						}
 					})
-					//
+					// Block comment start
+					.case(|reader| {
+						cx.match_seq(reader, "/*")?;
+						state.open_comment_frame();
+						Ok(LookaheadRes::OpenBlockComment)
+					})
 					.finish();
+
+				match result {
+					Ok(_) => todo!(),
+					Err(_) => todo!(),
+				}
 			}
 			TokenizerFrame::StrLit(str_lit) => todo!(),
 			TokenizerFrame::BlockComment => todo!(),
@@ -76,23 +135,24 @@ impl<'a> TokenizerCx<'a> {
 		reader: &mut FileReader<'a>,
 	) -> PResult<(GroupDelimiterKind, GroupDelimiterChar)> {
 		reader.lookahead(|reader| {
-			let read = reader.consume_atom().as_char();
+			let read = reader.consume_atom();
+			let read_char = read.as_char();
 
 			self.unstuck.expect(reader, "group delimiter");
 
 			GroupDelimiterChar::variants()
 				.find_map(|variant| match variant.as_char_or_eof() {
 					Some((open, close)) => {
-						if Some(open) == read {
+						if read_char == open {
 							Some((GroupDelimiterKind::Open, variant))
-						} else if Some(close) == read {
+						} else if read_char == close {
 							Some((GroupDelimiterKind::Close, variant))
 						} else {
 							None
 						}
 					}
 					None => {
-						if read.is_none() {
+						if read.is_eof() {
 							Some((GroupDelimiterKind::Close, variant))
 						} else {
 							None
@@ -109,7 +169,7 @@ impl<'a> TokenizerCx<'a> {
 
 			// Match XID start
 			let (start_loc, first) = reader.consume();
-			let first = first.as_char().unwrap();
+			let first = first.as_char();
 			if !first.is_xid_start() {
 				return Err(ParseError);
 			}
@@ -183,6 +243,9 @@ impl<'a> TokenizerCx<'a> {
 
 			// Match closing delimiter
 			recovery.propose(reader, ());
+
+			// TODO: Maybe we could try matching this as a regular string to handle the case where
+			// the user thinks `'` and `"` are interchangeable?
 			self.match_seq(reader, "'").or_recoverable(&recovery)?;
 			recovery.propose(reader, ());
 
@@ -194,6 +257,119 @@ impl<'a> TokenizerCx<'a> {
 
 			Ok(TokenCharLit { span, char })
 		})
+	}
+
+	fn match_num_lit(
+		&mut self,
+		reader: &mut FileReader<'a>,
+	) -> PResultRecoverable<'a, TokenNumLit> {
+		reader.lookahead(|reader| {
+			let start = reader.peek_loc();
+
+			self.unstuck.expect(reader, "numeric literal");
+
+			// See if we have a numeric prefix at this position
+			let prefix = reader
+				.lookahead(|reader| {
+					// Match leading `0`
+					self.match_seq(reader, "0").ok()?;
+
+					// Match prefix
+					self.unstuck.expect(reader, "numeric literal prefix");
+					let char = reader.consume_atom().as_char();
+
+					NumLitPrefix::variants().find(|prefix| prefix.prefix_char() == Some(char))
+				})
+				.unwrap_or(NumLitPrefix::Unprefixed);
+
+			// Match non-FP digits
+			let has_explicit_prefix = prefix != NumLitPrefix::Unprefixed;
+			let digits = self.match_digits(reader, has_explicit_prefix, prefix.digits());
+
+			// Terminate if the user didn't specify any digits in the base.
+			if digits.is_none() {
+				if prefix != NumLitPrefix::Unprefixed {
+					// Our recovery is a bit wacky. Essentially, we match *anything* that could
+					// possibly be interpreted as part of the number so long as we actually think
+					// the user was trying to type a number.
+					self.recover_num_lit(reader);
+				}
+
+				return Err(CursorRecovery::new(reader, ()));
+			}
+
+			// Match decimal point if relevant to this numeric prefix.
+			if prefix == NumLitPrefix::Unprefixed {
+				let has_dp = reader
+					.lookahead(|reader| {
+						// Match point
+						self.unstuck.expect(reader, ".");
+						self.match_seq(reader, ".")?;
+
+						// Ensure that the decimal is not immediately followed by an identifier start
+						// character or a second `.`
+						let subsequent = reader.peek_atom().as_char();
+						if subsequent.is_xid_start() || subsequent == '.' {
+							return Err(ParseError);
+						}
+
+						Ok(())
+					})
+					.is_ok();
+
+				// TODO
+			}
+
+			todo!()
+		})
+	}
+
+	fn match_digits(
+		&mut self,
+		reader: &mut FileReader<'a>,
+		has_explicit_prefix: bool,
+		set: &str,
+	) -> Option<Intern> {
+		let mut intern = self.interner.begin_intern();
+		let mut should_emit_expectations = has_explicit_prefix;
+
+		// Match digits
+		reader.lookahead_while(|reader| {
+			// Emit expectations if appropriate
+			if should_emit_expectations {
+				self.unstuck
+					.expect(reader, format_args!("digits ({})", set));
+			}
+			should_emit_expectations = true;
+
+			// Match digit
+			let digit = reader.consume_atom().as_char();
+
+			if digit == '_' {
+				// (ignore visual separators)
+				true
+			} else if set.contains(digit) {
+				intern.push_char(digit);
+				true
+			} else {
+				false
+			}
+		});
+
+		// Produce intern
+		if !intern.as_str().is_empty() {
+			Some(intern.finish())
+		} else {
+			None
+		}
+	}
+
+	fn recover_num_lit(&mut self, reader: &mut FileReader<'a>) {
+		reader.lookahead_while(|reader| {
+			let atom = reader.consume_atom().as_char();
+
+			atom.is_xid_continue() || atom == '.' || atom == '+' || atom == '-'
+		});
 	}
 
 	fn match_lit_char(&mut self, reader: &mut FileReader<'a>) -> PResultRecoverable<'a, char> {
@@ -249,8 +425,6 @@ impl<'a> TokenizerCx<'a> {
 						if hex <= 0x7F {
 							Ok(char::from_u32(hex.into()).unwrap())
 						} else {
-							// TODO: Amend the previous `expect` to include a hint that the specified
-							// hex code is past `0x7F`.
 							Err(recovery)
 						}
 					}
@@ -302,7 +476,7 @@ impl<'a> TokenizerCx<'a> {
 			for char in seq.chars() {
 				let next = reader.consume_atom().as_char();
 
-				if next != Some(char) {
+				if next != char {
 					return Err(ParseError);
 				}
 			}
@@ -315,10 +489,6 @@ impl<'a> TokenizerCx<'a> {
 // === `TokenizerState` === //
 
 mod tokenizer_state {
-	use std::sync::Arc;
-
-	use crate::tokenizer::token_ast::TokenStrLitTextualPart;
-
 	use super::*;
 
 	// === TokenizerState === //
@@ -461,6 +631,10 @@ mod tokenizer_state {
 
 		pub fn push_token(&self, token: Token) {
 			self.tokens.borrow_mut().push(token);
+		}
+
+		pub fn just_matched_punct(&self) -> bool {
+			matches!(self.tokens.borrow().last(), Some(Token::Punct(_)))
 		}
 	}
 

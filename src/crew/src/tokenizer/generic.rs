@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, fmt, ops::DerefMut};
 
-use crucible_core::std_traits::OptionLike;
+use crucible_core::std_traits::{OptionLike, ResultLike};
 use sealed::sealed;
 use thiserror::Error;
 
@@ -153,7 +153,6 @@ pub trait ForkableCursor: Cursor + Clone {
 			target: self,
 			matched_cursor: None,
 			result,
-			#[cfg(debug_assertions)]
 			barrier_has_val: false,
 		}
 	}
@@ -208,7 +207,6 @@ pub struct BranchMatcher<'a, C: ForkableCursor, R> {
 	target: &'a mut C,
 	matched_cursor: Option<C>,
 	result: R,
-	#[cfg(debug_assertions)]
 	barrier_has_val: bool,
 }
 
@@ -223,12 +221,9 @@ impl<'a, C: ForkableCursor, R> BranchMatcher<'a, C, R> {
 		let result = f(&mut fork);
 
 		if result.should_commit() {
-			// Debug checks to ensure that we don't have an ambiguous branch
-			#[cfg(debug_assertions)]
-			{
-				assert!(!self.barrier_has_val, "ambiguous branch");
-				self.barrier_has_val = true;
-			}
+			// Checks to ensure that we don't have an ambiguous fork
+			assert!(!self.barrier_has_val, "ambiguous fork");
+			self.barrier_has_val = true;
 
 			// Result committing
 			if self.matched_cursor.is_none() {
@@ -239,10 +234,7 @@ impl<'a, C: ForkableCursor, R> BranchMatcher<'a, C, R> {
 	}
 
 	pub fn barrier_proc(&mut self) {
-		#[cfg(debug_assertions)]
-		{
-			self.barrier_has_val = false;
-		}
+		self.barrier_has_val = false;
 	}
 
 	pub fn case<F, R2>(mut self, f: F) -> Self
@@ -290,12 +282,6 @@ pub type PResult<T> = Result<T, ParseError>;
 #[derive(Debug, Copy, Clone, Error)]
 #[error("failed to match grammar")]
 pub struct ParseError;
-
-impl<C, M> From<CursorRecovery<C, M>> for ParseError {
-	fn from(_: CursorRecovery<C, M>) -> Self {
-		Self
-	}
-}
 
 #[sealed]
 pub trait ParsingErrorExt: OptionLike {
@@ -347,6 +333,31 @@ impl<C: ForkableCursor, M> CursorRecovery<C, M> {
 		debug_assert!(cursor.latest_loc() <= self.furthest_cursor.latest_loc());
 		*cursor = self.furthest_cursor.clone();
 	}
+}
+
+pub trait CursorRecoveryExt: ResultLike<Error = CursorRecovery<Self::Cursor, Self::Meta>> {
+	type Cursor: ForkableCursor;
+	type Meta;
+
+	fn push_recovery<M, F>(
+		self,
+		recovery: &mut CursorRecovery<Self::Cursor, M>,
+		xform_meta: F,
+	) -> Result<Self::Success, ParseError>
+	where
+		F: FnOnce(Self::Meta) -> M,
+	{
+		self.raw_result().map_err(|err| {
+			let meta = xform_meta(err.meta);
+			recovery.propose(&err.furthest_cursor, meta);
+			ParseError
+		})
+	}
+}
+
+impl<T, C: ForkableCursor, M> CursorRecoveryExt for Result<T, CursorRecovery<C, M>> {
+	type Cursor = C;
+	type Meta = M;
 }
 
 // === CursorUnstuck === //

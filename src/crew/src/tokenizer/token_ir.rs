@@ -58,6 +58,14 @@ c_enum! {
 		Close,
 	}
 
+	/// The prefix used by a numeric literal.
+	pub enum NumLitPrefix {
+		Unprefixed,
+		Binary,
+		Octal,
+		Hex,
+	}
+
 }
 
 impl PunctKind {
@@ -105,6 +113,26 @@ impl GroupDelimiterChar {
 	}
 }
 
+impl NumLitPrefix {
+	pub fn prefix_char(&self) -> Option<char> {
+		match self {
+			NumLitPrefix::Unprefixed => None,
+			NumLitPrefix::Binary => Some('b'),
+			NumLitPrefix::Octal => Some('o'),
+			NumLitPrefix::Hex => Some('x'),
+		}
+	}
+
+	pub fn digits(&self) -> &'static str {
+		match self {
+			NumLitPrefix::Unprefixed => "0123456789",
+			NumLitPrefix::Binary => "01",
+			NumLitPrefix::Octal => "01234567",
+			NumLitPrefix::Hex => "0123456789abcdef",
+		}
+	}
+}
+
 // === Tree === //
 
 // Token
@@ -115,7 +143,7 @@ pub enum Token {
 	Punct(TokenPunct),
 	CharLit(TokenCharLit),
 	StrLit(TokenStrLit),
-	NumberLit(TokenNumberLit),
+	NumLit(TokenNumLit),
 }
 
 // TokenGroup
@@ -175,6 +203,6 @@ pub struct TokenStrLitTextualPart {
 
 // TokenNumberLit
 #[derive(Debug, Clone)]
-pub struct TokenNumberLit {
+pub struct TokenNumLit {
 	pub span: Span,
 }

@@ -290,12 +290,16 @@ pub enum FileAtom {
 }
 
 impl FileAtom {
-	pub fn as_char(&self) -> Option<char> {
+	pub fn is_eof(&self) -> bool {
+		matches!(self, Self::Eof)
+	}
+
+	pub fn as_char(&self) -> char {
 		match self {
-			FileAtom::Eof => None,
-			FileAtom::Codepoint(char) => Some(*char),
-			FileAtom::Malformed => Some(char::REPLACEMENT_CHARACTER),
-			FileAtom::Newline { .. } => Some('\n'),
+			FileAtom::Eof => '\0',
+			FileAtom::Codepoint(char) => *char,
+			FileAtom::Malformed => char::REPLACEMENT_CHARACTER,
+			FileAtom::Newline { .. } => '\n',
 		}
 	}
 
