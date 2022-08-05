@@ -35,7 +35,7 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 	loop {
 		match stack.top() {
 			TokenizerFrame::Group(group) => {
-				let mut recovery = CursorRecovery::new(&reader, ());
+				let mut recovery = CursorRecovery::new_one_token_after(&reader, ());
 
 				enum LookaheadRes {
 					Token(Token),
@@ -43,7 +43,7 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 					OpenGroup(FileLoc, GroupDelimiterChar),
 					CloseGroup(FileLoc, GroupDelimiterChar),
 					OpenStrLit(FileLoc),
-					NoOperation,
+					Whitespace,
 				}
 
 				let result = reader
@@ -51,6 +51,12 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 					// === General === //
 					// Identifiers
 					.case(|reader| {
+						if group.just_matched_num_lit() {
+							// TODO: Emit a hint telling users that an identifier cannot appear after
+							//  a numeric literal.
+							return Err(ParseError);
+						}
+
 						let ident = cx.match_ident(reader)?;
 						Ok(LookaheadRes::Token(Token::Ident(ident)))
 					})
@@ -79,14 +85,14 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 					// Line comment
 					.case(|reader| {
 						cx.match_line_comment(reader)?;
-						Ok(LookaheadRes::NoOperation)
+						Ok(LookaheadRes::Whitespace)
 					})
 					// Whitespace (you have been living here for as long as you can remember)
 					.case(|reader| match reader.consume_atom() {
 						FileAtom::Codepoint(point) if point.is_whitespace() => {
-							Ok(LookaheadRes::NoOperation)
+							Ok(LookaheadRes::Whitespace)
 						}
-						FileAtom::Newline { .. } => Ok(LookaheadRes::NoOperation),
+						FileAtom::Newline { .. } => Ok(LookaheadRes::Whitespace),
 						_ => Err(ParseError),
 					})
 					// Group delimiters
@@ -135,7 +141,9 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 					Ok(LookaheadRes::OpenStrLit(loc)) => {
 						stack.open_str_lit_frame(loc);
 					}
-					Ok(LookaheadRes::NoOperation) => {}
+					Ok(LookaheadRes::Whitespace) => {
+						group.notify_whitespace();
+					}
 					Err(_) => {
 						println!("Parse error! {:?}", cx.unstuck.unstuck_hint());
 						recovery.recover(&mut reader);
@@ -195,10 +203,10 @@ impl<'a> TokenizerCx<'a> {
 		reader: &mut FileReader<'a>,
 	) -> PResult<(GroupDelimiterKind, GroupDelimiterChar)> {
 		reader.lookahead(|reader| {
+			self.unstuck.expect(reader, "group delimiter");
+
 			let read = reader.consume_atom();
 			let read_char = read.as_char();
-
-			self.unstuck.expect(reader, "group delimiter");
 
 			GroupDelimiterChar::variants()
 				.find_map(|variant| match variant.as_char_or_eof() {
@@ -230,7 +238,7 @@ impl<'a> TokenizerCx<'a> {
 			// Match XID start
 			let (start_loc, first) = reader.consume();
 			let first = first.as_char();
-			if !first.is_xid_start() {
+			if !first.is_xid_start() && first != '_' {
 				return Err(ParseError);
 			}
 
@@ -359,18 +367,24 @@ impl<'a> TokenizerCx<'a> {
 			}
 
 			// Match digits right of decimal point if relevant to this numeric prefix.
-			let float_part = if prefix == NumLitPrefix::ImplicitDecimal {
+			let float_part = {
+				let mut unstuck_builder = self.unstuck.bump(reader);
+				let can_have_decimal = prefix == NumLitPrefix::ImplicitDecimal;
+
 				// Match decimal point
+				if can_have_decimal {
+					unstuck_builder.expect(".");
+				}
+
 				let has_dp = reader
-					.lookahead(|reader| {
+					.lookahead_commit_if(can_have_decimal, |reader| {
 						// Match point
-						self.unstuck.expect(reader, ".");
 						self.match_seq(reader, ".")?;
 
 						// Ensure that the decimal is not immediately followed by an identifier start
 						// character or a second `.`
 						let subsequent = reader.peek_atom().as_char();
-						if subsequent.is_xid_start() || subsequent == '.' {
+						if subsequent.is_xid_start() || subsequent == '_' || subsequent == '.' {
 							return Err(ParseError);
 						}
 
@@ -378,55 +392,74 @@ impl<'a> TokenizerCx<'a> {
 					})
 					.is_ok();
 
-				// Match digits
-				if has_dp {
-					Some(self.match_digits(reader, true, NumLitPrefix::ImplicitDecimal.digits()))
-				} else {
-					None
+				match (has_dp, can_have_decimal) {
+					(true, true) => Some(self.match_digits(
+						reader,
+						true,
+						NumLitPrefix::ImplicitDecimal.digits(),
+					)),
+					(true, false) => {
+						// unstuck_builder.rejection_hint(format_args!(
+						// 	"Numbers with {} prefix cannot have a decimal point.",
+						// 	prefix.with_a_name()
+						// ));
+						None
+					}
+					(false, _) => None,
 				}
-			} else {
-				None
 			};
 
 			// Match exponent
-			let exp_part = if prefix == NumLitPrefix::ImplicitDecimal {
+			let exp_part = {
+				let mut unstuck_builder = self.unstuck.bump(reader);
+				let can_have_exp = prefix == NumLitPrefix::ImplicitDecimal;
+
 				// Check if we have an exponent.
-				let has_exp = reader.lookahead(|reader| {
-					self.unstuck.expect(reader, "e");
+				if can_have_exp {
+					unstuck_builder.expect("e");
+				}
+
+				let has_exp = reader.lookahead_commit_if(can_have_exp, |reader| {
 					let atom = reader.consume_atom().as_char();
 					atom == 'e' || atom == 'E'
 				});
 
 				// If we have an exponent
-				if has_exp {
-					// Look for the optional sign
-					let sign = reader
-						.lookahead(|reader| {
-							self.unstuck.expect_many(reader, ["+", "-"]);
-							match reader.consume_atom().as_char() {
-								'+' => Some(NumLitExpSign::Pos),
-								'-' => Some(NumLitExpSign::Neg),
-								_ => None,
-							}
-						})
-						.unwrap_or(NumLitExpSign::Pos);
+				match (has_exp, can_have_exp) {
+					(true, true) => {
+						// Look for the optional sign
+						let sign = reader
+							.lookahead(|reader| {
+								self.unstuck.expect_many(reader, ["+", "-"]);
+								match reader.consume_atom().as_char() {
+									'+' => Some(NumLitExpSign::Pos),
+									'-' => Some(NumLitExpSign::Neg),
+									_ => None,
+								}
+							})
+							.unwrap_or(NumLitExpSign::Pos);
 
-					// Read the exponent digits
-					let exp_digits =
-						self.match_digits(reader, true, NumLitPrefix::ImplicitDecimal.digits());
+						// Read the exponent digits
+						let exp_digits =
+							self.match_digits(reader, true, NumLitPrefix::ImplicitDecimal.digits());
 
-					// Report a grammatical error if there are no exponent digits
-					if self.interner.decode(exp_digits).is_empty() {
-						self.recover_num_lit(reader);
-						return Err(CursorRecovery::new(reader, ()));
+						// Report a grammatical error if there are no exponent digits
+						if self.interner.decode(exp_digits).is_empty() {
+							self.recover_num_lit(reader);
+							return Err(CursorRecovery::new(reader, ()));
+						}
+
+						Some((sign, exp_digits))
 					}
-
-					Some((sign, exp_digits))
-				} else {
-					None
+					(true, false) => {
+						unstuck_builder.rejection_hint(format_args!(
+							"Numbers with {} prefix cannot have a floating-point exponent.",
+							prefix.with_a_name()
+						));
+						None
+					}
+					(false, _) => None,
 				}
-			} else {
-				None
 			};
 
 			// Build token
@@ -604,208 +637,224 @@ impl<'a> TokenizerCx<'a> {
 
 // === `TokenizerState` === //
 
-mod tokenizer_state {
-	use super::*;
+#[derive(Debug)]
+struct TokenizerState {
+	frames: Vec<(FileLoc, TokenizerFrameInternal)>,
+	block_comments: usize,
+}
 
-	// === TokenizerState === //
+#[derive(Debug, Clone)]
+enum TokenizerFrameInternal {
+	Group(GroupFrameBuilder),
+	StrLit(StrLitFrameBuilder),
+}
 
-	#[derive(Debug)]
-	pub struct TokenizerState {
-		frames: Vec<(FileLoc, TokenizerFrameInternal)>,
-		block_comments: usize,
+impl TokenizerState {
+	pub fn new(file: &LoadedFile) -> Self {
+		Self {
+			frames: vec![(
+				file.sof_loc(),
+				TokenizerFrameInternal::Group(GroupFrameBuilder::new(GroupDelimiterChar::File)),
+			)],
+			block_comments: 0,
+		}
 	}
 
-	#[derive(Debug, Clone)]
-	enum TokenizerFrameInternal {
-		Group(GroupFrameBuilder),
-		StrLit(StrLitFrameBuilder),
+	// === Frame management === //
+
+	pub fn top(&self) -> TokenizerFrame {
+		if self.block_comments > 0 {
+			TokenizerFrame::BlockComment
+		} else {
+			let last = self.frames.last().unwrap().1.clone();
+
+			match last {
+				TokenizerFrameInternal::Group(group) => TokenizerFrame::Group(group),
+				TokenizerFrameInternal::StrLit(str_lit) => TokenizerFrame::StrLit(str_lit),
+			}
+		}
 	}
 
-	impl TokenizerState {
-		pub fn new(file: &LoadedFile) -> Self {
-			Self {
-				frames: vec![(
-					file.sof_loc(),
-					TokenizerFrameInternal::Group(GroupFrameBuilder {
-						delimiter: GroupDelimiterChar::File,
-						tokens: Default::default(),
-					}),
-				)],
-				block_comments: 0,
-			}
-		}
+	pub fn open_group_frame(&mut self, start: FileLoc, delimiter: GroupDelimiterChar) {
+		debug_assert_eq!(self.block_comments, 0);
 
-		// === Frame management === //
+		self.frames.push((
+			start,
+			TokenizerFrameInternal::Group(GroupFrameBuilder::new(delimiter)),
+		));
+	}
 
-		pub fn top(&self) -> TokenizerFrame {
-			if self.block_comments > 0 {
-				TokenizerFrame::BlockComment
-			} else {
-				let last = self.frames.last().unwrap().1.clone();
+	pub fn open_str_lit_frame(&mut self, start: FileLoc) {
+		debug_assert!(matches!(self.top(), TokenizerFrame::Group(_)));
 
-				match last {
-					TokenizerFrameInternal::Group(group) => TokenizerFrame::Group(group),
-					TokenizerFrameInternal::StrLit(str_lit) => TokenizerFrame::StrLit(str_lit),
-				}
-			}
-		}
+		self.frames.push((
+			start,
+			TokenizerFrameInternal::StrLit(StrLitFrameBuilder(Default::default())),
+		))
+	}
 
-		pub fn open_group_frame(&mut self, start: FileLoc, delimiter: GroupDelimiterChar) {
-			debug_assert_eq!(self.block_comments, 0);
+	pub fn open_comment_frame(&mut self) {
+		// If they managed to nest more than `usize::MAX` comments, the user somehow made us
+		// process a file with at least `usize::MAX` characters, which would be impressive.
+		self.block_comments += 1;
+	}
 
-			self.frames.push((
-				start,
-				TokenizerFrameInternal::Group(GroupFrameBuilder {
-					delimiter,
-					tokens: Default::default(),
-				}),
-			));
-		}
+	pub fn close_frame(&mut self, cx: &mut TokenizerCx, end: FileLoc) -> Option<TokenGroup> {
+		if self.block_comments > 0 {
+			self.block_comments -= 1;
+			None
+		} else {
+			// Pop and close frame.
+			let frame = self.frames.pop().unwrap();
 
-		pub fn open_str_lit_frame(&mut self, start: FileLoc) {
-			debug_assert!(matches!(self.top(), TokenizerFrame::Group(_)));
+			let token = match frame {
+				(start, TokenizerFrameInternal::Group(group)) => {
+					let mut group = group.0.borrow_mut();
 
-			self.frames.push((
-				start,
-				TokenizerFrameInternal::StrLit(StrLitFrameBuilder(Default::default())),
-			))
-		}
-
-		pub fn open_comment_frame(&mut self) {
-			// If they managed to nest more than `usize::MAX` comments, the user somehow made us
-			// process a file with at least `usize::MAX` characters, which would be impressive.
-			self.block_comments += 1;
-		}
-
-		pub fn close_frame(&mut self, cx: &mut TokenizerCx, end: FileLoc) -> Option<TokenGroup> {
-			if self.block_comments > 0 {
-				self.block_comments -= 1;
-				None
-			} else {
-				// Pop and close frame.
-				let frame = self.frames.pop().unwrap();
-
-				let token = match frame {
-					(start, TokenizerFrameInternal::Group(group)) => Token::Group(TokenGroup {
+					Token::Group(TokenGroup {
 						span: Span::new(start, end),
 						delimiter: group.delimiter,
-						tokens: Arc::new(group.tokens.replace(Vec::new())),
-					}),
-					(start, TokenizerFrameInternal::StrLit(str_lit)) => {
-						Token::StrLit(TokenStrLit {
-							span: Span::new(start, end),
-							parts: str_lit.0.borrow_mut().finish(cx),
-						})
-					}
-				};
-
-				// Update frame
-				if let Some((_, top)) = self.frames.last() {
-					match top {
-						TokenizerFrameInternal::Group(group) => {
-							group.push_token(token);
-						}
-						TokenizerFrameInternal::StrLit(str_lit) => str_lit.push_token_group(
-							cx,
-							match token {
-								Token::Group(group) => group,
-								_ => unreachable!(),
-							},
-						),
-					};
-					None
-				} else {
-					Some(match token {
-						Token::Group(group) => group,
-						_ => unreachable!("the top-level frame must be a group"),
+						tokens: Arc::new(replace(&mut group.tokens, Vec::new())),
 					})
 				}
+				(start, TokenizerFrameInternal::StrLit(str_lit)) => Token::StrLit(TokenStrLit {
+					span: Span::new(start, end),
+					parts: str_lit.0.borrow_mut().finish(cx),
+				}),
+			};
+
+			// Update frame
+			if let Some((_, top)) = self.frames.last() {
+				match top {
+					TokenizerFrameInternal::Group(group) => {
+						group.push_token(token);
+					}
+					TokenizerFrameInternal::StrLit(str_lit) => str_lit.push_token_group(
+						cx,
+						match token {
+							Token::Group(group) => group,
+							_ => unreachable!(),
+						},
+					),
+				};
+				None
+			} else {
+				Some(match token {
+					Token::Group(group) => group,
+					_ => unreachable!("the top-level frame must be a group"),
+				})
 			}
-		}
-	}
-
-	// === TokenizerFrame === //
-
-	#[derive(Debug, Clone)]
-	pub enum TokenizerFrame {
-		Group(GroupFrameBuilder),
-		StrLit(StrLitFrameBuilder),
-		BlockComment,
-	}
-
-	#[derive(Debug, Clone)]
-	pub struct GroupFrameBuilder {
-		delimiter: GroupDelimiterChar,
-		tokens: Rc<RefCell<Vec<Token>>>,
-	}
-
-	impl GroupFrameBuilder {
-		pub fn delimiter(&self) -> GroupDelimiterChar {
-			self.delimiter
-		}
-
-		pub fn push_token(&self, token: Token) {
-			self.tokens.borrow_mut().push(token);
-		}
-
-		pub fn just_matched_punct(&self) -> bool {
-			matches!(self.tokens.borrow().last(), Some(Token::Punct(_)))
-		}
-	}
-
-	#[derive(Debug, Clone)]
-	pub struct StrLitFrameBuilder(Rc<RefCell<StrLitFrameBuilderInner>>);
-
-	impl StrLitFrameBuilder {
-		pub fn push_token_group(&self, cx: &mut TokenizerCx, group: TokenGroup) {
-			self.0.borrow_mut().push_token_group(cx, group);
-		}
-
-		pub fn push_char(&self, loc: FileLoc, char: char) {
-			self.0.borrow_mut().push_char(loc, char);
-		}
-	}
-
-	#[derive(Debug, Default)]
-	struct StrLitFrameBuilderInner {
-		parts: SmallVec<[TokenStrLitPart; 1]>,
-		textual_span: Option<Span>,
-		textual_str_buf: String, // TODO: Automate scratch buffer creation in the `Interner`.
-	}
-
-	impl StrLitFrameBuilderInner {
-		fn push_token_group(&mut self, cx: &mut TokenizerCx, group: TokenGroup) {
-			self.flush_textual(cx);
-		}
-
-		fn push_char(&mut self, loc: FileLoc, char: char) {
-			// Increase span
-			if self.textual_str_buf.is_empty() {
-				self.textual_span = Some(loc.span());
-			}
-			self.textual_span.as_mut().unwrap().set_end_loc(loc);
-
-			// Push character
-			self.textual_str_buf.push(char);
-		}
-
-		fn flush_textual(&mut self, cx: &mut TokenizerCx) {
-			if !self.textual_str_buf.is_empty() {
-				self.parts
-					.push(TokenStrLitPart::Textual(TokenStrLitTextualPart {
-						span: self.textual_span.unwrap(),
-						text: cx.interner.intern_str(self.textual_str_buf.as_str()),
-					}));
-
-				self.textual_str_buf.clear();
-			}
-		}
-
-		fn finish(&mut self, cx: &mut TokenizerCx) -> SmallVec<[TokenStrLitPart; 1]> {
-			self.flush_textual(cx);
-			replace(&mut self.parts, SmallVec::new())
 		}
 	}
 }
 
-use tokenizer_state::*;
+// === TokenizerFrame === //
+
+#[derive(Debug, Clone)]
+enum TokenizerFrame {
+	Group(GroupFrameBuilder),
+	StrLit(StrLitFrameBuilder),
+	BlockComment,
+}
+
+#[derive(Debug, Clone)]
+struct GroupFrameBuilder(Rc<RefCell<GroupFrameBuilderInner>>);
+
+#[derive(Debug)]
+struct GroupFrameBuilderInner {
+	delimiter: GroupDelimiterChar,
+	just_pushed_num_lit: bool,
+	tokens: Vec<Token>,
+}
+
+impl GroupFrameBuilder {
+	fn new(delimiter: GroupDelimiterChar) -> Self {
+		Self(Rc::new(RefCell::new(GroupFrameBuilderInner {
+			delimiter,
+			just_pushed_num_lit: false,
+			tokens: Vec::new(),
+		})))
+	}
+
+	pub fn delimiter(&self) -> GroupDelimiterChar {
+		self.0.borrow().delimiter
+	}
+
+	pub fn push_token(&self, token: Token) {
+		let mut inner = self.0.borrow_mut();
+
+		if matches!(&token, Token::NumLit(_)) {
+			inner.just_pushed_num_lit = true;
+		} else {
+			inner.just_pushed_num_lit = false;
+		}
+
+		inner.tokens.push(token);
+	}
+
+	pub fn notify_whitespace(&self) {
+		self.0.borrow_mut().just_pushed_num_lit = false;
+	}
+
+	pub fn just_matched_punct(&self) -> bool {
+		matches!(self.0.borrow().tokens.last(), Some(Token::Punct(_)))
+	}
+
+	pub fn just_matched_num_lit(&self) -> bool {
+		self.0.borrow().just_pushed_num_lit
+	}
+}
+
+#[derive(Debug, Clone)]
+struct StrLitFrameBuilder(Rc<RefCell<StrLitFrameBuilderInner>>);
+
+#[derive(Debug, Default)]
+struct StrLitFrameBuilderInner {
+	parts: SmallVec<[TokenStrLitPart; 1]>,
+	textual_span: Option<Span>,
+	textual_str_buf: String, // TODO: Automate scratch buffer creation in the `Interner`.
+}
+
+impl StrLitFrameBuilder {
+	pub fn push_token_group(&self, cx: &mut TokenizerCx, group: TokenGroup) {
+		self.0.borrow_mut().push_token_group(cx, group);
+	}
+
+	pub fn push_char(&self, loc: FileLoc, char: char) {
+		self.0.borrow_mut().push_char(loc, char);
+	}
+}
+
+impl StrLitFrameBuilderInner {
+	fn push_token_group(&mut self, cx: &mut TokenizerCx, group: TokenGroup) {
+		self.flush_textual(cx);
+	}
+
+	fn push_char(&mut self, loc: FileLoc, char: char) {
+		// Increase span
+		if self.textual_str_buf.is_empty() {
+			self.textual_span = Some(loc.span());
+		}
+		self.textual_span.as_mut().unwrap().set_end_loc(loc);
+
+		// Push character
+		self.textual_str_buf.push(char);
+	}
+
+	fn flush_textual(&mut self, cx: &mut TokenizerCx) {
+		if !self.textual_str_buf.is_empty() {
+			self.parts
+				.push(TokenStrLitPart::Textual(TokenStrLitTextualPart {
+					span: self.textual_span.unwrap(),
+					text: cx.interner.intern_str(self.textual_str_buf.as_str()),
+				}));
+
+			self.textual_str_buf.clear();
+		}
+	}
+
+	fn finish(&mut self, cx: &mut TokenizerCx) -> SmallVec<[TokenStrLitPart; 1]> {
+		self.flush_textual(cx);
+		replace(&mut self.parts, SmallVec::new())
+	}
+}

@@ -177,6 +177,19 @@ pub trait ForkableCursor: Cursor + Clone {
 		f(reader)
 	}
 
+	/// A lookahead which only commits its result if `can_commit` is true.
+	fn lookahead_commit_if<T, F>(&mut self, can_commit: bool, f: F) -> T
+	where
+		F: FnOnce(&mut Self) -> T,
+		T: LookaheadResult,
+	{
+		if can_commit {
+			self.lookahead(f)
+		} else {
+			f(&mut self.clone())
+		}
+	}
+
 	/// Returns an iterator which drains the remaining atoms from the cursor.
 	fn drain(&mut self) -> CursorDrain<&'_ mut Self> {
 		CursorDrain::new(self)
@@ -355,6 +368,16 @@ impl<C: ForkableCursor, M> CursorRecovery<C, M> {
 	pub fn new(cursor: &C, meta: M) -> Self {
 		Self {
 			furthest_cursor: cursor.clone(),
+			meta,
+		}
+	}
+
+	pub fn new_one_token_after(cursor: &C, meta: M) -> Self {
+		let mut cursor = cursor.clone();
+		let _ = cursor.consume();
+
+		Self {
+			furthest_cursor: cursor,
 			meta,
 		}
 	}

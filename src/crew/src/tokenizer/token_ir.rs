@@ -12,7 +12,6 @@ c_enum! {
 	/// A punctuating character. Can be further differentiated by whether it's glued to its predecessor
 	/// (e.g. differentiating `+=` from `+ =`)
 	pub enum PunctKind {
-		Backtick,
 		Tilde,
 		Exclamation,
 		At,
@@ -81,7 +80,6 @@ impl PunctKind {
 
 	pub fn char(self) -> char {
 		match self {
-			PunctKind::Backtick => '`',
 			PunctKind::Tilde => '~',
 			PunctKind::Exclamation => '!',
 			PunctKind::At => '@',
@@ -135,6 +133,16 @@ impl NumLitPrefix {
 			NumLitPrefix::Binary => "01",
 			NumLitPrefix::Octal => "01234567",
 			NumLitPrefix::Hex => "0123456789abcdef",
+		}
+	}
+
+	/// Returns the name formatted in the context of "thing did thing in/with 'a(n) xyz' prefix"
+	pub fn with_a_name(&self) -> &'static str {
+		match self {
+			NumLitPrefix::ImplicitDecimal => "a decimal",
+			NumLitPrefix::Binary => "a binary",
+			NumLitPrefix::Octal => "an octal",
+			NumLitPrefix::Hex => "a hexadecimal",
 		}
 	}
 }

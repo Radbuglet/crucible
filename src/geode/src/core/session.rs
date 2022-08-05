@@ -10,7 +10,7 @@ use crucible_core::{
 	cell::{MutexedUnsafeCell, UnsafeCellExt},
 	marker::{PhantomNoSendOrSync, PhantomNoSync},
 	sync::AssertSync,
-	transmute::entirely_unchecked_transmute,
+	transmute::sizealign_checked_transmute,
 };
 use parking_lot::Mutex;
 
@@ -389,7 +389,7 @@ impl<T> SessionStorage<T> {
 		Self {
 			slots: unsafe {
 				// Safety: `AssertSync` is `repr(transparent)` so the two types have the same layout.
-				entirely_unchecked_transmute::<[T; 256], [AssertSync<T>; 256]>(arr)
+				sizealign_checked_transmute::<[T; 256], [AssertSync<T>; 256]>(arr)
 			},
 		}
 	}

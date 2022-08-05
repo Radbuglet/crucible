@@ -1,4 +1,5 @@
 use crate::ext::transmute::entirely_unchecked_transmute;
+use crate::transmute::sizealign_checked_transmute;
 use core::iter;
 use core::mem::MaybeUninit;
 
@@ -7,13 +8,13 @@ use core::mem::MaybeUninit;
 pub const fn transmute_uninit_array_to_inner<T, const N: usize>(
 	arr: MaybeUninit<[T; N]>,
 ) -> [MaybeUninit<T>; N] {
-	unsafe { entirely_unchecked_transmute(arr) }
+	unsafe { sizealign_checked_transmute(arr) }
 }
 
 pub const fn transmute_uninit_array_to_outer<T, const N: usize>(
 	arr: [MaybeUninit<T>; N],
 ) -> MaybeUninit<[T; N]> {
-	unsafe { entirely_unchecked_transmute(arr) }
+	unsafe { sizealign_checked_transmute(arr) }
 }
 
 pub const fn new_uninit_array<T, const N: usize>() -> [MaybeUninit<T>; N] {
