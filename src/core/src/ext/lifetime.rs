@@ -20,3 +20,26 @@ where
 		}),
 	}
 }
+
+pub fn try_transform_or_err<T, R, E, F>(
+	orig: &mut T,
+	f: F,
+) -> Result<&mut R, (&mut T, E)>
+where
+	T: ?Sized,
+	R: ?Sized,
+	F: FnOnce(&mut T) -> Result<&mut R, E>,
+{
+	let mut err_reg = None;
+
+	match try_transform(orig, |lent| match f(lent) {
+		Ok(xformed) => Some(xformed),
+		Err(err) => {
+			err_reg = Some(err);
+			None
+		}
+	}) {
+		Ok(xformed) => Ok(xformed),
+		Err(orig) => Err((orig, err_reg.unwrap())),
+	}
+}

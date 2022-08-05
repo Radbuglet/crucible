@@ -172,6 +172,8 @@ impl<'a> Cursor for CodepointReader<'a> {
 	}
 }
 
+impl ForkableCursor for CodepointReader<'_> {}
+
 #[derive(Debug, Copy, Clone, Error)]
 #[error("failed to parse portion of unicode byte stream. Offending byte stream: {offending:?}")]
 pub struct UnicodeParseError<'a> {
@@ -179,7 +181,7 @@ pub struct UnicodeParseError<'a> {
 }
 
 impl Atom for Result<Option<char>, UnicodeParseError<'_>> {
-	fn is_eof(&self) -> bool {
+	fn is_stream_delimiter(&self) -> bool {
 		matches!(self, Ok(Some(_)))
 	}
 }
@@ -281,6 +283,8 @@ impl Cursor for FileReader<'_> {
 	}
 }
 
+impl ForkableCursor for FileReader<'_> {}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum FileAtom {
 	Eof,
@@ -312,7 +316,7 @@ impl FileAtom {
 }
 
 impl Atom for FileAtom {
-	fn is_eof(&self) -> bool {
+	fn is_stream_delimiter(&self) -> bool {
 		matches!(self, FileAtom::Eof)
 	}
 }
@@ -373,6 +377,14 @@ impl Span {
 			byte_index: self.end_byte,
 			pos: self.end_pos,
 		}
+	}
+
+	pub fn set_start_loc(&mut self, loc: FileLoc) {
+		*self = Self::new(loc, self.end_loc());
+	}
+
+	pub fn set_end_loc(&mut self, loc: FileLoc) {
+		*self = Self::new(self.start_loc(), loc);
 	}
 
 	pub fn byte_range(&self) -> Range<usize> {

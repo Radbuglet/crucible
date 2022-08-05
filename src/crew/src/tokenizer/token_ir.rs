@@ -60,10 +60,16 @@ c_enum! {
 
 	/// The prefix used by a numeric literal.
 	pub enum NumLitPrefix {
-		Unprefixed,
+		ImplicitDecimal,
 		Binary,
 		Octal,
 		Hex,
+	}
+
+	/// The sign of the exponent part of a floating point literal.
+	pub enum NumLitExpSign {
+		Pos,
+		Neg,
 	}
 
 }
@@ -116,7 +122,7 @@ impl GroupDelimiterChar {
 impl NumLitPrefix {
 	pub fn prefix_char(&self) -> Option<char> {
 		match self {
-			NumLitPrefix::Unprefixed => None,
+			NumLitPrefix::ImplicitDecimal => None,
 			NumLitPrefix::Binary => Some('b'),
 			NumLitPrefix::Octal => Some('o'),
 			NumLitPrefix::Hex => Some('x'),
@@ -125,7 +131,7 @@ impl NumLitPrefix {
 
 	pub fn digits(&self) -> &'static str {
 		match self {
-			NumLitPrefix::Unprefixed => "0123456789",
+			NumLitPrefix::ImplicitDecimal => "0123456789",
 			NumLitPrefix::Binary => "01",
 			NumLitPrefix::Octal => "01234567",
 			NumLitPrefix::Hex => "0123456789abcdef",
@@ -197,12 +203,16 @@ pub enum TokenStrLitPart {
 
 #[derive(Debug, Clone)]
 pub struct TokenStrLitTextualPart {
-	span: Span,
-	text: Intern,
+	pub span: Span,
+	pub text: Intern,
 }
 
 // TokenNumberLit
 #[derive(Debug, Clone)]
 pub struct TokenNumLit {
 	pub span: Span,
+	pub prefix: NumLitPrefix,
+	pub main_part: Intern,
+	pub float_part: Option<Intern>,
+	pub exp_part: Option<(NumLitExpSign, Intern)>,
 }

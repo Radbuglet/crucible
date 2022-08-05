@@ -1,0 +1,8 @@
+pub class Foo {
+    fn bar() {
+        let val = 103.do_something() - 4.;
+        val += 0xFFe3;
+        // Whee
+        woo
+    }
+}

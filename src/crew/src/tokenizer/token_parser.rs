@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::RefCell, mem::replace, rc::Rc, sync::Arc};
 
 use crucible_core::c_enum::CEnum;
 use smallvec::SmallVec;
@@ -13,9 +13,9 @@ use super::{
 		ParseError, ParsingErrorExt,
 	},
 	token_ir::{
-		GroupDelimiterChar, GroupDelimiterKind, NumLitPrefix, PunctKind, Token, TokenCharLit,
-		TokenGroup, TokenIdent, TokenNumLit, TokenPunct, TokenStrLit, TokenStrLitPart,
-		TokenStrLitTextualPart,
+		GroupDelimiterChar, GroupDelimiterKind, NumLitExpSign, NumLitPrefix, PunctKind, Token,
+		TokenCharLit, TokenGroup, TokenIdent, TokenNumLit, TokenPunct, TokenStrLit,
+		TokenStrLitPart, TokenStrLitTextualPart,
 	},
 };
 
@@ -28,35 +28,31 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 		unstuck: CursorUnstuck::default(),
 	};
 
-	let mut state = TokenizerState::new(file);
+	let mut stack = TokenizerState::new(file);
 	let mut reader = file.reader();
 
 	// Run main loop
 	loop {
-		match state.top() {
+		match stack.top() {
 			TokenizerFrame::Group(group) => {
 				let mut recovery = CursorRecovery::new(&reader, ());
 
 				enum LookaheadRes {
 					Token(Token),
 					OpenBlockComment,
-					OpenGroup(GroupDelimiterChar),
-					CloseGroup(GroupDelimiterChar),
-					OpenStrLit,
+					OpenGroup(FileLoc, GroupDelimiterChar),
+					CloseGroup(FileLoc, GroupDelimiterChar),
+					OpenStrLit(FileLoc),
 					NoOperation,
 				}
 
 				let result = reader
 					.lookahead_cases(Err(ParseError))
+					// === General === //
 					// Identifiers
 					.case(|reader| {
 						let ident = cx.match_ident(reader)?;
 						Ok(LookaheadRes::Token(Token::Ident(ident)))
-					})
-					// Punctuation
-					.case(|reader| {
-						let punct = cx.match_punct(reader, group.just_matched_punct())?;
-						Ok(LookaheadRes::Token(Token::Punct(punct)))
 					})
 					// Character literal
 					.case(|reader| {
@@ -68,8 +64,9 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 					})
 					// String literal start
 					.case(|reader| {
+						let loc = reader.peek_loc();
 						cx.match_seq(reader, "\"")?;
-						Ok(LookaheadRes::OpenStrLit)
+						Ok(LookaheadRes::OpenStrLit(loc))
 					})
 					// Numeric literal
 					.case(|reader| {
@@ -94,28 +91,91 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 					})
 					// Group delimiters
 					.case(|reader| {
+						let loc = reader.peek_loc();
 						let (kind, delimiter) = cx.match_group_delimiter(reader)?;
 
 						match kind {
-							GroupDelimiterKind::Open => Ok(LookaheadRes::OpenGroup(delimiter)),
-							GroupDelimiterKind::Close => Ok(LookaheadRes::CloseGroup(delimiter)),
+							GroupDelimiterKind::Open => Ok(LookaheadRes::OpenGroup(loc, delimiter)),
+							GroupDelimiterKind::Close => {
+								Ok(LookaheadRes::CloseGroup(loc, delimiter))
+							}
 						}
 					})
+					// === Punct-started sequences === //
 					// Block comment start
 					.case(|reader| {
 						cx.match_seq(reader, "/*")?;
-						state.open_comment_frame();
+						stack.open_comment_frame();
 						Ok(LookaheadRes::OpenBlockComment)
+					})
+					.barrier()
+					// === Punctuation === //
+					.case(|reader| {
+						let punct = cx.match_punct(reader, group.just_matched_punct())?;
+						Ok(LookaheadRes::Token(Token::Punct(punct)))
 					})
 					.finish();
 
 				match result {
-					Ok(_) => todo!(),
-					Err(_) => todo!(),
+					Ok(LookaheadRes::Token(token)) => {
+						group.push_token(token);
+					}
+					Ok(LookaheadRes::OpenBlockComment) => {
+						stack.open_comment_frame();
+					}
+					Ok(LookaheadRes::OpenGroup(loc, delimiter)) => {
+						stack.open_group_frame(loc, delimiter);
+					}
+					Ok(LookaheadRes::CloseGroup(loc, delimiter)) => {
+						assert_eq!(group.delimiter(), delimiter); // TODO: Non-panicking recovery
+						if let Some(finished_root) = stack.close_frame(&mut cx, loc) {
+							return finished_root;
+						}
+					}
+					Ok(LookaheadRes::OpenStrLit(loc)) => {
+						stack.open_str_lit_frame(loc);
+					}
+					Ok(LookaheadRes::NoOperation) => {}
+					Err(_) => {
+						println!("Parse error! {:?}", cx.unstuck.unstuck_hint());
+						recovery.recover(&mut reader);
+					}
 				}
 			}
-			TokenizerFrame::StrLit(str_lit) => todo!(),
-			TokenizerFrame::BlockComment => todo!(),
+			TokenizerFrame::StrLit(str_lit) => {
+				let mut recovery = CursorRecovery::new(&reader, ());
+
+				enum LookaheadRes {
+					Char(char),
+					TemplatedVar(FileLoc),
+					End(FileLoc),
+				}
+
+				let result = reader
+					.lookahead_cases(Err(ParseError))
+					.case(|reader| {
+						let char = cx
+							.match_str_char(reader)
+							.push_recovery(&mut recovery, |_| ())?;
+
+						Ok(LookaheadRes::Char(char))
+					})
+					.case(|reader| {
+						cx.match_seq(reader, "${")?;
+						Ok(LookaheadRes::TemplatedVar(reader.latest_loc()))
+					})
+					.case(|reader| {
+						cx.match_seq(reader, "\"")?;
+						Ok(LookaheadRes::End(reader.latest_loc()))
+					})
+					.finish();
+			}
+			TokenizerFrame::BlockComment => {
+				if cx.match_seq(&mut reader, "*/").is_ok() {
+					stack.close_frame(&mut cx, reader.peek_loc());
+				} else {
+				}
+			}
 		}
 	}
 }
@@ -231,7 +291,7 @@ impl<'a> TokenizerCx<'a> {
 			self.match_seq(reader, "'").or_recoverable(&recovery)?;
 
 			// Match middle character, recovering on an invalid middle character.
-			let char = match self.match_lit_char(reader) {
+			let char = match self.match_str_char(reader) {
 				Ok(char) => Some(char),
 				Err(recovery) => {
 					// If we fail, recover to the character matching safe point and try to consume
@@ -280,15 +340,15 @@ impl<'a> TokenizerCx<'a> {
 
 					NumLitPrefix::variants().find(|prefix| prefix.prefix_char() == Some(char))
 				})
-				.unwrap_or(NumLitPrefix::Unprefixed);
+				.unwrap_or(NumLitPrefix::ImplicitDecimal);
 
-			// Match non-FP digits
-			let has_explicit_prefix = prefix != NumLitPrefix::Unprefixed;
-			let digits = self.match_digits(reader, has_explicit_prefix, prefix.digits());
+			// Match main non-FP part
+			let has_explicit_prefix = prefix != NumLitPrefix::ImplicitDecimal;
+			let main_part = self.match_digits(reader, has_explicit_prefix, prefix.digits());
 
 			// Terminate if the user didn't specify any digits in the base.
-			if digits.is_none() {
-				if prefix != NumLitPrefix::Unprefixed {
+			if self.interner.decode(main_part).is_empty() {
+				if prefix != NumLitPrefix::ImplicitDecimal {
 					// Our recovery is a bit wacky. Essentially, we match *anything* that could
 					// possibly be interpreted as part of the number so long as we actually think
 					// the user was trying to type a number.
@@ -298,8 +358,9 @@ impl<'a> TokenizerCx<'a> {
 				return Err(CursorRecovery::new(reader, ()));
 			}
 
-			// Match decimal point if relevant to this numeric prefix.
-			if prefix == NumLitPrefix::Unprefixed {
+			// Match digits right of decimal point if relevant to this numeric prefix.
+			let float_part = if prefix == NumLitPrefix::ImplicitDecimal {
+				// Match decimal point
 				let has_dp = reader
 					.lookahead(|reader| {
 						// Match point
@@ -317,10 +378,65 @@ impl<'a> TokenizerCx<'a> {
 					})
 					.is_ok();
 
-				// TODO
-			}
+				// Match digits
+				if has_dp {
+					Some(self.match_digits(reader, true, NumLitPrefix::ImplicitDecimal.digits()))
+				} else {
+					None
+				}
+			} else {
+				None
+			};
 
-			todo!()
+			// Match exponent
+			let exp_part = if prefix == NumLitPrefix::ImplicitDecimal {
+				// Check if we have an exponent.
+				let has_exp = reader.lookahead(|reader| {
+					self.unstuck.expect(reader, "e");
+					let atom = reader.consume_atom().as_char();
+					atom == 'e' || atom == 'E'
+				});
+
+				// If we have an exponent
+				if has_exp {
+					// Look for the optional sign
+					let sign = reader
+						.lookahead(|reader| {
+							self.unstuck.expect_many(reader, ["+", "-"]);
+							match reader.consume_atom().as_char() {
+								'+' => Some(NumLitExpSign::Pos),
+								'-' => Some(NumLitExpSign::Neg),
+								_ => None,
+							}
+						})
+						.unwrap_or(NumLitExpSign::Pos);
+
+					// Read the exponent digits
+					let exp_digits =
+						self.match_digits(reader, true, NumLitPrefix::ImplicitDecimal.digits());
+
+					// Report a grammatical error if there are no exponent digits
+					if self.interner.decode(exp_digits).is_empty() {
+						self.recover_num_lit(reader);
+						return Err(CursorRecovery::new(reader, ()));
+					}
+
+					Some((sign, exp_digits))
+				} else {
+					None
+				}
+			} else {
+				None
+			};
+
+			// Build token
+			Ok(TokenNumLit {
+				span: Span::new(start, reader.latest_loc()),
+				prefix,
+				main_part,
+				float_part,
+				exp_part,
+			})
 		})
 	}
 
@@ -329,7 +445,11 @@ impl<'a> TokenizerCx<'a> {
 		reader: &mut FileReader<'a>,
 		has_explicit_prefix: bool,
 		set: &str,
-	) -> Option<Intern> {
+	) -> Intern {
+		debug_assert!(set
+			.chars()
+			.all(|char| !char.is_alphabetic() || char.is_ascii_lowercase()));
+
 		let mut intern = self.interner.begin_intern();
 		let mut should_emit_expectations = has_explicit_prefix;
 
@@ -348,7 +468,7 @@ impl<'a> TokenizerCx<'a> {
 			if digit == '_' {
 				// (ignore visual separators)
 				true
-			} else if set.contains(digit) {
+			} else if set.contains(digit.to_ascii_lowercase()) {
 				intern.push_char(digit);
 				true
 			} else {
@@ -357,11 +477,7 @@ impl<'a> TokenizerCx<'a> {
 		});
 
 		// Produce intern
-		if !intern.as_str().is_empty() {
-			Some(intern.finish())
-		} else {
-			None
-		}
+		intern.finish()
 	}
 
 	fn recover_num_lit(&mut self, reader: &mut FileReader<'a>) {
@@ -372,7 +488,7 @@ impl<'a> TokenizerCx<'a> {
 		});
 	}
 
-	fn match_lit_char(&mut self, reader: &mut FileReader<'a>) -> PResultRecoverable<'a, char> {
+	fn match_str_char(&mut self, reader: &mut FileReader<'a>) -> PResultRecoverable<'a, char> {
 		let mut recovery = CursorRecovery::new(reader, ());
 
 		reader.lookahead(|reader| {
@@ -535,7 +651,7 @@ mod tokenizer_state {
 		}
 
 		pub fn open_group_frame(&mut self, start: FileLoc, delimiter: GroupDelimiterChar) {
-			debug_assert_ne!(self.block_comments, 0);
+			debug_assert_eq!(self.block_comments, 0);
 
 			self.frames.push((
 				start,
@@ -551,9 +667,7 @@ mod tokenizer_state {
 
 			self.frames.push((
 				start,
-				TokenizerFrameInternal::StrLit(StrLitFrameBuilder {
-					parts: Default::default(),
-				}),
+				TokenizerFrameInternal::StrLit(StrLitFrameBuilder(Default::default())),
 			))
 		}
 
@@ -563,7 +677,7 @@ mod tokenizer_state {
 			self.block_comments += 1;
 		}
 
-		pub fn close_frame(&mut self, end: FileLoc) -> Option<TokenGroup> {
+		pub fn close_frame(&mut self, cx: &mut TokenizerCx, end: FileLoc) -> Option<TokenGroup> {
 			if self.block_comments > 0 {
 				self.block_comments -= 1;
 				None
@@ -580,7 +694,7 @@ mod tokenizer_state {
 					(start, TokenizerFrameInternal::StrLit(str_lit)) => {
 						Token::StrLit(TokenStrLit {
 							span: Span::new(start, end),
-							parts: str_lit.parts.replace(SmallVec::new()),
+							parts: str_lit.0.borrow_mut().finish(cx),
 						})
 					}
 				};
@@ -591,12 +705,13 @@ mod tokenizer_state {
 						TokenizerFrameInternal::Group(group) => {
 							group.push_token(token);
 						}
-						TokenizerFrameInternal::StrLit(str_lit) => {
-							str_lit.push_token_group(match token {
+						TokenizerFrameInternal::StrLit(str_lit) => str_lit.push_token_group(
+							cx,
+							match token {
 								Token::Group(group) => group,
 								_ => unreachable!(),
-							})
-						}
+							},
+						),
 					};
 					None
 				} else {
@@ -639,17 +754,56 @@ mod tokenizer_state {
 	}
 
 	#[derive(Debug, Clone)]
-	pub struct StrLitFrameBuilder {
-		parts: Rc<RefCell<SmallVec<[TokenStrLitPart; 1]>>>,
-	}
+	pub struct StrLitFrameBuilder(Rc<RefCell<StrLitFrameBuilderInner>>);
 
 	impl StrLitFrameBuilder {
-		pub fn push_token_group(&self, group: TokenGroup) {
-			self.parts.borrow_mut().push(TokenStrLitPart::Group(group));
+		pub fn push_token_group(&self, cx: &mut TokenizerCx, group: TokenGroup) {
+			self.0.borrow_mut().push_token_group(cx, group);
 		}
 
-		pub fn push_textual(&self, lit: TokenStrLitTextualPart) {
-			self.parts.borrow_mut().push(TokenStrLitPart::Textual(lit));
+		pub fn push_char(&self, loc: FileLoc, char: char) {
+			self.0.borrow_mut().push_char(loc, char);
+		}
+	}
+
+	#[derive(Debug, Default)]
+	struct StrLitFrameBuilderInner {
+		parts: SmallVec<[TokenStrLitPart; 1]>,
+		textual_span: Option<Span>,
+		textual_str_buf: String, // TODO: Automate scratch buffer creation in the `Interner`.
+	}
+
+	impl StrLitFrameBuilderInner {
+		fn push_token_group(&mut self, cx: &mut TokenizerCx, group: TokenGroup) {
+			self.flush_textual(cx);
+		}
+
+		fn push_char(&mut self, loc: FileLoc, char: char) {
+			// Increase span
+			if self.textual_str_buf.is_empty() {
+				self.textual_span = Some(loc.span());
+			}
+			self.textual_span.as_mut().unwrap().set_end_loc(loc);
+
+			// Push character
+			self.textual_str_buf.push(char);
+		}
+
+		fn flush_textual(&mut self, cx: &mut TokenizerCx) {
+			if !self.textual_str_buf.is_empty() {
+				self.parts
+					.push(TokenStrLitPart::Textual(TokenStrLitTextualPart {
+						span: self.textual_span.unwrap(),
+						text: cx.interner.intern_str(self.textual_str_buf.as_str()),
+					}));
+
+				self.textual_str_buf.clear();
+			}
+		}
+
+		fn finish(&mut self, cx: &mut TokenizerCx) -> SmallVec<[TokenStrLitPart; 1]> {
+			self.flush_textual(cx);
+			replace(&mut self.parts, SmallVec::new())
 		}
 	}
 }

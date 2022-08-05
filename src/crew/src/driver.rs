@@ -1,16 +1,21 @@
-use crate::tokenizer::{
-	file::{FileDescBundle, FileDescBundleCtor, LoadedFile, SourceFileInfo},
-	generic::ForkableCursor,
+use crate::{
+	tokenizer::{
+		file::{FileDescBundle, FileDescBundleCtor, LoadedFile, SourceFileInfo},
+		token_parser::tokenize,
+	},
+	util::intern::Interner,
 };
 use geode::prelude::*;
 
 pub fn entry() {
+	// Create Geode session
 	let main_lock = Lock::new(NoLabel);
 
 	let session = LocalSessionGuard::new();
 	let s = session.handle();
 	s.acquire_locks([main_lock.weak_copy()]);
 
+	// Create file
 	let file_desc = FileDescBundle::spawn(
 		s,
 		FileDescBundleCtor {
@@ -24,12 +29,11 @@ pub fn entry() {
 
 	let file = LoadedFile {
 		file_desc: file_desc.weak_copy(),
-		contents: "whee\rwoo\r\nwaz\n\rmaz".as_bytes().to_owned(),
+		contents: include_bytes!("driver_example.crew").as_slice().to_owned(),
 	};
 
-	let mut reader = file.reader();
-
-	for (_, atom) in reader.drain() {
-		dbg!(atom);
-	}
+	// Tokenize
+	let mut interner = Interner::default();
+	tokenize(&mut interner, &file);
+	println!("Done!");
 }
