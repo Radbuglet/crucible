@@ -580,16 +580,35 @@ impl<T, C: ForkableCursor, M> CursorRecoveryExt for Result<T, CursorRecovery<C, 
 #[derive(Debug)]
 pub struct CursorUnstuck<C> {
 	report: Option<UnstuckReport<C>>,
+	locked: bool,
 }
 
 impl<C> Default for CursorUnstuck<C> {
 	fn default() -> Self {
-		Self { report: None }
+		Self {
+			report: None,
+			locked: false,
+		}
 	}
 }
 
 impl<C: ForkableCursor> CursorUnstuck<C> {
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	pub fn null() -> Self {
+		Self {
+			report: None,
+			locked: true,
+		}
+	}
+
 	pub fn bump(&mut self, cursor: &C) -> OptionalUnstuckReport<C> {
+		if self.locked {
+			return OptionalUnstuckReport { inner: None };
+		}
+
 		enum AltResult {
 			CmpLess,
 			CmpGreater,
@@ -625,6 +644,20 @@ impl<C: ForkableCursor> CursorUnstuck<C> {
 		}
 	}
 
+	pub fn encountered<D>(&mut self, cursor: &C, what: D)
+	where
+		D: ToString,
+	{
+		self.bump(cursor).encountered(what);
+	}
+
+	pub fn rejection_hint<D>(&mut self, cursor: &C, what: D)
+	where
+		D: ToString,
+	{
+		self.bump(cursor).rejection_hint(what);
+	}
+
 	pub fn expect<D: ToString>(&mut self, cursor: &C, what: D) {
 		self.bump(cursor).expect(what);
 	}
@@ -658,7 +691,7 @@ impl<'a, C> OptionalUnstuckReport<'a, C> {
 		D: ToString,
 	{
 		if let Some(inner) = &mut self.inner {
-			inner.encountered.push(what.to_string());
+			inner.encountered(what);
 		}
 		self
 	}
@@ -668,7 +701,7 @@ impl<'a, C> OptionalUnstuckReport<'a, C> {
 		D: ToString,
 	{
 		if let Some(inner) = &mut self.inner {
-			inner.rejection_hints.push(what.to_string());
+			inner.rejection_hint(what);
 		}
 		self
 	}
@@ -678,7 +711,7 @@ impl<'a, C> OptionalUnstuckReport<'a, C> {
 		D: ToString,
 	{
 		if let Some(inner) = &mut self.inner {
-			inner.expected.push(what.to_string());
+			inner.expect(what);
 		}
 		self
 	}
@@ -700,5 +733,29 @@ impl<C> UnstuckReport<C> {
 			rejection_hints: Vec::new(),
 			encountered: Vec::new(),
 		}
+	}
+
+	pub fn encountered<D>(&mut self, what: D) -> &mut Self
+	where
+		D: ToString,
+	{
+		self.encountered.push(what.to_string());
+		self
+	}
+
+	pub fn rejection_hint<D>(&mut self, what: D) -> &mut Self
+	where
+		D: ToString,
+	{
+		self.rejection_hints.push(what.to_string());
+		self
+	}
+
+	pub fn expect<D>(&mut self, what: D) -> &mut Self
+	where
+		D: ToString,
+	{
+		self.expected.push(what.to_string());
+		self
 	}
 }

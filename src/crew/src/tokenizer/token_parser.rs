@@ -23,11 +23,8 @@ use super::{
 
 pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 	// Acquire all relevant context
-	let mut cx = TokenizerCx {
-		interner,
-		unstuck: CursorUnstuck::default(),
-	};
-
+	let mut unstuck = CursorUnstuck::new();
+	let mut cx = TokenizerCx { interner };
 	let mut stack = TokenizerState::new(file);
 	let mut reader = file.reader();
 
@@ -51,19 +48,35 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 					// === General === //
 					// Identifiers
 					.case(|reader| {
-						if group.just_matched_num_lit() {
-							// TODO: Emit a hint telling users that an identifier cannot appear after
-							//  a numeric literal.
+						let can_match_ident = !group.just_matched_num_lit();
+
+						let ident = reader.commit_if(can_match_ident, |reader| {
+							let mut null = CursorUnstuck::null();
+
+							cx.match_ident(
+								if can_match_ident {
+									&mut unstuck
+								} else {
+									&mut null
+								},
+								reader,
+							)
+						});
+
+						if ident.is_ok() && !can_match_ident {
+							unstuck.rejection_hint(
+								reader,
+								"Identifier cannot occur immediately after a numeric literal.",
+							);
 							return Err(ParseError);
 						}
 
-						let ident = cx.match_ident(reader)?;
-						Ok(LookaheadRes::Token(Token::Ident(ident)))
+						Ok(LookaheadRes::Token(Token::Ident(ident?)))
 					})
 					// Character literal
 					.case(|reader| {
 						let char_lit = cx
-							.match_char_lit(reader)
+							.match_char_lit(&mut unstuck, reader)
 							.push_recovery(&mut recovery, |_| ())?;
 
 						Ok(LookaheadRes::Token(Token::CharLit(char_lit)))
@@ -77,14 +90,14 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 					// Numeric literal
 					.case(|reader| {
 						let num_lit = cx
-							.match_num_lit(reader)
+							.match_num_lit(&mut unstuck, reader)
 							.push_recovery(&mut recovery, |_| ())?;
 
 						Ok(LookaheadRes::Token(Token::NumLit(num_lit)))
 					})
 					// Line comment
 					.case(|reader| {
-						cx.match_line_comment(reader)?;
+						cx.match_line_comment(&mut unstuck, reader)?;
 						Ok(LookaheadRes::Whitespace)
 					})
 					// Whitespace (you have been living here for as long as you can remember)
@@ -98,7 +111,7 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 					// Group delimiters
 					.case(|reader| {
 						let loc = reader.peek_loc();
-						let (kind, delimiter) = cx.match_group_delimiter(reader)?;
+						let (kind, delimiter) = cx.match_group_delimiter(&mut unstuck, reader)?;
 
 						match kind {
 							GroupDelimiterKind::Open => Ok(LookaheadRes::OpenGroup(loc, delimiter)),
@@ -117,7 +130,8 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 					.barrier()
 					// === Punctuation === //
 					.case(|reader| {
-						let punct = cx.match_punct(reader, group.just_matched_punct())?;
+						let punct =
+							cx.match_punct(&mut unstuck, reader, group.just_matched_punct())?;
 						Ok(LookaheadRes::Token(Token::Punct(punct)))
 					})
 					.finish();
@@ -145,7 +159,7 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 						group.notify_whitespace();
 					}
 					Err(_) => {
-						println!("Parse error! {:?}", cx.unstuck.unstuck_hint());
+						println!("Parse error! {:?}", unstuck.unstuck_hint());
 						recovery.recover(&mut reader);
 					}
 				}
@@ -163,7 +177,7 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 					.lookahead_cases(Err(ParseError))
 					.case(|reader| {
 						let char = cx
-							.match_str_char(reader)
+							.match_str_char(&mut unstuck, reader)
 							.push_recovery(&mut recovery, |_| ())?;
 
 						Ok(LookaheadRes::Char(char))
@@ -193,17 +207,17 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 type PResultRecoverable<'a, T, M = ()> = Result<T, CursorRecovery<FileReader<'a>, M>>;
 
 struct TokenizerCx<'a> {
-	unstuck: CursorUnstuck<FileReader<'a>>,
 	interner: &'a mut Interner,
 }
 
 impl<'a> TokenizerCx<'a> {
 	fn match_group_delimiter(
 		&mut self,
+		unstuck: &mut CursorUnstuck<FileReader<'a>>,
 		reader: &mut FileReader<'a>,
 	) -> PResult<(GroupDelimiterKind, GroupDelimiterChar)> {
 		reader.lookahead(|reader| {
-			self.unstuck.expect(reader, "group delimiter");
+			unstuck.expect(reader, "group delimiter");
 
 			let read = reader.consume_atom();
 			let read_char = read.as_char();
@@ -231,9 +245,13 @@ impl<'a> TokenizerCx<'a> {
 		})
 	}
 
-	fn match_ident(&mut self, reader: &mut FileReader<'a>) -> PResult<TokenIdent> {
+	fn match_ident(
+		&mut self,
+		unstuck: &mut CursorUnstuck<FileReader<'a>>,
+		reader: &mut FileReader<'a>,
+	) -> PResult<TokenIdent> {
 		reader.lookahead(|reader| {
-			self.unstuck.expect(reader, "identifier");
+			unstuck.expect(reader, "identifier");
 
 			// Match XID start
 			let (start_loc, first) = reader.consume();
@@ -247,7 +265,7 @@ impl<'a> TokenizerCx<'a> {
 			text.push_char(first);
 
 			reader.lookahead_while(|reader| {
-				self.unstuck.expect(reader, "identifier continuation");
+				unstuck.expect(reader, "identifier continuation");
 				let next = reader.consume_atom();
 
 				let next = match next {
@@ -267,10 +285,15 @@ impl<'a> TokenizerCx<'a> {
 		})
 	}
 
-	fn match_punct(&mut self, reader: &mut FileReader<'a>, glued: bool) -> PResult<TokenPunct> {
+	fn match_punct(
+		&mut self,
+		unstuck: &mut CursorUnstuck<FileReader<'a>>,
+		reader: &mut FileReader<'a>,
+		glued: bool,
+	) -> PResult<TokenPunct> {
 		reader.lookahead(|reader| {
 			// Consume atom
-			self.unstuck.expect(reader, "punct");
+			unstuck.expect(reader, "punct");
 			let (loc, char) = reader.consume();
 
 			// Parse punct mark
@@ -286,12 +309,13 @@ impl<'a> TokenizerCx<'a> {
 
 	fn match_char_lit(
 		&mut self,
+		unstuck: &mut CursorUnstuck<FileReader<'a>>,
 		reader: &mut FileReader<'a>,
 	) -> PResultRecoverable<'a, TokenCharLit> {
 		let mut recovery = CursorRecovery::new(reader, ());
 
 		reader.lookahead(|reader| {
-			self.unstuck.expect(reader, "character literal");
+			unstuck.expect(reader, "character literal");
 
 			let start = reader.peek_loc();
 
@@ -299,7 +323,7 @@ impl<'a> TokenizerCx<'a> {
 			self.match_seq(reader, "'").or_recoverable(&recovery)?;
 
 			// Match middle character, recovering on an invalid middle character.
-			let char = match self.match_str_char(reader) {
+			let char = match self.match_str_char(unstuck, reader) {
 				Ok(char) => Some(char),
 				Err(recovery) => {
 					// If we fail, recover to the character matching safe point and try to consume
@@ -329,12 +353,13 @@ impl<'a> TokenizerCx<'a> {
 
 	fn match_num_lit(
 		&mut self,
+		unstuck: &mut CursorUnstuck<FileReader<'a>>,
 		reader: &mut FileReader<'a>,
 	) -> PResultRecoverable<'a, TokenNumLit> {
 		reader.lookahead(|reader| {
 			let start = reader.peek_loc();
 
-			self.unstuck.expect(reader, "numeric literal");
+			unstuck.expect(reader, "numeric literal");
 
 			// See if we have a numeric prefix at this position
 			let prefix = reader
@@ -343,7 +368,7 @@ impl<'a> TokenizerCx<'a> {
 					self.match_seq(reader, "0").ok()?;
 
 					// Match prefix
-					self.unstuck.expect(reader, "numeric literal prefix");
+					unstuck.expect(reader, "numeric literal prefix");
 					let char = reader.consume_atom().as_char();
 
 					NumLitPrefix::variants().find(|prefix| prefix.prefix_char() == Some(char))
@@ -351,8 +376,7 @@ impl<'a> TokenizerCx<'a> {
 				.unwrap_or(NumLitPrefix::ImplicitDecimal);
 
 			// Match main non-FP part
-			let has_explicit_prefix = prefix != NumLitPrefix::ImplicitDecimal;
-			let main_part = self.match_digits(reader, has_explicit_prefix, prefix.digits());
+			let main_part = self.match_digits(unstuck, reader, prefix.digits());
 
 			// Terminate if the user didn't specify any digits in the base.
 			if self.interner.decode(main_part).is_empty() {
@@ -368,12 +392,12 @@ impl<'a> TokenizerCx<'a> {
 
 			// Match digits right of decimal point if relevant to this numeric prefix.
 			let float_part = {
-				let mut unstuck_builder = self.unstuck.bump(reader);
+				let mut unstuck_at_cursor = reader.clone();
 				let can_have_decimal = prefix == NumLitPrefix::ImplicitDecimal;
 
 				// Match decimal point
 				if can_have_decimal {
-					unstuck_builder.expect(".");
+					unstuck.expect(&unstuck_at_cursor, ".");
 				}
 
 				let has_dp = reader
@@ -394,15 +418,18 @@ impl<'a> TokenizerCx<'a> {
 
 				match (has_dp, can_have_decimal) {
 					(true, true) => Some(self.match_digits(
+						unstuck,
 						reader,
-						true,
 						NumLitPrefix::ImplicitDecimal.digits(),
 					)),
 					(true, false) => {
-						// unstuck_builder.rejection_hint(format_args!(
-						// 	"Numbers with {} prefix cannot have a decimal point.",
-						// 	prefix.with_a_name()
-						// ));
+						unstuck.rejection_hint(
+							&unstuck_at_cursor,
+							format_args!(
+								"Numbers with {} prefix cannot have a decimal point.",
+								prefix.with_a_name()
+							),
+						);
 						None
 					}
 					(false, _) => None,
@@ -411,7 +438,7 @@ impl<'a> TokenizerCx<'a> {
 
 			// Match exponent
 			let exp_part = {
-				let mut unstuck_builder = self.unstuck.bump(reader);
+				let mut unstuck_builder = unstuck.bump(reader);
 				let can_have_exp = prefix == NumLitPrefix::ImplicitDecimal;
 
 				// Check if we have an exponent.
@@ -430,7 +457,7 @@ impl<'a> TokenizerCx<'a> {
 						// Look for the optional sign
 						let sign = reader
 							.lookahead(|reader| {
-								self.unstuck.expect_many(reader, ["+", "-"]);
+								unstuck.expect_many(reader, ["+", "-"]);
 								match reader.consume_atom().as_char() {
 									'+' => Some(NumLitExpSign::Pos),
 									'-' => Some(NumLitExpSign::Neg),
@@ -440,8 +467,11 @@ impl<'a> TokenizerCx<'a> {
 							.unwrap_or(NumLitExpSign::Pos);
 
 						// Read the exponent digits
-						let exp_digits =
-							self.match_digits(reader, true, NumLitPrefix::ImplicitDecimal.digits());
+						let exp_digits = self.match_digits(
+							unstuck,
+							reader,
+							NumLitPrefix::ImplicitDecimal.digits(),
+						);
 
 						// Report a grammatical error if there are no exponent digits
 						if self.interner.decode(exp_digits).is_empty() {
@@ -475,8 +505,8 @@ impl<'a> TokenizerCx<'a> {
 
 	fn match_digits(
 		&mut self,
+		unstuck: &mut CursorUnstuck<FileReader<'a>>,
 		reader: &mut FileReader<'a>,
-		has_explicit_prefix: bool,
 		set: &str,
 	) -> Intern {
 		debug_assert!(set
@@ -484,16 +514,11 @@ impl<'a> TokenizerCx<'a> {
 			.all(|char| !char.is_alphabetic() || char.is_ascii_lowercase()));
 
 		let mut intern = self.interner.begin_intern();
-		let mut should_emit_expectations = has_explicit_prefix;
 
 		// Match digits
 		reader.lookahead_while(|reader| {
 			// Emit expectations if appropriate
-			if should_emit_expectations {
-				self.unstuck
-					.expect(reader, format_args!("digits ({})", set));
-			}
-			should_emit_expectations = true;
+			unstuck.expect(reader, format_args!("digits ({})", set));
 
 			// Match digit
 			let digit = reader.consume_atom().as_char();
@@ -521,7 +546,11 @@ impl<'a> TokenizerCx<'a> {
 		});
 	}
 
-	fn match_str_char(&mut self, reader: &mut FileReader<'a>) -> PResultRecoverable<'a, char> {
+	fn match_str_char(
+		&mut self,
+		unstuck: &mut CursorUnstuck<FileReader<'a>>,
+		reader: &mut FileReader<'a>,
+	) -> PResultRecoverable<'a, char> {
 		let mut recovery = CursorRecovery::new(reader, ());
 
 		reader.lookahead(|reader| {
@@ -531,8 +560,7 @@ impl<'a> TokenizerCx<'a> {
 				.or_recoverable(&recovery)?;
 
 			if char == '\\' {
-				self.unstuck
-					.expect_many(reader, ["x", "u", "n", "r", "t", "\\", "0", "'", "\""]);
+				unstuck.expect_many(reader, ["x", "u", "n", "r", "t", "\\", "0", "'", "\""]);
 
 				let char = reader
 					.consume_atom()
@@ -542,10 +570,9 @@ impl<'a> TokenizerCx<'a> {
 				match char {
 					// Encoded escapes
 					'x' | 'X' => {
-						self.unstuck.expect(
-							reader,
-							"2 character hex ASCII character code less than `0x77`",
-						);
+						let mut unstuck_builder = unstuck.bump(reader);
+						unstuck_builder
+							.expect("2 character hex ASCII character code less than `0x77`");
 
 						// If we fail to read the hex double, pretend that the user just tried to
 						// escape the character 'x' but failed and treat that as the malformed unit.
@@ -574,10 +601,14 @@ impl<'a> TokenizerCx<'a> {
 						if hex <= 0x7F {
 							Ok(char::from_u32(hex.into()).unwrap())
 						} else {
+							unstuck_builder.rejection_hint(format_args!(
+								"Hex code {}{} is above 0x7F—the maximum allowable ASCII character code.",
+								first, second
+							));
 							Err(recovery)
 						}
 					}
-					'u' | 'U' => todo!("Unicode parsing isn't finished."),
+					'u' | 'U' => todo!("Unicode parsing isn't implemented."),
 
 					// Char escapes
 					'n' => Ok('\n'),
@@ -602,10 +633,14 @@ impl<'a> TokenizerCx<'a> {
 		})
 	}
 
-	fn match_line_comment(&mut self, reader: &mut FileReader<'a>) -> PResult<()> {
+	fn match_line_comment(
+		&mut self,
+		unstuck: &mut CursorUnstuck<FileReader<'a>>,
+		reader: &mut FileReader<'a>,
+	) -> PResult<()> {
 		reader.lookahead(|reader| {
 			// Match "//"
-			self.unstuck.expect(reader, "//");
+			unstuck.expect(reader, "//");
 			self.match_seq(reader, "//")?;
 
 			// Match until end of line or EOF

@@ -29,7 +29,9 @@ pub fn entry() {
 
 	let file = LoadedFile {
 		file_desc: file_desc.weak_copy(),
-		contents: include_bytes!("../samples/driver_example.crew").as_slice().to_owned(),
+		contents: include_bytes!("../samples/driver_example.crew")
+			.as_slice()
+			.to_owned(),
 	};
 
 	// Tokenize
