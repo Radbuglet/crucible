@@ -5,3 +5,4 @@ pub mod linked_list;
 pub mod macros;
 pub mod sync;
 pub mod type_id;
+pub mod wide_option;

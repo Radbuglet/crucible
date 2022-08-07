@@ -2,7 +2,7 @@ use core::cell::{Ref, RefMut, UnsafeCell};
 
 use bytemuck::TransparentWrapper;
 
-use crate::ext::lifetime::try_transform;
+use crate::{ext::lifetime::try_transform, wide_option::WideOption};
 
 // === RefCell extensions === //
 
@@ -13,12 +13,12 @@ where
 	// Thanks to `kpreid` for the awesome insight behind this technique!
 	let backup = Ref::clone(&orig);
 	let mapped = Ref::map(orig, |orig| match f(orig) {
-		Some(mapped) => std::slice::from_ref(mapped),
-		None => &[],
+		Some(mapped) => WideOption::some(mapped),
+		None => WideOption::none(),
 	});
 
-	if mapped.len() > 0 {
-		Ok(Ref::map(mapped, |slice| &slice[0]))
+	if mapped.is_some() {
+		Ok(Ref::map(mapped, |mapped| mapped.unwrap_ref()))
 	} else {
 		Err(backup)
 	}

@@ -19,3 +19,29 @@ pub const unsafe fn entirely_unchecked_transmute<A, B>(a: A) -> B {
 
 	ManuallyDrop::into_inner(punned.b)
 }
+
+pub unsafe fn cast_ref_via_ptr<T, U, F>(val: &T, f: F) -> &U
+where
+	T: ?Sized,
+	U: ?Sized,
+	F: FnOnce(*const T) -> *const U,
+{
+	&*f(val)
+}
+
+pub unsafe fn cast_mut_via_ptr<T, U, F>(val: &mut T, f: F) -> &mut U
+where
+	T: ?Sized,
+	U: ?Sized,
+	F: FnOnce(*mut T) -> *mut U,
+{
+	&mut *f(val)
+}
+
+pub const unsafe fn prolong_ref<T: ?Sized>(val: &T) -> &'static T {
+	&*(val as *const T)
+}
+
+pub unsafe fn prolong_ref_mut<T: ?Sized>(val: &mut T) -> &'static mut T {
+	&mut *(val as *mut T)
+}

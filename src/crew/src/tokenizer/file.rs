@@ -1,6 +1,6 @@
 use super::generic::ForkableCursor;
 use crate::tokenizer::generic::{Atom, Cursor};
-use crate::util::slice::limit_len;
+use crucible_core::slice::limit_len;
 
 use geode::prelude::*;
 

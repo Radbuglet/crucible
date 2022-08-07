@@ -6,5 +6,6 @@ pub mod lifetime;
 pub mod marker;
 pub mod range;
 pub mod result;
+pub mod slice;
 pub mod std_traits;
 pub mod transmute;

@@ -1,8 +1,13 @@
-use std::{cmp::Ordering, ops::DerefMut};
+use std::{
+	cmp::Ordering,
+	ops::{Deref, DerefMut},
+};
 
+use bytemuck::TransparentWrapper;
 use crucible_core::{
 	lifetime::try_transform_or_err,
 	std_traits::{OptionLike, ResultLike},
+	wide_option::WideOption,
 };
 use sealed::sealed;
 use thiserror::Error;
@@ -356,46 +361,186 @@ impl<T> ParsingErrorExt for PResult<T> {}
 #[sealed]
 impl<T> ParsingErrorExt for Option<T> {}
 
-// === CursorRecovery === //
+// === CursorAnnotator === //
 
-#[derive(Debug, Clone)]
-pub struct CursorRecovery<C, M> {
-	pub furthest_cursor: C,
-	pub meta: M,
+#[derive(TransparentWrapper)]
+#[repr(transparent)]
+pub struct CursorAnnotatorOrDrain<C, A>(WideOption<CursorAnnotator<C, A>>);
+
+#[derive(Debug, Clone, Default)]
+pub struct CursorAnnotator<C, A> {
+	pub cursor: C,
+	pub annotation: A,
 }
 
-impl<C: ForkableCursor, M> CursorRecovery<C, M> {
-	pub fn new(cursor: &C, meta: M) -> Self {
+impl<C, A> CursorAnnotator<C, A>
+where
+	C: ForkableCursor,
+{
+	pub fn new_here(cursor: &C, annotation: A) -> Self {
 		Self {
-			furthest_cursor: cursor.clone(),
-			meta,
+			cursor: cursor.clone(),
+			annotation,
 		}
 	}
 
-	pub fn new_one_token_after(cursor: &C, meta: M) -> Self {
+	pub fn new_here_default(cursor: &C) -> Self
+	where
+		A: Default,
+	{
+		Self {
+			cursor: cursor.clone(),
+			annotation: A::default(),
+		}
+	}
+
+	pub fn new_one_after(cursor: &C, annotation: A) -> Self {
 		let mut cursor = cursor.clone();
 		let _ = cursor.consume();
 
-		Self {
-			furthest_cursor: cursor,
-			meta,
-		}
+		Self { cursor, annotation }
 	}
 
-	pub fn propose(&mut self, cursor: &C, meta: M) {
-		if cursor.latest_loc() > self.furthest_cursor.latest_loc() {
-			self.furthest_cursor = cursor.clone();
-			self.meta = meta;
-		}
-	}
-
-	pub fn recover(&self, cursor: &mut C) {
-		debug_assert!(cursor.latest_loc() <= self.furthest_cursor.latest_loc());
-		*cursor = self.furthest_cursor.clone();
+	pub fn new_one_after_default(cursor: &C) -> Self
+	where
+		A: Default,
+	{
+		Self::new_one_after(cursor, A::default())
 	}
 }
 
-pub trait CursorRecoveryExt: ResultLike<Error = CursorRecovery<Self::Cursor, Self::Meta>> {
+impl<C, A> CursorAnnotator<C, A> {
+	pub fn new_drain<'a>() -> &'a mut CursorAnnotatorOrDrain<C, A> {
+		CursorAnnotatorOrDrain::wrap_mut(WideOption::none())
+	}
+}
+
+impl<C, A> Deref for CursorAnnotator<C, A> {
+	type Target = CursorAnnotatorOrDrain<C, A>;
+
+	fn deref(&self) -> &Self::Target {
+		CursorAnnotatorOrDrain::wrap_ref(WideOption::some(self))
+	}
+}
+
+impl<C, A> DerefMut for CursorAnnotator<C, A> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		CursorAnnotatorOrDrain::wrap_mut(WideOption::some_mut(self))
+	}
+}
+
+impl<C, A> CursorAnnotatorOrDrain<C, A> {
+	pub fn is_real(&self) -> bool {
+		self.0.is_some()
+	}
+
+	pub fn is_drain(&self) -> bool {
+		self.0.is_none()
+	}
+
+	pub fn real(&self) -> Option<&CursorAnnotator<C, A>> {
+		self.0.as_option()
+	}
+
+	pub fn real_mut(&mut self) -> Option<&mut CursorAnnotator<C, A>> {
+		self.0.as_option_mut()
+	}
+
+	pub fn allow_bump_if(&mut self, cond: bool) -> &mut Self {
+		if cond {
+			self
+		} else {
+			CursorAnnotator::new_drain()
+		}
+	}
+}
+
+impl<C, A> CursorAnnotatorOrDrain<C, A>
+where
+	C: ForkableCursor,
+{
+	pub fn bump_with_fn<F>(&mut self, cursor: &C, factory: F) -> Option<&mut A>
+	where
+		F: FnOnce() -> A,
+	{
+		let me = match self.real_mut() {
+			Some(me) => me,
+			None => return None,
+		};
+
+		enum AltResult {
+			CmpLess,
+			CmpGreater,
+		}
+
+		let res = try_transform_or_err(&mut me.annotation, |annotation| {
+			match me.cursor.latest_loc().cmp(&cursor.latest_loc()) {
+				Ordering::Less => Err(AltResult::CmpLess),
+				Ordering::Equal => Ok(annotation),
+				Ordering::Greater => Err(AltResult::CmpGreater),
+			}
+		});
+
+		match res {
+			Ok(annotation) => Some(annotation),
+			Err((slot, AltResult::CmpLess)) => {
+				*slot = factory();
+				Some(slot)
+			}
+			Err((_, AltResult::CmpGreater)) => None,
+		}
+	}
+
+	pub fn bump_default(&mut self, cursor: &C) -> Option<&mut A>
+	where
+		A: Default,
+	{
+		self.bump_with_fn(cursor, A::default)
+	}
+}
+
+// === CursorRecovery === //
+
+pub type CursorRecovery<C, M> = CursorAnnotator<C, CursorRecoveryMeta<M>>;
+pub type CursorRecoveryOrDrain<C, M> = CursorAnnotatorOrDrain<C, CursorRecoveryMeta<M>>;
+
+#[derive(Debug, Clone, Default)]
+pub struct CursorRecoveryMeta<M>(pub M);
+
+impl<M> From<M> for CursorRecoveryMeta<M> {
+	fn from(meta: M) -> Self {
+		CursorRecoveryMeta(meta)
+	}
+}
+
+pub trait CursorRecoveryExt {
+	type Cursor;
+	type Meta;
+
+	fn propose(&mut self, cursor: &Self::Cursor, meta: Self::Meta);
+	fn recover(&self, cursor: &mut Self::Cursor);
+}
+
+impl<C, M> CursorRecoveryExt for CursorRecovery<C, M>
+where
+	C: ForkableCursor,
+{
+	type Cursor = C;
+	type Meta = M;
+
+	fn propose(&mut self, cursor: &Self::Cursor, meta: Self::Meta) {
+		self.bump_with_fn(cursor, || CursorRecoveryMeta(meta));
+	}
+
+	fn recover(&self, cursor: &mut Self::Cursor) {
+		debug_assert!(cursor.latest_loc() <= self.cursor.latest_loc());
+		*cursor = self.cursor.clone();
+	}
+}
+
+pub trait CursorRecoveryResultExt:
+	ResultLike<Error = CursorRecovery<Self::Cursor, Self::Meta>>
+{
 	type Cursor: ForkableCursor;
 	type Meta;
 
@@ -408,14 +553,14 @@ pub trait CursorRecoveryExt: ResultLike<Error = CursorRecovery<Self::Cursor, Sel
 		F: FnOnce(Self::Meta) -> M,
 	{
 		self.raw_result().map_err(|err| {
-			let meta = xform_meta(err.meta);
-			recovery.propose(&err.furthest_cursor, meta);
+			let meta = xform_meta(err.annotation.0);
+			recovery.propose(&err.cursor, meta);
 			ParseError
 		})
 	}
 }
 
-impl<T, C: ForkableCursor, M> CursorRecoveryExt for Result<T, CursorRecovery<C, M>> {
+impl<T, C: ForkableCursor, M> CursorRecoveryResultExt for Result<T, CursorRecovery<C, M>> {
 	type Cursor = C;
 	type Meta = M;
 }
@@ -577,164 +722,114 @@ impl<T, C: ForkableCursor, M> CursorRecoveryExt for Result<T, CursorRecovery<C, 
 ///
 /// Of course, this relies on the main tokenizer rejecting identifiers that occur immediately after
 /// a numeric literal.
-#[derive(Debug)]
-pub struct CursorUnstuck<C> {
-	report: Option<UnstuckReport<C>>,
-	locked: bool,
+pub type CursorUnstuck<C> = CursorAnnotator<C, UnstuckReport>;
+
+pub type CursorUnstuckOrDrain<C> = CursorAnnotatorOrDrain<C, UnstuckReport>;
+
+pub trait CursorUnstuckExt {
+	type Cursor;
+
+	fn encountered<D>(&mut self, cursor: &Self::Cursor, what: D)
+	where
+		D: ToString;
+
+	fn rejection_hint<D>(&mut self, cursor: &Self::Cursor, what: D)
+	where
+		D: ToString;
+
+	fn expects<D: ToString>(&mut self, cursor: &Self::Cursor, what: D);
+
+	fn expects_many<D: ToString, I: IntoIterator<Item = D>>(
+		&mut self,
+		cursor: &Self::Cursor,
+		what: I,
+	);
 }
 
-impl<C> Default for CursorUnstuck<C> {
-	fn default() -> Self {
-		Self {
-			report: None,
-			locked: false,
-		}
-	}
-}
+impl<C: ForkableCursor> CursorUnstuckExt for CursorUnstuckOrDrain<C> {
+	type Cursor = C;
 
-impl<C: ForkableCursor> CursorUnstuck<C> {
-	pub fn new() -> Self {
-		Self::default()
-	}
-
-	pub fn null() -> Self {
-		Self {
-			report: None,
-			locked: true,
-		}
-	}
-
-	pub fn bump(&mut self, cursor: &C) -> OptionalUnstuckReport<C> {
-		if self.locked {
-			return OptionalUnstuckReport { inner: None };
-		}
-
-		enum AltResult {
-			CmpLess,
-			CmpGreater,
-		}
-
-		let res = try_transform_or_err(&mut self.report, |report| {
-			match report.as_mut().map(|report| {
-				let cmp = report
-					.furthest_cursor
-					.latest_loc()
-					.cmp(&cursor.latest_loc());
-
-				(report, cmp)
-			}) {
-				Some((_, Ordering::Less)) | None => Err(AltResult::CmpLess),
-				Some((report, Ordering::Equal)) => Ok(report),
-				Some((_, Ordering::Greater)) => Err(AltResult::CmpGreater),
-			}
-		});
-
-		match res {
-			Ok(report) => OptionalUnstuckReport {
-				inner: Some(report),
-			},
-			Err((slot, AltResult::CmpLess)) => {
-				let report = slot.insert(UnstuckReport::new(cursor.clone()));
-
-				OptionalUnstuckReport {
-					inner: Some(report),
-				}
-			}
-			Err((_, AltResult::CmpGreater)) => OptionalUnstuckReport { inner: None },
-		}
-	}
-
-	pub fn encountered<D>(&mut self, cursor: &C, what: D)
+	fn encountered<D>(&mut self, cursor: &C, what: D)
 	where
 		D: ToString,
 	{
-		self.bump(cursor).encountered(what);
+		self.bump_default(cursor).encountered(what);
 	}
 
-	pub fn rejection_hint<D>(&mut self, cursor: &C, what: D)
+	fn rejection_hint<D>(&mut self, cursor: &C, what: D)
 	where
 		D: ToString,
 	{
-		self.bump(cursor).rejection_hint(what);
+		self.bump_default(cursor).rejection_hint(what);
 	}
 
-	pub fn expect<D: ToString>(&mut self, cursor: &C, what: D) {
-		self.bump(cursor).expect(what);
+	fn expects<D: ToString>(&mut self, cursor: &C, what: D) {
+		self.bump_default(cursor).expects(what);
 	}
 
-	pub fn expect_many<D: ToString, I: IntoIterator<Item = D>>(&mut self, cursor: &C, what: I) {
-		let mut bumped = self.bump(cursor);
+	fn expects_many<D: ToString, I: IntoIterator<Item = D>>(&mut self, cursor: &C, what: I) {
+		let mut bumped = self.bump_default(cursor);
 
 		for what in what {
-			bumped.expect(what);
+			bumped.expects(what);
 		}
 	}
 }
 
-impl<C> CursorUnstuck<C> {
-	pub fn unstuck_hint(&self) -> Option<&UnstuckReport<C>> {
-		self.report.as_ref()
-	}
+pub trait CursorUnstuckReportExt {
+	fn encountered<D>(&mut self, what: D) -> &mut Self
+	where
+		D: ToString;
+
+	fn rejection_hint<D>(&mut self, what: D) -> &mut Self
+	where
+		D: ToString;
+
+	fn expects<D>(&mut self, what: D) -> &mut Self
+	where
+		D: ToString;
 }
 
-pub struct OptionalUnstuckReport<'a, C> {
-	pub inner: Option<&'a mut UnstuckReport<C>>,
-}
-
-impl<'a, C> OptionalUnstuckReport<'a, C> {
-	pub fn is_some(&self) -> bool {
-		self.inner.is_some()
-	}
-
-	pub fn encountered<D>(&mut self, what: D) -> &mut Self
+impl<'a> CursorUnstuckReportExt for Option<&'a mut UnstuckReport> {
+	fn encountered<D>(&mut self, what: D) -> &mut Self
 	where
 		D: ToString,
 	{
-		if let Some(inner) = &mut self.inner {
+		if let Some(inner) = self {
 			inner.encountered(what);
 		}
 		self
 	}
 
-	pub fn rejection_hint<D>(&mut self, what: D) -> &mut Self
+	fn rejection_hint<D>(&mut self, what: D) -> &mut Self
 	where
 		D: ToString,
 	{
-		if let Some(inner) = &mut self.inner {
+		if let Some(inner) = self {
 			inner.rejection_hint(what);
 		}
 		self
 	}
 
-	pub fn expect<D>(&mut self, what: D) -> &mut Self
+	fn expects<D>(&mut self, what: D) -> &mut Self
 	where
 		D: ToString,
 	{
-		if let Some(inner) = &mut self.inner {
-			inner.expect(what);
+		if let Some(inner) = self {
+			inner.expects(what);
 		}
 		self
 	}
 }
 
-#[derive(Debug, Clone)]
-pub struct UnstuckReport<C> {
-	pub furthest_cursor: C,
+#[derive(Debug, Clone, Default)]
+pub struct UnstuckReport {
 	pub encountered: Vec<String>,
 	pub rejection_hints: Vec<String>,
 	pub expected: Vec<String>,
 }
 
-impl<C> UnstuckReport<C> {
-	pub fn new(cursor: C) -> Self {
-		Self {
-			furthest_cursor: cursor,
-			expected: Vec::new(),
-			rejection_hints: Vec::new(),
-			encountered: Vec::new(),
-		}
-	}
-
+impl UnstuckReport {
 	pub fn encountered<D>(&mut self, what: D) -> &mut Self
 	where
 		D: ToString,
@@ -751,7 +846,7 @@ impl<C> UnstuckReport<C> {
 		self
 	}
 
-	pub fn expect<D>(&mut self, what: D) -> &mut Self
+	pub fn expects<D>(&mut self, what: D) -> &mut Self
 	where
 		D: ToString,
 	{
