@@ -154,7 +154,15 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 						group.notify_whitespace();
 					}
 					Err(_) => {
-						println!("Parse error! {:?}", unstuck.annotation);
+						println!(
+							"Parse error! {:?}\nRemaining: {}",
+							unstuck.annotation,
+							reader
+								.peek_remaining()
+								.map_while(|(_, atom)| atom.as_codepoint())
+								.collect::<String>()
+						);
+
 						recovery.recover(&mut reader);
 					}
 				}

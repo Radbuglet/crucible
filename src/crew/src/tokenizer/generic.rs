@@ -196,13 +196,13 @@ pub trait ForkableCursor: Cursor + Clone {
 	}
 
 	/// Returns an iterator which drains the remaining atoms from the cursor.
-	fn drain(&mut self) -> CursorDrain<&'_ mut Self> {
+	fn consume_remaining(&mut self) -> CursorDrain<&'_ mut Self> {
 		CursorDrain::new(self)
 	}
 
 	/// Consume `n` atoms and ignore them. Useful for recovery.
 	fn skip(&mut self, n: usize) {
-		for _ in self.drain().take(n) {}
+		for _ in self.consume_remaining().take(n) {}
 	}
 
 	/// Returns an iterator which yields the remaining atoms from the cursor without modifying the
@@ -483,9 +483,11 @@ where
 
 		match res {
 			Ok(annotation) => Some(annotation),
-			Err((slot, AltResult::CmpLess)) => {
-				*slot = factory();
-				Some(slot)
+			Err((annotation, AltResult::CmpLess)) => {
+				me.cursor = cursor.clone();
+				*annotation = factory();
+
+				Some(annotation)
 			}
 			Err((_, AltResult::CmpGreater)) => None,
 		}
