@@ -1,14 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "src/client",
-    "src/common",
+    # "src/client",
+    # "src/common",
     "src/core",
-    "src/crew",
-    "src/geode",
-    "src/sfc-test",
+    # "src/crew",
+    # "src/geode",
+    # "src/sfc-test",
     "src/typed-glam",
-    "src/typed-glam/codegen",
 ]
 
 [profile.release]

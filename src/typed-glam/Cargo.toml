@@ -4,4 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-glam = "0.21.2"
+bytemuck = { version = "1.10.0", features = ["derive"] }
+crucible-core = { path = "../core" }
+glam = { version = "0.21.2", features = ["mint"] }
+mint = "0.5.9"
+num-traits = "0.2.15"

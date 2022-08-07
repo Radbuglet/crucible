@@ -1,3 +1,5 @@
+#![allow(dead_code)] // TODO: Remove
+
 use std::{cell::RefCell, mem::replace, rc::Rc, sync::Arc};
 
 use crucible_core::c_enum::CEnum;
@@ -167,7 +169,7 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 					}
 				}
 			}
-			TokenizerFrame::StrLit(str_lit) => {
+			TokenizerFrame::StrLit(_str_lit) => {
 				let mut recovery = CursorRecovery::new_one_after_default(&reader);
 
 				enum LookaheadRes {
@@ -176,7 +178,7 @@ pub fn tokenize(interner: &mut Interner, file: &LoadedFile) -> TokenGroup {
 					End(FileLoc),
 				}
 
-				let result = reader
+				let _result = reader
 					.lookahead_cases(Err(ParseError))
 					.case(|reader| {
 						let char = cx
@@ -395,7 +397,7 @@ impl<'a> TokenizerCx<'a> {
 
 			// Match digits right of decimal point if relevant to this numeric prefix.
 			let float_part = {
-				let mut unstuck_at_cursor = reader.clone();
+				let unstuck_at_cursor = reader.clone();
 				let can_have_decimal = prefix == NumLitPrefix::ImplicitDecimal;
 
 				// Match decimal point
@@ -866,6 +868,7 @@ impl StrLitFrameBuilder {
 impl StrLitFrameBuilderInner {
 	fn push_token_group(&mut self, cx: &mut TokenizerCx, group: TokenGroup) {
 		self.flush_textual(cx);
+		self.parts.push(TokenStrLitPart::Group(group));
 	}
 
 	fn push_char(&mut self, loc: FileLoc, char: char) {

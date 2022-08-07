@@ -74,6 +74,16 @@ pub macro arr($ctor:expr; $size:expr) {{
 	unsafe { arr.unwrap() }
 }}
 
+pub fn arr_from_iter<T, I: IntoIterator<Item = T>, const N: usize>(iter: I) -> [T; N] {
+	let mut iter = iter.into_iter();
+	let mut count = 0;
+
+	arr![{
+		count += 1;
+		iter.next().unwrap_or_else(|| panic!("Expected {N} element(s); got {}", count - 1))
+	}; N]
+}
+
 // === Boxed array creation === //
 
 pub fn iter_repeat_len<F, T>(f: F, len: usize) -> iter::Take<iter::RepeatWith<F>>
