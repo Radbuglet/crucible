@@ -1,31 +1,33 @@
 use bytemuck::TransparentWrapper;
-use crucible_core::std_traits::ArrayLike;
+use crucible_core::{marker::PhantomInvariant, std_traits::ArrayLike};
 use num_traits::Num;
 
 use std::{
 	any::type_name,
 	fmt, hash,
 	iter::{Product, Sum},
+	marker::PhantomData,
 	ops::{self, Index, IndexMut},
 };
 
 use crate::traits::{
-	floating_vector_forwards, numeric_vector_forwards, signed_vector_forwards, FloatingVector,
-	FloatingVector2, FloatingVector3, FloatingVector4, GlamConvert, IntegerVector, NumericVector,
-	NumericVector2, NumericVector3, NumericVector4, SignedNumericVector2, SignedNumericVector3,
-	SignedNumericVector4, SignedVector,
+	floating_vector_forwards, numeric_vector_forwards, signed_vector_forwards, Dim2, Dim3, Dim4,
+	DimClass, FloatingVector, FloatingVector2, FloatingVector3, FloatingVector4, GlamConvert,
+	IntegerVector, NumericVector, NumericVector2, NumericVector3, NumericVector4,
+	SignedNumericVector2, SignedNumericVector3, SignedNumericVector4, SignedVector,
 };
 
 // === Flavor traits === //
 
 pub trait VecFlavor:
-	FlavorCastFrom<TypedVector<Self>>
+	'static
+	+ FlavorCastFrom<TypedVector<Self>>
 	+ FlavorCastFrom<Self::Backing>
 	+ FlavorCastFrom<<Self::Backing as NumericVector>::Comp>
 {
 	type Backing: NumericVector;
 
-	const NAME: &'static str;
+	const DEBUG_NAME: &'static str;
 }
 
 pub trait FlavorCastFrom<V> {
@@ -46,7 +48,7 @@ pub macro vec_flavor($(
 	impl VecFlavor for $flavor {
 		type Backing = $backing;
 
-		const NAME: &'static str = stringify!($flavor);
+		const DEBUG_NAME: &'static str = stringify!($flavor);
 	}
 
 	impl FlavorCastFrom<TypedVector<$flavor>> for $flavor {
@@ -86,9 +88,15 @@ where
 
 // === TypedVector === //
 
-#[derive(TransparentWrapper)]
+pub type TypedVector<F> = TypedVectorImpl<F, <<F as VecFlavor>::Backing as NumericVector>::Dim>;
+
 #[repr(transparent)]
-pub struct TypedVector<F: ?Sized + VecFlavor>(F::Backing);
+pub struct TypedVectorImpl<F: ?Sized + VecFlavor, D: DimClass> {
+	_ty: PhantomInvariant<D>,
+	vec: F::Backing,
+}
+
+unsafe impl<F: ?Sized + VecFlavor> TransparentWrapper<F::Backing> for TypedVector<F> {}
 
 // TypedVector
 impl<F: ?Sized + VecFlavor> TypedVector<F> {
@@ -128,19 +136,22 @@ impl<F: ?Sized + VecFlavor> GlamConvert for TypedVector<F> {
 
 impl<F: ?Sized + VecFlavor> TypedVector<F> {
 	pub fn to_glam(self) -> F::Backing {
-		self.0
+		self.vec
 	}
 
 	pub fn as_glam(&self) -> &F::Backing {
-		TransparentWrapper::peel_ref(self)
+		&self.vec
 	}
 
 	pub fn as_glam_mut(&mut self) -> &mut F::Backing {
-		TransparentWrapper::peel_mut(self)
+		&mut self.vec
 	}
 
-	pub fn from_glam(glam: F::Backing) -> Self {
-		Self(glam)
+	pub const fn from_glam(vec: F::Backing) -> Self {
+		Self {
+			_ty: PhantomData,
+			vec,
+		}
 	}
 
 	pub fn from_glam_ref(glam: &F::Backing) -> &Self {
@@ -156,14 +167,19 @@ impl<F: ?Sized + VecFlavor> TypedVector<F> {
 impl<F: ?Sized + VecFlavor> fmt::Debug for TypedVector<F> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_tuple(format!("TypedVector<{}>", type_name::<F>()).as_str())
-			.field(&self.0)
+			.field(&self.as_glam())
 			.finish()
 	}
 }
 
 impl<F: ?Sized + VecFlavor> fmt::Display for TypedVector<F> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{}({:?})", F::NAME, self.0.to_array().as_slice())
+		write!(
+			f,
+			"TypedVector<{}>({:?})",
+			F::DEBUG_NAME,
+			self.as_glam().to_array().as_slice()
+		)
 	}
 }
 
@@ -177,13 +193,13 @@ impl<F: ?Sized + VecFlavor> Clone for TypedVector<F> {
 
 impl<F: ?Sized + VecFlavor> PartialEq for TypedVector<F> {
 	fn eq(&self, other: &Self) -> bool {
-		self.0 == other.0
+		self.as_glam() == other.as_glam()
 	}
 }
 
 impl<F: ?Sized + VecFlavor> Default for TypedVector<F> {
 	fn default() -> Self {
-		Self(Default::default())
+		Self::from_glam(Default::default())
 	}
 }
 
@@ -191,40 +207,39 @@ impl<F: ?Sized + VecFlavor> Index<usize> for TypedVector<F> {
 	type Output = <F::Backing as NumericVector>::Comp;
 
 	fn index(&self, index: usize) -> &Self::Output {
-		&self.0[index]
+		&self.as_glam()[index]
 	}
 }
 
 impl<F: ?Sized + VecFlavor> IndexMut<usize> for TypedVector<F> {
 	fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-		&mut self.0[index]
+		&mut self.as_glam_mut()[index]
 	}
 }
 
 impl<'a, F: ?Sized + VecFlavor> Sum<&'a Self> for TypedVector<F> {
 	fn sum<I: Iterator<Item = &'a Self>>(iter: I) -> Self {
-		Self::from_glam(F::Backing::sum(iter.map(|elem| &elem.0)))
+		Self::from_glam(F::Backing::sum(iter.map(|elem| elem.as_glam())))
 	}
 }
 
 impl<'a, F: ?Sized + VecFlavor> Product<&'a Self> for TypedVector<F> {
 	fn product<I: Iterator<Item = &'a Self>>(iter: I) -> Self {
-		Self::from_glam(F::Backing::product(iter.map(|elem| &elem.0)))
+		Self::from_glam(F::Backing::product(iter.map(|elem| elem.as_glam())))
 	}
 }
 
 impl<B, F> NumericVector for TypedVector<F>
 where
-	B: ?Sized + NumericVector,
+	B: NumericVector,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
 	numeric_vector_forwards!();
 
+	type Dim = B::Dim;
 	type Comp = B::Comp;
 	type CompArray = B::CompArray;
 	type Mask = B::Mask;
-
-	const DIM: usize = B::DIM;
 
 	fn unit_axis(index: usize) -> Self {
 		Self::unit_axis(index)
@@ -233,19 +248,19 @@ where
 
 impl<B, F> TypedVector<F>
 where
-	B: ?Sized + NumericVector,
+	B: NumericVector,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	pub const DIM: usize = B::DIM;
-	pub const ZERO: Self = Self(B::ZERO);
-	pub const ONE: Self = Self(B::ONE);
+	pub const ZERO: Self = Self::from_glam(B::ZERO);
+
+	pub const ONE: Self = Self::from_glam(B::ONE);
 
 	pub fn unit_axis(index: usize) -> Self {
-		Self(B::unit_axis(index))
+		Self::from_glam(B::unit_axis(index))
 	}
 
 	pub fn from_array(a: B::CompArray) -> Self {
-		Self(B::from_array(a))
+		Self::from_glam(B::from_array(a))
 	}
 
 	pub fn to_array(&self) -> B::CompArray {
@@ -253,67 +268,67 @@ where
 	}
 
 	pub fn from_slice(slice: &[B::Comp]) -> Self {
-		Self(B::from_slice(slice))
+		Self::from_glam(B::from_slice(slice))
 	}
 
 	pub fn write_to_slice(self, slice: &mut [B::Comp]) {
-		self.0.write_to_slice(slice)
+		self.to_glam().write_to_slice(slice)
 	}
 
 	pub fn splat(v: B::Comp) -> Self {
-		Self(B::splat(v))
+		Self::from_glam(B::splat(v))
 	}
 
 	pub fn select(mask: B::Mask, if_true: Self, if_false: Self) -> Self {
-		Self(B::select(mask, if_true.0, if_false.0))
+		Self::from_glam(B::select(mask, if_true.to_glam(), if_false.to_glam()))
 	}
 
 	pub fn min(self, rhs: Self) -> Self {
-		self.map_glam(|lhs| lhs.min(rhs.0))
+		self.map_glam(|lhs| lhs.min(rhs.to_glam()))
 	}
 
 	pub fn max(self, rhs: Self) -> Self {
-		self.map_glam(|lhs| lhs.max(rhs.0))
+		self.map_glam(|lhs| lhs.max(rhs.to_glam()))
 	}
 
 	pub fn clamp(self, min: Self, max: Self) -> Self {
-		self.map_glam(|val| val.clamp(min.0, max.0))
+		self.map_glam(|val| val.clamp(min.to_glam(), max.to_glam()))
 	}
 
 	pub fn min_element(self) -> B::Comp {
-		self.0.min_element()
+		self.to_glam().min_element()
 	}
 
 	pub fn max_element(self) -> B::Comp {
-		self.0.max_element()
+		self.to_glam().max_element()
 	}
 
 	pub fn cmpeq(self, rhs: Self) -> B::Mask {
-		self.0.cmpeq(rhs.0)
+		self.to_glam().cmpeq(rhs.to_glam())
 	}
 
 	pub fn cmpne(self, rhs: Self) -> B::Mask {
-		self.0.cmpne(rhs.0)
+		self.to_glam().cmpne(rhs.to_glam())
 	}
 
 	pub fn cmpge(self, rhs: Self) -> B::Mask {
-		self.0.cmpge(rhs.0)
+		self.to_glam().cmpge(rhs.to_glam())
 	}
 
 	pub fn cmpgt(self, rhs: Self) -> B::Mask {
-		self.0.cmpgt(rhs.0)
+		self.to_glam().cmpgt(rhs.to_glam())
 	}
 
 	pub fn cmple(self, rhs: Self) -> B::Mask {
-		self.0.cmple(rhs.0)
+		self.to_glam().cmple(rhs.to_glam())
 	}
 
 	pub fn cmplt(self, rhs: Self) -> B::Mask {
-		self.0.cmplt(rhs.0)
+		self.to_glam().cmplt(rhs.to_glam())
 	}
 
 	pub fn dot(self, rhs: Self) -> B::Comp {
-		self.0.dot(rhs.0)
+		self.to_glam().dot(rhs.to_glam())
 	}
 }
 
@@ -325,7 +340,7 @@ where
 	F::Backing: IntegerVector,
 {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		self.0.hash(state);
+		self.as_glam().hash(state);
 	}
 }
 
@@ -371,7 +386,7 @@ where
 	B: ?Sized + SignedVector,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	pub const NEG_ONE: Self = Self(B::NEG_ONE);
+	pub const NEG_ONE: Self = Self::from_glam(B::NEG_ONE);
 
 	pub fn abs(self) -> Self {
 		self.map_glam(|raw| raw.abs())
@@ -396,38 +411,38 @@ where
 	B: ?Sized + FloatingVector,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	pub const NAN: Self = Self(B::NAN);
+	pub const NAN: Self = Self::from_glam(B::NAN);
 
 	pub fn is_finite(self) -> bool {
-		self.0.is_finite()
+		self.to_glam().is_finite()
 	}
 
 	pub fn is_nan(self) -> bool {
-		self.0.is_nan()
+		self.to_glam().is_nan()
 	}
 
 	pub fn is_nan_mask(self) -> B::Mask {
-		self.0.is_nan_mask()
+		self.to_glam().is_nan_mask()
 	}
 
 	pub fn length(self) -> B::Comp {
-		self.0.length()
+		self.to_glam().length()
 	}
 
 	pub fn length_squared(self) -> B::Comp {
-		self.0.length_squared()
+		self.to_glam().length_squared()
 	}
 
 	pub fn length_recip(self) -> B::Comp {
-		self.0.length_recip()
+		self.to_glam().length_recip()
 	}
 
 	pub fn distance(self, rhs: Self) -> B::Comp {
-		self.0.distance(rhs.0)
+		self.to_glam().distance(rhs.to_glam())
 	}
 
 	pub fn distance_squared(self, rhs: Self) -> B::Comp {
-		self.0.distance_squared(rhs.0)
+		self.to_glam().distance_squared(rhs.to_glam())
 	}
 
 	pub fn normalize(self) -> Self {
@@ -435,7 +450,7 @@ where
 	}
 
 	pub fn try_normalize(self) -> Option<Self> {
-		Some(Self(self.0.try_normalize()?))
+		Some(Self::from_glam(self.to_glam().try_normalize()?))
 	}
 
 	pub fn normalize_or_zero(self) -> Self {
@@ -443,23 +458,23 @@ where
 	}
 
 	pub fn is_normalized(self) -> bool {
-		self.0.is_normalized()
+		self.to_glam().is_normalized()
 	}
 
 	pub fn project_onto(self, rhs: Self) -> Self {
-		self.map_glam(|raw| raw.project_onto(rhs.0))
+		self.map_glam(|raw| raw.project_onto(rhs.to_glam()))
 	}
 
 	pub fn reject_from(self, rhs: Self) -> Self {
-		self.map_glam(|raw| raw.reject_from(rhs.0))
+		self.map_glam(|raw| raw.reject_from(rhs.to_glam()))
 	}
 
 	pub fn project_onto_normalized(self, rhs: Self) -> Self {
-		self.map_glam(|raw| raw.project_onto_normalized(rhs.0))
+		self.map_glam(|raw| raw.project_onto_normalized(rhs.to_glam()))
 	}
 
 	pub fn reject_from_normalized(self, rhs: Self) -> Self {
-		self.map_glam(|raw| raw.reject_from_normalized(rhs.0))
+		self.map_glam(|raw| raw.reject_from_normalized(rhs.to_glam()))
 	}
 
 	pub fn round(self) -> Self {
@@ -491,11 +506,11 @@ where
 	}
 
 	pub fn lerp(self, rhs: Self, s: B::Comp) -> Self {
-		self.map_glam(|raw| raw.lerp(rhs.0, s))
+		self.map_glam(|raw| raw.lerp(rhs.to_glam(), s))
 	}
 
 	pub fn abs_diff_eq(self, rhs: Self, max_abs_diff: B::Comp) -> bool {
-		self.0.abs_diff_eq(rhs.0, max_abs_diff)
+		self.to_glam().abs_diff_eq(rhs.to_glam(), max_abs_diff)
 	}
 
 	pub fn clamp_length(self, min: B::Comp, max: B::Comp) -> Self {
@@ -511,7 +526,7 @@ where
 	}
 
 	pub fn mul_add(self, a: Self, b: Self) -> Self {
-		self.map_glam(|raw| raw.mul_add(a.0, b.0))
+		self.map_glam(|raw| raw.mul_add(a.to_glam(), b.to_glam()))
 	}
 }
 
@@ -519,34 +534,79 @@ where
 // TODO: Make this, and other variadic traits, inherent
 impl<B, F> From<(B::Comp, B::Comp)> for TypedVector<F>
 where
-	B: ?Sized + NumericVector2,
+	B: NumericVector2,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
 	fn from(tup: (B::Comp, B::Comp)) -> Self {
-		Self(B::from(tup))
+		Self::from_glam(B::from(tup))
 	}
 }
 
 impl<B, F> From<TypedVector<F>> for (B::Comp, B::Comp)
 where
-	B: ?Sized + NumericVector2,
+	B: NumericVector2,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
 	fn from(vec: TypedVector<F>) -> Self {
-		vec.0.into()
+		vec.to_glam().into()
+	}
+}
+
+impl<B, F> TypedVectorImpl<F, Dim2>
+where
+	B: NumericVector2,
+	F: ?Sized + VecFlavor<Backing = B>,
+{
+	pub const X: Self = Self::from_glam(B::X);
+	pub const Y: Self = Self::from_glam(B::Y);
+
+	pub fn new(x: B::Comp, y: B::Comp) -> Self {
+		Self::from_glam(B::new(x, y))
+	}
+
+	pub fn x(&self) -> B::Comp {
+		self.as_glam().x()
+	}
+
+	pub fn x_mut(&mut self) -> &mut B::Comp {
+		self.as_glam_mut().x_mut()
+	}
+
+	pub fn y(&self) -> B::Comp {
+		self.as_glam().y()
+	}
+
+	pub fn y_mut(&mut self) -> &mut B::Comp {
+		self.as_glam_mut().y_mut()
 	}
 }
 
 impl<B, F> NumericVector2 for TypedVector<F>
 where
-	B: ?Sized + NumericVector2,
+	B: NumericVector2,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	const X: Self = Self(B::X);
-	const Y: Self = Self(B::Y);
+	const X: Self = Self::X;
+	const Y: Self = Self::Y;
 
 	fn new(x: B::Comp, y: B::Comp) -> Self {
-		Self(B::new(x, y))
+		Self::new(x, y)
+	}
+
+	fn x(&self) -> Self::Comp {
+		self.x()
+	}
+
+	fn x_mut(&mut self) -> &mut Self::Comp {
+		self.x_mut()
+	}
+
+	fn y(&self) -> Self::Comp {
+		self.y()
+	}
+
+	fn y_mut(&mut self) -> &mut Self::Comp {
+		self.y_mut()
 	}
 }
 
@@ -556,46 +616,112 @@ where
 	B: ?Sized + SignedNumericVector2,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	const NEG_X: Self = Self(B::NEG_X);
-	const NEG_Y: Self = Self(B::NEG_Y);
+	const NEG_X: Self = Self::from_glam(B::NEG_X);
+	const NEG_Y: Self = Self::from_glam(B::NEG_Y);
 }
 
 // NumericVector3
 impl<B, F> From<(B::Comp, B::Comp, B::Comp)> for TypedVector<F>
 where
-	B: ?Sized + NumericVector3,
+	B: NumericVector3,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
 	fn from(tup: (B::Comp, B::Comp, B::Comp)) -> Self {
-		Self(B::from(tup))
+		Self::from_glam(B::from(tup))
 	}
 }
 
 impl<B, F> From<TypedVector<F>> for (B::Comp, B::Comp, B::Comp)
 where
-	B: ?Sized + NumericVector3,
+	B: NumericVector3,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
 	fn from(vec: TypedVector<F>) -> Self {
-		vec.0.into()
+		vec.to_glam().into()
+	}
+}
+
+impl<B, F> TypedVectorImpl<F, Dim3>
+where
+	B: NumericVector3,
+	F: ?Sized + VecFlavor<Backing = B>,
+{
+	pub const X: Self = Self::from_glam(B::X);
+	pub const Y: Self = Self::from_glam(B::Y);
+	pub const Z: Self = Self::from_glam(B::Z);
+
+	pub fn new(x: B::Comp, y: B::Comp, z: B::Comp) -> Self {
+		Self::from_glam(B::new(x, y, z))
+	}
+
+	pub fn cross(self, rhs: Self) -> Self {
+		self.map_glam(|raw| raw.cross(rhs.to_glam()))
+	}
+
+	pub fn x(&self) -> B::Comp {
+		self.as_glam().x()
+	}
+
+	pub fn x_mut(&mut self) -> &mut B::Comp {
+		self.as_glam_mut().x_mut()
+	}
+
+	pub fn y(&self) -> B::Comp {
+		self.as_glam().y()
+	}
+
+	pub fn y_mut(&mut self) -> &mut B::Comp {
+		self.as_glam_mut().y_mut()
+	}
+
+	pub fn z(&self) -> B::Comp {
+		self.as_glam().z()
+	}
+
+	pub fn z_mut(&mut self) -> &mut B::Comp {
+		self.as_glam_mut().z_mut()
 	}
 }
 
 impl<B, F> NumericVector3 for TypedVector<F>
 where
-	B: ?Sized + NumericVector3,
+	B: NumericVector3,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	const X: Self = Self(B::X);
-	const Y: Self = Self(B::Y);
-	const Z: Self = Self(B::Z);
+	const X: Self = Self::X;
+	const Y: Self = Self::Y;
+	const Z: Self = Self::Z;
 
 	fn new(x: B::Comp, y: B::Comp, z: B::Comp) -> Self {
-		Self(B::new(x, y, z))
+		Self::new(x, y, z)
 	}
 
 	fn cross(self, rhs: Self) -> Self {
-		self.map_glam(|raw| raw.cross(rhs.0))
+		self.cross(rhs)
+	}
+
+	fn x(&self) -> Self::Comp {
+		self.x()
+	}
+
+	fn x_mut(&mut self) -> &mut Self::Comp {
+		self.x_mut()
+	}
+
+	fn y(&self) -> Self::Comp {
+		self.y()
+	}
+
+	fn y_mut(&mut self) -> &mut Self::Comp {
+		self.y_mut()
+	}
+
+	fn z(&self) -> Self::Comp {
+		self.z()
+	}
+
+	fn z_mut(&mut self) -> &mut Self::Comp {
+		self.z_mut()
 	}
 }
 
@@ -605,44 +731,123 @@ where
 	B: ?Sized + SignedNumericVector3,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	const NEG_X: Self = Self(B::NEG_X);
-	const NEG_Y: Self = Self(B::NEG_Y);
-	const NEG_Z: Self = Self(B::NEG_Z);
+	const NEG_X: Self = Self::from_glam(B::NEG_X);
+	const NEG_Y: Self = Self::from_glam(B::NEG_Y);
+	const NEG_Z: Self = Self::from_glam(B::NEG_Z);
 }
 
 // NumericVector4
 impl<B, F> From<(B::Comp, B::Comp, B::Comp, B::Comp)> for TypedVector<F>
 where
-	B: ?Sized + NumericVector4,
+	B: NumericVector4,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
 	fn from(tup: (B::Comp, B::Comp, B::Comp, B::Comp)) -> Self {
-		Self(B::from(tup))
+		Self::from_glam(B::from(tup))
 	}
 }
 
 impl<B, F> From<TypedVector<F>> for (B::Comp, B::Comp, B::Comp, B::Comp)
 where
-	B: ?Sized + NumericVector4,
+	B: NumericVector4,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
 	fn from(vec: TypedVector<F>) -> Self {
-		vec.0.into()
+		vec.to_glam().into()
 	}
 }
 
-impl<B, F> NumericVector4 for TypedVector<F>
+impl<B, F> TypedVectorImpl<F, Dim4>
 where
-	B: ?Sized + NumericVector4,
+	B: NumericVector4,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	const X: Self = Self(B::X);
-	const Y: Self = Self(B::Y);
-	const Z: Self = Self(B::Z);
-	const W: Self = Self(B::W);
+	pub const X: Self = Self::from_glam(B::X);
+	pub const Y: Self = Self::from_glam(B::Y);
+	pub const Z: Self = Self::from_glam(B::Z);
+	pub const W: Self = Self::from_glam(B::W);
+
+	pub fn new(x: B::Comp, y: B::Comp, z: B::Comp, w: B::Comp) -> Self {
+		Self::from_glam(B::new(x, y, z, w))
+	}
+
+	pub fn x(&self) -> B::Comp {
+		self.as_glam().x()
+	}
+
+	pub fn x_mut(&mut self) -> &mut B::Comp {
+		self.as_glam_mut().x_mut()
+	}
+
+	pub fn y(&self) -> B::Comp {
+		self.as_glam().y()
+	}
+
+	pub fn y_mut(&mut self) -> &mut B::Comp {
+		self.as_glam_mut().y_mut()
+	}
+
+	pub fn z(&self) -> B::Comp {
+		self.as_glam().z()
+	}
+
+	pub fn z_mut(&mut self) -> &mut B::Comp {
+		self.as_glam_mut().z_mut()
+	}
+
+	pub fn w(&self) -> B::Comp {
+		self.as_glam().w()
+	}
+
+	pub fn w_mut(&mut self) -> &mut B::Comp {
+		self.as_glam_mut().w_mut()
+	}
+}
+
+impl<B, F> NumericVector4 for TypedVectorImpl<F, Dim4>
+where
+	B: NumericVector4,
+	F: ?Sized + VecFlavor<Backing = B>,
+{
+	const X: Self = Self::X;
+	const Y: Self = Self::Y;
+	const Z: Self = Self::Z;
+	const W: Self = Self::W;
 
 	fn new(x: Self::Comp, y: Self::Comp, z: Self::Comp, w: Self::Comp) -> Self {
-		Self(B::new(x, y, z, w))
+		Self::new(x, y, z, w)
+	}
+
+	fn x(&self) -> Self::Comp {
+		self.x()
+	}
+
+	fn x_mut(&mut self) -> &mut Self::Comp {
+		self.x_mut()
+	}
+
+	fn y(&self) -> Self::Comp {
+		self.y()
+	}
+
+	fn y_mut(&mut self) -> &mut Self::Comp {
+		self.y_mut()
+	}
+
+	fn z(&self) -> Self::Comp {
+		self.z()
+	}
+
+	fn z_mut(&mut self) -> &mut Self::Comp {
+		self.z_mut()
+	}
+
+	fn w(&self) -> Self::Comp {
+		self.w()
+	}
+
+	fn w_mut(&mut self) -> &mut Self::Comp {
+		self.w_mut()
 	}
 }
 
@@ -652,10 +857,10 @@ where
 	B: ?Sized + SignedNumericVector4,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	const NEG_X: Self = Self(B::NEG_X);
-	const NEG_Y: Self = Self(B::NEG_Y);
-	const NEG_Z: Self = Self(B::NEG_Z);
-	const NEG_W: Self = Self(B::NEG_W);
+	const NEG_X: Self = Self::from_glam(B::NEG_X);
+	const NEG_Y: Self = Self::from_glam(B::NEG_Y);
+	const NEG_Z: Self = Self::from_glam(B::NEG_Z);
+	const NEG_W: Self = Self::from_glam(B::NEG_W);
 }
 
 // FloatingVector2
@@ -665,11 +870,11 @@ where
 	F: ?Sized + VecFlavor<Backing = B>,
 {
 	fn from_angle(angle: Self::Comp) -> Self {
-		Self(B::from_angle(angle))
+		Self::from_glam(B::from_angle(angle))
 	}
 
 	fn angle_between(self, rhs: Self) -> Self::Comp {
-		self.0.angle_between(rhs.0)
+		self.to_glam().angle_between(rhs.to_glam())
 	}
 
 	fn perp(self) -> Self {
@@ -677,11 +882,11 @@ where
 	}
 
 	fn perp_dot(self, rhs: Self) -> Self::Comp {
-		self.0.perp_dot(rhs.0)
+		self.to_glam().perp_dot(rhs.to_glam())
 	}
 
 	fn rotate(self, rhs: Self) -> Self {
-		self.map_glam(|raw| raw.rotate(rhs.0))
+		self.map_glam(|raw| raw.rotate(rhs.to_glam()))
 	}
 }
 
@@ -692,20 +897,20 @@ where
 	F: ?Sized + VecFlavor<Backing = B>,
 {
 	fn angle_between(self, rhs: Self) -> Self::Comp {
-		self.0.angle_between(rhs.0)
+		self.to_glam().angle_between(rhs.to_glam())
 	}
 
 	fn any_orthogonal_vector(&self) -> Self {
-		Self(self.0.any_orthogonal_vector())
+		Self::from_glam(self.as_glam().any_orthogonal_vector())
 	}
 
 	fn any_orthonormal_vector(&self) -> Self {
-		Self(self.0.any_orthonormal_vector())
+		Self::from_glam(self.as_glam().any_orthonormal_vector())
 	}
 
 	fn any_orthonormal_pair(&self) -> (Self, Self) {
-		let (a, b) = self.0.any_orthonormal_pair();
-		(Self(a), Self(b))
+		let (a, b) = self.as_glam().any_orthonormal_pair();
+		(Self::from_glam(a), Self::from_glam(b))
 	}
 }
 
@@ -728,7 +933,7 @@ macro derive_bin_ops(
 ) {$(
 	impl<B, F, R> ops::$trait<R> for TypedVector<F>
 	where
-		B: ?Sized + NumericVector $(+ $extra_trait)?,
+		B: NumericVector $(+ $extra_trait)?,
 		F: ?Sized + VecFlavor<Backing = B> + FlavorCastFrom<R>,
 	{
 		type Output = Self;
@@ -746,7 +951,7 @@ macro derive_bin_ops(
 			F: ?Sized + VecFlavor + FlavorCastFrom<R>,
 		{
 			fn $fn_assign(&mut self, rhs: R) {
-				ops::$trait_assign::$fn_assign(&mut self.0, F::addend_from(rhs).to_glam());
+				ops::$trait_assign::$fn_assign(self.as_glam_mut(), F::addend_from(rhs).to_glam());
 			}
 		}
 	)?
@@ -777,7 +982,7 @@ where
 	type Output = Self;
 
 	fn not(self) -> Self::Output {
-		Self(ops::Not::not(self.0))
+		self.map_glam(ops::Not::not)
 	}
 }
 
@@ -790,6 +995,6 @@ where
 	type Output = Self;
 
 	fn neg(self) -> Self::Output {
-		Self(ops::Neg::neg(self.0))
+		self.map_glam(ops::Neg::neg)
 	}
 }

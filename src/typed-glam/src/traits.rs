@@ -11,6 +11,36 @@ use std::{
 use crucible_core::std_traits::ArrayLike;
 use num_traits::Num;
 
+// === Dim class === //
+
+pub trait DimClass: Sized + 'static {
+	const DIM: usize;
+}
+
+pub struct Dim2 {
+	_private: (),
+}
+
+impl DimClass for Dim2 {
+	const DIM: usize = 2;
+}
+
+pub struct Dim3 {
+	_private: (),
+}
+
+impl DimClass for Dim3 {
+	const DIM: usize = 3;
+}
+
+pub struct Dim4 {
+	_private: (),
+}
+
+impl DimClass for Dim4 {
+	const DIM: usize = 4;
+}
+
 // === Definitions === //
 
 pub trait GlamConvert: Sized {
@@ -51,7 +81,8 @@ pub trait GlamConvert: Sized {
 // TODO: BoolVector trait
 
 pub trait NumericVector:
-	Debug
+	'static
+	+ Debug
 	+ Display
 	+ Copy
 	+ PartialEq
@@ -70,22 +101,18 @@ pub trait NumericVector:
 	+ IndexMut<usize>
 	+ for<'a> Sum<&'a Self>
 	+ for<'a> Product<&'a Self>
-	// TODO
-	// + IntoMint
-	// + From<Self::CompArray>
 	+ GlamConvert
 {
 	// Types
+	type Dim: DimClass;
 	type Comp: Debug + Display + Num; // TODO: Narrow these bounds a bit more.
 	type CompArray: ArrayLike<Elem = Self::Comp>;
 	type Mask;
 
 	// Constants
-	const DIM: usize;
 	const ZERO: Self;
 	const ONE: Self;
 
-	// TODO: Convert to a const-friendly array once things stabilize.
 	fn unit_axis(index: usize) -> Self;
 
 	// Constructors
@@ -109,8 +136,6 @@ pub trait NumericVector:
 	fn cmpgt(self, rhs: Self) -> Self::Mask;
 	fn cmple(self, rhs: Self) -> Self::Mask;
 	fn cmplt(self, rhs: Self) -> Self::Mask;
-
-	// TODO: Component getters (both generic and variadic aliases)
 
 	// Woo! Inner products!
 	fn dot(self, rhs: Self) -> Self::Comp;
@@ -173,12 +198,18 @@ pub trait FloatingVector: SignedVector {
 }
 
 pub trait NumericVector2:
-	NumericVector + From<(Self::Comp, Self::Comp)> + Into<(Self::Comp, Self::Comp)>
+	NumericVector<Dim = Dim2> + From<(Self::Comp, Self::Comp)> + Into<(Self::Comp, Self::Comp)>
 {
 	const X: Self;
 	const Y: Self;
 
 	fn new(x: Self::Comp, y: Self::Comp) -> Self;
+
+	fn x(&self) -> Self::Comp;
+	fn x_mut(&mut self) -> &mut Self::Comp;
+
+	fn y(&self) -> Self::Comp;
+	fn y_mut(&mut self) -> &mut Self::Comp;
 }
 
 pub trait SignedNumericVector2: NumericVector2 {
@@ -187,7 +218,7 @@ pub trait SignedNumericVector2: NumericVector2 {
 }
 
 pub trait NumericVector3:
-	NumericVector
+	NumericVector<Dim = Dim3>
 	+ From<(Self::Comp, Self::Comp, Self::Comp)>
 	+ Into<(Self::Comp, Self::Comp, Self::Comp)>
 {
@@ -197,6 +228,15 @@ pub trait NumericVector3:
 
 	fn new(x: Self::Comp, y: Self::Comp, z: Self::Comp) -> Self;
 	fn cross(self, rhs: Self) -> Self;
+
+	fn x(&self) -> Self::Comp;
+	fn x_mut(&mut self) -> &mut Self::Comp;
+
+	fn y(&self) -> Self::Comp;
+	fn y_mut(&mut self) -> &mut Self::Comp;
+
+	fn z(&self) -> Self::Comp;
+	fn z_mut(&mut self) -> &mut Self::Comp;
 }
 
 pub trait SignedNumericVector3: NumericVector3 {
@@ -206,7 +246,7 @@ pub trait SignedNumericVector3: NumericVector3 {
 }
 
 pub trait NumericVector4:
-	NumericVector
+	NumericVector<Dim = Dim4>
 	+ From<(Self::Comp, Self::Comp, Self::Comp, Self::Comp)>
 	+ Into<(Self::Comp, Self::Comp, Self::Comp, Self::Comp)>
 {
@@ -216,6 +256,18 @@ pub trait NumericVector4:
 	const W: Self;
 
 	fn new(x: Self::Comp, y: Self::Comp, z: Self::Comp, w: Self::Comp) -> Self;
+
+	fn x(&self) -> Self::Comp;
+	fn x_mut(&mut self) -> &mut Self::Comp;
+
+	fn y(&self) -> Self::Comp;
+	fn y_mut(&mut self) -> &mut Self::Comp;
+
+	fn z(&self) -> Self::Comp;
+	fn z_mut(&mut self) -> &mut Self::Comp;
+
+	fn w(&self) -> Self::Comp;
+	fn w_mut(&mut self) -> &mut Self::Comp;
 }
 
 pub trait SignedNumericVector4: NumericVector4 {
@@ -373,15 +425,14 @@ pub(crate) macro numeric_vector_forwards() {
 }
 
 macro impl_numeric_vector(
-	$($ty:ty, $bool_ty:ty, $comp:ty, $dim:expr);
+	$($ty:ty, $bool_ty:ty, $comp:ty, $dim:ty);
 	*$(;)?
 ) {$(
 	impl NumericVector for $ty {
+		type Dim = $dim;
 		type Comp = $comp;
-		type CompArray = [Self::Comp; $dim];
+		type CompArray = [Self::Comp; <$dim as DimClass>::DIM];
 		type Mask = $bool_ty;
-
-		const DIM: usize = $dim;
 
 		fn unit_axis(index: usize) -> Self {
 			<$ty>::AXES[index]
@@ -392,19 +443,19 @@ macro impl_numeric_vector(
 )*}
 
 impl_numeric_vector!(
-	glam::Vec2,  glam::BVec2,  f32,  2;
-	glam::Vec3,  glam::BVec3,  f32,  3;
-	glam::Vec3A, glam::BVec3A, f32,  3;
-	glam::Vec4,  glam::BVec4A, f32,  4;
-	glam::DVec2, glam::BVec2,  f64,  2;
-	glam::DVec3, glam::BVec3,  f64,  3;
-	glam::DVec4, glam::BVec4,  f64,  4;
-	glam::IVec2, glam::BVec2,  i32,  2;
-	glam::IVec3, glam::BVec3,  i32,  3;
-	glam::IVec4, glam::BVec4,  i32,  4;
-	glam::UVec2, glam::BVec2,  u32,  2;
-	glam::UVec3, glam::BVec3,  u32,  3;
-	glam::UVec4, glam::BVec4,  u32,  4;
+	glam::Vec2,  glam::BVec2,  f32,  Dim2;
+	glam::Vec3,  glam::BVec3,  f32,  Dim3;
+	glam::Vec3A, glam::BVec3A, f32,  Dim3;
+	glam::Vec4,  glam::BVec4A, f32,  Dim4;
+	glam::DVec2, glam::BVec2,  f64,  Dim2;
+	glam::DVec3, glam::BVec3,  f64,  Dim3;
+	glam::DVec4, glam::BVec4,  f64,  Dim4;
+	glam::IVec2, glam::BVec2,  i32,  Dim2;
+	glam::IVec3, glam::BVec3,  i32,  Dim3;
+	glam::IVec4, glam::BVec4,  i32,  Dim4;
+	glam::UVec2, glam::BVec2,  u32,  Dim2;
+	glam::UVec3, glam::BVec3,  u32,  Dim3;
+	glam::UVec4, glam::BVec4,  u32,  Dim4;
 );
 
 macro impl_integer_vector($($ty:ty),*$(,)?) {$(
@@ -603,6 +654,22 @@ macro impl_numeric_vector_2($($ty:ty),*$(,)?) {$(
 		fn new(x: Self::Comp, y: Self::Comp) -> Self {
 			Self::new(x, y)
 		}
+
+		fn x(&self) -> Self::Comp {
+			self.x
+		}
+
+		fn x_mut(&mut self) -> &mut Self::Comp {
+			&mut self.x
+		}
+
+		fn y(&self) -> Self::Comp {
+			self.y
+		}
+
+		fn y_mut(&mut self) -> &mut Self::Comp {
+			&mut self.y
+		}
 	}
 )*}
 
@@ -629,6 +696,30 @@ macro impl_numeric_vector_3($($ty:ty),*$(,)?) {$(
 
 		fn cross(self, rhs: Self) -> Self {
 			self.cross(rhs)
+		}
+
+		fn x(&self) -> Self::Comp {
+			self.x
+		}
+
+		fn x_mut(&mut self) -> &mut Self::Comp {
+			&mut self.x
+		}
+
+		fn y(&self) -> Self::Comp {
+			self.y
+		}
+
+		fn y_mut(&mut self) -> &mut Self::Comp {
+			&mut self.y
+		}
+
+		fn z(&self) -> Self::Comp {
+			self.z
+		}
+
+		fn z_mut(&mut self) -> &mut Self::Comp {
+			&mut self.z
 		}
 	}
 )*}
@@ -660,6 +751,38 @@ macro impl_numeric_vector_4($($ty:ty),*$(,)?) {$(
 
 		fn new(x: Self::Comp, y: Self::Comp, z: Self::Comp, w: Self::Comp) -> Self {
 			Self::new(x, y, z, w)
+		}
+
+		fn x(&self) -> Self::Comp {
+			self.x
+		}
+
+		fn x_mut(&mut self) -> &mut Self::Comp {
+			&mut self.x
+		}
+
+		fn y(&self) -> Self::Comp {
+			self.y
+		}
+
+		fn y_mut(&mut self) -> &mut Self::Comp {
+			&mut self.y
+		}
+
+		fn z(&self) -> Self::Comp {
+			self.z
+		}
+
+		fn z_mut(&mut self) -> &mut Self::Comp {
+			&mut self.z
+		}
+
+		fn w(&self) -> Self::Comp {
+			self.w
+		}
+
+		fn w_mut(&mut self) -> &mut Self::Comp {
+			&mut self.w
 		}
 	}
 )*}
