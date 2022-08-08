@@ -1,5 +1,6 @@
 use bytemuck::TransparentWrapper;
 use crucible_core::std_traits::ArrayLike;
+use num_traits::Num;
 
 use std::{
 	any::type_name,
@@ -9,9 +10,10 @@ use std::{
 };
 
 use crate::traits::{
-	FloatingVector, FloatingVector2, FloatingVector3, FloatingVector4, GlamConvert, IntegerVector,
-	NumericVector, NumericVector2, NumericVector3, NumericVector4, SignedNumericVector2,
-	SignedNumericVector3, SignedNumericVector4, SignedVector,
+	floating_vector_forwards, numeric_vector_forwards, signed_vector_forwards, FloatingVector,
+	FloatingVector2, FloatingVector3, FloatingVector4, GlamConvert, IntegerVector, NumericVector,
+	NumericVector2, NumericVector3, NumericVector4, SignedNumericVector2, SignedNumericVector3,
+	SignedNumericVector4, SignedVector,
 };
 
 // === Flavor traits === //
@@ -67,8 +69,6 @@ pub macro vec_flavor($(
 )*}
 
 // === TypedVector === //
-
-// TODO: `TypedVector` inherent `impl`s
 
 #[derive(TransparentWrapper)]
 #[repr(transparent)]
@@ -153,87 +153,101 @@ where
 	B: ?Sized + NumericVector,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
+	numeric_vector_forwards!();
+
 	type Comp = B::Comp;
 	type CompArray = B::CompArray;
 	type Mask = B::Mask;
 
 	const DIM: usize = B::DIM;
-	const ZERO: Self = Self(B::ZERO);
-	const ONE: Self = Self(B::ONE);
 
 	fn unit_axis(index: usize) -> Self {
+		Self::unit_axis(index)
+	}
+}
+
+impl<B, F> TypedVector<F>
+where
+	B: ?Sized + NumericVector,
+	F: ?Sized + VecFlavor<Backing = B>,
+{
+	pub const DIM: usize = B::DIM;
+	pub const ZERO: Self = Self(B::ZERO);
+	pub const ONE: Self = Self(B::ONE);
+
+	pub fn unit_axis(index: usize) -> Self {
 		Self(B::unit_axis(index))
 	}
 
-	fn from_array(a: Self::CompArray) -> Self {
+	pub fn from_array(a: B::CompArray) -> Self {
 		Self(B::from_array(a))
 	}
 
-	fn to_array(&self) -> Self::CompArray {
+	pub fn to_array(&self) -> B::CompArray {
 		self.to_glam().to_array()
 	}
 
-	fn from_slice(slice: &[Self::Comp]) -> Self {
+	pub fn from_slice(slice: &[B::Comp]) -> Self {
 		Self(B::from_slice(slice))
 	}
 
-	fn write_to_slice(self, slice: &mut [Self::Comp]) {
+	pub fn write_to_slice(self, slice: &mut [B::Comp]) {
 		self.0.write_to_slice(slice)
 	}
 
-	fn splat(v: Self::Comp) -> Self {
+	pub fn splat(v: B::Comp) -> Self {
 		Self(B::splat(v))
 	}
 
-	fn select(mask: Self::Mask, if_true: Self, if_false: Self) -> Self {
+	pub fn select(mask: B::Mask, if_true: Self, if_false: Self) -> Self {
 		Self(B::select(mask, if_true.0, if_false.0))
 	}
 
-	fn min(self, rhs: Self) -> Self {
+	pub fn min(self, rhs: Self) -> Self {
 		self.map_glam(|lhs| lhs.min(rhs.0))
 	}
 
-	fn max(self, rhs: Self) -> Self {
+	pub fn max(self, rhs: Self) -> Self {
 		self.map_glam(|lhs| lhs.max(rhs.0))
 	}
 
-	fn clamp(self, min: Self, max: Self) -> Self {
+	pub fn clamp(self, min: Self, max: Self) -> Self {
 		self.map_glam(|val| val.clamp(min.0, max.0))
 	}
 
-	fn min_element(self) -> Self::Comp {
+	pub fn min_element(self) -> B::Comp {
 		self.0.min_element()
 	}
 
-	fn max_element(self) -> Self::Comp {
+	pub fn max_element(self) -> B::Comp {
 		self.0.max_element()
 	}
 
-	fn cmpeq(self, rhs: Self) -> Self::Mask {
+	pub fn cmpeq(self, rhs: Self) -> B::Mask {
 		self.0.cmpeq(rhs.0)
 	}
 
-	fn cmpne(self, rhs: Self) -> Self::Mask {
+	pub fn cmpne(self, rhs: Self) -> B::Mask {
 		self.0.cmpne(rhs.0)
 	}
 
-	fn cmpge(self, rhs: Self) -> Self::Mask {
+	pub fn cmpge(self, rhs: Self) -> B::Mask {
 		self.0.cmpge(rhs.0)
 	}
 
-	fn cmpgt(self, rhs: Self) -> Self::Mask {
+	pub fn cmpgt(self, rhs: Self) -> B::Mask {
 		self.0.cmpgt(rhs.0)
 	}
 
-	fn cmple(self, rhs: Self) -> Self::Mask {
+	pub fn cmple(self, rhs: Self) -> B::Mask {
 		self.0.cmple(rhs.0)
 	}
 
-	fn cmplt(self, rhs: Self) -> Self::Mask {
+	pub fn cmplt(self, rhs: Self) -> B::Mask {
 		self.0.cmplt(rhs.0)
 	}
 
-	fn dot(self, rhs: Self) -> Self::Comp {
+	pub fn dot(self, rhs: Self) -> B::Comp {
 		self.0.dot(rhs.0)
 	}
 }
@@ -255,21 +269,51 @@ where
 	B: ?Sized + IntegerVector,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
+	fn shl_prim<N: Num>(self, v: N) -> Self {
+		self.shl_prim(v)
+	}
+
+	fn shr_prim<N: Num>(self, v: N) -> Self {
+		self.shr_prim(v)
+	}
+}
+
+impl<B, F> TypedVector<F>
+where
+	B: ?Sized + IntegerVector,
+	F: ?Sized + VecFlavor<Backing = B>,
+{
+	fn shl_prim<N: Num>(self, v: N) -> Self {
+		self.map_glam(|raw| raw.shl_prim(v))
+	}
+
+	fn shr_prim<N: Num>(self, v: N) -> Self {
+		self.map_glam(|raw| raw.shr_prim(v))
+	}
 }
 
 // SignedVector
+
 impl<B, F> SignedVector for TypedVector<F>
 where
 	B: ?Sized + SignedVector,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	const NEG_ONE: Self = Self(B::NEG_ONE);
+	signed_vector_forwards!();
+}
 
-	fn abs(self) -> Self {
+impl<B, F> TypedVector<F>
+where
+	B: ?Sized + SignedVector,
+	F: ?Sized + VecFlavor<Backing = B>,
+{
+	pub const NEG_ONE: Self = Self(B::NEG_ONE);
+
+	pub fn abs(self) -> Self {
 		self.map_glam(|raw| raw.abs())
 	}
 
-	fn signum(self) -> Self {
+	pub fn signum(self) -> Self {
 		self.map_glam(|raw| raw.signum())
 	}
 }
@@ -280,126 +324,135 @@ where
 	B: ?Sized + FloatingVector,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	const NAN: Self = Self(B::NAN);
+	floating_vector_forwards!();
+}
 
-	fn is_finite(self) -> bool {
+impl<B, F> TypedVector<F>
+where
+	B: ?Sized + FloatingVector,
+	F: ?Sized + VecFlavor<Backing = B>,
+{
+	pub const NAN: Self = Self(B::NAN);
+
+	pub fn is_finite(self) -> bool {
 		self.0.is_finite()
 	}
 
-	fn is_nan(self) -> bool {
+	pub fn is_nan(self) -> bool {
 		self.0.is_nan()
 	}
 
-	fn is_nan_mask(self) -> Self::Mask {
+	pub fn is_nan_mask(self) -> B::Mask {
 		self.0.is_nan_mask()
 	}
 
-	fn length(self) -> Self::Comp {
+	pub fn length(self) -> B::Comp {
 		self.0.length()
 	}
 
-	fn length_squared(self) -> Self::Comp {
+	pub fn length_squared(self) -> B::Comp {
 		self.0.length_squared()
 	}
 
-	fn length_recip(self) -> Self::Comp {
+	pub fn length_recip(self) -> B::Comp {
 		self.0.length_recip()
 	}
 
-	fn distance(self, rhs: Self) -> Self::Comp {
+	pub fn distance(self, rhs: Self) -> B::Comp {
 		self.0.distance(rhs.0)
 	}
 
-	fn distance_squared(self, rhs: Self) -> Self::Comp {
+	pub fn distance_squared(self, rhs: Self) -> B::Comp {
 		self.0.distance_squared(rhs.0)
 	}
 
-	fn normalize(self) -> Self {
+	pub fn normalize(self) -> Self {
 		self.map_glam(|raw| raw.normalize())
 	}
 
-	fn try_normalize(self) -> Option<Self> {
+	pub fn try_normalize(self) -> Option<Self> {
 		Some(Self(self.0.try_normalize()?))
 	}
 
-	fn normalize_or_zero(self) -> Self {
+	pub fn normalize_or_zero(self) -> Self {
 		self.map_glam(|raw| raw.normalize_or_zero())
 	}
 
-	fn is_normalized(self) -> bool {
+	pub fn is_normalized(self) -> bool {
 		self.0.is_normalized()
 	}
 
-	fn project_onto(self, rhs: Self) -> Self {
+	pub fn project_onto(self, rhs: Self) -> Self {
 		self.map_glam(|raw| raw.project_onto(rhs.0))
 	}
 
-	fn reject_from(self, rhs: Self) -> Self {
+	pub fn reject_from(self, rhs: Self) -> Self {
 		self.map_glam(|raw| raw.reject_from(rhs.0))
 	}
 
-	fn project_onto_normalized(self, rhs: Self) -> Self {
+	pub fn project_onto_normalized(self, rhs: Self) -> Self {
 		self.map_glam(|raw| raw.project_onto_normalized(rhs.0))
 	}
 
-	fn reject_from_normalized(self, rhs: Self) -> Self {
+	pub fn reject_from_normalized(self, rhs: Self) -> Self {
 		self.map_glam(|raw| raw.reject_from_normalized(rhs.0))
 	}
 
-	fn round(self) -> Self {
+	pub fn round(self) -> Self {
 		self.map_glam(|raw| raw.round())
 	}
 
-	fn floor(self) -> Self {
+	pub fn floor(self) -> Self {
 		self.map_glam(|raw| raw.floor())
 	}
 
-	fn ceil(self) -> Self {
+	pub fn ceil(self) -> Self {
 		self.map_glam(|raw| raw.ceil())
 	}
 
-	fn fract(self) -> Self {
+	pub fn fract(self) -> Self {
 		self.map_glam(|raw| raw.fract())
 	}
 
-	fn exp(self) -> Self {
+	pub fn exp(self) -> Self {
 		self.map_glam(|raw| raw.exp())
 	}
 
-	fn powf(self, n: Self::Comp) -> Self {
+	pub fn powf(self, n: B::Comp) -> Self {
 		self.map_glam(|raw| raw.powf(n))
 	}
 
-	fn recip(self) -> Self {
+	pub fn recip(self) -> Self {
 		self.map_glam(|raw| raw.recip())
 	}
 
-	fn lerp(self, rhs: Self, s: Self::Comp) -> Self {
+	pub fn lerp(self, rhs: Self, s: B::Comp) -> Self {
 		self.map_glam(|raw| raw.lerp(rhs.0, s))
 	}
 
-	fn abs_diff_eq(self, rhs: Self, max_abs_diff: Self::Comp) -> bool {
+	pub fn abs_diff_eq(self, rhs: Self, max_abs_diff: B::Comp) -> bool {
 		self.0.abs_diff_eq(rhs.0, max_abs_diff)
 	}
 
-	fn clamp_length(self, min: Self::Comp, max: Self::Comp) -> Self {
+	pub fn clamp_length(self, min: B::Comp, max: B::Comp) -> Self {
 		self.map_glam(|raw| raw.clamp_length(min, max))
 	}
 
-	fn clamp_length_max(self, max: Self::Comp) -> Self {
+	pub fn clamp_length_max(self, max: B::Comp) -> Self {
 		self.map_glam(|raw| raw.clamp_length_max(max))
 	}
 
-	fn clamp_length_min(self, min: Self::Comp) -> Self {
+	pub fn clamp_length_min(self, min: B::Comp) -> Self {
 		self.map_glam(|raw| raw.clamp_length_min(min))
 	}
 
-	fn mul_add(self, a: Self, b: Self) -> Self {
+	pub fn mul_add(self, a: Self, b: Self) -> Self {
 		self.map_glam(|raw| raw.mul_add(a.0, b.0))
 	}
 }
 
 // NumericVector2
+// TODO: Make this, and other variadic traits, inherent
 impl<B, F> From<(B::Comp, B::Comp)> for TypedVector<F>
 where
 	B: ?Sized + NumericVector2,
@@ -428,7 +481,7 @@ where
 	const X: Self = Self(B::X);
 	const Y: Self = Self(B::Y);
 
-	fn new(x: Self::Comp, y: Self::Comp) -> Self {
+	fn new(x: B::Comp, y: B::Comp) -> Self {
 		Self(B::new(x, y))
 	}
 }
@@ -473,7 +526,7 @@ where
 	const Y: Self = Self(B::Y);
 	const Z: Self = Self(B::Z);
 
-	fn new(x: Self::Comp, y: Self::Comp, z: Self::Comp) -> Self {
+	fn new(x: B::Comp, y: B::Comp, z: B::Comp) -> Self {
 		Self(B::new(x, y, z))
 	}
 
