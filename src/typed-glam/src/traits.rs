@@ -13,20 +13,38 @@ use num_traits::Num;
 
 // === Definitions === //
 
-// TODO: More glam conversions
-
 pub trait GlamConvert: Sized {
 	type Glam;
 
 	fn to_glam(self) -> Self::Glam;
 
+	fn as_glam(&self) -> &Self::Glam;
+
+	fn as_glam_mut(&mut self) -> &mut Self::Glam;
+
 	fn from_glam(glam: Self::Glam) -> Self;
+
+	fn from_glam_ref(glam: &Self::Glam) -> &Self;
+
+	fn from_glam_mut(glam: &mut Self::Glam) -> &mut Self;
 
 	fn map_glam<F>(self, f: F) -> Self
 	where
 		F: FnOnce(Self::Glam) -> Self::Glam,
 	{
 		Self::from_glam(f(self.to_glam()))
+	}
+
+	fn cast_glam<T: GlamConvert<Glam = Self::Glam>>(self) -> T {
+		T::from_glam(self.to_glam())
+	}
+
+	fn cast_glam_ref<T: GlamConvert<Glam = Self::Glam>>(&self) -> &T {
+		T::from_glam_ref(self.as_glam())
+	}
+
+	fn cast_glam_mut<T: GlamConvert<Glam = Self::Glam>>(&mut self) -> &mut T {
+		T::from_glam_mut(self.as_glam_mut())
 	}
 }
 
@@ -91,6 +109,8 @@ pub trait NumericVector:
 	fn cmpgt(self, rhs: Self) -> Self::Mask;
 	fn cmple(self, rhs: Self) -> Self::Mask;
 	fn cmplt(self, rhs: Self) -> Self::Mask;
+
+	// TODO: Component getters (both generic and variadic aliases)
 
 	// Woo! Inner products!
 	fn dot(self, rhs: Self) -> Self::Comp;
@@ -232,7 +252,23 @@ macro impl_glam_convert_identity($($ty:ty),*$(,)?) {$(
 			self
 		}
 
+		fn as_glam(&self) -> &Self::Glam {
+			self
+		}
+
+		fn as_glam_mut(&mut self) -> &mut Self::Glam {
+			self
+		}
+
 		fn from_glam(glam: Self::Glam) -> Self {
+			glam
+		}
+
+		fn from_glam_ref(glam: &Self::Glam) -> &Self {
+			glam
+		}
+
+		fn from_glam_mut(glam: &mut Self::Glam) -> &mut Self {
 			glam
 		}
 	}

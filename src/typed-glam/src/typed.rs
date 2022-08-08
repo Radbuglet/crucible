@@ -68,22 +68,87 @@ pub macro vec_flavor($(
 	}
 )*}
 
+// === TypedVectorAsATrait === //
+
+pub trait CastTarget<F: ?Sized + VecFlavor> {
+	fn cast_from(vec: TypedVector<F>) -> Self;
+}
+
+impl<S, D> CastTarget<S> for TypedVector<D>
+where
+	S: ?Sized + VecFlavor,
+	D: ?Sized + VecFlavor + FlavorCastFrom<TypedVector<S>>,
+{
+	fn cast_from(vec: TypedVector<S>) -> Self {
+		D::addend_from(vec)
+	}
+}
+
 // === TypedVector === //
 
 #[derive(TransparentWrapper)]
 #[repr(transparent)]
 pub struct TypedVector<F: ?Sized + VecFlavor>(F::Backing);
 
+// TypedVector
+impl<F: ?Sized + VecFlavor> TypedVector<F> {
+	pub fn cast<T: CastTarget<F>>(self) -> T {
+		T::cast_from(self)
+	}
+}
+
 // GlamConvert
 impl<F: ?Sized + VecFlavor> GlamConvert for TypedVector<F> {
 	type Glam = F::Backing;
 
 	fn to_glam(self) -> Self::Glam {
-		self.0
+		self.to_glam()
+	}
+
+	fn as_glam(&self) -> &Self::Glam {
+		self.as_glam()
+	}
+
+	fn as_glam_mut(&mut self) -> &mut Self::Glam {
+		self.as_glam_mut()
 	}
 
 	fn from_glam(glam: Self::Glam) -> Self {
+		Self::from_glam(glam)
+	}
+
+	fn from_glam_ref(glam: &Self::Glam) -> &Self {
+		Self::from_glam_ref(glam)
+	}
+
+	fn from_glam_mut(glam: &mut Self::Glam) -> &mut Self {
+		Self::from_glam_mut(glam)
+	}
+}
+
+impl<F: ?Sized + VecFlavor> TypedVector<F> {
+	pub fn to_glam(self) -> F::Backing {
+		self.0
+	}
+
+	pub fn as_glam(&self) -> &F::Backing {
+		TransparentWrapper::peel_ref(self)
+	}
+
+	pub fn as_glam_mut(&mut self) -> &mut F::Backing {
+		TransparentWrapper::peel_mut(self)
+	}
+
+	pub fn from_glam(glam: F::Backing) -> Self {
 		Self(glam)
+	}
+
+	pub fn from_glam_ref(glam: &F::Backing) -> &Self {
+		TransparentWrapper::wrap_ref(glam)
+	}
+
+	pub fn from_glam_mut(glam: &mut F::Backing) -> &mut Self {
+		TransparentWrapper::wrap_mut(glam)
 	}
 }
 
@@ -293,7 +358,6 @@ where
 }
 
 // SignedVector
-
 impl<B, F> SignedVector for TypedVector<F>
 where
 	B: ?Sized + SignedVector,
