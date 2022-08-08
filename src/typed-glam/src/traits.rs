@@ -9,16 +9,23 @@ use std::{
 };
 
 use crucible_core::std_traits::ArrayLike;
-use mint::IntoMint;
 use num_traits::Num;
 
 // === Definitions === //
 
-pub trait GlamConvert: From<Self::Glam> + Into<Self::Glam> {
+pub trait GlamConvert: Sized {
 	type Glam;
 
-	fn as_glam(self) -> Self::Glam;
+	fn to_glam(self) -> Self::Glam;
+
 	fn from_glam(glam: Self::Glam) -> Self;
+
+	fn map_glam<F>(self, f: F) -> Self
+	where
+		F: FnOnce(Self::Glam) -> Self::Glam,
+	{
+		Self::from_glam(f(self.to_glam()))
+	}
 }
 
 // TODO: BoolVector trait
@@ -41,15 +48,14 @@ pub trait NumericVector:
 	+ RemAssign
 	+ Index<usize, Output = Self::Comp>
 	+ IndexMut<usize>
-	+ From<Self::CompArray>
 	+ for<'a> Sum<&'a Self>
 	+ for<'a> Product<&'a Self>
-	+ IntoMint
+	// + IntoMint
+	// + From<Self::CompArray>
 	+ GlamConvert
 {
 	// Types
 	type Comp: Debug + Display + Num; // TODO: Narrow these bounds a bit more.
-	type VectorArray: ArrayLike<Elem = Self>;
 	type CompArray: ArrayLike<Elem = Self::Comp>;
 	type Mask;
 
@@ -57,7 +63,9 @@ pub trait NumericVector:
 	const DIM: usize;
 	const ZERO: Self;
 	const ONE: Self;
-	const AXES: Self::VectorArray;
+
+	// TODO: Convert to a const-friendly array once things stabilize.
+	fn unit_axis(index: usize) -> Self;
 
 	// Constructors
 	fn from_array(a: Self::CompArray) -> Self;
@@ -92,12 +100,11 @@ pub trait IntegerVector:
 	+ BitAnd<Output = Self>
 	+ BitOr<Output = Self>
 	+ BitXor<Output = Self>
-	+ Not<Output = Self>
 	+ Shl<Output = Self>
 	+ Shr<Output = Self>
+	+ Not<Output = Self>
 {
-	fn shl_generic<N: Num, V: NumericVector<Comp = N>>(self, comps: V) -> Self;
-	fn shr_generic<N: Num, V: NumericVector<Comp = N>>(self, comps: V) -> Self;
+	// TODO: Splatted primitive shifts?
 }
 
 pub trait SignedVector: NumericVector + Neg<Output = Self> {
@@ -218,7 +225,7 @@ macro_rules! impl_glam_convert_identity {
 		impl GlamConvert for $ty {
 			type Glam = Self;
 
-			fn as_glam(self) -> Self::Glam {
+			fn to_glam(self) -> Self::Glam {
 				self
 			}
 
@@ -256,14 +263,16 @@ macro_rules! impl_numeric_vector {
 	) => {$(
 		impl NumericVector for $ty {
 			type Comp = $comp;
-			type VectorArray = [Self; $dim];
 			type CompArray = [Self::Comp; $dim];
 			type Mask = $bool_ty;
 
 			const DIM: usize = $dim;
 			const ZERO: Self = Self::ZERO;
 			const ONE: Self = Self::ONE;
-			const AXES: Self::VectorArray = Self::AXES;
+
+			fn unit_axis(index: usize) -> Self {
+				<$ty>::AXES[index]
+			}
 
 			fn from_array(a: Self::CompArray) -> Self {
 				Self::from_array(a)
@@ -358,15 +367,7 @@ impl_numeric_vector!(
 
 macro_rules! impl_integer_vector {
 	($($ty:ty),*$(,)?) => {$(
-		impl IntegerVector for $ty {
-			fn shl_generic<N: Num, V: NumericVector<Comp = N>>(self, _comps: V) -> Self {
-				todo!()
-			}
-
-			fn shr_generic<N: Num, V: NumericVector<Comp = N>>(self, _comps: V) -> Self {
-				todo!()
-			}
-		}
+		impl IntegerVector for $ty {}
 	)*};
 }
 
