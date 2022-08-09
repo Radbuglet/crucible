@@ -339,16 +339,19 @@ impl<T: ?Sized + ObjPointee> Destructible for Obj<T> {
 }
 
 impl<T: Sized + ObjPointee + Sync> Obj<T> {
+	#[inline(always)]
 	pub fn new(session: Session, value: T) -> Owned<Self> {
 		Self::new_in_raw(session, 0xFF, value)
 	}
 }
 
 impl<T: Sized + ObjPointee> Obj<T> {
+	#[inline(always)]
 	pub fn new_in(session: Session, lock: Lock, value: T) -> Owned<Self> {
 		Self::new_in_raw(session, lock.0, value)
 	}
 
+	#[inline(always)]
 	fn new_in_raw(session: Session, lock: u8, value: T) -> Owned<Self> {
 		// Allocate slot
 		let (slot, gen, initial_ptr) =

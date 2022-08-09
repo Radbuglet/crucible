@@ -287,6 +287,7 @@ pub fn try_get_obj_ptr(
 	slot.try_get_base(&local_sess_data.session_locks, gen)
 }
 
+#[inline(always)]
 pub fn destroy_obj(session: Session<'_>, slot: &'static Slot, local_gen: ExtendedGen) -> bool {
 	let local_sess_data = unsafe {
 		// Safety: see item comment for [LocalSessData].

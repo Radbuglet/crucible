@@ -1,7 +1,4 @@
-use core::{
-	any::{self, TypeId},
-	fmt, hash,
-};
+use core::{any::TypeId, fmt, hash};
 
 /// A fancy [TypeId] that records type names in debug builds.
 #[derive(Copy, Clone)]
@@ -16,7 +13,7 @@ impl NamedTypeId {
 		Self {
 			id: TypeId::of::<T>(),
 			#[cfg(debug_assertions)]
-			name: any::type_name::<T>(),
+			name: std::any::type_name::<T>(),
 		}
 	}
 
