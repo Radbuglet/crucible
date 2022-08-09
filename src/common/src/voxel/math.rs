@@ -1,9 +1,9 @@
-use std::ops::{Index, IndexMut};
-
 use num_traits::Signed;
 use typed_glam::{
-	glam::{self, DVec3, IVec3, UVec3, Vec3},
-	TypedVector, TypedVectorImpl, VecFlavor,
+	ext::VecExt,
+	glam::{self, DVec3, IVec3},
+	traits::NumericVector3,
+	typed::{FlavorCastFrom, TypedVector, VecFlavor},
 };
 
 use crucible_core::c_enum::{c_enum, CEnum};
@@ -21,7 +21,21 @@ pub type WorldVec = TypedVector<WorldVecFlavor>;
 pub struct WorldVecFlavor(!);
 
 impl VecFlavor for WorldVecFlavor {
-	type Backing = glam::i32::IVec3;
+	type Backing = glam::IVec3;
+
+	const DEBUG_NAME: &'static str = "WorldVec";
+}
+
+impl FlavorCastFrom<glam::IVec3> for WorldVecFlavor {
+	fn cast_from(v: glam::IVec3) -> WorldVec {
+		WorldVec::from_glam(v)
+	}
+}
+
+impl FlavorCastFrom<i32> for WorldVecFlavor {
+	fn cast_from(v: i32) -> WorldVec {
+		WorldVec::splat(v)
+	}
 }
 
 pub trait WorldVecExt: Sized {
@@ -37,7 +51,7 @@ impl WorldVecExt for WorldVec {
 	fn compose(chunk: ChunkVec, block: BlockVec) -> Self {
 		debug_assert!(chunk.is_valid());
 		debug_assert!(block.is_valid());
-		Self::from_raw(chunk.into_raw() * CHUNK_EDGE + block.into_raw())
+		Self::from_glam(chunk.to_glam() * CHUNK_EDGE + block.to_glam())
 	}
 
 	fn decompose(self) -> (ChunkVec, BlockVec) {
@@ -45,25 +59,23 @@ impl WorldVecExt for WorldVec {
 	}
 
 	fn chunk(self) -> ChunkVec {
-		let raw = self.into_raw();
 		ChunkVec::new(
-			raw.x.div_euclid(CHUNK_EDGE),
-			raw.y.div_euclid(CHUNK_EDGE),
-			raw.z.div_euclid(CHUNK_EDGE),
+			self.x().div_euclid(CHUNK_EDGE),
+			self.y().div_euclid(CHUNK_EDGE),
+			self.z().div_euclid(CHUNK_EDGE),
 		)
 	}
 
 	fn block(self) -> BlockVec {
-		let raw = self.into_raw();
 		BlockVec::new(
-			raw.x.rem_euclid(CHUNK_EDGE),
-			raw.y.rem_euclid(CHUNK_EDGE),
-			raw.z.rem_euclid(CHUNK_EDGE),
+			self.x().rem_euclid(CHUNK_EDGE),
+			self.y().rem_euclid(CHUNK_EDGE),
+			self.z().rem_euclid(CHUNK_EDGE),
 		)
 	}
 
 	fn min_corner_pos(self) -> EntityVec {
-		EntityVec::from_raw(self.into_raw().as_dvec3())
+		self.map_glam(|raw| raw.as_dvec3())
 	}
 
 	fn block_interface_layer(self, face: BlockFace) -> f64 {
@@ -71,9 +83,9 @@ impl WorldVecExt for WorldVec {
 		let (axis, sign) = face.decompose();
 
 		if sign == Sign::Positive {
-			corner[axis] + 1.
+			corner.comp(axis) + 1.
 		} else {
-			corner[axis]
+			corner.comp(axis)
 		}
 	}
 }
@@ -85,7 +97,21 @@ pub type ChunkVec = TypedVector<ChunkVecFlavor>;
 pub struct ChunkVecFlavor(!);
 
 impl VecFlavor for ChunkVecFlavor {
-	type Backing = glam::i32::IVec3;
+	type Backing = glam::IVec3;
+
+	const DEBUG_NAME: &'static str = "ChunkVec";
+}
+
+impl FlavorCastFrom<glam::IVec3> for ChunkVecFlavor {
+	fn cast_from(v: glam::IVec3) -> ChunkVec {
+		ChunkVec::from_glam(v)
+	}
+}
+
+impl FlavorCastFrom<i32> for ChunkVecFlavor {
+	fn cast_from(v: i32) -> ChunkVec {
+		ChunkVec::splat(v)
+	}
 }
 
 pub trait ChunkVecExt: Sized {
@@ -94,7 +120,7 @@ pub trait ChunkVecExt: Sized {
 
 impl ChunkVecExt for ChunkVec {
 	fn is_valid(&self) -> bool {
-		Axis3::variants().all(|comp| self[comp].checked_mul(CHUNK_EDGE).is_some())
+		self.all(|comp| comp.checked_mul(CHUNK_EDGE).is_some())
 	}
 }
 
@@ -105,7 +131,21 @@ pub type BlockVec = TypedVector<BlockVecFlavor>;
 pub struct BlockVecFlavor(!);
 
 impl VecFlavor for BlockVecFlavor {
-	type Backing = glam::i32::IVec3;
+	type Backing = glam::IVec3;
+
+	const DEBUG_NAME: &'static str = "BlockVec";
+}
+
+impl FlavorCastFrom<glam::IVec3> for BlockVecFlavor {
+	fn cast_from(v: glam::IVec3) -> BlockVec {
+		BlockVec::from_glam(v)
+	}
+}
+
+impl FlavorCastFrom<i32> for BlockVecFlavor {
+	fn cast_from(v: i32) -> BlockVec {
+		BlockVec::splat(v)
+	}
 }
 
 pub trait BlockVecExt: Sized {
@@ -121,15 +161,11 @@ pub trait BlockVecExt: Sized {
 
 impl BlockVecExt for BlockVec {
 	fn is_valid(&self) -> bool {
-		Axis3::variants().all(|comp| self[comp] >= 0 && self[comp] < CHUNK_EDGE)
+		self.all(|comp| comp >= 0 && comp < CHUNK_EDGE)
 	}
 
-	fn wrap(mut self) -> Self {
-		for axis in Axis3::variants() {
-			self[axis] = self[axis].rem_euclid(CHUNK_EDGE);
-		}
-
-		self
+	fn wrap(self) -> Self {
+		self.map(|comp| comp.rem_euclid(CHUNK_EDGE))
 	}
 
 	fn iter() -> BlockPosIter {
@@ -138,8 +174,7 @@ impl BlockVecExt for BlockVec {
 
 	fn to_index(self) -> usize {
 		debug_assert!(self.is_valid());
-		let raw = self.into_raw();
-		(raw.x + raw.y * CHUNK_EDGE + raw.z * CHUNK_LAYER) as usize
+		(self.x() + self.y() * CHUNK_EDGE + self.z() * CHUNK_LAYER) as usize
 	}
 
 	fn try_from_index(index: usize) -> Option<Self> {
@@ -196,6 +231,20 @@ pub struct EntityVecFlavor(!);
 
 impl VecFlavor for EntityVecFlavor {
 	type Backing = DVec3;
+
+	const DEBUG_NAME: &'static str = "EntityVec";
+}
+
+impl FlavorCastFrom<glam::DVec3> for EntityVecFlavor {
+	fn cast_from(v: glam::DVec3) -> EntityVec {
+		EntityVec::from_glam(v)
+	}
+}
+
+impl FlavorCastFrom<f64> for EntityVecFlavor {
+	fn cast_from(v: f64) -> EntityVec {
+		EntityVec::splat(v)
+	}
 }
 
 pub trait EntityVecExt {
@@ -204,7 +253,7 @@ pub trait EntityVecExt {
 
 impl EntityVecExt for EntityVec {
 	fn block_pos(self) -> WorldVec {
-		WorldVec::from_raw(self.raw().floor().as_ivec3())
+		self.map_glam(|raw| raw.floor().as_ivec3())
 	}
 }
 
@@ -328,64 +377,8 @@ impl Axis3 {
 	}
 
 	pub fn plane_intersect(self, layer: f64, line: Line3) -> (f64, EntityVec) {
-		let lerp = lerp_percent_at(layer, line.start[self], line.end[self]);
+		let lerp = lerp_percent_at(layer, line.start.comp(self), line.end.comp(self));
 		(lerp, line.start.lerp(line.end, lerp))
-	}
-}
-
-impl<F: VecFlavor<Backing = IVec3>> Index<Axis3> for TypedVectorImpl<IVec3, F> {
-	type Output = i32;
-
-	fn index(&self, index: Axis3) -> &Self::Output {
-		&self[index as usize]
-	}
-}
-
-impl<F: VecFlavor<Backing = IVec3>> IndexMut<Axis3> for TypedVectorImpl<IVec3, F> {
-	fn index_mut(&mut self, index: Axis3) -> &mut Self::Output {
-		&mut self[index as usize]
-	}
-}
-
-impl<F: VecFlavor<Backing = UVec3>> Index<Axis3> for TypedVectorImpl<UVec3, F> {
-	type Output = u32;
-
-	fn index(&self, index: Axis3) -> &Self::Output {
-		&self[index as usize]
-	}
-}
-
-impl<F: VecFlavor<Backing = UVec3>> IndexMut<Axis3> for TypedVectorImpl<UVec3, F> {
-	fn index_mut(&mut self, index: Axis3) -> &mut Self::Output {
-		&mut self[index as usize]
-	}
-}
-
-impl<F: VecFlavor<Backing = Vec3>> Index<Axis3> for TypedVectorImpl<Vec3, F> {
-	type Output = f32;
-
-	fn index(&self, index: Axis3) -> &Self::Output {
-		&self[index as usize]
-	}
-}
-
-impl<F: VecFlavor<Backing = Vec3>> IndexMut<Axis3> for TypedVectorImpl<Vec3, F> {
-	fn index_mut(&mut self, index: Axis3) -> &mut Self::Output {
-		&mut self[index as usize]
-	}
-}
-
-impl<F: VecFlavor<Backing = DVec3>> Index<Axis3> for TypedVectorImpl<DVec3, F> {
-	type Output = f64;
-
-	fn index(&self, index: Axis3) -> &Self::Output {
-		&self[index as usize]
-	}
-}
-
-impl<F: VecFlavor<Backing = DVec3>> IndexMut<Axis3> for TypedVectorImpl<DVec3, F> {
-	fn index_mut(&mut self, index: Axis3) -> &mut Self::Output {
-		&mut self[index as usize]
 	}
 }
 
@@ -443,4 +436,22 @@ pub fn lerp_percent_at(val: f64, start: f64, end: f64) -> f64 {
 	// start + (end - start) * percent = val
 	// (val - start) / (end - start) = percent
 	(val - start) / (end - start)
+}
+
+// === Vector extensions === //
+
+pub trait Vec3Ext: NumericVector3 {
+	fn comp(&self, axis: Axis3) -> Self::Comp;
+
+	fn comp_mut(&mut self, axis: Axis3) -> &mut Self::Comp;
+}
+
+impl<V: NumericVector3> Vec3Ext for V {
+	fn comp(&self, axis: Axis3) -> Self::Comp {
+		self[axis.index()]
+	}
+
+	fn comp_mut(&mut self, axis: Axis3) -> &mut Self::Comp {
+		&mut self[axis.index()]
+	}
 }

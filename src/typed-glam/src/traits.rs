@@ -58,11 +58,15 @@ pub trait GlamConvert: Sized {
 
 	fn from_glam_mut(glam: &mut Self::Glam) -> &mut Self;
 
-	fn map_glam<F>(self, f: F) -> Self
+	// === Derived === //
+	// N.B. Default `impl`s mirrored in `TypedVec`'s inherent `impl`s. Be careful!
+
+	fn map_glam<R, F>(self, f: F) -> R
 	where
-		F: FnOnce(Self::Glam) -> Self::Glam,
+		R: GlamConvert,
+		F: FnOnce(Self::Glam) -> R::Glam,
 	{
-		Self::from_glam(f(self.to_glam()))
+		R::from_glam(f(self.to_glam()))
 	}
 
 	fn cast_glam<T: GlamConvert<Glam = Self::Glam>>(self) -> T {
@@ -105,7 +109,7 @@ pub trait NumericVector:
 {
 	// Types
 	type Dim: DimClass;
-	type Comp: Debug + Display + Num; // TODO: Narrow these bounds a bit more.
+	type Comp: Debug + Display + Copy + Num; // TODO: Narrow these bounds a bit more.
 	type CompArray: ArrayLike<Elem = Self::Comp>;
 	type Mask;
 
@@ -152,8 +156,6 @@ pub trait IntegerVector:
 	+ Shr<Output = Self>
 	+ Not<Output = Self>
 {
-	fn shl_prim<N: Num>(self, v: N) -> Self;
-	fn shr_prim<N: Num>(self, v: N) -> Self;
 }
 
 pub trait SignedVector: NumericVector + Neg<Output = Self> {
@@ -459,15 +461,7 @@ impl_numeric_vector!(
 );
 
 macro impl_integer_vector($($ty:ty),*$(,)?) {$(
-	impl IntegerVector for $ty {
-		fn shl_prim<N: Num>(self, _v: N) -> Self {
-			todo!()
-		}
-
-		fn shr_prim<N: Num>(self, _v: N) -> Self {
-			todo!()
-		}
-	}
+	impl IntegerVector for $ty {}
 )*}
 
 impl_integer_vector!(

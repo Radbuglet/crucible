@@ -14,7 +14,7 @@ use smallvec::SmallVec;
 
 use super::math::{
 	Axis3, BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, EntityVecExt, Line3, Sign,
-	WorldVec, WorldVecExt, CHUNK_VOLUME,
+	Vec3Ext, WorldVec, WorldVecExt, CHUNK_VOLUME,
 };
 
 // === Voxel Data Containers === //
@@ -84,7 +84,7 @@ impl VoxelWorldData {
 
 		// Link new chunk to neighbors
 		for face in BlockFace::variants() {
-			let rel = ChunkVec::from_raw(face.unit());
+			let rel: ChunkVec = ChunkVec::new_from(face.unit());
 			let neighbor_pos = pos + rel;
 			let neighbor = inner
 				.chunks
@@ -287,9 +287,12 @@ impl BlockLocation {
 
 	pub fn move_by(mut self, s: Session, delta: WorldVec) -> Self {
 		for axis in Axis3::variants() {
-			if let Some(sign) = Sign::of(delta[axis]) {
-				self =
-					self.neighbor_with_stride(s, BlockFace::compose(axis, sign), delta[axis].abs());
+			if let Some(sign) = Sign::of(delta.comp(axis)) {
+				self = self.neighbor_with_stride(
+					s,
+					BlockFace::compose(axis, sign),
+					delta.comp(axis).abs(),
+				);
 			}
 		}
 		self
@@ -308,7 +311,8 @@ impl BlockLocation {
 		let new_chunk_pos = self.vec.chunk();
 
 		// Attempt to update the chunk cache.
-		let chunks_moved = (new_chunk_pos[face.axis()] - old_chunk_pos[face.axis()]).abs();
+		let chunks_moved =
+			(new_chunk_pos.comp(face.axis()) - old_chunk_pos.comp(face.axis())).abs();
 
 		if chunks_moved < 4 {
 			// While we're still holding on to a cached chunk handle, navigate through its neighbors.
@@ -458,7 +462,7 @@ impl RayCast {
 			let block_delta = end_block - start_block;
 
 			for axis in Axis3::variants() {
-				let delta = block_delta[axis];
+				let delta = block_delta.comp(axis);
 				debug_assert!((-1..=1).contains(&delta));
 
 				let sign = match Sign::of(delta) {

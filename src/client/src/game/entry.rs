@@ -4,7 +4,7 @@ use crucible_common::voxel::{
 	data::{
 		BlockLocation, BlockState, ChunkFactoryRequest, RayCast, VoxelChunkData, VoxelWorldData,
 	},
-	math::{BlockFace, WorldVec, WorldVecExt},
+	math::{BlockFace, EntityVec, WorldVec, WorldVecExt},
 };
 use crucible_core::c_enum::CEnum;
 use geode::prelude::*;
@@ -190,8 +190,8 @@ impl EventHandlerMut<SceneUpdateEvent> for GameSceneEntry {
 			if right_pressed {
 				let mut ray = RayCast::new_cached(
 					&p_world_data,
-					p_local_camera.pos().as_dvec3().into(),
-					p_local_camera.facing().as_dvec3().into(),
+					EntityVec::new_from(p_local_camera.pos().as_dvec3()),
+					EntityVec::new_from(p_local_camera.facing().as_dvec3()),
 				);
 
 				for isect in ray.step_for(s, 7.) {
@@ -222,8 +222,8 @@ impl EventHandlerMut<SceneUpdateEvent> for GameSceneEntry {
 			if left_pressed {
 				let mut ray = RayCast::new_cached(
 					&p_world_data,
-					p_local_camera.pos().as_dvec3().into(),
-					p_local_camera.facing().as_dvec3().into(),
+					EntityVec::new_from(p_local_camera.pos().as_dvec3()),
+					EntityVec::new_from(p_local_camera.facing().as_dvec3()),
 				);
 
 				for isect in ray.step_for(s, 100.) {
@@ -252,7 +252,7 @@ impl EventHandlerMut<SceneUpdateEvent> for GameSceneEntry {
 
 		if p_input_tracker.key(VirtualKeyCode::Key1).state() {
 			let pos = p_local_camera.pos();
-			let pos = WorldVec::from_raw(pos.floor().as_ivec3());
+			let pos = WorldVec::new_from(pos.floor().as_ivec3());
 			let pos = BlockLocation::new_uncached(pos);
 
 			for x in -3..3 {

@@ -1,6 +1,5 @@
 use bytemuck::TransparentWrapper;
 use crucible_core::{marker::PhantomInvariant, std_traits::ArrayLike};
-use num_traits::Num;
 
 use std::{
 	any::type_name,
@@ -19,58 +18,25 @@ use crate::traits::{
 
 // === Flavor traits === //
 
-pub trait VecFlavor:
-	'static
-	+ FlavorCastFrom<TypedVector<Self>>
-	+ FlavorCastFrom<Self::Backing>
-	+ FlavorCastFrom<<Self::Backing as NumericVector>::Comp>
-{
+pub trait VecFlavor: 'static + FlavorCastFrom<TypedVector<Self>> {
 	type Backing: NumericVector;
 
 	const DEBUG_NAME: &'static str;
 }
 
 pub trait FlavorCastFrom<V> {
-	fn addend_from(vec: V) -> TypedVector<Self>
+	fn cast_from(vec: V) -> TypedVector<Self>
 	where
 		Self: VecFlavor;
 }
 
-pub macro vec_flavor($(
-	$(#[$meta:meta])*
-	$vis:vis struct $flavor:ident($backing:ty);
-)*) {$(
-	$(#[$meta])*
-	$vis struct $flavor {
-		_private: (),
+impl<F: ?Sized + VecFlavor> FlavorCastFrom<TypedVector<F>> for F {
+	fn cast_from(vec: TypedVector<F>) -> TypedVector<Self> {
+		vec
 	}
+}
 
-	impl VecFlavor for $flavor {
-		type Backing = $backing;
-
-		const DEBUG_NAME: &'static str = stringify!($flavor);
-	}
-
-	impl FlavorCastFrom<TypedVector<$flavor>> for $flavor {
-		fn addend_from(vec: TypedVector<$flavor>) -> TypedVector<Self> {
-			vec
-		}
-	}
-
-	impl FlavorCastFrom<$backing> for $flavor {
-		fn addend_from(vec: $backing) -> TypedVector<Self> {
-			TypedVector::from_glam(vec)
-		}
-	}
-
-	impl FlavorCastFrom<<$backing as NumericVector>::Comp> for $flavor {
-		fn addend_from(comp: <$backing as NumericVector>::Comp) -> TypedVector<Self> {
-			TypedVector::from_glam(NumericVector::splat(comp))
-		}
-	}
-)*}
-
-// === TypedVectorAsATrait === //
+// === CastTarget === //
 
 pub trait CastTarget<F: ?Sized + VecFlavor> {
 	fn cast_from(vec: TypedVector<F>) -> Self;
@@ -82,7 +48,7 @@ where
 	D: ?Sized + VecFlavor + FlavorCastFrom<TypedVector<S>>,
 {
 	fn cast_from(vec: TypedVector<S>) -> Self {
-		D::addend_from(vec)
+		D::cast_from(vec)
 	}
 }
 
@@ -100,6 +66,13 @@ unsafe impl<F: ?Sized + VecFlavor> TransparentWrapper<F::Backing> for TypedVecto
 
 // TypedVector
 impl<F: ?Sized + VecFlavor> TypedVector<F> {
+	pub fn new_from<T>(v: T) -> Self
+	where
+		F: FlavorCastFrom<T>,
+	{
+		F::cast_from(v)
+	}
+
 	pub fn cast<T: CastTarget<F>>(self) -> T {
 		T::cast_from(self)
 	}
@@ -161,6 +134,27 @@ impl<F: ?Sized + VecFlavor> TypedVector<F> {
 	pub fn from_glam_mut(glam: &mut F::Backing) -> &mut Self {
 		TransparentWrapper::wrap_mut(glam)
 	}
+
+	// Copied from `GlamConvert`
+	pub fn map_glam<R, C>(self, f: C) -> R
+	where
+		R: GlamConvert,
+		C: FnOnce(F::Backing) -> R::Glam,
+	{
+		R::from_glam(f(self.to_glam()))
+	}
+
+	pub fn cast_glam<T: GlamConvert<Glam = F::Backing>>(self) -> T {
+		T::from_glam(self.to_glam())
+	}
+
+	pub fn cast_glam_ref<T: GlamConvert<Glam = F::Backing>>(&self) -> &T {
+		T::from_glam_ref(self.as_glam())
+	}
+
+	pub fn cast_glam_mut<T: GlamConvert<Glam = F::Backing>>(&mut self) -> &mut T {
+		T::from_glam_mut(self.as_glam_mut())
+	}
 }
 
 // NumericVector
@@ -176,7 +170,7 @@ impl<F: ?Sized + VecFlavor> fmt::Display for TypedVector<F> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
 			f,
-			"TypedVector<{}>({:?})",
+			"{}({:?})",
 			F::DEBUG_NAME,
 			self.as_glam().to_array().as_slice()
 		)
@@ -349,27 +343,6 @@ where
 	B: ?Sized + IntegerVector,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	fn shl_prim<N: Num>(self, v: N) -> Self {
-		self.shl_prim(v)
-	}
-
-	fn shr_prim<N: Num>(self, v: N) -> Self {
-		self.shr_prim(v)
-	}
-}
-
-impl<B, F> TypedVector<F>
-where
-	B: ?Sized + IntegerVector,
-	F: ?Sized + VecFlavor<Backing = B>,
-{
-	fn shl_prim<N: Num>(self, v: N) -> Self {
-		self.map_glam(|raw| raw.shl_prim(v))
-	}
-
-	fn shr_prim<N: Num>(self, v: N) -> Self {
-		self.map_glam(|raw| raw.shr_prim(v))
-	}
 }
 
 // SignedVector
@@ -939,7 +912,7 @@ macro derive_bin_ops(
 		type Output = Self;
 
 		fn $fn(self, rhs: R) -> Self::Output {
-			self.map_glam(|lhs| ops::$trait::$fn(lhs, F::addend_from(rhs).to_glam()))
+			self.map_glam(|lhs| ops::$trait::$fn(lhs, F::cast_from(rhs).to_glam()))
 		}
 	}
 
@@ -951,7 +924,7 @@ macro derive_bin_ops(
 			F: ?Sized + VecFlavor + FlavorCastFrom<R>,
 		{
 			fn $fn_assign(&mut self, rhs: R) {
-				ops::$trait_assign::$fn_assign(self.as_glam_mut(), F::addend_from(rhs).to_glam());
+				ops::$trait_assign::$fn_assign(self.as_glam_mut(), F::cast_from(rhs).to_glam());
 			}
 		}
 	)?
