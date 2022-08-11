@@ -1,5 +1,4 @@
-use super::gen::{ExtendedGen, SessionLocks};
-use crate::core::reflect::ReflectType;
+use super::gen::{LockIdAndMeta, SessionLocks};
 use crate::util::bump::LeakyBump;
 use bumpalo::Bump;
 use std::alloc::Layout;
@@ -61,8 +60,8 @@ impl Slot {
 	/// While the object guarantees that a wrong pointer-generation pair cannot be acquired externally,
 	/// this guarantee only applies if generations are never reused.
 	///
-	pub fn acquire(&self, new_gen: ExtendedGen, new_base: *const ()) {
-		debug_assert_ne!(new_gen.gen(), 0);
+	pub fn acquire(&self, new_gen: LockIdAndMeta, new_base: *const ()) {
+		debug_assert_ne!(new_gen.meta(), 0);
 
 		// We first ensure that the new `lock_and_gen` is visible to other threads before modifying
 		// the pointer. That way, even if they load the stale pointer, they'll see that the `gen`
@@ -81,7 +80,7 @@ impl Slot {
 	///
 	/// TODO: Code review
 	///
-	pub fn release(&self, local_gen: ExtendedGen) -> bool {
+	pub fn release(&self, local_gen: LockIdAndMeta) -> bool {
 		// We're going to perform a one-shot `fetch_update`. This is sound because the, if the slot
 		// changed in between the calls, it must have been updated by some other `release`/`acquire`
 		// call.
@@ -91,7 +90,7 @@ impl Slot {
 
 		// Of course, even if we win the race, we still have to ensure that we're not deleting the
 		// slot at the wrong generation.
-		if ExtendedGen::from_raw(lock_and_gen).gen() != local_gen.gen() {
+		if LockIdAndMeta::from_raw(lock_and_gen).meta() != local_gen.meta() {
 			return false;
 		}
 
@@ -114,19 +113,43 @@ impl Slot {
 	// 	self.base_ptr.store(new_base as *mut (), Ordering::Relaxed);
 	// }
 
-	/// Attempts to get the current base pointer for the [Slot]. Fails and returns the existing
-	/// generation-lock pair if we either lack lock permission or if the slot has been generationally
-	/// invalidated.
-	pub fn try_get_base(
-		&self,
-		locks: &SessionLocks,
-		ptr_gen: ExtendedGen,
-	) -> Result<*mut (), ExtendedGen> {
+	fn try_get_base_common(&self) -> (*mut (), LockIdAndMeta) {
+		// TODO: Could we somehow make this entirely `Relaxed`?
 		let base_ptr = self.base_ptr.load(Ordering::Acquire); // Forces us to see `lock_and_gen` and `base_ptr`.
 		let slot_gen = self.lock_and_gen.load(Ordering::Relaxed);
-		let slot_gen = ExtendedGen::from_raw(slot_gen);
+		let slot_gen = LockIdAndMeta::from_raw(slot_gen);
 
-		if locks.check_gen_and_lock(ptr_gen, slot_gen) {
+		(base_ptr, slot_gen)
+	}
+
+	/// Attempts to get the current base pointer for the [Slot] mutably. Fails and returns the existing
+	/// generation-lock pair if we either lack lock permission or if the slot has been generationally
+	/// invalidated.
+	pub fn try_get_base_mut(
+		&self,
+		locks: &SessionLocks,
+		ptr_handle: LockIdAndMeta,
+	) -> Result<*mut (), LockIdAndMeta> {
+		let (base_ptr, slot_gen) = self.try_get_base_common();
+
+		if locks.is_locked_mut_and_eq(ptr_handle, slot_gen) {
+			Ok(base_ptr)
+		} else {
+			Err(slot_gen)
+		}
+	}
+
+	/// Attempts to get the current base pointer for the [Slot] mutably. Fails and returns the existing
+	/// generation-lock pair if we either lack lock permission or if the slot has been generationally
+	/// invalidated.
+	pub fn try_get_base_ref(
+		&self,
+		locks: &SessionLocks,
+		ptr_handle: LockIdAndMeta,
+	) -> Result<*const (), LockIdAndMeta> {
+		let (base_ptr, slot_gen) = self.try_get_base_common();
+
+		if locks.is_locked_ref_and_eq(ptr_handle, slot_gen) {
 			Ok(base_ptr)
 		} else {
 			Err(slot_gen)
@@ -139,10 +162,10 @@ impl Slot {
 	///
 	/// Specifically, we have no clue if the slot will remain alive when we run [Slot::try_get_base].
 	/// This is purely just a heuristic.
-	pub fn is_alive(&self, ptr_gen: ExtendedGen) -> bool {
+	pub fn is_alive(&self, ptr_gen: LockIdAndMeta) -> bool {
 		let curr_gen = self.lock_and_gen.load(Ordering::Relaxed);
-		let curr_gen = ExtendedGen::from_raw(curr_gen);
-		ptr_gen.gen() == curr_gen.gen()
+		let curr_gen = LockIdAndMeta::from_raw(curr_gen);
+		ptr_gen.meta() == curr_gen.meta()
 	}
 }
 
@@ -155,15 +178,7 @@ pub struct GcHeap {
 }
 
 impl GcHeap {
-	pub fn alloc(
-		&mut self,
-		slot: &'static Slot,
-		gen_and_lock: ExtendedGen,
-		_ty: &'static ReflectType,
-		layout: Layout,
-	) -> NonNull<u8> {
-		let full_ptr = self.bump.alloc_layout(layout);
-		slot.acquire(gen_and_lock, full_ptr.as_ptr() as *const ());
-		full_ptr
+	pub fn alloc(&mut self, layout: Layout) -> NonNull<u8> {
+		self.bump.alloc_layout(layout)
 	}
 }

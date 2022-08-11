@@ -4,7 +4,9 @@
 //! handlers, accidental `Debug` calls, etc) that could easily cause deadlocks or UB if we're not
 //! careful.
 
-use std::{alloc::Layout, borrow::Cow, fmt, sync::atomic::AtomicU64};
+// TODO: Panic safety for OOM.
+
+use std::{alloc::Layout, borrow::Cow, fmt, num::NonZeroU8, ptr::NonNull, sync::atomic::AtomicU64};
 
 use crucible_core::{
 	array::arr,
@@ -13,7 +15,6 @@ use crucible_core::{
 use parking_lot::Mutex;
 
 use crate::{
-	core::reflect::ReflectType,
 	core::session::{Session, StaticStorage, StaticStorageHandler},
 	util::{
 		number::{LocalBatchAllocator, U8BitSet},
@@ -22,7 +23,7 @@ use crate::{
 };
 
 use super::{
-	gen::{ExtendedGen, SessionLocks, MAX_OBJ_GEN_EXCLUSIVE},
+	gen::{LockIdAndMeta, SessionLocks},
 	heap::{GcHeap, Slot, SlotManager},
 };
 
@@ -36,11 +37,11 @@ struct GlobalData {
 }
 
 struct GlobalMutexedData {
-	/// A bit set of reserved locks.
+	/// A bitset of reserved locks. Bit `0` must always be reserved.
 	reserved_locks: U8BitSet,
 
-	/// A bit set of locks held by a session. A lock can be held without being reserved if it is
-	/// released during its reservation.
+	/// A bitset of locks held by a session. A lock can be held without being reserved if it is
+	/// released while it's being held.
 	held_locks: U8BitSet,
 
 	/// Debug names for the various locks.
@@ -50,7 +51,7 @@ struct GlobalMutexedData {
 static GLOBAL_DATA: GlobalData = GlobalData {
 	id_batch_gen: AtomicU64::new(1),
 	mutexed: new_lot_mutex(GlobalMutexedData {
-		reserved_locks: U8BitSet::new(),
+		reserved_locks: U8BitSet([1, 0, 0, 0]), // Make sure bit 0 is always reserved.
 		held_locks: U8BitSet::new(),
 		lock_names: arr![None; 256],
 	}),
@@ -68,6 +69,9 @@ static GLOBAL_DATA: GlobalData = GlobalData {
 ///
 #[derive(Default)]
 pub(crate) struct LocalSessData {
+	/// Our session's thread-local generation allocator.
+	generation_gen: LocalBatchAllocator,
+
 	/// Our local garbage-collected heap that serves as both a nursery for new allocations and the
 	/// primary heap for objects that don't belong in a specific global heap.
 	heap: GcHeap,
@@ -75,14 +79,11 @@ pub(crate) struct LocalSessData {
 	/// A free stack of [Slot]s to be reused.
 	slots: SlotManager,
 
+	/// The set of all locks we need to unacquire on deinitialization.
+	locks_to_unacquire: U8BitSet,
+
 	/// Our session's actively held lock set.
 	session_locks: SessionLocks,
-
-	/// Our session's thread-local generation allocator.
-	generation_gen: LocalBatchAllocator,
-
-	/// The set of all locks acquired in our [SessionLocks] set.
-	lock_set: U8BitSet,
 }
 
 impl StaticStorageHandler for LocalSessData {
@@ -95,12 +96,18 @@ impl StaticStorageHandler for LocalSessData {
 	}
 
 	fn deinit_comp(target: &mut Option<Self::Comp>) {
+		// Acquire dependencies.
+		// This is called directly from userland. It is non-reentrant.
 		let mut global_session_data = GLOBAL_DATA.mutexed.lock();
 		let local_session_data = target.as_mut().unwrap().get_mut();
 
-		for lock in local_session_data.lock_set.iter_set() {
-			local_session_data.lock_set.unset(lock);
-			local_session_data.session_locks.unlock(lock);
+		// Unacquire all locks.
+		for lock in local_session_data.locks_to_unacquire.iter_set() {
+			// Unregister locally
+			local_session_data.locks_to_unacquire.unset(lock);
+			local_session_data.session_locks.unacquire(lock);
+
+			// Unregister globally
 			global_session_data.held_locks.unset(lock);
 		}
 	}
@@ -108,30 +115,32 @@ impl StaticStorageHandler for LocalSessData {
 
 // === Lock management === //
 
-pub fn reserve_lock(label: Option<Cow<'static, str>>) -> u8 {
+pub fn reserve_lock(label: Option<Cow<'static, str>>) -> NonZeroU8 {
 	let mut global_data = GLOBAL_DATA.mutexed.lock();
 
+	// Reserve lock
 	let id = global_data
 		.reserved_locks
 		.reserve_zero_bit()
-		.unwrap_or(0xFF);
+		.expect("Cannot allocate more than 255 locks concurrently.");
 
-	assert_ne!(
-		id, 0xFF,
-		"Cannot allocate more than 255 locks concurrently."
-	);
-
+	// Set lock label
 	global_data.lock_names[id as usize] = label;
 
-	id
+	// We statically reserve bit `0` so the sentinel lock is never reserved.
+	NonZeroU8::new(id).unwrap()
 }
 
-pub fn unreserve_lock(handle: u8) {
-	GLOBAL_DATA.mutexed.lock().reserved_locks.unset(handle);
+pub fn unreserve_lock(handle: NonZeroU8) {
+	GLOBAL_DATA
+		.mutexed
+		.lock()
+		.reserved_locks
+		.unset(handle.get());
 }
 
-pub fn is_lock_held_somewhere(handle: u8) -> bool {
-	GLOBAL_DATA.mutexed.lock().held_locks.contains(handle)
+pub fn is_lock_held_somewhere(handle: NonZeroU8) -> bool {
+	GLOBAL_DATA.mutexed.lock().held_locks.contains(handle.get())
 }
 
 pub fn is_lock_held_by(session: Session<'_>, handle: u8) -> bool {
@@ -140,10 +149,10 @@ pub fn is_lock_held_by(session: Session<'_>, handle: u8) -> bool {
 		LocalSessData::get(session).get_mut_unchecked()
 	};
 
-	local_sess_data.lock_set.contains(handle)
+	local_sess_data.locks_to_unacquire.contains(handle)
 }
 
-pub fn acquire_locks(session: Session<'_>, locks: &[u8]) {
+pub fn acquire_locks(session: Session<'_>, locks: &[NonZeroU8]) {
 	let mut mutexed_data = GLOBAL_DATA.mutexed.lock();
 
 	// Acquire local session data (enter non-reentrant section!)
@@ -168,8 +177,8 @@ pub fn acquire_locks(session: Session<'_>, locks: &[u8]) {
 	// Now, lock them!
 	for lock in locks.iter().copied() {
 		mutexed_data.held_locks.set(lock);
-		local_sess_data.session_locks.lock(lock);
-		local_sess_data.lock_set.set(lock);
+		local_sess_data.session_locks.acquire_mut(lock);
+		local_sess_data.locks_to_unacquire.set(lock);
 	}
 }
 
@@ -230,17 +239,43 @@ pub fn reserve_obj_slot_capacity(session: Session<'_>, amount: usize) {
 #[inline(always)]
 pub fn allocate_new_obj(
 	session: Session<'_>,
-	ty: &'static ReflectType,
 	layout: Layout,
 	lock_id: u8,
-) -> (&'static Slot, ExtendedGen, *mut ()) {
-	// Ensure that `ty.layout` and `layout` are consistent in debug builds.
-	debug_assert!(
-		ty.static_layout
-			.map_or(true, |static_layout| static_layout == layout),
-		"`ty`-provided `Layout` does not match provided `layout`."
-	);
+) -> (&'static Slot, ExtendedGen, NonNull<u8>) {
+	// Acquire local session data (enter non-reentrant section!)
+	let local_sess_data = unsafe {
+		// Safety: see item comment for [LocalSessData].
+		LocalSessData::get(session).get_mut_unchecked()
+	};
 
+	// Generate a new ID
+	let gen = local_sess_data.generation_gen.generate(
+		&GLOBAL_DATA.id_batch_gen,
+		MAX_OBJ_GEN_EXCLUSIVE,
+		ID_GEN_BATCH_SIZE,
+	);
+	debug_assert_ne!(gen, 0);
+
+	// Acquire a slot
+	let slot = local_sess_data.slots.reserve();
+
+	// Lock that slot and reserve space for the allocation.
+	let full_ptr = local_sess_data.heap.alloc(layout);
+
+	let gen_and_lock = ExtendedGen::new(lock_id, gen);
+	slot.acquire(gen_and_lock, full_ptr.as_ptr() as *const ());
+
+	let gen_and_mask = ExtendedGen::new(0xFF, gen);
+
+	(slot, gen_and_mask, full_ptr)
+}
+
+#[inline(always)]
+pub fn allocate_new_obj_custom(
+	session: Session<'_>,
+	target: *const u8,
+	lock_id: u8,
+) -> (&'static Slot, ExtendedGen) {
 	// Acquire local session data (enter non-reentrant section!)
 	let local_sess_data = unsafe {
 		// Safety: see item comment for [LocalSessData].
@@ -260,15 +295,11 @@ pub fn allocate_new_obj(
 
 	// Lock that slot and reserve space for the allocation.
 	let gen_and_lock = ExtendedGen::new(lock_id, gen);
-	let full_ptr = local_sess_data
-		.heap
-		.alloc(slot, gen_and_lock, ty, layout)
-		.cast::<()>()
-		.as_ptr();
+	slot.acquire(gen_and_lock, target as *const ());
 
 	let gen_and_mask = ExtendedGen::new(0xFF, gen);
 
-	(slot, gen_and_mask, full_ptr)
+	(slot, gen_and_mask)
 }
 
 #[inline(always)]
@@ -284,7 +315,7 @@ pub fn try_get_obj_ptr(
 		LocalSessData::get(session).get_mut_unchecked()
 	};
 
-	slot.try_get_base(&local_sess_data.session_locks, gen)
+	slot.try_get_base_mut(&local_sess_data.session_locks, gen)
 }
 
 #[inline(always)]

@@ -49,7 +49,7 @@ pub fn mask_out_lsb(count: u8) -> u64 {
 
 /// An byte-sized ID allocator that properly reuses free bits.
 #[derive(Debug, Clone)]
-pub struct U8BitSet([u64; 4]);
+pub struct U8BitSet(pub [u64; 4]);
 
 impl Default for U8BitSet {
 	fn default() -> Self {
