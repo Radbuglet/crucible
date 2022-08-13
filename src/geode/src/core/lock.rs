@@ -26,7 +26,7 @@ mod math {
 	pub struct LockId(u8);
 
 	impl LockId {
-		pub const ID_COUNT: usize = 256;
+		pub const TOTAL_ID_COUNT: usize = 256;
 		pub const MUTABLE: LockId = LockId(0);
 		pub const IMMUTABLE: LockId = LockId(0xFF);
 
@@ -36,7 +36,7 @@ mod math {
 
 		pub const fn from_index(index: usize) -> Self {
 			assert!(
-				index < Self::ID_COUNT,
+				index < Self::TOTAL_ID_COUNT,
 				"`index` is greater than or equal to `LockId::ID_COUNT`"
 			);
 			Self(index as u8)
@@ -67,7 +67,7 @@ mod math {
 		}
 	}
 
-	#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+	#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 	pub struct UserLockId(NonZeroU8);
 
 	impl UserLockId {
@@ -111,10 +111,10 @@ mod math {
 	}
 
 	impl LockIdAndMeta {
-		pub const MAX_META: u64 = 2u64.pow(64 - 8);
+		pub const MAX_META_EXCLUSIVE: u64 = 2u64.pow(64 - 8);
 
 		const fn new_raw(lock: u8, meta: u64) -> Self {
-			debug_assert!(meta < Self::MAX_META);
+			debug_assert!(meta < Self::MAX_META_EXCLUSIVE);
 
 			Self(lock as u64 + (meta << 8))
 		}
@@ -123,7 +123,7 @@ mod math {
 			Self::new_raw(lock.0, meta)
 		}
 
-		pub const fn new_validation_pair(meta: u64) -> Self {
+		pub const fn new_handle(meta: u64) -> Self {
 			Self::new_raw(0xFF, meta)
 		}
 
@@ -249,18 +249,18 @@ mod math {
 			}
 		}
 
-		pub fn is_locked_mut_and_eq(&self, target: LockIdAndMeta, rhs: LockIdAndMeta) -> bool {
-			debug_assert_eq!(rhs.lock_raw(), 0xFF);
+		pub fn is_locked_mut_and_eq(&self, target: LockIdAndMeta, handle: LockIdAndMeta) -> bool {
+			debug_assert_eq!(handle.lock_raw(), 0xFF);
 
 			let state = self.lock_states[target.lock().index()].get();
-			rhs.xor_lock(state) == target
+			handle.xor_lock(state) == target
 		}
 
-		pub fn is_locked_ref_and_eq(&self, target: LockIdAndMeta, rhs: LockIdAndMeta) -> bool {
-			debug_assert_eq!(rhs.lock_raw(), 0xFF);
+		pub fn is_locked_ref_and_eq(&self, target: LockIdAndMeta, handle: LockIdAndMeta) -> bool {
+			debug_assert_eq!(handle.lock_raw(), 0xFF);
 
 			let state = self.lock_states[target.lock().index()].get();
-			target.or_lock(state) == rhs
+			target.or_lock(state) == handle
 		}
 	}
 
@@ -272,7 +272,7 @@ mod math {
 	}
 
 	impl<T> LockMap<T> {
-		pub const fn new(values: [T; LockId::ID_COUNT]) -> Self {
+		pub const fn new(values: [T; LockId::TOTAL_ID_COUNT]) -> Self {
 			Self { values }
 		}
 	}
@@ -299,10 +299,6 @@ mod math {
 	impl UserLockSet {
 		pub fn add(&mut self, id: UserLockId) {
 			self.0.set(id.bit_index());
-		}
-
-		pub fn remove(&mut self, id: UserLockId) {
-			self.0.unset(id.bit_index());
 		}
 
 		pub fn clear(&mut self) {
@@ -342,7 +338,7 @@ mod math {
 			Self(U8BitSet([bit_mask(0), 0, 0, bit_mask(63)]))
 		}
 
-		pub fn reserve(&mut self, at_most: u8) -> UserLockSetIter {
+		pub fn reserve(&mut self, at_most: usize) -> UserLockSetIter {
 			let mut reserved = U8BitSet::new();
 
 			for _ in 0..at_most {
@@ -371,7 +367,7 @@ mod math {
 			Self(0)
 		}
 
-		pub fn get_borrow_state(&self) -> Option<BorrowState> {
+		pub fn borrow_state(&self) -> Option<BorrowState> {
 			match self.0 {
 				-1 => Some(BorrowState::Mut),
 				0 => None,
@@ -392,7 +388,7 @@ mod math {
 				Ok(())
 			} else {
 				Err(LockAcquireError {
-					offending_state: self.get_borrow_state().unwrap(),
+					offending_state: self.borrow_state().unwrap(),
 				})
 			}
 		}
@@ -445,7 +441,7 @@ mod db {
 			LockBorrowCount, LockId, LockMap, SessionLockStateTracker, UserLockId,
 			UserLockIdAllocator, UserLockSet, UserLockSetIter,
 		},
-		BorrowMutability, SessionLocksAcquisitionError, UserLock,
+		BorrowMutability, BorrowState, LockIdAndMeta, SessionLocksAcquisitionError, UserLock,
 	};
 
 	// === Global State === //
@@ -463,9 +459,9 @@ mod db {
 
 	static GLOBAL_LOCK_STATE: Mutex<GlobalLockState> = new_lot_mutex(GlobalLockState {
 		reserved_locks: UserLockIdAllocator::new(),
-		lock_rcs: LockMap::new(arr![LockBorrowCount::new(); LockId::ID_COUNT]),
+		lock_rcs: LockMap::new(arr![LockBorrowCount::new(); LockId::TOTAL_ID_COUNT]),
 		lock_labels: LockMap::new(
-			arr_indexed![i => LockId::from_index(i).default_debug_label(); LockId::ID_COUNT],
+			arr_indexed![i => LockId::from_index(i).default_debug_label(); LockId::TOTAL_ID_COUNT],
 		),
 	});
 
@@ -518,8 +514,8 @@ mod db {
 		id
 	}
 
-	pub fn reserve_many_locks(up_to: u8) -> UserLockSetIter {
-		GLOBAL_LOCK_STATE.lock().reserved_locks.reserve(up_to)
+	pub fn reserve_many_locks(at_most: usize) -> UserLockSetIter {
+		GLOBAL_LOCK_STATE.lock().reserved_locks.reserve(at_most)
 	}
 
 	pub fn unreserve_lock(id: UserLockId) {
@@ -612,11 +608,39 @@ mod db {
 
 	// === Lock state querying === //
 
-	// TODO
+	pub fn get_global_lock_borrow_state(id: UserLockId) -> Option<BorrowState> {
+		GLOBAL_LOCK_STATE.lock().lock_rcs[id.as_lock_id()].borrow_state()
+	}
+
+	pub fn get_session_borrow_state(session: Session, id: LockId) -> Option<BorrowMutability> {
+		SessionLockState::get(session).lock_states.lock_state(id)
+	}
+
+	pub fn session_cmp_lock_mut(
+		session: Session,
+		target: LockIdAndMeta,
+		handle: LockIdAndMeta,
+	) -> bool {
+		SessionLockState::get(session)
+			.lock_states
+			.is_locked_mut_and_eq(target, handle)
+	}
+
+	pub fn session_cmp_lock_ref(
+		session: Session,
+		target: LockIdAndMeta,
+		handle: LockIdAndMeta,
+	) -> bool {
+		SessionLockState::get(session)
+			.lock_states
+			.is_locked_ref_and_eq(target, handle)
+	}
 }
 
 use crucible_core::{c_enum::c_enum, error::ResultExt};
 pub(crate) use db::SessionLockState;
+
+use self::math::UserLockSetIter;
 
 use super::{
 	debug::DebugLabel,
@@ -624,7 +648,7 @@ use super::{
 	session::Session,
 };
 
-// === Generic Lock State === //
+// === Generic lock state === //
 
 c_enum! {
 	pub enum BorrowMutability {
@@ -670,7 +694,7 @@ impl fmt::Display for LockAcquireError {
 	}
 }
 
-// === Lock Management === //
+// === UserLock === //
 
 #[derive(Debug, Clone)]
 pub struct SessionLocksAcquisitionError {
@@ -691,28 +715,50 @@ impl fmt::Display for SessionLocksAcquisitionError {
 	}
 }
 
-#[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub struct UserLock(math::UserLockId);
 
 impl fmt::Debug for UserLock {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("Lock")
+		f.debug_struct("UserLock")
 			.field("id", &self.0)
 			.field("debug_name", &db::get_lock_debug_name(self.0.as_lock_id()))
 			.finish()
 	}
 }
 
-impl Destructible for UserLock {
-	fn destruct(self) {
-		db::unreserve_lock(self.0)
-	}
-}
-
 impl UserLock {
+	pub const USER_ID_COUNT: usize = math::UserLockId::USER_ID_COUNT;
+
 	pub fn new<L: DebugLabel>(label: L) -> Owned<Self> {
 		let id = db::reserve_lock(label.to_debug_label());
 		Owned::new(UserLock(id))
+	}
+
+	pub fn new_batch(at_most: usize) -> UserLockAllocIter {
+		UserLockAllocIter(db::reserve_many_locks(at_most))
+	}
+
+	pub fn try_from_lock(lock: Lock) -> Option<Self> {
+		lock.0.try_as_user_id().map(Self)
+	}
+
+	pub fn set_debug_name<L: DebugLabel>(self, label: L) {
+		db::set_lock_debug_name(self.0, label.to_debug_label())
+	}
+
+	pub fn global_borrow_state(self) -> Option<BorrowState> {
+		db::get_global_lock_borrow_state(self.0)
+	}
+
+	pub fn as_lock(self) -> Lock {
+		Lock::from_user_lock(self)
+	}
+}
+
+impl Destructible for UserLock {
+	fn destruct(self) {
+		db::unreserve_lock(self.0)
 	}
 }
 
@@ -732,5 +778,99 @@ impl Session<'_> {
 
 	pub fn acquire_locks<I: IntoIterator<Item = (BorrowMutability, UserLock)>>(self, locks: I) {
 		self.try_acquire_locks(locks).unwrap_pretty()
+	}
+}
+
+#[derive(Debug)]
+pub struct UserLockAllocIter(UserLockSetIter);
+
+impl Iterator for UserLockAllocIter {
+	type Item = Owned<UserLock>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let id = self.0.next()?;
+		Some(Owned::new(UserLock(id)))
+	}
+}
+
+impl Drop for UserLockAllocIter {
+	fn drop(&mut self) {
+		for item in self {
+			drop(item); // Destructs the `Owned` lock instance.
+		}
+	}
+}
+
+// === Lock === //
+
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+pub struct Lock(math::LockId);
+
+impl fmt::Debug for Lock {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Lock")
+			.field("id", &self.0)
+			.field("debug_name", &db::get_lock_debug_name(self.0))
+			.finish()
+	}
+}
+
+impl Lock {
+	pub const TOTAL_ID_COUNT: usize = math::LockId::TOTAL_ID_COUNT;
+	pub const IMMUTABLE: Self = Lock(math::LockId::IMMUTABLE);
+	pub const MUTABLE: Self = Lock(math::LockId::MUTABLE);
+
+	pub fn from_user_lock(lock: UserLock) -> Self {
+		Self(lock.0.as_lock_id())
+	}
+
+	pub fn try_as_user_lock(self) -> Option<UserLock> {
+		UserLock::try_from_lock(self)
+	}
+
+	pub fn session_borrow_state(self, session: Session) -> Option<BorrowMutability> {
+		db::get_session_borrow_state(session, self.0)
+	}
+}
+
+// === LockAndMeta === //
+
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+pub struct LockAndMeta(math::LockIdAndMeta);
+
+impl fmt::Debug for LockAndMeta {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("LockAndMeta")
+			.field("lock", &self.lock())
+			.field("meta", &self.0.meta())
+			.finish()
+	}
+}
+
+impl LockAndMeta {
+	pub const MAX_META_EXCLUSIVE: u64 = math::LockIdAndMeta::MAX_META_EXCLUSIVE;
+
+	pub fn new(lock: Lock, meta: u64) -> Self {
+		Self(math::LockIdAndMeta::new(lock.0, meta))
+	}
+
+	pub fn new_handle(meta: u64) -> Self {
+		Self(math::LockIdAndMeta::new_handle(meta))
+	}
+
+	pub fn lock(self) -> Lock {
+		Lock(self.0.lock())
+	}
+
+	pub fn meta(self) -> u64 {
+		self.0.meta()
+	}
+
+	pub fn eq_locked_mut(self, session: Session, handle: Self) -> bool {
+		db::session_cmp_lock_mut(session, self.0, handle.0)
+	}
+
+	pub fn eq_locked_ref(self, session: Session, handle: Self) -> bool {
+		db::session_cmp_lock_ref(session, self.0, handle.0)
 	}
 }
