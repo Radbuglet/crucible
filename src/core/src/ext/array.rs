@@ -74,6 +74,20 @@ pub macro arr($ctor:expr; $size:expr) {{
 	unsafe { arr.unwrap() }
 }}
 
+pub macro arr_indexed($index:ident => $ctor:expr; $size:expr) {{
+	let mut arr = unsafe { MacroArrayBuilder::<_, { $size }>::new() };
+
+	while arr.init_count < arr.len {
+		arr.array[arr.init_count] = MaybeUninit::new({
+			let $index = arr.init_count;
+			$ctor
+		});
+		arr.init_count += 1;
+	}
+
+	unsafe { arr.unwrap() }
+}}
+
 pub fn arr_from_iter<T, I: IntoIterator<Item = T>, const N: usize>(iter: I) -> [T; N] {
 	let mut iter = iter.into_iter();
 	let mut count = 0;

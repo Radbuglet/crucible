@@ -21,10 +21,7 @@ where
 	}
 }
 
-pub fn try_transform_or_err<T, R, E, F>(
-	orig: &mut T,
-	f: F,
-) -> Result<&mut R, (&mut T, E)>
+pub fn try_transform_or_err<T, R, E, F>(orig: &mut T, f: F) -> Result<&mut R, (&mut T, E)>
 where
 	T: ?Sized,
 	R: ?Sized,

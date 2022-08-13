@@ -6,7 +6,7 @@ use std::{
 };
 
 use crucible_core::{
-	array::arr,
+	array::{arr, arr_indexed},
 	cell::{MutexedUnsafeCell, UnsafeCellExt},
 	marker::{PhantomNoSendOrSync, PhantomNoSync},
 	sync::AssertSync,
@@ -709,16 +709,8 @@ macro register_static_storages(
 
 		unsafe fn backing_storage() -> &'static SessionStorage<PrimaryStorageEntry> {
 			static STORAGE: SessionStorage<PrimaryStorageEntry> = {
-				let mut i = 0;
-
-				SessionStorage::new(arr![(
-					{
-						let old = i;
-						if i != u8::MAX {
-							i += 1;
-						}
-						old
-					},
+				SessionStorage::new(arr_indexed![i => (
+					i as u8,
 					MutexedUnsafeCell::new(None),
 				); 256])
 			};
@@ -755,4 +747,4 @@ macro register_static_storages(
 	)*
 }
 
-register_static_storages![super::internals::db::LocalSessData];
+register_static_storages![super::lock::SessionLockState];

@@ -38,7 +38,7 @@ pub fn contains_bit(target: u64, pos: u8) -> bool {
 }
 
 /// Constructs a bit mask with only the bit at position `pos` set.
-pub fn bit_mask(pos: u8) -> u64 {
+pub const fn bit_mask(pos: u8) -> u64 {
 	1u64.wrapping_shl(pos as u32)
 }
 
@@ -48,7 +48,7 @@ pub fn mask_out_lsb(count: u8) -> u64 {
 }
 
 /// An byte-sized ID allocator that properly reuses free bits.
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct U8BitSet(pub [u64; 4]);
 
 impl Default for U8BitSet {
@@ -142,6 +142,10 @@ impl U8BitSet {
 		U8BitSetIter {
 			target: self.clone(),
 		}
+	}
+
+	pub fn clear(&mut self) {
+		*self = Self::default();
 	}
 }
 
