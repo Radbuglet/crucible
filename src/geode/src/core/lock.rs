@@ -1,5 +1,16 @@
 use std::{error::Error, fmt, num::NonZeroUsize};
 
+use crucible_core::{c_enum::c_enum, error::ResultExt};
+use thiserror::Error;
+
+use self::math::UserLockSetIter;
+
+use super::{
+	debug::DebugLabel,
+	owned::{Destructible, Owned},
+	session::Session,
+};
+
 // === Math === //
 
 mod math {
@@ -18,7 +29,7 @@ mod math {
 		util::number::{bit_mask, U8BitSet},
 	};
 
-	use super::{BorrowMutability, BorrowState, LockAcquireError};
+	use super::{BorrowError, BorrowMutability, BorrowState};
 
 	// === Lock Ids === //
 
@@ -46,7 +57,7 @@ mod math {
 			UserLockId::try_from_lock_id(self)
 		}
 
-		pub fn is_user_id(self) -> bool {
+		pub fn is_user_lock(self) -> bool {
 			self.try_as_user_id().is_some()
 		}
 
@@ -125,6 +136,14 @@ mod math {
 
 		pub const fn new_handle(meta: u64) -> Self {
 			Self::new_raw(0xFF, meta)
+		}
+
+		pub fn could_be_a_handle(self) -> bool {
+			self.lock_raw() == 0xFF
+		}
+
+		pub fn turn_into_a_handle(self) -> Self {
+			self.or_lock(0xFF)
 		}
 
 		pub fn raw(self) -> u64 {
@@ -250,14 +269,14 @@ mod math {
 		}
 
 		pub fn is_locked_mut_and_eq(&self, target: LockIdAndMeta, handle: LockIdAndMeta) -> bool {
-			debug_assert_eq!(handle.lock_raw(), 0xFF);
+			debug_assert!(handle.could_be_a_handle());
 
 			let state = self.lock_states[target.lock().index()].get();
 			handle.xor_lock(state) == target
 		}
 
 		pub fn is_locked_ref_and_eq(&self, target: LockIdAndMeta, handle: LockIdAndMeta) -> bool {
-			debug_assert_eq!(handle.lock_raw(), 0xFF);
+			debug_assert!(handle.could_be_a_handle());
 
 			let state = self.lock_states[target.lock().index()].get();
 			target.or_lock(state) == handle
@@ -378,7 +397,7 @@ mod math {
 			}
 		}
 
-		pub fn can_acquire(&self, mutability: BorrowMutability) -> Result<(), LockAcquireError> {
+		pub fn can_acquire(&self, mutability: BorrowMutability) -> Result<(), BorrowError> {
 			let is_compatible = match mutability {
 				BorrowMutability::Mut => self.0 == 0,
 				BorrowMutability::Ref => self.0 >= 0,
@@ -387,7 +406,7 @@ mod math {
 			if is_compatible {
 				Ok(())
 			} else {
-				Err(LockAcquireError {
+				Err(BorrowError {
 					offending_state: self.borrow_state().unwrap(),
 				})
 			}
@@ -417,9 +436,6 @@ mod math {
 	}
 }
 
-// Reexports
-pub use math::LockIdAndMeta;
-
 // === Global State === //
 
 mod db {
@@ -438,10 +454,10 @@ mod db {
 
 	use super::{
 		math::{
-			LockBorrowCount, LockId, LockMap, SessionLockStateTracker, UserLockId,
+			LockBorrowCount, LockId, LockIdAndMeta, LockMap, SessionLockStateTracker, UserLockId,
 			UserLockIdAllocator, UserLockSet, UserLockSetIter,
 		},
-		BorrowMutability, BorrowState, LockIdAndMeta, SessionLocksAcquisitionError, UserLock,
+		BorrowMutability, BorrowState, SessionLocksAcquisitionError, UserLock,
 	};
 
 	// === Global State === //
@@ -616,7 +632,7 @@ mod db {
 		SessionLockState::get(session).lock_states.lock_state(id)
 	}
 
-	pub fn session_cmp_lock_mut(
+	pub fn extended_eq_locked_mut(
 		session: Session,
 		target: LockIdAndMeta,
 		handle: LockIdAndMeta,
@@ -626,7 +642,7 @@ mod db {
 			.is_locked_mut_and_eq(target, handle)
 	}
 
-	pub fn session_cmp_lock_ref(
+	pub fn extended_eq_locked_ref(
 		session: Session,
 		target: LockIdAndMeta,
 		handle: LockIdAndMeta,
@@ -637,16 +653,7 @@ mod db {
 	}
 }
 
-use crucible_core::{c_enum::c_enum, error::ResultExt};
 pub(crate) use db::SessionLockState;
-
-use self::math::UserLockSetIter;
-
-use super::{
-	debug::DebugLabel,
-	owned::{Destructible, Owned},
-	session::Session,
-};
 
 // === Generic lock state === //
 
@@ -654,6 +661,22 @@ c_enum! {
 	pub enum BorrowMutability {
 		Ref,
 		Mut,
+	}
+}
+
+impl BorrowMutability {
+	pub fn inverse(self) -> Self {
+		match self {
+			BorrowMutability::Ref => BorrowMutability::Mut,
+			BorrowMutability::Mut => BorrowMutability::Ref,
+		}
+	}
+
+	fn fmt_adjective(self) -> &'static str {
+		match self {
+			BorrowMutability::Ref => "immutably",
+			BorrowMutability::Mut => "mutably",
+		}
 	}
 }
 
@@ -672,14 +695,14 @@ impl BorrowState {
 	}
 }
 
-#[derive(Debug, Clone)]
-pub struct LockAcquireError {
-	offending_state: BorrowState,
+#[derive(Debug, Copy, Clone)]
+pub struct BorrowError {
+	pub offending_state: BorrowState,
 }
 
-impl Error for LockAcquireError {}
+impl Error for BorrowError {}
 
-impl fmt::Display for LockAcquireError {
+impl fmt::Display for BorrowError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self.offending_state {
 			BorrowState::Ref(blocked_by) => write!(
@@ -696,12 +719,10 @@ impl fmt::Display for LockAcquireError {
 
 // === UserLock === //
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub struct SessionLocksAcquisitionError {
-	violations: Vec<(UserLock, LockAcquireError)>,
+	violations: Vec<(UserLock, BorrowError)>,
 }
-
-impl Error for SessionLocksAcquisitionError {}
 
 impl fmt::Display for SessionLocksAcquisitionError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -709,6 +730,36 @@ impl fmt::Display for SessionLocksAcquisitionError {
 
 		for (lock, error) in self.violations.iter() {
 			writeln!(f, "- {:?}: {}", lock, error)?;
+		}
+
+		Ok(())
+	}
+}
+
+#[derive(Debug, Copy, Clone, Error)]
+pub struct LockPermissionsError {
+	pub lock: Lock,
+	pub requested_mode: BorrowMutability,
+	pub session_had_lock: bool,
+}
+
+impl fmt::Display for LockPermissionsError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(
+			f,
+			"failed to borrow {:?} {}",
+			self.lock,
+			self.requested_mode.fmt_adjective(),
+		)?;
+
+		if self.session_had_lock {
+			write!(
+				f,
+				"; session only acquired the lock {}",
+				self.requested_mode.inverse().fmt_adjective(),
+			)?;
+		} else {
+			write!(f, "; session did not acquire the lock at all.")?;
 		}
 
 		Ok(())
@@ -831,6 +882,10 @@ impl Lock {
 	pub fn session_borrow_state(self, session: Session) -> Option<BorrowMutability> {
 		db::get_session_borrow_state(session, self.0)
 	}
+
+	pub fn is_user_lock(&self) -> bool {
+		self.0.is_user_lock()
+	}
 }
 
 // === LockAndMeta === //
@@ -858,6 +913,14 @@ impl LockAndMeta {
 		Self(math::LockIdAndMeta::new_handle(meta))
 	}
 
+	pub fn from_raw(raw: u64) -> Self {
+		Self(math::LockIdAndMeta::from_raw(raw))
+	}
+
+	pub fn raw(self) -> u64 {
+		self.0.raw()
+	}
+
 	pub fn lock(self) -> Lock {
 		Lock(self.0.lock())
 	}
@@ -866,11 +929,26 @@ impl LockAndMeta {
 		self.0.meta()
 	}
 
+	pub fn could_be_a_handle(self) -> bool {
+		self.0.could_be_a_handle()
+	}
+
+	pub fn make_handle(self) -> Self {
+		LockAndMeta(self.0.turn_into_a_handle())
+	}
+
+	pub fn eq_locked(self, session: Session, handle: Self, mutability: BorrowMutability) -> bool {
+		match mutability {
+			BorrowMutability::Ref => self.eq_locked_ref(session, handle),
+			BorrowMutability::Mut => self.eq_locked_mut(session, handle),
+		}
+	}
+
 	pub fn eq_locked_mut(self, session: Session, handle: Self) -> bool {
-		db::session_cmp_lock_mut(session, self.0, handle.0)
+		db::extended_eq_locked_mut(session, self.0, handle.0)
 	}
 
 	pub fn eq_locked_ref(self, session: Session, handle: Self) -> bool {
-		db::session_cmp_lock_ref(session, self.0, handle.0)
+		db::extended_eq_locked_ref(session, self.0, handle.0)
 	}
 }

@@ -172,7 +172,12 @@ pub struct LocalBatchAllocator {
 
 impl LocalBatchAllocator {
 	#[inline(always)]
-	pub fn generate(&mut self, gen: &AtomicU64, max_id_exclusive: u64, batch_size: u64) -> u64 {
+	pub fn generate(
+		&mut self,
+		global_gen: &AtomicU64,
+		max_id_exclusive: u64,
+		batch_size: u64,
+	) -> u64 {
 		assert!(batch_size > 0);
 
 		self.id_generator += 1;
@@ -181,14 +186,19 @@ impl LocalBatchAllocator {
 			// Fast path
 			self.id_generator
 		} else {
-			self.generate_slow(gen, max_id_exclusive, batch_size)
+			self.generate_slow(global_gen, max_id_exclusive, batch_size)
 		}
 	}
 
 	#[cold]
 	#[inline(never)]
-	fn generate_slow(&mut self, gen: &AtomicU64, max_id_exclusive: u64, batch_size: u64) -> u64 {
-		let start_id = gen
+	fn generate_slow(
+		&mut self,
+		global_gen: &AtomicU64,
+		max_id_exclusive: u64,
+		batch_size: u64,
+	) -> u64 {
+		let start_id = global_gen
 			.fetch_update(AtomicOrdering::Relaxed, AtomicOrdering::Relaxed, |f| {
 				Some(f.saturating_add(batch_size))
 			})

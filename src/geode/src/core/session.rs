@@ -747,4 +747,7 @@ macro register_static_storages(
 	)*
 }
 
-register_static_storages![super::lock::SessionLockState];
+register_static_storages![
+	super::lock::SessionLockState,
+	super::object_db::SlotManagerState
+];
