@@ -45,17 +45,17 @@ impl ByteCounter {
 		self.bits_set |= self.count;
 	}
 
-	pub fn pad_for(&mut self, align: usize) {
+	pub fn align_to(&mut self, align: usize) {
 		self.bump(needed_alignment(self.count, align));
 	}
 
 	pub fn bump_layout(&mut self, layout: Layout) {
-		self.pad_for(layout.align());
+		self.align_to(layout.align());
 		self.bump(layout.size());
 	}
 
 	pub fn bump_array(&mut self, elem_layout: Layout, len: usize) {
-		self.pad_for(elem_layout.align());
+		self.align_to(elem_layout.align());
 
 		if let Some(size) = elem_layout.size().checked_mul(len) {
 			self.bump(size);
@@ -124,13 +124,13 @@ impl<'a> Writer<'a> {
 		Ok(old_finger)
 	}
 
-	pub fn pad_for(&mut self, align: usize) -> Result<(), WriterOom> {
+	pub fn align_to(&mut self, align: usize) -> Result<(), WriterOom> {
 		self.bump(needed_alignment(self.finger as usize, align))
 			.map(|_| ())
 	}
 
 	pub fn bump_layout(&mut self, layout: Layout) -> Result<*mut u8, WriterOom> {
-		self.pad_for(layout.align())?;
+		self.align_to(layout.align())?;
 		self.bump(layout.size())
 	}
 }

@@ -3,7 +3,7 @@ use crate::transmute::sizealign_checked_transmute;
 use core::iter;
 use core::mem::MaybeUninit;
 
-// === Raw array creation === //
+// === Array transmute === //
 
 pub const fn transmute_uninit_array_to_inner<T, const N: usize>(
 	arr: MaybeUninit<[T; N]>,
@@ -26,6 +26,8 @@ pub const unsafe fn assume_init_array<T, const N: usize>(arr: [MaybeUninit<T>; N
 	// Safety: provided by caller
 	transmute_uninit_array_to_outer(arr).assume_init()
 }
+
+// === Array constructors === //
 
 #[repr(C)]
 pub struct MacroArrayBuilder<T, const N: usize> {
@@ -64,6 +66,7 @@ impl<T, const N: usize> Drop for MacroArrayBuilder<T, N> {
 }
 
 pub macro arr($ctor:expr; $size:expr) {{
+	// N.B. const expressions do not inherit the `unsafe` scope from their surroundings.
 	let mut arr = unsafe { MacroArrayBuilder::<_, { $size }>::new() };
 
 	while arr.init_count < arr.len {
@@ -75,6 +78,7 @@ pub macro arr($ctor:expr; $size:expr) {{
 }}
 
 pub macro arr_indexed($index:ident => $ctor:expr; $size:expr) {{
+	// N.B. const expressions do not inherit the `unsafe` scope from their surroundings.
 	let mut arr = unsafe { MacroArrayBuilder::<_, { $size }>::new() };
 
 	while arr.init_count < arr.len {
@@ -94,7 +98,7 @@ pub fn arr_from_iter<T, I: IntoIterator<Item = T>, const N: usize>(iter: I) -> [
 
 	arr![{
 		count += 1;
-		iter.next().unwrap_or_else(|| panic!("Expected {N} element(s); got {}", count - 1))
+		iter.next().unwrap_or_else(|| panic!("Expected at least {N} element(s); got {}", count - 1))
 	}; N]
 }
 

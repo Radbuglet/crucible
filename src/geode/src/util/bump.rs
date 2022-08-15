@@ -1,5 +1,5 @@
 use bumpalo::Bump;
-use crucible_core::sync::AssertSync;
+use crucible_core::{sync::AssertSync, transmute::prolong_ref};
 use std::mem::ManuallyDrop;
 
 #[derive(Debug, Default)]
@@ -12,7 +12,7 @@ impl LeakyBump {
 		let ptr = self.bump.get_mut().alloc(value);
 		unsafe {
 			// Safety: we can leave this unbounded because the `Bump` will never be dropped.
-			&*(ptr as *const T)
+			prolong_ref(ptr)
 		}
 	}
 }

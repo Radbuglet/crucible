@@ -1,12 +1,5 @@
 use core::mem::{self, ManuallyDrop};
 
-pub const unsafe fn sizealign_checked_transmute<A, B>(a: A) -> B {
-	assert!(mem::size_of::<A>() == mem::size_of::<B>());
-	assert!(mem::align_of::<A>() >= mem::align_of::<B>());
-
-	entirely_unchecked_transmute(a)
-}
-
 pub const unsafe fn entirely_unchecked_transmute<A, B>(a: A) -> B {
 	union Punny<A, B> {
 		a: ManuallyDrop<A>,
@@ -18,6 +11,13 @@ pub const unsafe fn entirely_unchecked_transmute<A, B>(a: A) -> B {
 	};
 
 	ManuallyDrop::into_inner(punned.b)
+}
+
+pub const unsafe fn sizealign_checked_transmute<A, B>(a: A) -> B {
+	assert!(mem::size_of::<A>() == mem::size_of::<B>());
+	assert!(mem::align_of::<A>() >= mem::align_of::<B>());
+
+	entirely_unchecked_transmute(a)
 }
 
 pub unsafe fn cast_ref_via_ptr<T, U, F>(val: &T, f: F) -> &U
@@ -38,10 +38,10 @@ where
 	&mut *f(val)
 }
 
-pub const unsafe fn prolong_ref<T: ?Sized>(val: &T) -> &'static T {
+pub const unsafe fn prolong_ref<'r, T: ?Sized>(val: &T) -> &'r T {
 	&*(val as *const T)
 }
 
-pub unsafe fn prolong_ref_mut<T: ?Sized>(val: &mut T) -> &'static mut T {
+pub unsafe fn prolong_ref_mut<'r, T: ?Sized>(val: &mut T) -> &'r mut T {
 	&mut *(val as *mut T)
 }

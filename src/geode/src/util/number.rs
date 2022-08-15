@@ -22,22 +22,24 @@ pub fn reserve_set_bit(target: &mut u64) -> u8 {
 	pos
 }
 
-/// Sets the specified bit to `1`.
+/// Sets the specified bit to `1`. See [bit_mask] for details on indexing.
 pub fn set_bit(target: &mut u64, pos: u8) {
 	*target |= bit_mask(pos);
 }
 
-/// Sets the specified bit to `0`.
+/// Sets the specified bit to `0`. See [bit_mask] for details on indexing.
 pub fn unset_bit(target: &mut u64, pos: u8) {
 	*target &= !bit_mask(pos);
 }
 
-/// Checks if a bitmask contains a specific bit.
+/// Checks if a bitmask contains a specific bit.  See [bit_mask] for details on indexing.
 pub fn contains_bit(target: u64, pos: u8) -> bool {
 	target & bit_mask(pos) > 0
 }
 
-/// Constructs a bit mask with only the bit at position `pos` set.
+/// Constructs a bit mask with only the bit at position `pos` set. Bit indices are measured from the
+/// LSB where index `0` is the least significant bit and `63` is the most significant bit. Indices
+/// higher than `63` result in an empty bitmask.
 pub const fn bit_mask(pos: u8) -> u64 {
 	1u64.wrapping_shl(pos as u32)
 }

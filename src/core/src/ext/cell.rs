@@ -56,10 +56,8 @@ where
 
 	// Actual implementation
 	let mut mapped = RefMut::map(orig, |orig| match try_transform(orig, f) {
-		Ok(mapped) => {
-			<Success<U> as TransparentWrapper<U>>::wrap_mut(mapped) as &mut dyn Either<U, T>
-		}
-		Err(orig) => <Failure<T> as TransparentWrapper<T>>::wrap_mut(orig) as &mut dyn Either<U, T>,
+		Ok(mapped) => Success::wrap_mut(mapped) as &mut dyn Either<U, T>,
+		Err(orig) => Failure::wrap_mut(orig) as &mut dyn Either<U, T>,
 	});
 
 	match mapped.as_result().is_ok() {

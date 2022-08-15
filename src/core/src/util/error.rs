@@ -1,4 +1,4 @@
-//! Error reporting built of the Rust standard library [Error] trait.
+//! Error reporting built off the Rust standard library [Error] trait.
 
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
@@ -21,13 +21,11 @@ pub trait ErrorFormatExt: Error {
 
 impl<T: ?Sized + Error> ErrorFormatExt for T {
 	fn format_error(&self) -> FormattedError<Self> {
-		FormattedError { target: self }
+		FormattedError(self)
 	}
 }
 
-pub struct FormattedError<'a, T: ?Sized> {
-	target: &'a T,
-}
+pub struct FormattedError<'a, T: ?Sized>(pub &'a T);
 
 impl<T: ?Sized> Copy for FormattedError<'_, T> {}
 
@@ -39,7 +37,7 @@ impl<T: ?Sized> Clone for FormattedError<'_, T> {
 
 impl<T: ?Sized + Error> Display for FormattedError<'_, T> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		let target = self.target;
+		let target = self.0;
 
 		// Write context
 		writeln!(f, "Error: {}", target)?;

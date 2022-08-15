@@ -21,6 +21,7 @@ use crate::util::{number::U8BitSet, threading::new_lot_mutex};
 /// Session ID allocator.
 static ID_ALLOC: Mutex<U8BitSet> = new_lot_mutex(U8BitSet::new());
 
+/// A guard that unregisters a session with the provided ID on `Drop`.
 struct UnregisterGuard(u8);
 
 impl Drop for UnregisterGuard {
@@ -43,9 +44,9 @@ impl Drop for UnregisterGuard {
 fn allocate_session() -> &'static PrimaryStorageEntry {
 	// Allocate ID and set up an unregistry guard to trigger on panic. We mark the session ID as
 	// registered here and employ a guard because `init_session` can call `allocate_session` (making
-	// it reentrant) and we need to prevent that semi-initialized ID from being reused.
+	// this function reentrant) and we need to prevent that semi-initialized ID from being reused.
 	let id = ID_ALLOC.lock().reserve_zero_bit().unwrap_or(0xFF);
-	assert_ne!(id, 0xFF, "Cannot create more than 255 sessions!");
+	assert_ne!(id, 0xFF, "Cannot create more than 254 sessions!"); // TODO: Do we need this cap?
 
 	let unregister_guard = UnregisterGuard(id);
 
@@ -747,7 +748,8 @@ macro register_static_storages(
 	)*
 }
 
+// TODO: Use AOS instead of SOA; we're not iterating through any of these lists.
 register_static_storages![
 	super::lock::SessionLockState,
-	super::object_db::SlotManagerState
+	super::object_db::SessionSlotManagerState
 ];
