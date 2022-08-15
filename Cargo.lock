@@ -181,6 +181,7 @@ dependencies = [
  "bytemuck",
  "log",
  "sealed",
+ "thiserror",
 ]
 
 [[package]]
