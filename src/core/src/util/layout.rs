@@ -87,18 +87,18 @@ pub struct WriterOom {
 }
 
 impl<'a> Writer<'a> {
-	pub unsafe fn new_raw(base: *mut u8, count: usize) -> Self {
+	pub fn new_raw(base: *mut u8, count: usize) -> Self {
 		Self {
 			_ty: PhantomData,
 			finger: base,
-			end_exclusive: base.add(count),
+			end_exclusive: base.wrapping_add(count),
 		}
 	}
 
 	pub fn new(target: &'a mut [MaybeUninit<u8>]) -> Self {
 		let base = target.as_mut_ptr().cast::<u8>();
 
-		unsafe { Self::new_raw(base, target.len()) }
+		Self::new_raw(base, target.len())
 	}
 
 	pub fn bytes_left(&self) -> usize {
@@ -119,7 +119,7 @@ impl<'a> Writer<'a> {
 	pub fn bump(&mut self, amount: usize) -> Result<*mut u8, WriterOom> {
 		self.can_bump(amount)?;
 		let old_finger = self.finger;
-		self.finger = unsafe { self.finger.add(amount) };
+		self.finger = self.finger.wrapping_add(amount);
 
 		Ok(old_finger)
 	}

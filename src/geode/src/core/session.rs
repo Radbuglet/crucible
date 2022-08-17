@@ -13,7 +13,7 @@ mod db {
 	use std::marker::PhantomData;
 
 	use crucible_core::{
-		const_utils::ConstSafeMutPtr, drop_guard::DropGuard, marker::PhantomNoSync,
+		const_hacks::ConstSafeMutPtr, drop_guard::DropGuard, marker::PhantomNoSync,
 	};
 	use parking_lot::Mutex;
 
@@ -52,7 +52,7 @@ mod db {
 			let session = {
 				let mut inner = self.0.lock();
 				if let Some(free) = inner.free.pop() {
-					free.raw()
+					free.as_ref()
 				} else {
 					// Increment index counter
 					let index = inner.index_gen;
@@ -170,9 +170,10 @@ static DB: db::SessionManager<SessionStateContainer> = db::SessionManager::new()
 
 static_storage_container! {
 	struct SessionStateContainer {
-		debug_name: SessionDebugNameState,
-		lock_manager: super::lock::SessionLockManagerState,
-		object_db: super::object_db::SessionSlotManagerState,
+		debug_name: SessionStateDebugName,
+		lock_manager: super::lock::SessionStateLockManager,
+		slot_manager: super::object_db::SessionStateSlotManager,
+		gc_manager: super::gc::SessionStateGcManager,
 	}
 }
 
@@ -310,9 +311,9 @@ impl PartialEq for Session<'_> {
 
 // === Debug names === //
 
-struct SessionDebugNameState;
+struct SessionStateDebugName;
 
-impl StaticStorageHandler for SessionDebugNameState {
+impl StaticStorageHandler for SessionStateDebugName {
 	type Comp = RefCell<SerializedDebugLabel>;
 
 	fn init_comp(comp: &mut Option<Self::Comp>) {
@@ -325,7 +326,7 @@ impl StaticStorageHandler for SessionDebugNameState {
 }
 
 fn fmt_session(f: &mut fmt::Formatter<'_>, struct_name: &str, session: Session<'_>) -> fmt::Result {
-	let debug_name = SessionDebugNameState::get(session).borrow();
+	let debug_name = SessionStateDebugName::get(session).borrow();
 
 	f.debug_struct(struct_name)
 		.field("debug_name", &debug_name)
@@ -356,6 +357,6 @@ impl Session<'_> {
 		// N.B. we serialize the label before locking `SessionDebugNameState`.
 		let label = label.to_debug_label();
 
-		*SessionDebugNameState::get(self).borrow_mut() = label;
+		*SessionStateDebugName::get(self).borrow_mut() = label;
 	}
 }

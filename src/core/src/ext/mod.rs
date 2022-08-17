@@ -1,5 +1,6 @@
 pub mod array;
 pub mod cell;
+pub mod const_hacks;
 pub mod f32;
 pub mod hasher;
 pub mod lifetime;

@@ -110,8 +110,10 @@ pub struct MutexedUnsafeCell<T: ?Sized>(UnsafeCell<T>);
 
 // Safety: Users can't get an immutable reference to this value without using `unsafe`. They take full
 // responsibility for any extra danger when using this cell by asserting that they won't share a
-// non-Sync value on several threads simultaneously.
-unsafe impl<T: ?Sized> Sync for MutexedUnsafeCell<T> {}
+// non-Sync value on several threads simultaneously. We require `Send` as an extra precaution because
+// users could theoretically use the cell's newfound `Sync` superpowers to move a non-`Send` `T`
+// instance to another thread via a mutable reference to it.
+unsafe impl<T: ?Sized + Send> Sync for MutexedUnsafeCell<T> {}
 
 impl<T> MutexedUnsafeCell<T> {
 	pub const fn new(value: T) -> Self {

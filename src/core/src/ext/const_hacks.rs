@@ -5,8 +5,9 @@ pub struct ConstSafeMutPtr<'a, T: ?Sized> {
 	ptr: *mut T,
 }
 
-unsafe impl<T: ?Sized> Send for ConstSafeMutPtr<'_, T> {}
-unsafe impl<T: ?Sized> Sync for ConstSafeMutPtr<'_, T> {}
+// These are the same rules as for regular mutable references mutable.
+unsafe impl<T: ?Sized + Send> Send for ConstSafeMutPtr<'_, T> {}
+unsafe impl<T: ?Sized + Sync> Sync for ConstSafeMutPtr<'_, T> {}
 
 impl<'a, T: ?Sized> From<&'a mut T> for ConstSafeMutPtr<'a, T> {
 	fn from(ptr: &'a mut T) -> Self {
@@ -22,7 +23,7 @@ impl<'a, T: ?Sized> ConstSafeMutPtr<'a, T> {
 		ptr.into()
 	}
 
-	pub fn raw(self) -> &'a mut T {
+	pub fn as_ref(self) -> &'a mut T {
 		unsafe { &mut *self.ptr }
 	}
 }

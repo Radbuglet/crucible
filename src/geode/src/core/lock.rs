@@ -482,7 +482,7 @@ mod db {
 	});
 
 	#[derive(Default)]
-	pub(crate) struct SessionLockManagerState {
+	pub(crate) struct SessionStateLockManager {
 		/// A container storing the states of every slot.
 		lock_states: SessionLockStateTracker,
 
@@ -490,7 +490,7 @@ mod db {
 		requires_unlocking: Cell<UserLockSet>,
 	}
 
-	impl StaticStorageHandler for SessionLockManagerState {
+	impl StaticStorageHandler for SessionStateLockManager {
 		type Comp = Self;
 
 		fn init_comp(target: &mut Option<Self::Comp>) {
@@ -583,7 +583,7 @@ mod db {
 		list: &[(BorrowMutability, UserLockId)],
 	) -> Result<(), SessionLocksAcquisitionError> {
 		let mut global = GLOBAL_LOCK_STATE.lock();
-		let state = SessionLockManagerState::get(s);
+		let state = SessionStateLockManager::get(s);
 
 		// Ensure that we can acquire these locks.
 		{
@@ -629,7 +629,7 @@ mod db {
 	}
 
 	pub fn get_session_borrow_state(session: Session, id: LockId) -> Option<BorrowMutability> {
-		SessionLockManagerState::get(session)
+		SessionStateLockManager::get(session)
 			.lock_states
 			.lock_state(id)
 	}
@@ -639,7 +639,7 @@ mod db {
 		target: LockIdAndMeta,
 		handle: LockIdAndMeta,
 	) -> bool {
-		SessionLockManagerState::get(session)
+		SessionStateLockManager::get(session)
 			.lock_states
 			.is_locked_mut_and_eq(target, handle)
 	}
@@ -649,13 +649,13 @@ mod db {
 		target: LockIdAndMeta,
 		handle: LockIdAndMeta,
 	) -> bool {
-		SessionLockManagerState::get(session)
+		SessionStateLockManager::get(session)
 			.lock_states
 			.is_locked_ref_and_eq(target, handle)
 	}
 }
 
-pub(crate) use db::SessionLockManagerState;
+pub(crate) use db::SessionStateLockManager;
 
 // === Generic lock state === //
 

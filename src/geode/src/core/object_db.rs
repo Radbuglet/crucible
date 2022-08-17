@@ -28,13 +28,13 @@ mod db {
 	static GLOBAL_GEN_ALLOC: AtomicU64 = AtomicU64::new(0);
 
 	#[derive(Default)]
-	pub(crate) struct SessionSlotManagerState {
+	pub(crate) struct SessionStateSlotManager {
 		free_slots: Vec<&'static Slot>,
 		slot_alloc: LeakyBump,
 		gen_alloc: LocalBatchAllocator,
 	}
 
-	impl StaticStorageHandler for SessionSlotManagerState {
+	impl StaticStorageHandler for SessionStateSlotManager {
 		type Comp = UnsafeCell<Self>;
 
 		fn init_comp(target: &mut Option<Self::Comp>) {
@@ -141,7 +141,7 @@ mod db {
 		lock: Lock,
 		base_ptr: *mut (),
 	) -> (&'static Slot, LockAndMeta) {
-		let state = unsafe { SessionSlotManagerState::get(session).get_mut_unchecked() };
+		let state = unsafe { SessionStateSlotManager::get(session).get_mut_unchecked() };
 
 		// Allocate generation
 		let gen = state.gen_alloc.generate(
@@ -153,7 +153,7 @@ mod db {
 
 		#[cold]
 		#[inline(never)]
-		fn allocate_new_slot(state: &mut SessionSlotManagerState) -> &'static Slot {
+		fn allocate_new_slot(state: &mut SessionStateSlotManager) -> &'static Slot {
 			state.slot_alloc.alloc(Slot::default())
 		}
 
@@ -172,7 +172,7 @@ mod db {
 		slot: &'static Slot,
 		gen_handle: LockAndMeta,
 	) -> Result<(), LockAndMeta> {
-		let state = unsafe { SessionSlotManagerState::get(session).get_mut_unchecked() };
+		let state = unsafe { SessionStateSlotManager::get(session).get_mut_unchecked() };
 
 		match slot.try_destroy(gen_handle) {
 			Ok(_) => {
@@ -185,7 +185,7 @@ mod db {
 }
 
 use crucible_core::error::ErrorFormatExt;
-pub(crate) use db::SessionSlotManagerState;
+pub(crate) use db::SessionStateSlotManager;
 use thiserror::Error;
 
 // === User interface === //
