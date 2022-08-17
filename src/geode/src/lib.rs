@@ -1,9 +1,7 @@
 #![allow(clippy::missing_safety_doc)] // TODO: Remove this lint once we have the bandwidth.
-#![feature(allocator_api)]
 #![feature(decl_macro)]
 #![feature(unsize)]
 #![feature(ptr_metadata)]
-#![feature(thread_local)]
 
 mod util;
 

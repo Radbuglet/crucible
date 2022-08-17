@@ -13,7 +13,7 @@ mod db {
 	use crate::{
 		core::{
 			lock::{BorrowMutability, Lock, LockAndMeta},
-			session::{Session, StaticStorage, StaticStorageHandler},
+			session::{Session, StaticStorageGetter, StaticStorageHandler},
 		},
 		util::{bump::LeakyBump, number::LocalBatchAllocator},
 	};

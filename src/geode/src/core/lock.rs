@@ -447,7 +447,7 @@ mod db {
 	use crate::{
 		core::{
 			debug::SerializedDebugLabel,
-			session::{Session, StaticStorage, StaticStorageHandler},
+			session::{Session, StaticStorageGetter, StaticStorageHandler},
 		},
 		util::threading::new_lot_mutex,
 	};
@@ -482,7 +482,7 @@ mod db {
 	});
 
 	#[derive(Default)]
-	pub(crate) struct SessionLockState {
+	pub(crate) struct SessionLockManagerState {
 		/// A container storing the states of every slot.
 		lock_states: SessionLockStateTracker,
 
@@ -490,7 +490,7 @@ mod db {
 		requires_unlocking: Cell<UserLockSet>,
 	}
 
-	impl StaticStorageHandler for SessionLockState {
+	impl StaticStorageHandler for SessionLockManagerState {
 		type Comp = Self;
 
 		fn init_comp(target: &mut Option<Self::Comp>) {
@@ -583,7 +583,7 @@ mod db {
 		list: &[(BorrowMutability, UserLockId)],
 	) -> Result<(), SessionLocksAcquisitionError> {
 		let mut global = GLOBAL_LOCK_STATE.lock();
-		let state = SessionLockState::get(s);
+		let state = SessionLockManagerState::get(s);
 
 		// Ensure that we can acquire these locks.
 		{
@@ -629,7 +629,9 @@ mod db {
 	}
 
 	pub fn get_session_borrow_state(session: Session, id: LockId) -> Option<BorrowMutability> {
-		SessionLockState::get(session).lock_states.lock_state(id)
+		SessionLockManagerState::get(session)
+			.lock_states
+			.lock_state(id)
 	}
 
 	pub fn extended_eq_locked_mut(
@@ -637,7 +639,7 @@ mod db {
 		target: LockIdAndMeta,
 		handle: LockIdAndMeta,
 	) -> bool {
-		SessionLockState::get(session)
+		SessionLockManagerState::get(session)
 			.lock_states
 			.is_locked_mut_and_eq(target, handle)
 	}
@@ -647,13 +649,13 @@ mod db {
 		target: LockIdAndMeta,
 		handle: LockIdAndMeta,
 	) -> bool {
-		SessionLockState::get(session)
+		SessionLockManagerState::get(session)
 			.lock_states
 			.is_locked_ref_and_eq(target, handle)
 	}
 }
 
-pub(crate) use db::SessionLockState;
+pub(crate) use db::SessionLockManagerState;
 
 // === Generic lock state === //
 
