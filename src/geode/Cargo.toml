@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ahash = "0.8.0"
 anyhow = "1.0.58"
 bumpalo = "3.10.0"
 bytemuck = { version = "1.10.0", features = ["derive"] }

@@ -86,7 +86,7 @@ mod db {
 		///
 		/// Can be called on as many threads as desired.
 		///
-		fn try_destroy(&self, gen_handle: LockAndMeta) -> Result<(), LockAndMeta> {
+		fn try_destroy(&self, gen_handle: LockAndMeta) -> Result<*mut (), LockAndMeta> {
 			debug_assert!(gen_handle.could_be_a_handle());
 
 			let replaced_gen = self.gen.load(AtomicOrdering::Relaxed);
@@ -94,7 +94,7 @@ mod db {
 
 			if replaced_gen.make_handle() == gen_handle {
 				self.gen.store(0, AtomicOrdering::Relaxed);
-				Ok(())
+				Ok(self.fetch_unchecked())
 			} else {
 				Err(replaced_gen)
 			}
@@ -171,13 +171,13 @@ mod db {
 		session: Session,
 		slot: &'static Slot,
 		gen_handle: LockAndMeta,
-	) -> Result<(), LockAndMeta> {
+	) -> Result<*mut (), LockAndMeta> {
 		let state = unsafe { SessionStateSlotManager::get(session).get_mut_unchecked() };
 
 		match slot.try_destroy(gen_handle) {
-			Ok(_) => {
+			Ok(ptr) => {
 				state.free_slots.push(slot);
-				Ok(())
+				Ok(ptr)
 			}
 			Err(err) => Err(err),
 		}
@@ -204,9 +204,9 @@ impl Slot {
 		self,
 		session: Session,
 		gen_handle: LockAndMeta,
-	) -> Result<(), SlotDeadError> {
+	) -> Result<*mut (), SlotDeadError> {
 		match db::destroy_slot(session, self.0, gen_handle) {
-			Ok(_) => Ok(()),
+			Ok(ptr) => Ok(ptr),
 			Err(received_handle) => Err(SlotDeadError {
 				requested_handle: gen_handle,
 				offending_descriptor: received_handle,

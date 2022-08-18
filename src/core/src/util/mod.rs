@@ -6,5 +6,5 @@ pub mod layout;
 pub mod linked_list;
 pub mod macros;
 // pub mod perfect_map;
-pub mod sync;
+pub mod f32;
 pub mod wide_option;

@@ -38,8 +38,8 @@ mod math {
 
 	impl LockId {
 		pub const TOTAL_ID_COUNT: usize = 256;
-		pub const MUTABLE: LockId = LockId(0);
-		pub const IMMUTABLE: LockId = LockId(0xFF);
+		pub const ALWAYS_MUTABLE: LockId = LockId(0);
+		pub const ALWAYS_IMMUTABLE: LockId = LockId(0xFF);
 
 		pub fn from_user_id(id: UserLockId) -> Self {
 			Self(id.0.get())
@@ -870,8 +870,8 @@ impl fmt::Debug for Lock {
 
 impl Lock {
 	pub const TOTAL_ID_COUNT: usize = math::LockId::TOTAL_ID_COUNT;
-	pub const IMMUTABLE: Self = Lock(math::LockId::IMMUTABLE);
-	pub const MUTABLE: Self = Lock(math::LockId::MUTABLE);
+	pub const ALWAYS_IMMUTABLE: Self = Lock(math::LockId::ALWAYS_IMMUTABLE);
+	pub const ALWAYS_MUTABLE: Self = Lock(math::LockId::ALWAYS_MUTABLE);
 
 	pub fn from_user_lock(lock: UserLock) -> Self {
 		Self(lock.0.as_lock_id())

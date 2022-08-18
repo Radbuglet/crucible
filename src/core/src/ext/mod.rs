@@ -1,7 +1,6 @@
 pub mod array;
 pub mod cell;
 pub mod const_hacks;
-pub mod f32;
 pub mod hasher;
 pub mod lifetime;
 pub mod marker;
@@ -9,4 +8,5 @@ pub mod range;
 pub mod result;
 pub mod slice;
 pub mod std_traits;
+pub mod sync;
 pub mod transmute;

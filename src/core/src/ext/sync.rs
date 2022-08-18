@@ -1,4 +1,7 @@
 use core::{any, fmt};
+use std::marker::PhantomData;
+
+use crate::marker::PhantomNoSendOrSync;
 
 #[derive(Default)]
 pub struct AssertSync<T: ?Sized>(T);
@@ -38,3 +41,27 @@ impl<T: ?Sized + Send> AssertSync<T> {
 }
 
 // impl<T, U> CoerceUnsized<OnlyMut<U>> for OnlyMut<T> where T: CoerceUnsized<U> {}
+
+pub type PMutSend<T> = MutexedPtr<*mut T>;
+pub type PRefSend<T> = MutexedPtr<*const T>;
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MutexedPtr<P> {
+	_ty: PhantomNoSendOrSync,
+	pub ptr: P,
+}
+
+impl<P> From<P> for MutexedPtr<P> {
+	fn from(ptr: P) -> Self {
+		Self {
+			_ty: PhantomData,
+			ptr,
+		}
+	}
+}
+
+unsafe impl<T: ?Sized + Send> Send for MutexedPtr<*mut T> {}
+unsafe impl<T: ?Sized + Sync> Sync for MutexedPtr<*mut T> {}
+
+unsafe impl<T: ?Sized + Send + Sync> Send for MutexedPtr<*const T> {}
+unsafe impl<T: ?Sized + Sync> Sync for MutexedPtr<*const T> {}
