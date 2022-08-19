@@ -97,6 +97,18 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 		unsafe { &*ptr }
 	}
 
+	pub fn is_alive_now(self) -> bool {
+		self.slot.try_fetch_no_lock(self.gen).is_ok()
+	}
+
+	pub fn slot(self) -> Slot {
+		self.slot
+	}
+
+	pub fn gen_handle(self) -> LockAndMeta {
+		self.gen
+	}
+
 	pub fn destroy(self, session: Session) -> Result<(), SlotDeadError> {
 		let base = self.slot.try_destroy(session, self.gen)?;
 		let ptr = ptr::from_raw_parts_mut::<T>(base, self.meta);

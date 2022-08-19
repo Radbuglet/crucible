@@ -1,8 +1,11 @@
-use crucible_core::drop_guard::{DropGuard, DropGuardHandler};
+use crucible_core::{
+	const_hacks::ConstSafeMutRef,
+	drop_guard::{DropGuard, DropGuardHandler},
+};
 
 use std::{
 	cell::{Cell, RefCell},
-	fmt, hash,
+	fmt, hash, mem,
 };
 
 use super::debug::{DebugLabel, SerializedDebugLabel};
@@ -10,10 +13,10 @@ use super::debug::{DebugLabel, SerializedDebugLabel};
 // === SessionManager === //
 
 mod db {
-	use std::marker::PhantomData;
+	use std::{marker::PhantomData, mem};
 
 	use crucible_core::{
-		const_hacks::ConstSafeMutPtr, drop_guard::DropGuard, marker::PhantomNoSync,
+		const_hacks::ConstSafeMutRef, drop_guard::DropGuard, marker::PhantomNoSync,
 	};
 	use parking_lot::Mutex;
 
@@ -33,15 +36,15 @@ mod db {
 	pub struct SessionManager<C: 'static>(Mutex<SessionManagerInner<C>>);
 
 	struct SessionManagerInner<C: 'static> {
-		free: Vec<ConstSafeMutPtr<'static, SessionStatePointee<C>>>,
-		index_gen: usize,
+		free: Vec<ConstSafeMutRef<'static, SessionStatePointee<C>>>,
+		total_session_count: usize,
 	}
 
 	impl<C> SessionManager<C> {
 		pub const fn new() -> Self {
 			Self(new_lot_mutex(SessionManagerInner {
 				free: Vec::new(),
-				index_gen: 0,
+				total_session_count: 0,
 			}))
 		}
 	}
@@ -52,13 +55,13 @@ mod db {
 			let session = {
 				let mut inner = self.0.lock();
 				if let Some(free) = inner.free.pop() {
-					free.as_ref()
+					free.to_ref()
 				} else {
 					// Increment index counter
-					let index = inner.index_gen;
-					inner.index_gen.checked_add(1).expect(
-						"Allocated more than `usize::MAX - 1` different sessions. \
-		 				 Given that sessions are reused, this is likely a memory leak.",
+					let index = inner.total_session_count;
+					inner.total_session_count.checked_add(1).expect(
+						"Allocated more than `usize::MAX` different sessions. \
+		 				 Given that sessions are reused, this was likely caused by a memory leak.",
 					);
 
 					// Create session
@@ -73,22 +76,72 @@ mod db {
 			};
 
 			// Initialize the container
-			let mut guarded_session = DropGuard::new(session, |session| {
-				self.0.lock().free.push(ConstSafeMutPtr::new(session));
+			let mut session = DropGuard::new(session, |session| {
+				self.0.lock().free.push(ConstSafeMutRef::new(session));
 			});
 
 			unsafe {
-				SessionStateContainer::init(&mut guarded_session.state_container);
+				SessionStateContainer::init(&mut session.state_container);
 			}
 
-			DropGuard::defuse(guarded_session)
+			DropGuard::defuse(session)
 		}
 
 		pub fn deallocate_session(&self, session: &'static mut SessionStatePointee<C>) {
+			let mut session = DropGuard::new(session, |session| {
+				self.0.lock().free.push(ConstSafeMutRef::from(session));
+			});
+
 			unsafe {
 				SessionStateContainer::deinit(&mut session.state_container);
 			}
-			self.0.lock().free.push(session.into());
+		}
+
+		pub fn acquire_free_sessions(
+			&self,
+		) -> (Vec<ConstSafeMutRef<'static, SessionStatePointee<C>>>, usize) {
+			// Acquire session list
+			let (free_sessions, total_session_count) = {
+				let mut inner = self.0.lock();
+
+				(
+					mem::replace(&mut inner.free, Vec::new()),
+					inner.total_session_count,
+				)
+			};
+			let mut free_sessions = DropGuard::new(free_sessions, |free_sessions| {
+				self.0.lock().free.extend(free_sessions);
+			});
+
+			// Initialize all the sessions
+			for session in free_sessions.iter_mut() {
+				unsafe {
+					SessionStateContainer::init(&mut session.as_ref().state_container);
+				}
+			}
+
+			// Return the group if they were all successfully initialized. Otherwise, place them
+			// back in the free list.
+			(DropGuard::defuse(free_sessions), total_session_count)
+		}
+
+		pub fn release_free_sessions(
+			&self,
+			list: Vec<ConstSafeMutRef<'static, SessionStatePointee<C>>>,
+		) {
+			let mut list = DropGuard::new(list, |list| {
+				self.0.lock().free.extend(list);
+			});
+
+			for session in list.iter_mut() {
+				unsafe {
+					SessionStateContainer::deinit(&mut session.as_ref().state_container);
+				}
+			}
+		}
+
+		pub fn total_session_count(&self) -> usize {
+			self.0.lock().total_session_count
 		}
 	}
 }
@@ -184,7 +237,7 @@ thread_local! {
 	);
 }
 
-// === Interface === //
+// === MovableSessionGuard === //
 
 pub struct MovableSessionGuard {
 	// Mutable references to `SessionStatePointee` are `Send` but not `Sync` so this type exhibits
@@ -207,6 +260,18 @@ impl MovableSessionGuard {
 		}
 	}
 
+	pub fn acquire_free() -> (FreeSessionIter, usize) {
+		let (free_vec, total_session_count) = DB.acquire_free_sessions();
+		(
+			FreeSessionIter(DropGuard::new(free_vec, FreeSessionIterDctor)),
+			total_session_count,
+		)
+	}
+
+	pub fn total_session_count() -> usize {
+		DB.total_session_count()
+	}
+
 	pub fn handle(&self) -> Session {
 		Session {
 			state: &**self.state,
@@ -215,7 +280,10 @@ impl MovableSessionGuard {
 
 	pub fn make_local(self) -> LocalSessionGuard {
 		LOCAL_SESSION_GUARD_STATE.with(|(rc, thread_state)| {
-			assert_eq!(rc.get(), 0, "Attempted to make a MovableSessionGuard local while another local session was extant.");
+			assert_eq!(
+				rc.get(), 0,
+				"Attempted to make a MovableSessionGuard local while another local session was extant."
+			);
 
 			// Update state
 			let state = DropGuard::defuse(self.state) as *mut _;
@@ -227,6 +295,37 @@ impl MovableSessionGuard {
 		})
 	}
 }
+
+type FreeSessionVec = Vec<ConstSafeMutRef<'static, SessionStatePointee>>;
+
+pub struct FreeSessionIter(DropGuard<FreeSessionVec, FreeSessionIterDctor>);
+
+impl ExactSizeIterator for FreeSessionIter {}
+
+impl Iterator for FreeSessionIter {
+	type Item = MovableSessionGuard;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let elem = self.0.pop()?;
+		Some(MovableSessionGuard {
+			state: DropGuard::new(elem.to_ref(), MovableSessionGuardDctor),
+		})
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		self.0.iter().size_hint()
+	}
+}
+
+struct FreeSessionIterDctor;
+
+impl DropGuardHandler<FreeSessionVec> for FreeSessionIterDctor {
+	fn destruct(self, list: FreeSessionVec) {
+		DB.release_free_sessions(list);
+	}
+}
+
+// === LocalSessionGuard === //
 
 pub struct LocalSessionGuard {
 	// Raw pointers are neither `Send` nor `Sync` so this type exhibits the proper threading semantics.
@@ -254,6 +353,21 @@ impl LocalSessionGuard {
 				LocalSessionGuard {
 					state: thread_state.get(),
 				}
+			}
+		})
+	}
+
+	pub fn make_movable(self) -> MovableSessionGuard {
+		LOCAL_SESSION_GUARD_STATE.with(|(rc, thread_state)| {
+			assert_eq!(rc.get(), 1, "`make_movable` requires that exactly one `LocalSessionGuard` exists on this thread.");
+			mem::forget(self);
+			rc.set(0);
+
+			MovableSessionGuard {
+				state: DropGuard::new(
+					unsafe { &mut *thread_state.get() },
+					MovableSessionGuardDctor,
+				),
 			}
 		})
 	}
@@ -287,6 +401,8 @@ impl Drop for LocalSessionGuard {
 		});
 	}
 }
+
+// === Session === //
 
 #[derive(Copy, Clone)]
 pub struct Session<'a> {

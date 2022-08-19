@@ -1,4 +1,4 @@
-use super::session::{Session, StaticStorageGetter, StaticStorageHandler};
+use super::session::{MovableSessionGuard, Session, StaticStorageGetter, StaticStorageHandler};
 
 // === Internals === //
 
@@ -63,15 +63,15 @@ mod internal {
 			});
 		}
 
-		pub fn process(&self, session: Session) {
-			let bump = mem::replace(unsafe { self.bump.get_mut_unchecked() }, Bump::new());
+		pub unsafe fn process_once(&self, session: Session) {
+			let bump = mem::replace(self.bump.get_mut_unchecked(), Bump::new());
 
-			for (start, len) in unsafe { bump.iter_allocated_chunks_raw() } {
+			for (start, len) in bump.iter_allocated_chunks_raw() {
 				let mut finger = start.cast::<FinalizerHeader>();
-				let exclusive_end = unsafe { start.add(len) }.cast::<FinalizerHeader>();
+				let exclusive_end = start.add(len).cast::<FinalizerHeader>();
 
 				while finger < exclusive_end {
-					finger = unsafe { ((*finger).handler)(session, finger) };
+					finger = ((*finger).handler)(session, finger);
 				}
 			}
 		}
@@ -97,11 +97,19 @@ mod internal {
 			// Definitions
 			let finalized = Arc::new(AtomicUsize::new(0_usize));
 
-			struct Task(usize, Arc<AtomicUsize>);
+			struct Task1(usize, Arc<AtomicUsize>);
 
-			impl GcHook for Task {
+			impl GcHook for Task1 {
 				unsafe fn process(self, _: Session) {
 					self.1.fetch_add(self.0, AtomicOrdering::Relaxed);
+				}
+			}
+
+			struct Task2(u8, Arc<AtomicUsize>);
+
+			impl GcHook for Task2 {
+				unsafe fn process(self, _: Session) {
+					self.1.fetch_add(self.0.into(), AtomicOrdering::Relaxed);
 				}
 			}
 
@@ -111,10 +119,17 @@ mod internal {
 
 			let finalizers = FinalizerExecutor::default();
 			for i in 0..=1000 {
-				finalizers.push(Task(i, finalized.clone()));
+				finalizers.push(Task1(i, finalized.clone()));
 			}
-			finalizers.process(s);
-			assert_eq!(finalized.load(AtomicOrdering::Relaxed), 500500);
+
+			for i in 0..=0xFF {
+				finalizers.push(Task2(i, finalized.clone()));
+			}
+
+			unsafe {
+				finalizers.process_once(s);
+			}
+			assert_eq!(finalized.load(AtomicOrdering::Relaxed), 500500 + 32640);
 		}
 	}
 }
@@ -141,7 +156,32 @@ impl StaticStorageHandler for SessionStateGcManager {
 pub use internal::GcHook;
 
 impl Session<'_> {
-	pub fn register_gc_hook<H: GcHook>(self, hook: H) {
+	pub unsafe fn register_gc_hook<H: GcHook>(self, hook: H) {
 		SessionStateGcManager::get(self).exec.push(hook);
+	}
+}
+
+pub fn collect_garbage() {
+	let (free_sessions, mut total_session_count) = MovableSessionGuard::acquire_free();
+	let mut free_sessions = free_sessions.map(Some).collect::<Vec<_>>();
+
+	loop {
+		// === Scan for a session === //
+
+		// We want to make sure that all sessions that existed at the same time as our `free_sessions` are
+		// destroyed as well, since doing so ensures that all references that could potentially point to
+		// finalization targets will have expired.
+		//
+		// We can achieve this in a somewhat conservative manner by ensuring that the list of sessions we
+		// acquire is equal to the total number of sessions. Even if another thread decides to create a
+		// new session immediately after we acquire the free sessions, we know this session couldn't
+		// possibly point to targets finalized in these sessions because they were already marked as dead.
+		assert_eq!(
+			free_sessions.len(),
+			total_session_count,
+			"All session guards in the application must be destroyed before returning control to the garbage collector."
+		);
+
+		// TODO
 	}
 }
