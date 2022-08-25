@@ -27,7 +27,7 @@ impl<'a, T: ?Sized> ConstSafeMutRef<'a, T> {
 		unsafe { &mut *self.ptr }
 	}
 
-	pub fn to_ref(self) -> &'a mut T {
+	pub fn into_ref(self) -> &'a mut T {
 		unsafe { &mut *self.ptr }
 	}
 }

@@ -1,4 +1,7 @@
-use super::session::{MovableSessionGuard, Session, StaticStorageGetter, StaticStorageHandler};
+use super::{
+	lock::{BorrowMutability, UserLock},
+	session::{MovableSessionGuard, Session, StaticStorageGetter, StaticStorageHandler},
+};
 
 // === Internals === //
 
@@ -80,58 +83,6 @@ mod internal {
 	pub trait GcHook: 'static + Sized + Send {
 		unsafe fn process(self, session: Session);
 	}
-
-	#[cfg(test)]
-	mod tests {
-		use std::sync::{
-			atomic::{AtomicUsize, Ordering as AtomicOrdering},
-			Arc,
-		};
-
-		use crate::core::session::LocalSessionGuard;
-
-		use super::*;
-
-		#[test]
-		fn ensure_all_finalized() {
-			// Definitions
-			let finalized = Arc::new(AtomicUsize::new(0_usize));
-
-			struct Task1(usize, Arc<AtomicUsize>);
-
-			impl GcHook for Task1 {
-				unsafe fn process(self, _: Session) {
-					self.1.fetch_add(self.0, AtomicOrdering::Relaxed);
-				}
-			}
-
-			struct Task2(u8, Arc<AtomicUsize>);
-
-			impl GcHook for Task2 {
-				unsafe fn process(self, _: Session) {
-					self.1.fetch_add(self.0.into(), AtomicOrdering::Relaxed);
-				}
-			}
-
-			// Test
-			let session = LocalSessionGuard::new();
-			let s = session.handle();
-
-			let finalizers = FinalizerExecutor::default();
-			for i in 0..=1000 {
-				finalizers.push(Task1(i, finalized.clone()));
-			}
-
-			for i in 0..=0xFF {
-				finalizers.push(Task2(i, finalized.clone()));
-			}
-
-			unsafe {
-				finalizers.process_once(s);
-			}
-			assert_eq!(finalized.load(AtomicOrdering::Relaxed), 500500 + 32640);
-		}
-	}
 }
 
 // === Global state === //
@@ -161,27 +112,33 @@ impl Session<'_> {
 	}
 }
 
-pub fn collect_garbage() {
-	let (free_sessions, mut total_session_count) = MovableSessionGuard::acquire_free();
-	let mut free_sessions = free_sessions.map(Some).collect::<Vec<_>>();
+pub fn collect_garbage<I>(locks: I)
+where
+	I: IntoIterator<Item = (BorrowMutability, UserLock)>,
+{
+	let locks = locks.into_iter().collect::<Vec<_>>();
+	let (free_sessions, total_session_count) = MovableSessionGuard::acquire_free();
 
-	loop {
-		// === Scan for a session === //
+	assert_eq!(
+		free_sessions.len(),
+		total_session_count,
+		"No sessions may be alive at the time `collect_garbage` is called."
+	);
 
-		// We want to make sure that all sessions that existed at the same time as our `free_sessions` are
-		// destroyed as well, since doing so ensures that all references that could potentially point to
-		// finalization targets will have expired.
-		//
-		// We can achieve this in a somewhat conservative manner by ensuring that the list of sessions we
-		// acquire is equal to the total number of sessions. Even if another thread decides to create a
-		// new session immediately after we acquire the free sessions, we know this session couldn't
-		// possibly point to targets finalized in these sessions because they were already marked as dead.
-		assert_eq!(
-			free_sessions.len(),
-			total_session_count,
-			"All session guards in the application must be destroyed before returning control to the garbage collector."
-		);
+	for free_session in free_sessions {
+		let session = free_session.make_local();
+		session.handle().acquire_locks(locks.iter().copied());
 
-		// TODO
+		unsafe {
+			// Safety: the destructor list of this session could not have grown since we acquired it
+			// at the top of this function and we already ensured that all sessions that could
+			// possibly observe a dead handle would be dead themselves.
+			SessionStateGcManager::get(session.handle())
+				.exec
+				.process_once(session.handle());
+		}
+
+		// Technically not necessary but allows us to fail early.
+		drop(session.make_movable());
 	}
 }

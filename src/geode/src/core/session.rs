@@ -5,7 +5,7 @@ use crucible_core::{
 
 use std::{
 	cell::{Cell, RefCell},
-	fmt, hash, mem,
+	fmt, hash, mem, ptr,
 };
 
 use super::debug::{DebugLabel, SerializedDebugLabel};
@@ -55,13 +55,13 @@ mod db {
 			let session = {
 				let mut inner = self.0.lock();
 				if let Some(free) = inner.free.pop() {
-					free.to_ref()
+					free.into_ref()
 				} else {
 					// Increment index counter
 					let index = inner.total_session_count;
 					inner.total_session_count.checked_add(1).expect(
 						"Allocated more than `usize::MAX` different sessions. \
-		 				 Given that sessions are reused, this was likely caused by a memory leak.",
+		 				 Given that sessions are reused, this overflow was likely caused by a memory leak.",
 					);
 
 					// Create session
@@ -69,7 +69,7 @@ mod db {
 					let session = Box::leak(Box::new(SessionStatePointee {
 						_no_sync: PhantomData,
 						index,
-						state_container: Default::default(),
+						state_container: C::default(),
 					}));
 					session
 				}
@@ -95,6 +95,8 @@ mod db {
 			unsafe {
 				SessionStateContainer::deinit(&mut session.state_container);
 			}
+
+			drop(session);
 		}
 
 		pub fn acquire_free_sessions(
@@ -109,11 +111,12 @@ mod db {
 					inner.total_session_count,
 				)
 			};
+
+			// Initialize all the sessions
 			let mut free_sessions = DropGuard::new(free_sessions, |free_sessions| {
 				self.0.lock().free.extend(free_sessions);
 			});
 
-			// Initialize all the sessions
 			for session in free_sessions.iter_mut() {
 				unsafe {
 					SessionStateContainer::init(&mut session.as_ref().state_container);
@@ -138,6 +141,8 @@ mod db {
 					SessionStateContainer::deinit(&mut session.as_ref().state_container);
 				}
 			}
+
+			drop(list);
 		}
 
 		pub fn total_session_count(&self) -> usize {
@@ -233,7 +238,7 @@ static_storage_container! {
 thread_local! {
 	static LOCAL_SESSION_GUARD_STATE: (Cell<usize>, Cell<*mut SessionStatePointee>) = (
 		Cell::new(0),
-		Cell::new(std::ptr::null_mut()),
+		Cell::new(ptr::null_mut()),
 	);
 }
 
@@ -282,7 +287,7 @@ impl MovableSessionGuard {
 		LOCAL_SESSION_GUARD_STATE.with(|(rc, thread_state)| {
 			assert_eq!(
 				rc.get(), 0,
-				"Attempted to make a MovableSessionGuard local while another local session was extant."
+				"Attempted to make a `MovableSessionGuard` local while another local session was extant."
 			);
 
 			// Update state
@@ -308,7 +313,7 @@ impl Iterator for FreeSessionIter {
 	fn next(&mut self) -> Option<Self::Item> {
 		let elem = self.0.pop()?;
 		Some(MovableSessionGuard {
-			state: DropGuard::new(elem.to_ref(), MovableSessionGuardDctor),
+			state: DropGuard::new(elem.into_ref(), MovableSessionGuardDctor),
 		})
 	}
 

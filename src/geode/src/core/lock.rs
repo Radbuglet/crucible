@@ -1,4 +1,4 @@
-use std::{error::Error, fmt, num::NonZeroUsize};
+use std::{fmt, num::NonZeroUsize};
 
 use crucible_core::{c_enum::c_enum, error::ResultExt};
 use thiserror::Error;
@@ -40,41 +40,43 @@ mod math {
 		pub const TOTAL_ID_COUNT: usize = 256;
 		pub const ALWAYS_MUTABLE: LockId = LockId(0);
 		pub const ALWAYS_IMMUTABLE: LockId = LockId(0xFF);
+		pub const ALWAYS_UNBORROWED: LockId = LockId(0xFE);
 
-		pub fn from_user_id(id: UserLockId) -> Self {
+		pub fn from_user_lock(id: UserLockId) -> Self {
 			Self(id.0.get())
 		}
 
 		pub const fn from_index(index: usize) -> Self {
 			assert!(
 				index < Self::TOTAL_ID_COUNT,
-				"`index` is greater than or equal to `LockId::ID_COUNT`"
+				"`index` is greater than or equal to `LockId::TOTAL_ID_COUNT`"
 			);
 			Self(index as u8)
 		}
 
-		pub fn try_as_user_id(self) -> Option<UserLockId> {
-			UserLockId::try_from_lock_id(self)
+		pub fn try_as_user_lock(self) -> Option<UserLockId> {
+			UserLockId::try_from_lock(self)
 		}
 
 		pub fn is_user_lock(self) -> bool {
-			self.try_as_user_id().is_some()
+			self.try_as_user_lock().is_some()
 		}
 
 		pub const fn default_debug_label(self) -> SerializedDebugLabel {
 			match self.0 {
 				0 => Some(Cow::Borrowed("[always mutable]")),
-				1..=0xFE => None,
+				1..=0xFD => None,
+				0xFE => Some(Cow::Borrowed("[always unborrowed]")),
 				0xFF => Some(Cow::Borrowed("[always immutable]")),
 			}
 		}
 
-		fn bit_index(self) -> u8 {
-			self.0
-		}
-
 		fn index(self) -> usize {
 			self.0 as usize
+		}
+
+		fn bit_index(self) -> u8 {
+			self.0
 		}
 	}
 
@@ -82,22 +84,22 @@ mod math {
 	pub struct UserLockId(NonZeroU8);
 
 	impl UserLockId {
-		pub const USER_ID_COUNT: usize = 256 - 2;
+		pub const USER_ID_COUNT: usize = 256 - 3;
 
 		fn try_new(id: u8) -> Option<Self> {
-			if id != 0 && id != 0xFF {
+			if id != 0 && id != 0xFE && id != 0xFF {
 				Some(Self(NonZeroU8::new(id).unwrap()))
 			} else {
 				None
 			}
 		}
 
-		pub fn try_from_lock_id(id: LockId) -> Option<Self> {
+		pub fn try_from_lock(id: LockId) -> Option<Self> {
 			Self::try_new(id.0)
 		}
 
 		pub fn as_lock_id(self) -> LockId {
-			LockId::from_user_id(self)
+			LockId::from_user_lock(self)
 		}
 
 		fn bit_index(self) -> u8 {
@@ -178,7 +180,8 @@ mod math {
 	// === SessionLockStateTracker === //
 
 	pub struct SessionLockStateTracker {
-		/// A lock `L` has been acquired for a session slot `S` if it satisfies the specific equalities:
+		/// A lock `L` has been acquired for a session slot `S` if it satisfies the specific
+		/// equalities:
 		///
 		/// - To borrow it mutably, it must satisfy: `0xFF ^ S = L`.
 		/// - To borrow it immutably, it must satisfy: `L | S = 0xFF`.
@@ -201,11 +204,14 @@ mod math {
 		///   Mutability: `0xFF ^ 0xFF = 0 = L`
 		///   Immutability: `0xFF | 0xFF = 0xFF`
 		///
-		/// - If `L = 0xFF`, the slot must always be considered immutably borrowed. `S` can safely be set
-		///   to `0xFF` to achieve this behavior:
+		/// - If `L = 0xFF`, the slot must always be considered immutably borrowed. `S` can safely
+		///   be set to `0xFF` to achieve this behavior:
 		///
 		///   Mutability: `0xFF ^ 0xFF = 0 != L`
 		///   Immutability: `0xFF | 0xFF = 0xFF`
+		///
+		/// Note that lock `0xFE` is, by convention, always left unborrowed; we just don't have
+		/// special-case it.
 		///
 		lock_states: [Cell<u8>; 256],
 	}
@@ -214,6 +220,7 @@ mod math {
 		fn default() -> Self {
 			let lock_states = arr![Cell::new(0); 256];
 			lock_states[0].set(0xFF); // Slot `0` is a special case.
+			lock_states[0xFF].set(0xFF); // So is 0xFF.
 
 			Self { lock_states }
 		}
@@ -354,7 +361,7 @@ mod math {
 
 	impl UserLockIdAllocator {
 		pub const fn new() -> Self {
-			Self(U8BitSet([bit_mask(0), 0, 0, bit_mask(63)]))
+			Self(U8BitSet([bit_mask(0), 0, 0, bit_mask(62) | bit_mask(63)]))
 		}
 
 		pub fn reserve(&mut self, at_most: usize) -> UserLockSetIter {
@@ -390,9 +397,9 @@ mod math {
 			match self.0 {
 				-1 => Some(BorrowState::Mut),
 				0 => None,
-				1..=i16::MAX => Some(BorrowState::Ref(
+				1..=i16::MAX => Some(BorrowState::Ref(Some(
 					NonZeroUsize::new(self.0 as usize).unwrap(),
-				)),
+				))),
 				_ => unreachable!(),
 			}
 		}
@@ -628,6 +635,18 @@ mod db {
 		GLOBAL_LOCK_STATE.lock().lock_rcs[id.as_lock_id()].borrow_state()
 	}
 
+	pub fn is_session_borrowing_lock_immutably(session: Session, id: LockId) -> bool {
+		SessionStateLockManager::get(session)
+			.lock_states
+			.is_locked_ref(id)
+	}
+
+	pub fn is_session_borrowing_lock_mutably(session: Session, id: LockId) -> bool {
+		SessionStateLockManager::get(session)
+			.lock_states
+			.is_locked_mut(id)
+	}
+
 	pub fn get_session_borrow_state(session: Session, id: LockId) -> Option<BorrowMutability> {
 		SessionStateLockManager::get(session)
 			.lock_states
@@ -684,11 +703,18 @@ impl BorrowMutability {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum BorrowState {
-	Ref(NonZeroUsize),
+	Ref(Option<NonZeroUsize>),
 	Mut,
 }
 
 impl BorrowState {
+	pub fn block_count(self) -> Option<NonZeroUsize> {
+		match self {
+			BorrowState::Ref(count) => count,
+			BorrowState::Mut => Some(NonZeroUsize::new(1).unwrap()),
+		}
+	}
+
 	pub fn mutability(self) -> BorrowMutability {
 		match self {
 			BorrowState::Ref(_) => BorrowMutability::Ref,
@@ -697,24 +723,32 @@ impl BorrowState {
 	}
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Error)]
 pub struct BorrowError {
-	pub offending_state: BorrowState,
+	offending_state: BorrowState,
 }
-
-impl Error for BorrowError {}
 
 impl fmt::Display for BorrowError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self.offending_state {
-			BorrowState::Ref(blocked_by) => write!(
+		let block_count = self.offending_state.block_count();
+		let offending_mutability = self.offending_state.mutability();
+		let desired_mutability = offending_mutability.inverse();
+
+		if let Some(block_count) = block_count {
+			write!(
 				f,
-				"failed to acquire lock mutably: blocked by {blocked_by} immutable lock{}.",
-				if blocked_by.get() == 1 { "" } else { "s" }
-			),
-			BorrowState::Mut => {
-				f.write_str("failed to acquire lock immutably: blocked by 1 mutable lock.")
-			}
+				"failed to acquire {}: blocked by {block_count} {} acquisition{}.",
+				desired_mutability.fmt_adjective(),
+				offending_mutability.fmt_adjective(),
+				if block_count.get() == 1 { "" } else { "s" }
+			)
+		} else {
+			write!(
+				f,
+				"failed to acquire {}: blocked by an indeterminate number of {} acquisitions.",
+				desired_mutability.fmt_adjective(),
+				offending_mutability.fmt_adjective(),
+			)
 		}
 	}
 }
@@ -793,7 +827,11 @@ impl UserLock {
 	}
 
 	pub fn try_from_lock(lock: Lock) -> Option<Self> {
-		lock.0.try_as_user_id().map(Self)
+		lock.0.try_as_user_lock().map(Self)
+	}
+
+	pub fn as_lock(self) -> Lock {
+		Lock::from_user_lock(self)
 	}
 
 	pub fn set_debug_name<L: DebugLabel>(self, label: L) {
@@ -802,10 +840,6 @@ impl UserLock {
 
 	pub fn global_borrow_state(self) -> Option<BorrowState> {
 		db::get_global_lock_borrow_state(self.0)
-	}
-
-	pub fn as_lock(self) -> Lock {
-		Lock::from_user_lock(self)
 	}
 }
 
@@ -872,6 +906,7 @@ impl Lock {
 	pub const TOTAL_ID_COUNT: usize = math::LockId::TOTAL_ID_COUNT;
 	pub const ALWAYS_IMMUTABLE: Self = Lock(math::LockId::ALWAYS_IMMUTABLE);
 	pub const ALWAYS_MUTABLE: Self = Lock(math::LockId::ALWAYS_MUTABLE);
+	pub const ALWAYS_UNBORROWED: Self = Lock(math::LockId::ALWAYS_UNBORROWED);
 
 	pub fn from_user_lock(lock: UserLock) -> Self {
 		Self(lock.0.as_lock_id())
@@ -883,6 +918,14 @@ impl Lock {
 
 	pub fn session_borrow_state(self, session: Session) -> Option<BorrowMutability> {
 		db::get_session_borrow_state(session, self.0)
+	}
+
+	pub fn is_borrowed_immutably_by(self, session: Session) -> bool {
+		db::is_session_borrowing_lock_immutably(session, self.0)
+	}
+
+	pub fn is_borrowed_mutably_by(self, session: Session) -> bool {
+		db::is_session_borrowing_lock_mutably(session, self.0)
 	}
 
 	pub fn is_user_lock(&self) -> bool {
