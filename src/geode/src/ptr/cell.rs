@@ -1,4 +1,4 @@
-use crucible_core::cell::{MutexedUnsafeCell, UnsafeCellExt};
+use crucible_core::{cell::UnsafeCellExt, sync::MutexedUnsafeCell};
 
 use crate::core::{
 	lock::{BorrowMutability, Lock, UserLock},

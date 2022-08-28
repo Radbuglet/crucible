@@ -36,7 +36,7 @@ mod internal {
 	}
 
 	impl Executor {
-		pub fn push<H: GcHookOnce>(&self, entry: H) {
+		pub fn push<H: GcHookOnce>(&self, entry: H) -> &mut H {
 			unsafe fn handler<H: GcHookOnce>(
 				session: Session,
 				base: *mut FinalizerHeader,
@@ -63,12 +63,16 @@ mod internal {
 			);
 
 			let bump = unsafe { self.bump.get_mut_unchecked() };
-			bump.alloc(Entry {
+			let entry = bump.alloc(Entry {
 				header: FinalizerHeader {
 					handler: handler::<H>,
 				},
 				value: ManuallyDrop::new(entry),
 			});
+
+			// Safety: executor tasks can only be destroyed by `process_once`, which is already
+			// unsafe.
+			&mut *entry.value
 		}
 
 		pub unsafe fn process_once(&self, session: Session) {

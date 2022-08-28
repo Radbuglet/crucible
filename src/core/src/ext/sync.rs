@@ -1,7 +1,9 @@
 use core::{any, fmt};
-use std::marker::PhantomData;
+use std::{cell::UnsafeCell, marker::PhantomData};
 
-use crate::marker::PhantomNoSendOrSync;
+use bytemuck::TransparentWrapper;
+
+use crate::{cell::UnsafeCellExt, marker::PhantomNoSendOrSync};
 
 #[derive(Default)]
 pub struct AssertSync<T: ?Sized>(T);
@@ -40,10 +42,47 @@ impl<T: ?Sized + Send> AssertSync<T> {
 	}
 }
 
-// impl<T, U> CoerceUnsized<OnlyMut<U>> for OnlyMut<T> where T: CoerceUnsized<U> {}
+// impl<T, U> CoerceUnsized<AssertSync<U>> for AssertSync<T> where T: CoerceUnsized<U> {}
 
-pub type PMutSend<T> = MutexedPtr<*mut T>;
-pub type PRefSend<T> = MutexedPtr<*const T>;
+// === MutexedUnsafeCell === //
+
+/// A type of [UnsafeCell] that asserts that access to the given cell will be properly synchronized.
+#[derive(Default, TransparentWrapper)]
+#[repr(transparent)]
+pub struct MutexedUnsafeCell<T: ?Sized>(UnsafeCell<T>);
+
+// Safety: Users can't get an immutable reference to this value without using `unsafe`. They take full
+// responsibility for any extra danger when using this cell by asserting that they won't share a
+// non-Sync value on several threads simultaneously. We require `Send` in this bound as an extra
+// precaution because users could theoretically use the cell's newfound `Sync` superpowers to move a
+// non-`Send` `T` instance to another thread via a mutable reference to it and people are only really
+// promising that they'll federate access properly.
+unsafe impl<T: ?Sized + Send> Sync for MutexedUnsafeCell<T> {}
+
+impl<T> MutexedUnsafeCell<T> {
+	pub const fn new(value: T) -> Self {
+		Self(UnsafeCell::new(value))
+	}
+
+	pub fn into_inner(self) -> T {
+		self.0.into_inner()
+	}
+}
+
+unsafe impl<T: ?Sized> UnsafeCellExt for MutexedUnsafeCell<T> {
+	type Inner = T;
+
+	fn get(&self) -> *mut Self::Inner {
+		self.0.get()
+	}
+}
+
+// impl<T, U> CoerceUnsized<MutexedUnsafeCell<U>> for MutexedUnsafeCell<T> where T: CoerceUnsized<U> {}
+
+// === MutexedPtr === //
+
+pub type SendPtrMut<T> = MutexedPtr<*mut T>;
+pub type SendPtrRef<T> = MutexedPtr<*const T>;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct MutexedPtr<P> {

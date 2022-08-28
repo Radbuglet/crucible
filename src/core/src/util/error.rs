@@ -83,6 +83,8 @@ impl<T, E: Error> ResultExt for Result<T, E> {
 	}
 }
 
+// === Anyhow conversions === //
+
 pub type AnyhowErrorBoxed = Box<AnyhowErrorInner>;
 pub type AnyhowErrorInner = dyn Error + Send + Sync + 'static;
 

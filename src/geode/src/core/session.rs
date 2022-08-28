@@ -120,7 +120,7 @@ mod db {
 
 			for session in free_sessions.iter_mut() {
 				unsafe {
-					SessionStateContainer::init(&mut session.as_ref().state_container);
+					SessionStateContainer::init(&mut session.state_container);
 				}
 			}
 
@@ -139,7 +139,7 @@ mod db {
 
 			for session in list.iter_mut() {
 				unsafe {
-					SessionStateContainer::deinit(&mut session.as_ref().state_container);
+					SessionStateContainer::deinit(&mut session.state_container);
 				}
 			}
 

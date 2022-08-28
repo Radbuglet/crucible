@@ -23,8 +23,9 @@ pub const fn new_uninit_array<T, const N: usize>() -> [MaybeUninit<T>; N] {
 }
 
 pub const unsafe fn assume_init_array<T, const N: usize>(arr: [MaybeUninit<T>; N]) -> [T; N] {
-	// Safety: provided by caller
-	transmute_uninit_array_to_outer(arr).assume_init()
+	transmute_uninit_array_to_outer(arr)
+		// Safety: provided by caller
+		.assume_init()
 }
 
 // === Array constructors === //

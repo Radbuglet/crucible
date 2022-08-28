@@ -99,38 +99,3 @@ unsafe impl<T: ?Sized> UnsafeCellExt for UnsafeCell<T> {
 		self.get_mut()
 	}
 }
-
-// === MutexedUnsafeCell === //
-
-/// A type of [UnsafeCell] that asserts that the given cell will only be accessed by one thread at a
-/// given time.
-#[derive(Default, TransparentWrapper)]
-#[repr(transparent)]
-pub struct MutexedUnsafeCell<T: ?Sized>(UnsafeCell<T>);
-
-// Safety: Users can't get an immutable reference to this value without using `unsafe`. They take full
-// responsibility for any extra danger when using this cell by asserting that they won't share a
-// non-Sync value on several threads simultaneously. We require `Send` as an extra precaution because
-// users could theoretically use the cell's newfound `Sync` superpowers to move a non-`Send` `T`
-// instance to another thread via a mutable reference to it.
-unsafe impl<T: ?Sized + Send> Sync for MutexedUnsafeCell<T> {}
-
-impl<T> MutexedUnsafeCell<T> {
-	pub const fn new(value: T) -> Self {
-		Self(UnsafeCell::new(value))
-	}
-
-	pub fn into_inner(self) -> T {
-		self.0.into_inner()
-	}
-}
-
-unsafe impl<T: ?Sized> UnsafeCellExt for MutexedUnsafeCell<T> {
-	type Inner = T;
-
-	fn get(&self) -> *mut Self::Inner {
-		self.0.get()
-	}
-}
-
-// impl<T, U> CoerceUnsized<MutexedUnsafeCell<U>> for MutexedUnsafeCell<T> where T: CoerceUnsized<U> {}
