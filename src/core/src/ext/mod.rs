@@ -1,4 +1,5 @@
 pub mod array;
+pub mod boxing;
 pub mod cell;
 pub mod const_hacks;
 pub mod hasher;
@@ -10,3 +11,4 @@ pub mod slice;
 pub mod std_traits;
 pub mod sync;
 pub mod transmute;
+pub mod type_id;

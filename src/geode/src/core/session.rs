@@ -16,7 +16,8 @@ mod db {
 	use std::{marker::PhantomData, mem};
 
 	use crucible_core::{
-		const_hacks::ConstSafeMutRef, drop_guard::DropGuard, marker::PhantomNoSync,
+		boxing::leak_box, const_hacks::ConstSafeMutRef, drop_guard::DropGuard,
+		marker::PhantomNoSync,
 	};
 	use parking_lot::Mutex;
 
@@ -66,11 +67,11 @@ mod db {
 
 					// Create session
 					drop(inner);
-					let session = Box::leak(Box::new(SessionStatePointee {
+					let session = leak_box(SessionStatePointee {
 						_no_sync: PhantomData,
 						index,
 						state_container: C::default(),
-					}));
+					});
 					session
 				}
 			};

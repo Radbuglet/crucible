@@ -1,3 +1,5 @@
+use std::sync::{Arc, Weak};
+
 use super::{
 	lock::{BorrowMutability, UserLock},
 	session::{MovableSessionGuard, Session, StaticStorageGetter, StaticStorageHandler},
@@ -9,8 +11,8 @@ mod internal {
 	use std::{
 		any,
 		cell::UnsafeCell,
-		mem::{self, MaybeUninit},
-		ptr,
+		mem::{self, ManuallyDrop},
+		panic::{catch_unwind, AssertUnwindSafe},
 	};
 
 	use bumpalo::Bump;
@@ -19,29 +21,32 @@ mod internal {
 	use crate::core::session::Session;
 
 	#[derive(Default)]
-	pub struct FinalizerExecutor {
+	pub struct Executor {
 		bump: UnsafeCell<Bump>,
 	}
 
 	#[repr(C)]
-	struct FinalizerEntry<T> {
+	struct Entry<T> {
 		header: FinalizerHeader,
-		value: MaybeUninit<T>,
+		value: ManuallyDrop<T>,
 	}
 
 	struct FinalizerHeader {
 		handler: unsafe fn(Session, *mut Self) -> *mut Self,
 	}
 
-	impl FinalizerExecutor {
-		pub fn push<H: GcHook>(&self, entry: H) {
-			unsafe fn handler<H: GcHook>(
+	impl Executor {
+		pub fn push<H: GcHookOnce>(&self, entry: H) {
+			unsafe fn handler<H: GcHookOnce>(
 				session: Session,
 				base: *mut FinalizerHeader,
 			) -> *mut FinalizerHeader {
-				let base = base.cast::<FinalizerEntry<H>>();
-				let entry = ptr::addr_of!((*base).value).cast::<H>().read();
-				entry.process(session);
+				let base = base.cast::<Entry<H>>();
+				let entry = ManuallyDrop::take(&mut (*base).value);
+
+				let _ = catch_unwind(AssertUnwindSafe(move || {
+					entry.process(session);
+				}));
 
 				// N.B. this does not run into provenance issues because the pointer keeps the
 				// provenance of the allocation chunk, not the provenance of each individual hook.
@@ -58,11 +63,11 @@ mod internal {
 			);
 
 			let bump = unsafe { self.bump.get_mut_unchecked() };
-			bump.alloc(FinalizerEntry {
+			bump.alloc(Entry {
 				header: FinalizerHeader {
 					handler: handler::<H>,
 				},
-				value: MaybeUninit::new(entry),
+				value: ManuallyDrop::new(entry),
 			});
 		}
 
@@ -80,8 +85,30 @@ mod internal {
 		}
 	}
 
-	pub trait GcHook: 'static + Sized + Send {
+	pub trait GcHookOnce: 'static + Sized + Send {
 		unsafe fn process(self, session: Session);
+	}
+
+	impl<F> GcHookOnce for F
+	where
+		F: 'static + Sized + Send + FnOnce(Session),
+	{
+		unsafe fn process(self, session: Session) {
+			(self)(session)
+		}
+	}
+
+	pub trait GcHookMany: 'static + Sized + Send {
+		unsafe fn process(&mut self, session: Session);
+	}
+
+	impl<F> GcHookMany for F
+	where
+		F: 'static + Sized + Send + FnMut(Session),
+	{
+		unsafe fn process(&mut self, session: Session) {
+			(self)(session)
+		}
 	}
 }
 
@@ -89,7 +116,8 @@ mod internal {
 
 #[derive(Default)]
 pub(crate) struct SessionStateGcManager {
-	exec: internal::FinalizerExecutor,
+	finalizers: internal::Executor,
+	compactors: internal::Executor,
 }
 
 impl StaticStorageHandler for SessionStateGcManager {
@@ -104,11 +132,52 @@ impl StaticStorageHandler for SessionStateGcManager {
 
 // === Interface === //
 
-pub use internal::GcHook;
+pub use internal::{GcHookMany, GcHookOnce};
 
 impl Session<'_> {
-	pub unsafe fn register_gc_hook<H: GcHook>(self, hook: H) {
-		SessionStateGcManager::get(self).exec.push(hook);
+	pub unsafe fn add_gc_finalizer<H: GcHookOnce>(self, hook: H) {
+		SessionStateGcManager::get(self).finalizers.push(hook);
+	}
+
+	pub unsafe fn add_gc_compactor<H: GcHookOnce>(self, hook: H) {
+		SessionStateGcManager::get(self).compactors.push(hook);
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct PersistentGcHook(Arc<()>);
+
+struct RepeatedGcHook<H, const IS_FINALIZER: bool>(H, Weak<()>);
+
+impl<H: GcHookMany, const IS_FINALIZER: bool> GcHookOnce for RepeatedGcHook<H, IS_FINALIZER> {
+	unsafe fn process(mut self, session: Session) {
+		if self.1.upgrade().is_some() {
+			self.0.process(session);
+
+			if IS_FINALIZER {
+				session.add_gc_finalizer(self);
+			} else {
+				session.add_gc_compactor(self);
+			}
+		} else {
+			drop(self);
+		}
+	}
+}
+
+// TODO: Add a dedicated system to handle these?
+impl PersistentGcHook {
+	pub unsafe fn new_finalizer<H: GcHookMany>(session: Session, hook: H) {
+		let keep_alive = Arc::new(());
+		session.add_gc_finalizer(RepeatedGcHook::<H, true>(hook, Arc::downgrade(&keep_alive)));
+	}
+
+	pub unsafe fn new_compactor<H: GcHookMany>(session: Session, hook: H) {
+		let keep_alive = Arc::new(());
+		session.add_gc_finalizer(RepeatedGcHook::<H, false>(
+			hook,
+			Arc::downgrade(&keep_alive),
+		));
 	}
 }
 
@@ -125,6 +194,9 @@ where
 		"No sessions may be alive at the time `collect_garbage` is called."
 	);
 
+	// Run finalizers
+	let mut free_sessions_2 = Vec::with_capacity(free_sessions.len());
+
 	for free_session in free_sessions {
 		let session = free_session.make_local();
 		session.handle().acquire_locks(locks.iter().copied());
@@ -134,11 +206,26 @@ where
 			// at the top of this function and we already ensured that all sessions that could
 			// possibly observe a dead handle would be dead themselves.
 			SessionStateGcManager::get(session.handle())
-				.exec
+				.finalizers
 				.process_once(session.handle());
 		}
 
-		// Technically not necessary but allows us to fail early.
+		free_sessions_2.push(session.make_movable());
+	}
+
+	// Run compactors
+	for free_session in free_sessions_2 {
+		let session = free_session.make_local();
+		session.handle().acquire_locks(locks.iter().copied());
+
+		unsafe {
+			// Safety: see above
+			SessionStateGcManager::get(session.handle())
+				.compactors
+				.process_once(session.handle());
+		}
+
+		// Technically not necessary but allows us to fail more predictably.
 		drop(session.make_movable());
 	}
 }

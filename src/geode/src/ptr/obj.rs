@@ -6,7 +6,6 @@ use std::{
 use crucible_core::sync::MutexedPtr;
 
 use crate::core::{
-	gc::GcHook,
 	lock::{Lock, LockAndMeta},
 	object_db::{Slot, SlotDeadError},
 	owned::{Destructible, Owned},
@@ -111,20 +110,17 @@ impl<T: ?Sized + ObjPointee> Obj<T> {
 
 	pub fn destroy(self, session: Session) -> Result<(), SlotDeadError> {
 		let base = self.slot.try_destroy(session, self.gen)?;
+
 		let ptr = ptr::from_raw_parts_mut::<T>(base, self.meta);
 
-		struct ObjFinalizerHook<T: ?Sized + ObjPointee>(MutexedPtr<*mut T>);
-
-		impl<T: ?Sized + ObjPointee> GcHook for ObjFinalizerHook<T> {
-			unsafe fn process(self, _: Session) {
-				drop(Box::from_raw(self.0.ptr));
-			}
-		}
-
 		unsafe {
-			// Safety: we allow unsizing coercions but we never allow these coercions to change the
-			// layout of the object.
-			session.register_gc_hook(ObjFinalizerHook(ptr.into()));
+			let ptr = MutexedPtr::from(ptr);
+
+			session.add_gc_finalizer(move |_: Session| {
+				// Safety: we allow unsizing coercions but we never allow these coercions to change the
+				// layout of the object.
+				drop(Box::from_raw(ptr.ptr()));
+			});
 		}
 
 		Ok(())

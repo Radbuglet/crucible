@@ -48,7 +48,7 @@ pub type PRefSend<T> = MutexedPtr<*const T>;
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct MutexedPtr<P> {
 	_ty: PhantomNoSendOrSync,
-	pub ptr: P,
+	ptr: P,
 }
 
 impl<P> From<P> for MutexedPtr<P> {
@@ -57,6 +57,12 @@ impl<P> From<P> for MutexedPtr<P> {
 			_ty: PhantomData,
 			ptr,
 		}
+	}
+}
+
+impl<P> MutexedPtr<P> {
+	pub fn ptr(self) -> P {
+		self.ptr
 	}
 }
 
