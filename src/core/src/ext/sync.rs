@@ -3,7 +3,7 @@ use std::{cell::UnsafeCell, marker::PhantomData};
 
 use bytemuck::TransparentWrapper;
 
-use crate::{cell::UnsafeCellExt, marker::PhantomNoSendOrSync};
+use crate::{cell::UnsafeCellLike, marker::PhantomNoSendOrSync};
 
 #[derive(Default)]
 pub struct AssertSync<T: ?Sized>(T);
@@ -49,7 +49,7 @@ impl<T: ?Sized + Send> AssertSync<T> {
 /// A type of [UnsafeCell] that asserts that access to the given cell will be properly synchronized.
 #[derive(Default, TransparentWrapper)]
 #[repr(transparent)]
-pub struct MutexedUnsafeCell<T: ?Sized>(UnsafeCell<T>);
+pub struct SyncUnsafeCell<T: ?Sized>(UnsafeCell<T>);
 
 // Safety: Users can't get an immutable reference to this value without using `unsafe`. They take full
 // responsibility for any extra danger when using this cell by asserting that they won't share a
@@ -57,9 +57,9 @@ pub struct MutexedUnsafeCell<T: ?Sized>(UnsafeCell<T>);
 // precaution because users could theoretically use the cell's newfound `Sync` superpowers to move a
 // non-`Send` `T` instance to another thread via a mutable reference to it and people are only really
 // promising that they'll federate access properly.
-unsafe impl<T: ?Sized + Send> Sync for MutexedUnsafeCell<T> {}
+unsafe impl<T: ?Sized + Send> Sync for SyncUnsafeCell<T> {}
 
-impl<T> MutexedUnsafeCell<T> {
+impl<T> SyncUnsafeCell<T> {
 	pub const fn new(value: T) -> Self {
 		Self(UnsafeCell::new(value))
 	}
@@ -69,7 +69,7 @@ impl<T> MutexedUnsafeCell<T> {
 	}
 }
 
-unsafe impl<T: ?Sized> UnsafeCellExt for MutexedUnsafeCell<T> {
+unsafe impl<T: ?Sized> UnsafeCellLike for SyncUnsafeCell<T> {
 	type Inner = T;
 
 	fn get(&self) -> *mut Self::Inner {

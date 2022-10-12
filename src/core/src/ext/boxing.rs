@@ -1,3 +1,3 @@
-pub fn leak_box<T>(value: T) -> &'static mut T {
-	Box::leak(Box::new(value))
+pub fn leak_box<'a, T>(val: T) -> &'a mut T {
+	Box::leak(Box::new(val))
 }

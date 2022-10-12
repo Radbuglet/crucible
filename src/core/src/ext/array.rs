@@ -30,77 +30,78 @@ pub const unsafe fn assume_init_array<T, const N: usize>(arr: [MaybeUninit<T>; N
 
 // === Array constructors === //
 
-#[repr(C)]
-pub struct MacroArrayBuilder<T, const N: usize> {
-	pub array: [MaybeUninit<T>; N],
-	pub init_count: usize,
-	pub len: usize,
-}
+#[doc(hidden)]
+pub mod macro_internals {
+	use super::*;
+	pub use std::mem::MaybeUninit;
 
-impl<T, const N: usize> MacroArrayBuilder<T, N> {
-	pub const unsafe fn new() -> Self {
-		Self {
-			array: new_uninit_array(),
-			init_count: 0,
-			len: N,
+	#[repr(C)]
+	pub struct MacroArrayBuilder<T, const N: usize> {
+		pub array: [MaybeUninit<T>; N],
+		pub init_count: usize,
+		pub len: usize,
+	}
+
+	impl<T, const N: usize> MacroArrayBuilder<T, N> {
+		pub const unsafe fn new() -> Self {
+			Self {
+				array: new_uninit_array(),
+				init_count: 0,
+				len: N,
+			}
+		}
+
+		pub const unsafe fn unwrap(self) -> [T; N] {
+			// Safety: `array` is the first element of this `repr(C)` structure so we can transmute an
+			// owned instance of the structure into an owned instance of this field. We also perform an
+			// implicit transmute from `[MaybeUninit<T>; N]` to `[T; N]`, whose safety is guaranteed by
+			// the caller.
+			entirely_unchecked_transmute(self)
 		}
 	}
 
-	pub const unsafe fn unwrap(self) -> [T; N] {
-		// Safety: `array` is the first element of this `repr(C)` structure so we can transmute an
-		// owned instance of the structure into an owned instance of this field. We also perform an
-		// implicit transmute from `[MaybeUninit<T>; N]` to `[T; N]`, whose safety is guaranteed by
-		// the caller.
-		entirely_unchecked_transmute(self)
-	}
-}
-
-impl<T, const N: usize> Drop for MacroArrayBuilder<T, N> {
-	fn drop(&mut self) {
-		for i in 0..self.init_count {
-			unsafe {
-				// Safety: provided during call to `MacroArrayBuilder::new`.
-				self.array[i].assume_init_drop()
-			};
+	impl<T, const N: usize> Drop for MacroArrayBuilder<T, N> {
+		fn drop(&mut self) {
+			for i in 0..self.init_count {
+				unsafe {
+					// Safety: provided during call to `MacroArrayBuilder::new`.
+					self.array[i].assume_init_drop()
+				};
+			}
 		}
 	}
 }
 
-pub macro arr($ctor:expr; $size:expr) {{
-	// N.B. const expressions do not inherit the `unsafe` scope from their surroundings.
-	let mut arr = unsafe { MacroArrayBuilder::<_, { $size }>::new() };
+macro arr {
+	($ctor:expr; $size:expr) => {{
+		arr![_ignored => $ctor; $size]
+	}},
+	($index:ident => $ctor:expr; $size:expr) => {{
+		use macro_internals::*;
 
-	while arr.init_count < arr.len {
-		arr.array[arr.init_count] = MaybeUninit::new($ctor);
-		arr.init_count += 1;
-	}
+		// N.B. const expressions do not inherit the `unsafe` scope from their surroundings.
+		let mut arr = unsafe { MacroArrayBuilder::<_, { $size }>::new() };
 
-	unsafe { arr.unwrap() }
-}}
+		while arr.init_count < arr.len {
+			arr.array[arr.init_count] = MaybeUninit::new({
+				let $index = arr.init_count;
+				$ctor
+			});
+			arr.init_count += 1;
+		}
 
-pub macro arr_indexed($index:ident => $ctor:expr; $size:expr) {{
-	// N.B. const expressions do not inherit the `unsafe` scope from their surroundings.
-	let mut arr = unsafe { MacroArrayBuilder::<_, { $size }>::new() };
-
-	while arr.init_count < arr.len {
-		arr.array[arr.init_count] = MaybeUninit::new({
-			let $index = arr.init_count;
-			$ctor
-		});
-		arr.init_count += 1;
-	}
-
-	unsafe { arr.unwrap() }
-}}
+		unsafe { arr.unwrap() }
+	}},
+}
 
 pub fn arr_from_iter<T, I: IntoIterator<Item = T>, const N: usize>(iter: I) -> [T; N] {
 	let mut iter = iter.into_iter();
-	let mut count = 0;
 
-	arr![{
-		count += 1;
-		iter.next().unwrap_or_else(|| panic!("Expected at least {N} element(s); got {}", count - 1))
-	}; N]
+	arr![
+		i => iter.next()
+			.unwrap_or_else(|| panic!("Expected at least {N} element(s); got {}", i));
+		N
+	]
 }
 
 // === Boxed array creation === //

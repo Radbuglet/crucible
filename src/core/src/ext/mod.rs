@@ -5,6 +5,7 @@ pub mod const_hacks;
 pub mod hasher;
 pub mod lifetime;
 pub mod marker;
+pub mod option;
 pub mod range;
 pub mod result;
 pub mod slice;

@@ -4,7 +4,6 @@ members = [
     # "src/client",
     # "src/common",
     "src/core",
-    # "src/crew",
     "src/geode",
     # "src/sfc-test",
     # "src/typed-glam",

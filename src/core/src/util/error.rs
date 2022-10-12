@@ -8,7 +8,9 @@ use crate::std_traits::ResultLike;
 // === Standard Error Extensions === //
 
 pub trait ErrorFormatExt: Error {
-	fn format_error(&self) -> FormattedError<Self>;
+	fn format_error(&self) -> FormattedError<Self> {
+		FormattedError(self)
+	}
 
 	fn raise(&self) -> ! {
 		panic!("{}", self.format_error());
@@ -19,11 +21,7 @@ pub trait ErrorFormatExt: Error {
 	}
 }
 
-impl<T: ?Sized + Error> ErrorFormatExt for T {
-	fn format_error(&self) -> FormattedError<Self> {
-		FormattedError(self)
-	}
-}
+impl<T: ?Sized + Error> ErrorFormatExt for T {}
 
 pub struct FormattedError<'a, T: ?Sized>(pub &'a T);
 
