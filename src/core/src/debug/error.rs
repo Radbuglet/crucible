@@ -3,7 +3,7 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
-use crate::std_traits::ResultLike;
+use crate::lang::std_traits::ResultLike;
 
 // === Standard Error Extensions === //
 

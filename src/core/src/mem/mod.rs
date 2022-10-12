@@ -1,12 +1,9 @@
+pub mod array;
 pub mod c_enum;
 pub mod drop_guard;
-pub mod error;
-pub mod f32;
 pub mod inline;
-pub mod iter;
-pub mod label;
 pub mod layout;
 pub mod linked_list;
-pub mod macros;
 pub mod ptr;
+pub mod transmute;
 pub mod wide_option;

@@ -3,7 +3,7 @@ use std::{cell::UnsafeCell, marker::PhantomData};
 
 use bytemuck::TransparentWrapper;
 
-use crate::{cell::UnsafeCellLike, marker::PhantomNoSendOrSync};
+use super::{marker::PhantomNoSendOrSync, std_traits::UnsafeCellLike};
 
 #[derive(Default)]
 pub struct AssertSync<T: ?Sized>(T);
@@ -74,6 +74,13 @@ unsafe impl<T: ?Sized> UnsafeCellLike for SyncUnsafeCell<T> {
 
 	fn get(&self) -> *mut Self::Inner {
 		self.0.get()
+	}
+
+	fn into_inner(self) -> Self::Inner
+	where
+		Self::Inner: Sized,
+	{
+		self.0.into_inner()
 	}
 }
 

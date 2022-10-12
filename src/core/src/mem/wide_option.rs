@@ -1,4 +1,4 @@
-use crate::transmute::{cast_mut_via_ptr, cast_ref_via_ptr};
+use crate::mem::transmute::{cast_mut_via_ptr, cast_ref_via_ptr};
 
 use std::slice;
 

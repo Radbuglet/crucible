@@ -1,16 +1,12 @@
 use std::{
 	fmt,
 	marker::PhantomData,
-	sync::{
-		atomic::{AtomicU64, Ordering::Relaxed},
-		Arc, Weak,
-	},
+	sync::atomic::{AtomicU64, Ordering::Relaxed},
 };
 
 use crucible_core::{
-	error::ResultExt,
-	ptr::{Incomplete, PointeeCastExt},
-	type_id::NamedTypeId,
+	debug::{error::ResultExt, type_id::NamedTypeId},
+	mem::ptr::{Incomplete, PointeeCastExt},
 };
 use derive_where::derive_where;
 use itertools::Itertools;
@@ -315,9 +311,6 @@ impl Provider for EmptyProvider {
 
 // === Archetypal === //
 
-pub type ArcEntity = Arc<Entity>;
-pub type WeakArcEntity = Weak<Entity>;
-
 #[derive(Debug)] // TODO: Add more derives and helpers
 pub struct Entity<T: ?Sized + Provider = dyn Send + Sync + Provider> {
 	_archetype: (),
@@ -341,10 +334,6 @@ impl<T: ?Sized + Provider> Provider for Entity<T> {
 		// TODO: Fast-path archetypal components
 		self.provider.provide(demand);
 	}
-}
-
-pub fn new_dangling_weak_entity_arc() -> WeakArcEntity {
-	Weak::<Entity<EmptyProvider>>::new()
 }
 
 // === Tests === //

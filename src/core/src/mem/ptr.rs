@@ -7,9 +7,15 @@ use std::{
 };
 
 use crate::{
-	macros::{ignore, impl_tuples},
-	transmute::sizealign_checked_transmute,
+	lang::macros::{ignore, impl_tuples},
+	mem::transmute::sizealign_checked_transmute,
 };
+
+// === Allocation === //
+
+pub fn leak_box<'a, T>(val: T) -> &'a mut T {
+	Box::leak(Box::new(val))
+}
 
 // === Pointer Casts === //
 

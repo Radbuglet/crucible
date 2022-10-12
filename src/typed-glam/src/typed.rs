@@ -1,5 +1,5 @@
 use bytemuck::TransparentWrapper;
-use crucible_core::{marker::PhantomInvariant, std_traits::ArrayLike};
+use crucible_core::lang::{marker::PhantomInvariant, std_traits::ArrayLike};
 
 use std::{
 	any::type_name,

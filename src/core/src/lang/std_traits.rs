@@ -1,9 +1,11 @@
 use std::{
 	borrow::{Borrow, BorrowMut},
-	ops::{Index, IndexMut},
+	ops::{Index, IndexMut}, cell::UnsafeCell,
 };
 
-use crate::array::arr_from_iter;
+use crate::mem::array::arr_from_iter;
+
+// === OptionLike === //
 
 pub trait OptionLike: Sized {
 	type Value;
@@ -27,6 +29,8 @@ impl<T, E> OptionLike for Result<T, E> {
 	}
 }
 
+// === ResultLike === //
+
 pub trait ResultLike: Sized {
 	type Success;
 	type Error;
@@ -42,6 +46,8 @@ impl<T, E> ResultLike for Result<T, E> {
 		self
 	}
 }
+
+// === ArrayLike === //
 
 pub trait ArrayLike:
 	Sized
@@ -75,5 +81,47 @@ impl<T, const N: usize> ArrayLike for [T; N] {
 
 	fn from_iter<I: IntoIterator<Item = Self::Elem>>(iter: I) -> Self {
 		arr_from_iter(iter)
+	}
+}
+
+// === UnsafeCellLike === //
+
+pub unsafe trait UnsafeCellLike {
+	type Inner: ?Sized;
+
+	fn get(&self) -> *mut Self::Inner;
+
+	fn into_inner(self) -> Self::Inner
+	where
+		Self::Inner: Sized;
+
+	fn get_mut(&mut self) -> &mut Self::Inner {
+		unsafe { &mut *self.get() }
+	}
+
+	unsafe fn get_ref_unchecked(&self) -> &Self::Inner {
+		&*self.get()
+	}
+
+	#[allow(clippy::mut_from_ref)] // That's the users' problem.
+	unsafe fn get_mut_unchecked(&self) -> &mut Self::Inner {
+		&mut *self.get()
+	}
+}
+
+unsafe impl<T: ?Sized> UnsafeCellLike for UnsafeCell<T> {
+	type Inner = T;
+
+	fn get(&self) -> *mut Self::Inner {
+		// This is shadowed by the inherent `impl`.
+		self.get()
+	}
+
+	fn into_inner(self) -> Self::Inner
+	where
+		Self::Inner: Sized,
+	{
+		// This is shadowed by the inherent `impl`.
+		self.into_inner()
 	}
 }

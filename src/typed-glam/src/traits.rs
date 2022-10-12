@@ -8,7 +8,7 @@ use std::{
 	},
 };
 
-use crucible_core::std_traits::ArrayLike;
+use crucible_core::lang::std_traits::ArrayLike;
 use num_traits::Num;
 
 // === Dim class === //

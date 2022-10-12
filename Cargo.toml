@@ -6,7 +6,7 @@ members = [
     "src/core",
     "src/geode",
     # "src/sfc-test",
-    # "src/typed-glam",
+    "src/typed-glam",
 ]
 
 [profile.release]

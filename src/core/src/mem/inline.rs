@@ -1,6 +1,8 @@
 use std::mem::{self, ManuallyDrop};
 
-use crate::{boxing::leak_box, ptr::PointeeCastExt};
+use crate::mem::ptr::PointeeCastExt;
+
+use super::ptr::leak_box;
 
 // === Inline Store === //
 

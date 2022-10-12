@@ -1,7 +1,6 @@
-use crate::ext::transmute::entirely_unchecked_transmute;
-use crate::transmute::sizealign_checked_transmute;
-use core::iter;
-use core::mem::MaybeUninit;
+use std::{iter, mem::MaybeUninit};
+
+use super::transmute::{entirely_unchecked_transmute, sizealign_checked_transmute};
 
 // === Array transmute === //
 
