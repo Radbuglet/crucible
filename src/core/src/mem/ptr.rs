@@ -1,15 +1,34 @@
 use std::{
 	any::TypeId,
 	marker::PhantomData,
-	mem::MaybeUninit,
+	mem::{self, ManuallyDrop, MaybeUninit},
 	ops::{Deref, DerefMut},
 	ptr,
 };
 
-use crate::{
-	lang::macros::{ignore, impl_tuples},
-	mem::transmute::sizealign_checked_transmute,
-};
+use crate::lang::macros::{ignore, impl_tuples};
+
+// === Transmute === //
+
+pub const unsafe fn entirely_unchecked_transmute<A, B>(a: A) -> B {
+	union Punny<A, B> {
+		a: ManuallyDrop<A>,
+		b: ManuallyDrop<B>,
+	}
+
+	let punned = Punny {
+		a: ManuallyDrop::new(a),
+	};
+
+	ManuallyDrop::into_inner(punned.b)
+}
+
+pub const unsafe fn sizealign_checked_transmute<A, B>(a: A) -> B {
+	assert!(mem::size_of::<A>() == mem::size_of::<B>());
+	assert!(mem::align_of::<A>() >= mem::align_of::<B>());
+
+	entirely_unchecked_transmute(a)
+}
 
 // === Allocation === //
 
@@ -23,6 +42,10 @@ pub trait PointeeCastExt {
 	type Pointee: ?Sized;
 
 	fn as_byte_ptr(&self) -> *const u8;
+
+	unsafe fn prolong<'r>(&self) -> &'r Self::Pointee;
+
+	unsafe fn prolong_mut<'r>(&mut self) -> &'r mut Self::Pointee;
 
 	unsafe fn cast_ref_via_ptr<F, R>(&self, f: F) -> &R
 	where
@@ -54,6 +77,14 @@ impl<P: ?Sized> PointeeCastExt for P {
 
 	fn as_byte_ptr(&self) -> *const u8 {
 		self as *const Self as *const u8
+	}
+
+	unsafe fn prolong<'r>(&self) -> &'r Self::Pointee {
+		&*(self as *const Self::Pointee)
+	}
+
+	unsafe fn prolong_mut<'r>(&mut self) -> &'r mut Self::Pointee {
+		&mut *(self as *mut Self::Pointee)
 	}
 
 	unsafe fn cast_ref_via_ptr<F, R>(&self, f: F) -> &R

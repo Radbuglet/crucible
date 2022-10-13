@@ -1,106 +1,15 @@
-use std::{
-	cell::{Ref, RefMut},
-	hash::{self, Hasher},
-};
+use std::hash::{self, Hasher};
 
-use bytemuck::TransparentWrapper;
-
-use crate::mem::wide_option::WideOption;
-
-use super::{
-	lifetime::try_transform,
-	std_traits::{OptionLike, ResultLike},
-};
-
-// === RefCell === //
-
-pub trait RefPoly<'a>: Sized {
-	type Inner;
-
-	fn filter_map_ref<U, F>(me: Self, f: F) -> Result<Ref<'a, U>, Self>
-	where
-		F: FnOnce(&Self::Inner) -> Option<&U>;
-}
-
-impl<'a, T> RefPoly<'a> for Ref<'a, T> {
-	type Inner = T;
-
-	fn filter_map_ref<U, F>(me: Self, f: F) -> Result<Ref<'a, U>, Self>
-	where
-		F: FnOnce(&Self::Inner) -> Option<&U>,
-	{
-		let backup = Ref::clone(&me);
-		let mapped = Ref::map(me, |orig| match f(orig) {
-			Some(mapped) => WideOption::some(mapped),
-			None => WideOption::none(),
-		});
-
-		if mapped.is_some() {
-			Ok(Ref::map(mapped, |mapped| mapped.unwrap_ref()))
-		} else {
-			Err(backup)
-		}
-	}
-}
-
-pub trait RefMutPoly<'a>: Sized {
-	type Inner;
-
-	fn filter_map_mut<U, F>(me: Self, f: F) -> Result<RefMut<'a, U>, Self>
-	where
-		F: FnOnce(&mut Self::Inner) -> Option<&mut U>;
-}
-
-impl<'a, T> RefMutPoly<'a> for RefMut<'a, T> {
-	type Inner = T;
-
-	fn filter_map_mut<U, F>(me: Self, f: F) -> Result<RefMut<'a, U>, Self>
-	where
-		F: FnOnce(&mut Self::Inner) -> Option<&mut U>,
-	{
-		// Utils
-		// Thanks to `kpreid` for helping me make the original implementation of this safe.
-		trait Either<U, T> {
-			fn as_result(&mut self) -> Result<&mut U, &mut T>;
-		}
-
-		#[derive(TransparentWrapper)]
-		#[repr(transparent)]
-		struct Success<U>(U);
-
-		impl<U, T> Either<U, T> for Success<U> {
-			fn as_result(&mut self) -> Result<&mut U, &mut T> {
-				Ok(&mut self.0)
-			}
-		}
-
-		#[derive(TransparentWrapper)]
-		#[repr(transparent)]
-		struct Failure<T>(T);
-
-		impl<U, T> Either<U, T> for Failure<T> {
-			fn as_result(&mut self) -> Result<&mut U, &mut T> {
-				Err(&mut self.0)
-			}
-		}
-
-		// Actual implementation
-		let mut mapped = RefMut::map(me, |orig| match try_transform(orig, f) {
-			Ok(mapped) => Success::wrap_mut(mapped) as &mut dyn Either<U, T>,
-			Err(orig) => Failure::wrap_mut(orig) as &mut dyn Either<U, T>,
-		});
-
-		match mapped.as_result().is_ok() {
-			true => Ok(RefMut::map(mapped, |val| val.as_result().ok().unwrap())),
-			false => Err(RefMut::map(mapped, |val| val.as_result().err().unwrap())),
-		}
-	}
-}
+use super::std_traits::{OptionLike, ResultLike};
 
 // === Option === //
 
 pub trait OptionPoly: OptionLike {
 	fn is_some_and<F>(self, f: F) -> bool
+	where
+		F: FnOnce(Self::Value) -> bool;
+
+	fn is_none_or<F>(self, f: F) -> bool
 	where
 		F: FnOnce(Self::Value) -> bool;
 }
@@ -111,6 +20,13 @@ impl<T> OptionPoly for Option<T> {
 		F: FnOnce(Self::Value) -> bool,
 	{
 		self.map_or(false, f)
+	}
+
+	fn is_none_or<F>(self, f: F) -> bool
+	where
+		F: FnOnce(Self::Value) -> bool,
+	{
+		self.map_or(true, f)
 	}
 }
 

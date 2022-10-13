@@ -1,6 +1,6 @@
 use std::{iter, mem::MaybeUninit};
 
-use super::transmute::{entirely_unchecked_transmute, sizealign_checked_transmute};
+use super::ptr::{entirely_unchecked_transmute, sizealign_checked_transmute};
 
 // === Array transmute === //
 

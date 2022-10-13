@@ -5,5 +5,4 @@ pub mod inline;
 pub mod layout;
 pub mod linked_list;
 pub mod ptr;
-pub mod transmute;
 pub mod wide_option;

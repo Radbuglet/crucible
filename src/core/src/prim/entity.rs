@@ -4,7 +4,7 @@ use std::{
 	sync::atomic::{AtomicU64, Ordering::Relaxed},
 };
 
-use crucible_core::{
+use crate::{
 	debug::{error::ResultExt, type_id::NamedTypeId},
 	mem::ptr::{Incomplete, PointeeCastExt},
 };

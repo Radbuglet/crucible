@@ -1,6 +1,6 @@
-use crate::mem::transmute::{cast_mut_via_ptr, cast_ref_via_ptr};
-
 use std::slice;
+
+use super::ptr::PointeeCastExt;
 
 #[repr(transparent)]
 pub struct WideOption<T>([T]);
@@ -8,17 +8,17 @@ pub struct WideOption<T>([T]);
 impl<T> WideOption<T> {
 	fn from_slice_mut(val: &mut [T]) -> &mut Self {
 		unsafe {
-			cast_mut_via_ptr(val, |ptr| {
-				ptr as *mut WideOption<T> // repr(transparent)
-			})
+			val.cast_mut_via_ptr(
+				|ptr| ptr as *mut WideOption<T>, // repr(transparent)
+			)
 		}
 	}
 
 	pub fn some(val: &T) -> &Self {
 		unsafe {
-			cast_ref_via_ptr(slice::from_ref(val), |ptr| {
-				ptr as *const WideOption<T> // repr(transparent)
-			})
+			slice::from_ref(val).cast_ref_via_ptr(
+				|ptr| ptr as *const WideOption<T>, // repr(transparent)
+			)
 		}
 	}
 

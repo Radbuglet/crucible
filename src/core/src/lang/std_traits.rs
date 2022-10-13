@@ -1,9 +1,13 @@
 use std::{
 	borrow::{Borrow, BorrowMut},
-	ops::{Index, IndexMut}, cell::UnsafeCell,
+	cell::{RefCell, UnsafeCell},
+	num::NonZeroU64,
+	ops::{Index, IndexMut},
 };
 
-use crate::mem::array::arr_from_iter;
+use crate::mem::{array::arr_from_iter, c_enum::c_enum};
+
+use super::marker::PhantomInvariant;
 
 // === OptionLike === //
 
@@ -125,3 +129,91 @@ unsafe impl<T: ?Sized> UnsafeCellLike for UnsafeCell<T> {
 		self.into_inner()
 	}
 }
+
+unsafe impl<T: ?Sized> UnsafeCellLike for RefCell<T> {
+	type Inner = T;
+
+	fn get(&self) -> *mut Self::Inner {
+		// This is shadowed by the inherent `impl`.
+		self.as_ptr()
+	}
+
+	fn into_inner(self) -> Self::Inner
+	where
+		Self::Inner: Sized,
+	{
+		// This is shadowed by the inherent `impl`.
+		self.into_inner()
+	}
+}
+
+// === RefCell Stuff === //
+
+c_enum! {
+	pub enum Mutability {
+		Immutable,
+		Mutable,
+	}
+}
+
+impl Mutability {
+	pub fn can_access_as(self, privileges: Self) -> bool {
+		// Higher index => more privileges
+		// i.e. if we can offer more than `privileges` is requesting, the check passes.
+		self as usize >= privileges as usize
+	}
+
+	pub fn max_privileges(self, other: Self) -> Self {
+		if self as usize > other as usize {
+			self
+		} else {
+			other
+		}
+	}
+
+	pub fn adverb(self) -> &'static str {
+		match self {
+			Self::Immutable => "immutably",
+			Self::Mutable => "mutably",
+		}
+	}
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum BorrowState {
+	Mutable,
+	Immutable(NonZeroU64),
+}
+
+impl BorrowState {
+	pub fn mutability(self) -> Mutability {
+		match self {
+			Self::Mutable => Mutability::Mutable,
+			Self::Immutable(_) => Mutability::Immutable,
+		}
+	}
+
+	pub fn as_immutably_reborrowed(self) -> Option<Self> {
+		match self {
+			Self::Mutable => unreachable!(),
+			Self::Immutable(counter) => Some(Self::Immutable(counter.checked_add(1)?)),
+		}
+	}
+
+	pub fn as_decremented(self) -> Option<Self> {
+		match self {
+			Self::Mutable => None,
+			Self::Immutable(counter) => {
+				if let Some(counter) = NonZeroU64::new(counter.get() - 1) {
+					Some(Self::Immutable(counter))
+				} else {
+					None
+				}
+			}
+		}
+	}
+}
+
+pub struct RefMarker<T: ?Sized>(PhantomInvariant<T>);
+
+pub struct MutMarker<T: ?Sized>(PhantomInvariant<T>);
