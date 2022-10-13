@@ -175,8 +175,6 @@ impl LockDB {
 }
 
 pub unsafe trait Session: Sized + fmt::Debug {
-	fn dyn_session(me: &Self) -> &DynSession;
-
 	fn can_lock_mut<L: ?Sized + 'static>(&self) -> bool;
 
 	fn can_lock_ref<L: ?Sized + 'static>(&self) -> bool;
@@ -186,8 +184,10 @@ pub unsafe trait Session: Sized + fmt::Debug {
 		T::check_compat(self);
 
 		// Cast the session!
-		unsafe { StaticSession::from_dyn_unchecked(Self::dyn_session(self)) }
+		unsafe { StaticSession::from_dyn_unchecked(Self::as_dyn(self)) }
 	}
+
+	fn as_dyn(&self) -> &DynSession;
 }
 
 #[derive_where(Debug)]
@@ -242,10 +242,6 @@ impl<T: BorrowList> StaticSession<T> {
 }
 
 unsafe impl<T: BorrowList> Session for StaticSession<T> {
-	fn dyn_session(me: &Self) -> &DynSession {
-		&me.session
-	}
-
 	fn can_lock_mut<L: ?Sized + 'static>(&self) -> bool {
 		T::can_lock_mut::<L>()
 			|| self
@@ -258,6 +254,10 @@ unsafe impl<T: BorrowList> Session for StaticSession<T> {
 			|| self
 				.session
 				.cold_can_lock_dyn(NamedTypeId::of::<L>(), Mutability::Immutable)
+	}
+
+	fn as_dyn(&self) -> &DynSession {
+		&self.session
 	}
 }
 
@@ -290,16 +290,16 @@ impl DynSession {
 }
 
 unsafe impl Session for DynSession {
-	fn dyn_session(me: &Self) -> &DynSession {
-		me
-	}
-
 	fn can_lock_mut<L: ?Sized + 'static>(&self) -> bool {
 		self.can_lock_dyn(NamedTypeId::of::<L>(), Mutability::Mutable)
 	}
 
 	fn can_lock_ref<L: ?Sized + 'static>(&self) -> bool {
 		self.can_lock_dyn(NamedTypeId::of::<L>(), Mutability::Immutable)
+	}
+
+	fn as_dyn(&self) -> &DynSession {
+		self
 	}
 }
 
@@ -315,7 +315,7 @@ impl Drop for DynSession {
 
 // === CompCell === //
 
-pub struct CompCell<T: ?Sized, L: ?Sized + 'static> {
+pub struct CompCell<T: ?Sized, L: ?Sized + 'static = T> {
 	_lock: PhantomInvariant<L>,
 	value: AssertSync<RefCell<T>>,
 }
@@ -353,7 +353,7 @@ impl<T: ?Sized, L: ?Sized + 'static> CompCell<T, L> {
 			NamedTypeId::of::<L>()
 		);
 
-		// FIXME: This may hit the cold path if a `StaticSession` only borrows something immutably.
+		// FIXME: This will hit the cold path if a `StaticSession` only borrows something immutably.
 		if s.can_lock_mut::<L>() {
 			let borrow = unsafe { self.value.get() }.borrow();
 

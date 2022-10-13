@@ -1,7 +1,7 @@
 // When working with lifetime escape-hatches, we are better off being painfully explicit than
 // being [explicit] painfully.
 #[allow(clippy::needless_lifetimes)]
-pub fn try_transform<'a, T: ?Sized, R: ?Sized, F>(
+pub fn try_transform_mut<'a, T: ?Sized, R: ?Sized, F>(
 	orig: &'a mut T,
 	f: F,
 ) -> Result<&'a mut R, &'a mut T>
@@ -21,6 +21,24 @@ where
 	}
 }
 
+pub fn try_transform_ref<'a, T: ?Sized, R: ?Sized, F>(
+	orig: &'a mut T,
+	f: F,
+) -> Result<&'a R, &'a mut T>
+where
+	F: FnOnce(&mut T) -> Option<&R>,
+{
+	let orig_ptr = orig as *mut T;
+
+	match f(orig) {
+		Some(new) => Ok(new),
+		None => Err(unsafe {
+			// Safety: see `try_transform`
+			&mut *orig_ptr
+		}),
+	}
+}
+
 pub fn try_transform_or_err<T, R, E, F>(orig: &mut T, f: F) -> Result<&mut R, (&mut T, E)>
 where
 	T: ?Sized,
@@ -29,7 +47,7 @@ where
 {
 	let mut err_reg = None;
 
-	match try_transform(orig, |lent| match f(lent) {
+	match try_transform_mut(orig, |lent| match f(lent) {
 		Ok(xformed) => Some(xformed),
 		Err(err) => {
 			err_reg = Some(err);

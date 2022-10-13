@@ -71,7 +71,7 @@ pub mod macro_internals {
 	}
 }
 
-macro arr {
+pub macro arr {
 	($ctor:expr; $size:expr) => {{
 		arr![_ignored => $ctor; $size]
 	}},

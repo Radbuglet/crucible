@@ -1,4 +1,5 @@
 use core::{fmt, hash, ops::Index};
+use std::{marker::PhantomData, ops::IndexMut};
 
 use super::array::boxed_arr_from_fn;
 use crate::lang::marker::PhantomInvariant;
@@ -57,59 +58,42 @@ pub macro c_enum($(
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct CEnumMap<K: CEnum, V> {
 	_ty: PhantomInvariant<K>,
-	map: Box<[Option<V>]>,
+	map: Box<[V]>,
 }
 
-impl<K: CEnum, V> Default for CEnumMap<K, V> {
+impl<K: CEnum, V: Default> Default for CEnumMap<K, V> {
 	fn default() -> Self {
 		Self {
 			_ty: Default::default(),
-			map: boxed_arr_from_fn(|| None, K::COUNT),
+			map: boxed_arr_from_fn(Default::default, K::COUNT),
 		}
 	}
 }
 
 impl<K: CEnum, V> CEnumMap<K, V> {
-	pub fn new() -> Self {
-		Self::default()
-	}
+	pub fn new<const N: usize>(values: [V; N]) -> Self {
+		assert_eq!(values.len(), K::COUNT);
 
-	pub fn from_entries<I: IntoIterator<Item = (K, V)>>(entries: I) -> Self {
-		let mut target = Self::new();
-
-		for (k, v) in entries {
-			target.insert(k, v);
+		Self {
+			_ty: PhantomData,
+			map: Box::new(values),
 		}
-
-		target
-	}
-
-	pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-		self.map[key.index()].replace(value)
-	}
-
-	pub fn get(&self, key: K) -> Option<&V> {
-		self.map[key.index()].as_ref()
-	}
-
-	pub fn get_mut(&mut self, key: K) -> Option<&mut V> {
-		self.entry_mut(key).as_mut()
-	}
-
-	pub fn entry_mut(&mut self, key: K) -> &mut Option<V> {
-		&mut self.map[key.index()]
 	}
 
 	pub fn iter(&self) -> impl Iterator<Item = (K, &V)> + '_ {
-		K::variants()
-			.zip(self.map.iter())
-			.filter_map(|(k, v)| Some((k, v.as_ref()?)))
+		K::variants().zip(self.map.iter())
 	}
 
 	pub fn iter_mut(&mut self) -> impl Iterator<Item = (K, &mut V)> + '_ {
-		K::variants()
-			.zip(self.map.iter_mut())
-			.filter_map(|(k, v)| Some((k, v.as_mut()?)))
+		K::variants().zip(self.map.iter_mut())
+	}
+
+	pub fn values(&self) -> impl Iterator<Item = &V> + '_ {
+		self.iter().map(|(_, v)| v)
+	}
+
+	pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> + '_ {
+		self.iter_mut().map(|(_, v)| v)
 	}
 }
 
@@ -117,6 +101,12 @@ impl<K: CEnum, V> Index<K> for CEnumMap<K, V> {
 	type Output = V;
 
 	fn index(&self, index: K) -> &Self::Output {
-		self.get(index).unwrap()
+		&self.map[index.index()]
+	}
+}
+
+impl<K: CEnum, V> IndexMut<K> for CEnumMap<K, V> {
+	fn index_mut(&mut self, index: K) -> &mut Self::Output {
+		&mut self.map[index.index()]
 	}
 }

@@ -1,7 +1,10 @@
 use std::{
 	fmt,
 	marker::PhantomData,
-	sync::atomic::{AtomicU64, Ordering::Relaxed},
+	sync::{
+		atomic::{AtomicU64, Ordering::Relaxed},
+		Arc,
+	},
 };
 
 use crate::{
@@ -11,6 +14,8 @@ use crate::{
 use derive_where::derive_where;
 use itertools::Itertools;
 use thiserror::Error;
+
+use super::lock::{CompCell, CompMut, CompRef, Session};
 
 // === TypedKey === //
 
@@ -282,6 +287,30 @@ pub trait ProviderExt: Provider {
 	fn get<T: ?Sized + 'static>(&self) -> &T {
 		self.get_in(TypedKey::instance())
 	}
+
+	fn borrow_in<T: ?Sized + 'static>(
+		&self,
+		s: &impl Session,
+		key: TypedKey<CompCell<T>>,
+	) -> CompRef<T> {
+		self.get_in(key).borrow(s)
+	}
+
+	fn borrow<T: ?Sized + 'static>(&self, s: &impl Session) -> CompRef<T> {
+		self.borrow_in(s, TypedKey::instance())
+	}
+
+	fn borrow_mut_in<T: ?Sized + 'static>(
+		&self,
+		s: &impl Session,
+		key: TypedKey<CompCell<T>>,
+	) -> CompMut<T> {
+		self.get_in(key).borrow_mut(s)
+	}
+
+	fn borrow_mut<T: ?Sized + 'static>(&self, s: &impl Session) -> CompMut<T> {
+		self.borrow_mut_in(s, TypedKey::instance())
+	}
 }
 
 pub fn key_list_matches<T: ?Sized + Provider>(provider: &T, list: &[RawTypedKey]) -> bool {
@@ -311,10 +340,15 @@ impl Provider for EmptyProvider {
 
 // === Archetypal === //
 
-#[derive(Debug)] // TODO: Add more derives and helpers
 pub struct Entity<T: ?Sized + Provider = dyn Send + Sync + Provider> {
 	_archetype: (),
 	provider: T,
+}
+
+impl<T: ?Sized + Provider> fmt::Debug for Entity<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Entity").finish_non_exhaustive()
+	}
 }
 
 impl<T: ?Sized + Provider> Entity<T> {
@@ -326,6 +360,13 @@ impl<T: ?Sized + Provider> Entity<T> {
 			_archetype: (),
 			provider,
 		}
+	}
+
+	pub fn new_arc(provider: T) -> Arc<Entity>
+	where
+		T: Sized + Send + Sync + 'static,
+	{
+		Arc::new(Self::new(provider))
 	}
 }
 

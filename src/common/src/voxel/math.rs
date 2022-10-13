@@ -6,7 +6,7 @@ use typed_glam::{
 	typed::{FlavorCastFrom, TypedVector, VecFlavor},
 };
 
-use crucible_core::c_enum::{c_enum, CEnum};
+use crucible_core::mem::c_enum::{c_enum, CEnum};
 
 // === Coordinate Systems === //
 
