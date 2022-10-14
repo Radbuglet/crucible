@@ -6,14 +6,7 @@ pub trait DebugLabel {
 	fn serialize_label(self) -> SerializedDebugLabel;
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct NoLabel;
-
-impl DebugLabel for NoLabel {
-	fn serialize_label(self) -> SerializedDebugLabel {
-		None
-	}
-}
+pub const NO_LABEL: Option<&'static str> = None;
 
 impl DebugLabel for String {
 	fn serialize_label(self) -> SerializedDebugLabel {

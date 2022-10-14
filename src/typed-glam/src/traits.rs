@@ -59,7 +59,8 @@ pub trait GlamConvert: Sized {
 	fn from_glam_mut(glam: &mut Self::Glam) -> &mut Self;
 
 	// === Derived === //
-	// N.B. Default `impl`s mirrored in `TypedVec`'s inherent `impl`s. Be careful!
+	// N.B. Default `impl`s are copied verbatim into `TypedGlam`'s inherent impls to make them `const`
+	// safe. If you change things here, you should probably change them there as well.
 
 	fn map_glam<R, F>(self, f: F) -> R
 	where
@@ -342,11 +343,11 @@ impl_glam_convert_identity!(
 	glam::UVec2,
 	glam::UVec3,
 	glam::UVec4,
-	glam::BVec2,
-	glam::BVec3,
-	glam::BVec3A,
-	glam::BVec4,
-	glam::BVec4A,
+	// glam::BVec2,
+	// glam::BVec3,
+	// glam::BVec3A,
+	// glam::BVec4,
+	// glam::BVec4A,
 );
 
 pub(crate) macro numeric_vector_forwards() {

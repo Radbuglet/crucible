@@ -288,27 +288,27 @@ pub trait ProviderExt: Provider {
 		self.get_in(TypedKey::instance())
 	}
 
-	fn borrow_in<T: ?Sized + 'static>(
-		&self,
-		s: &impl Session,
+	fn borrow_in<'a, T: ?Sized + 'static>(
+		&'a self,
+		s: &'a impl Session,
 		key: TypedKey<CompCell<T>>,
-	) -> CompRef<T> {
+	) -> CompRef<'a, T> {
 		self.get_in(key).borrow(s)
 	}
 
-	fn borrow<T: ?Sized + 'static>(&self, s: &impl Session) -> CompRef<T> {
+	fn borrow<'a, T: ?Sized + 'static>(&'a self, s: &'a impl Session) -> CompRef<'a, T> {
 		self.borrow_in(s, TypedKey::instance())
 	}
 
-	fn borrow_mut_in<T: ?Sized + 'static>(
-		&self,
-		s: &impl Session,
+	fn borrow_mut_in<'a, T: ?Sized + 'static>(
+		&'a self,
+		s: &'a impl Session,
 		key: TypedKey<CompCell<T>>,
-	) -> CompMut<T> {
+	) -> CompMut<'a, T> {
 		self.get_in(key).borrow_mut(s)
 	}
 
-	fn borrow_mut<T: ?Sized + 'static>(&self, s: &impl Session) -> CompMut<T> {
+	fn borrow_mut<'a, T: ?Sized + 'static>(&'a self, s: &'a impl Session) -> CompMut<'a, T> {
 		self.borrow_mut_in(s, TypedKey::instance())
 	}
 }

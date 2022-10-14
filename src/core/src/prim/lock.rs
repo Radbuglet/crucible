@@ -346,7 +346,7 @@ impl<T: ?Sized, L: ?Sized + 'static> CompCell<T, L> {
 		}
 	}
 
-	pub fn borrow(&self, s: &impl Session) -> CompRef<T> {
+	pub fn borrow<'a>(&'a self, s: &'a impl Session) -> CompRef<'a, T> {
 		assert!(
 			s.can_lock_ref::<L>(),
 			"{s:?} cannot lock component protected with lock {:?}",
@@ -365,7 +365,7 @@ impl<T: ?Sized, L: ?Sized + 'static> CompCell<T, L> {
 		}
 	}
 
-	pub fn borrow_mut(&self, s: &impl Session) -> CompMut<T> {
+	pub fn borrow_mut<'a>(&'a self, s: &'a impl Session) -> CompMut<'a, T> {
 		assert!(
 			s.can_lock_mut::<L>(),
 			"{s:?} cannot lock component protected with lock {:?}",

@@ -1,5 +1,3 @@
-#![allow(unused_macros)]
-
 pub macro impl_tuples_with {
 	(
 		$target:path : []
