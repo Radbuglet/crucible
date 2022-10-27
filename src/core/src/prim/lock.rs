@@ -7,6 +7,7 @@ use std::{
 	mem,
 	num::NonZeroU64,
 	ops::{Deref, DerefMut},
+	ptr,
 	sync::{Mutex, MutexGuard},
 };
 
@@ -20,13 +21,14 @@ use crate::{
 		marker::{PhantomInvariant, PhantomNoSendOrSync},
 		polyfill::OptionPoly,
 		std_traits::{BorrowState, MutMarker, Mutability, RefMarker, UnsafeCellLike},
-		sync::AssertSync,
+		sync::{AssertSync, SyncUnsafeCell},
 	},
 	mem::ptr::PointeeCastExt,
 };
 
 // === BorrowList === //
 
+#[derive(Debug)]
 pub struct DynBorrowListBuilder {
 	borrows: HashMap<NamedTypeId, Mutability>,
 }
@@ -313,17 +315,34 @@ impl Drop for DynSession {
 	}
 }
 
-// === CompCell === //
+// === NRefCell === //
 
-pub struct CompCell<T: ?Sized, L: ?Sized + 'static = T> {
+pub struct NRefCell<T: ?Sized, L: ?Sized + 'static = T> {
 	_lock: PhantomInvariant<L>,
 	value: AssertSync<RefCell<T>>,
 }
 
-unsafe impl<T: ?Sized, L: ?Sized + 'static> UnsafeCellLike for CompCell<T, L> {
+impl<T: ?Sized + fmt::Debug, L: ?Sized + 'static> fmt::Debug for NRefCell<T, L> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("NRefCell")
+			.field("_lock", &self._lock)
+			.finish_non_exhaustive()
+	}
+}
+
+impl<T: Default, L: ?Sized + 'static> Default for NRefCell<T, L> {
+	fn default() -> Self {
+		Self {
+			_lock: Default::default(),
+			value: Default::default(),
+		}
+	}
+}
+
+unsafe impl<T: ?Sized, L: ?Sized + 'static> UnsafeCellLike for NRefCell<T, L> {
 	type Inner = T;
 
-	fn get(&self) -> *mut Self::Inner {
+	fn get_ptr(&self) -> *mut Self::Inner {
 		unsafe { self.value.get() }.as_ptr()
 	}
 
@@ -335,7 +354,7 @@ unsafe impl<T: ?Sized, L: ?Sized + 'static> UnsafeCellLike for CompCell<T, L> {
 	}
 }
 
-impl<T: ?Sized, L: ?Sized + 'static> CompCell<T, L> {
+impl<T: ?Sized, L: ?Sized + 'static> NRefCell<T, L> {
 	pub const fn new(value: T) -> Self
 	where
 		T: Sized,
@@ -346,10 +365,10 @@ impl<T: ?Sized, L: ?Sized + 'static> CompCell<T, L> {
 		}
 	}
 
-	pub fn borrow<'a>(&'a self, s: &'a impl Session) -> CompRef<'a, T> {
+	pub fn borrow<'a>(&'a self, s: &'a impl Session) -> NRef<'a, T> {
 		assert!(
 			s.can_lock_ref::<L>(),
-			"{s:?} cannot lock component protected with lock {:?}",
+			"{s:?} cannot lock NRefCell protected with lock {:?}",
 			NamedTypeId::of::<L>()
 		);
 
@@ -357,24 +376,24 @@ impl<T: ?Sized, L: ?Sized + 'static> CompCell<T, L> {
 		if s.can_lock_mut::<L>() {
 			let borrow = unsafe { self.value.get() }.borrow();
 
-			CompRef(CompRefInner::Smart(borrow))
+			NRef(NRefInner::Smart(borrow))
 		} else {
 			let borrow = unsafe { self.get_ref_unchecked() };
 
-			CompRef(CompRefInner::Dumb(borrow))
+			NRef(NRefInner::Dumb(borrow))
 		}
 	}
 
-	pub fn borrow_mut<'a>(&'a self, s: &'a impl Session) -> CompMut<'a, T> {
+	pub fn borrow_mut<'a>(&'a self, s: &'a impl Session) -> NMut<'a, T> {
 		assert!(
 			s.can_lock_mut::<L>(),
-			"{s:?} cannot lock component protected with lock {:?}",
+			"{s:?} cannot lock NRefCell protected with lock {:?}",
 			NamedTypeId::of::<L>()
 		);
 
 		let borrow = unsafe { self.value.get() }.borrow_mut();
 
-		CompMut(borrow)
+		NMut(borrow)
 	}
 
 	pub fn can_access_ref(&self, s: &impl Session) -> bool {
@@ -403,132 +422,132 @@ impl<T: ?Sized, L: ?Sized + 'static> CompCell<T, L> {
 	}
 }
 
-// === CompRef === //
+// === NRef === //
 
 #[derive(Debug)]
-pub struct CompRef<'a, T: ?Sized>(CompRefInner<'a, T>);
+pub struct NRef<'a, T: ?Sized>(NRefInner<'a, T>);
 
-impl<'a, T: ?Sized> CompRef<'a, T> {
+impl<'a, T: ?Sized> NRef<'a, T> {
 	pub fn clone(orig: &Self) -> Self {
 		let inner = match &orig.0 {
-			CompRefInner::Dumb(v) => CompRefInner::Dumb(*v),
-			CompRefInner::Smart(v) => CompRefInner::Smart(Ref::clone(v)),
+			NRefInner::Dumb(v) => NRefInner::Dumb(*v),
+			NRefInner::Smart(v) => NRefInner::Smart(Ref::clone(v)),
 		};
 
 		Self(inner)
 	}
 
-	pub fn map<U: ?Sized, F>(orig: Self, f: F) -> CompRef<'a, U>
+	pub fn map<U: ?Sized, F>(orig: Self, f: F) -> NRef<'a, U>
 	where
 		F: FnOnce(&T) -> &U,
 	{
 		let inner = match orig.0 {
-			CompRefInner::Dumb(v) => CompRefInner::Dumb(f(v)),
-			CompRefInner::Smart(v) => CompRefInner::Smart(Ref::map(v, f)),
+			NRefInner::Dumb(v) => NRefInner::Dumb(f(v)),
+			NRefInner::Smart(v) => NRefInner::Smart(Ref::map(v, f)),
 		};
 
-		CompRef(inner)
+		NRef(inner)
 	}
 
-	pub fn filter_map<U: ?Sized, F>(orig: Self, f: F) -> Result<CompRef<'a, U>, Self>
+	pub fn filter_map<U: ?Sized, F>(orig: Self, f: F) -> Result<NRef<'a, U>, Self>
 	where
 		F: FnOnce(&T) -> Option<&U>,
 	{
 		let inner = match orig.0 {
-			CompRefInner::Dumb(v) => match f(v) {
-				Some(val) => Ok(CompRefInner::Dumb(val)),
-				None => Err(CompRefInner::Dumb(v)),
+			NRefInner::Dumb(v) => match f(v) {
+				Some(val) => Ok(NRefInner::Dumb(val)),
+				None => Err(NRefInner::Dumb(v)),
 			},
-			CompRefInner::Smart(v) => match Ref::filter_map(v, f) {
-				Ok(v) => Ok(CompRefInner::Smart(v)),
-				Err(v) => Err(CompRefInner::Smart(v)),
+			NRefInner::Smart(v) => match Ref::filter_map(v, f) {
+				Ok(v) => Ok(NRefInner::Smart(v)),
+				Err(v) => Err(NRefInner::Smart(v)),
 			},
 		};
 
 		match inner {
-			Ok(v) => Ok(CompRef(v)),
-			Err(v) => Err(CompRef(v)),
+			Ok(v) => Ok(NRef(v)),
+			Err(v) => Err(NRef(v)),
 		}
 	}
 
-	pub fn map_split<U: ?Sized, V: ?Sized, F>(orig: Self, f: F) -> (CompRef<'a, U>, CompRef<'a, V>)
+	pub fn map_split<U: ?Sized, V: ?Sized, F>(orig: Self, f: F) -> (NRef<'a, U>, NRef<'a, V>)
 	where
 		F: FnOnce(&T) -> (&U, &V),
 	{
 		let (inner_a, inner_b) = match orig.0 {
-			CompRefInner::Dumb(v) => {
+			NRefInner::Dumb(v) => {
 				let (a, b) = f(v);
 
-				(CompRefInner::Dumb(a), CompRefInner::Dumb(b))
+				(NRefInner::Dumb(a), NRefInner::Dumb(b))
 			}
-			CompRefInner::Smart(v) => {
+			NRefInner::Smart(v) => {
 				let (a, b) = Ref::map_split(v, f);
 
-				(CompRefInner::Smart(a), CompRefInner::Smart(b))
+				(NRefInner::Smart(a), NRefInner::Smart(b))
 			}
 		};
 
-		(CompRef(inner_a), CompRef(inner_b))
+		(NRef(inner_a), NRef(inner_b))
 	}
 }
 
-impl<'a, T: ?Sized> Deref for CompRef<'a, T> {
+impl<'a, T: ?Sized> Deref for NRef<'a, T> {
 	type Target = T;
 
 	fn deref(&self) -> &Self::Target {
 		match &self.0 {
-			CompRefInner::Dumb(v) => v,
-			CompRefInner::Smart(v) => v,
+			NRefInner::Dumb(v) => v,
+			NRefInner::Smart(v) => v,
 		}
 	}
 }
 
-impl<'a, T: ?Sized + fmt::Display> fmt::Display for CompRef<'a, T> {
+impl<'a, T: ?Sized + fmt::Display> fmt::Display for NRef<'a, T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		(&**self).fmt(f)
 	}
 }
 
 #[derive(Debug)]
-enum CompRefInner<'a, T: ?Sized> {
+enum NRefInner<'a, T: ?Sized> {
 	Dumb(&'a T),
 	Smart(Ref<'a, T>),
 }
 
-// === CompMut === //
+// === NMut === //
 
 #[derive(Debug)]
-pub struct CompMut<'a, T: ?Sized>(RefMut<'a, T>);
+pub struct NMut<'a, T: ?Sized>(RefMut<'a, T>);
 
-impl<'a, T: ?Sized> CompMut<'a, T> {
-	pub fn map<U: ?Sized, F>(orig: Self, f: F) -> CompMut<'a, U>
+impl<'a, T: ?Sized> NMut<'a, T> {
+	pub fn map<U: ?Sized, F>(orig: Self, f: F) -> NMut<'a, U>
 	where
 		F: FnOnce(&mut T) -> &mut U,
 	{
-		CompMut(RefMut::map(orig.0, f))
+		NMut(RefMut::map(orig.0, f))
 	}
 
-	pub fn filter_map<U: ?Sized, F>(orig: Self, f: F) -> Result<CompMut<'a, U>, Self>
+	pub fn filter_map<U: ?Sized, F>(orig: Self, f: F) -> Result<NMut<'a, U>, Self>
 	where
 		F: FnOnce(&mut T) -> Option<&mut U>,
 	{
 		match RefMut::filter_map(orig.0, f) {
-			Ok(v) => Ok(CompMut(v)),
-			Err(v) => Err(CompMut(v)),
+			Ok(v) => Ok(NMut(v)),
+			Err(v) => Err(NMut(v)),
 		}
 	}
 
-	pub fn map_split<U: ?Sized, V: ?Sized, F>(orig: Self, f: F) -> (CompMut<'a, U>, CompMut<'a, V>)
+	pub fn map_split<U: ?Sized, V: ?Sized, F>(orig: Self, f: F) -> (NMut<'a, U>, NMut<'a, V>)
 	where
 		F: FnOnce(&mut T) -> (&mut U, &mut V),
 	{
 		let (a, b) = RefMut::map_split(orig.0, f);
 
-		(CompMut(a), CompMut(b))
+		(NMut(a), NMut(b))
 	}
 }
 
-impl<'a, T: ?Sized> Deref for CompMut<'a, T> {
+impl<'a, T: ?Sized> Deref for NMut<'a, T> {
 	type Target = T;
 
 	fn deref(&self) -> &Self::Target {
@@ -536,15 +555,149 @@ impl<'a, T: ?Sized> Deref for CompMut<'a, T> {
 	}
 }
 
-impl<'a, T: ?Sized> DerefMut for CompMut<'a, T> {
+impl<'a, T: ?Sized> DerefMut for NMut<'a, T> {
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		&mut self.0
 	}
 }
 
-impl<'a, T: ?Sized + fmt::Display> fmt::Display for CompMut<'a, T> {
+impl<'a, T: ?Sized + fmt::Display> fmt::Display for NMut<'a, T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		(&**self).fmt(f)
+	}
+}
+
+// === NCell === //
+
+pub struct NCell<T, L: ?Sized + 'static> {
+	_ty: PhantomInvariant<L>,
+	value: SyncUnsafeCell<T>,
+}
+
+impl<T, L: ?Sized + 'static> fmt::Debug for NCell<T, L> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("NCell")
+			.field("_ty", &self._ty)
+			.finish_non_exhaustive()
+	}
+}
+
+impl<T: Default, L: ?Sized + 'static> Default for NCell<T, L> {
+	fn default() -> Self {
+		Self::new(T::default())
+	}
+}
+
+impl<T, L: ?Sized + 'static> From<T> for NCell<T, L> {
+	fn from(value: T) -> Self {
+		Self::new(value)
+	}
+}
+
+impl<T, L: ?Sized + 'static> NCell<T, L> {
+	pub const fn new(value: T) -> Self {
+		Self {
+			_ty: PhantomData,
+			value: SyncUnsafeCell::new(value),
+		}
+	}
+
+	pub fn set(&self, s: &impl Session, value: T) {
+		assert!(
+			s.can_lock_mut::<L>(),
+			"{s:?} cannot write to NCell protected with lock {:?}",
+			NamedTypeId::of::<L>()
+		);
+
+		unsafe {
+			*self.value.get_mut_unchecked() = value;
+		}
+	}
+
+	pub fn swap<L2: ?Sized + 'static>(&self, s: &impl Session, other: &NCell<T, L2>) {
+		assert!(
+			s.can_lock_mut::<L>(),
+			"{s:?} cannot write to NCell protected with lock {:?}",
+			NamedTypeId::of::<L>()
+		);
+		assert!(
+			s.can_lock_mut::<L2>(),
+			"{s:?} cannot write to NCell protected with lock {:?}",
+			NamedTypeId::of::<L2>()
+		);
+
+		if ptr::eq(self.get_ptr(), other.get_ptr()) {
+			return;
+		}
+
+		unsafe { ptr::swap(self.get_ptr(), other.get_ptr()) }
+	}
+
+	pub fn replace(&self, s: &impl Session, value: T) -> T {
+		assert!(
+			s.can_lock_mut::<L>(),
+			"{s:?} cannot write to NCell protected with lock {:?}",
+			NamedTypeId::of::<L>()
+		);
+
+		unsafe { mem::replace(self.get_mut_unchecked(), value) }
+	}
+
+	pub fn can_access_ref(&self, s: &impl Session) -> bool {
+		s.can_lock_ref::<L>()
+	}
+
+	pub fn can_access_mut(&self, s: &impl Session) -> bool {
+		s.can_lock_mut::<L>()
+	}
+}
+
+impl<T: Copy, L: ?Sized + 'static> NCell<T, L> {
+	pub fn get(&self, s: &impl Session) -> T {
+		assert!(
+			s.can_lock_ref::<L>(),
+			"{s:?} cannot read to NCell protected with lock {:?}",
+			NamedTypeId::of::<L>()
+		);
+
+		unsafe { *self.get_ptr() }
+	}
+
+	pub fn update<F: FnOnce(T) -> T>(&self, s: &impl Session, f: F) -> T {
+		assert!(
+			s.can_lock_mut::<L>(),
+			"{s:?} cannot write to NCell protected with lock {:?}",
+			NamedTypeId::of::<L>()
+		);
+
+		unsafe {
+			let p = self.get_ptr();
+			let old = *p;
+			let new = f(old);
+			*p = new;
+			new
+		}
+	}
+}
+
+impl<T: Default, L: ?Sized + 'static> NCell<T, L> {
+	pub fn take(&self, s: &impl Session) -> T {
+		self.replace(s, T::default())
+	}
+}
+
+unsafe impl<T, L: ?Sized + 'static> UnsafeCellLike for NCell<T, L> {
+	type Inner = T;
+
+	fn get_ptr(&self) -> *mut Self::Inner {
+		self.value.get_ptr()
+	}
+
+	fn into_inner(self) -> Self::Inner
+	where
+		Self::Inner: Sized,
+	{
+		self.value.into_inner()
 	}
 }
 
@@ -559,8 +712,9 @@ mod tests {
 
 	#[test]
 	fn lock_test() {
-		let cell_1 = CompCell::<_, MyLock1>::new(3);
-		let cell_2 = CompCell::<_, MyLock2>::new(3);
+		let cell_1 = NRefCell::<_, MyLock1>::new(3);
+		let cell_2 = NRefCell::<_, MyLock2>::new(3);
+		let cell_3 = NCell::<u32, MyLock1>::new(32);
 
 		{
 			let s = StaticSession::<(MutMarker<MyLock1>, RefMarker<MyLock2>)>::new();
@@ -609,6 +763,10 @@ mod tests {
 
 			cell_2.borrow(s3);
 			cell_2.borrow_mut(s3);
+
+			cell_3.set(s3, 3);
+			cell_3.update(s3, |x| x + 1);
+			assert_eq!(cell_3.get(s3), 4);
 		}
 	}
 

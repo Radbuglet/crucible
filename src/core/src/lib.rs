@@ -11,7 +11,7 @@ pub mod prelude {
 		lang::std_traits::{MutMarker, RefMarker},
 		prim::{
 			entity::{Demand, Entity, Provider, ProviderExt},
-			lock::{CompCell, DynSession, Session, StaticSession},
+			lock::{DynSession, NCell, NRefCell, Session, StaticSession},
 		},
 	};
 }

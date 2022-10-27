@@ -15,7 +15,7 @@ use derive_where::derive_where;
 use itertools::Itertools;
 use thiserror::Error;
 
-use super::lock::{CompCell, CompMut, CompRef, Session};
+use super::lock::{NMut, NRef, NRefCell, Session};
 
 // === TypedKey === //
 
@@ -291,24 +291,24 @@ pub trait ProviderExt: Provider {
 	fn borrow_in<'a, T: ?Sized + 'static>(
 		&'a self,
 		s: &'a impl Session,
-		key: TypedKey<CompCell<T>>,
-	) -> CompRef<'a, T> {
+		key: TypedKey<NRefCell<T>>,
+	) -> NRef<'a, T> {
 		self.get_in(key).borrow(s)
 	}
 
-	fn borrow<'a, T: ?Sized + 'static>(&'a self, s: &'a impl Session) -> CompRef<'a, T> {
+	fn borrow<'a, T: ?Sized + 'static>(&'a self, s: &'a impl Session) -> NRef<'a, T> {
 		self.borrow_in(s, TypedKey::instance())
 	}
 
 	fn borrow_mut_in<'a, T: ?Sized + 'static>(
 		&'a self,
 		s: &'a impl Session,
-		key: TypedKey<CompCell<T>>,
-	) -> CompMut<'a, T> {
+		key: TypedKey<NRefCell<T>>,
+	) -> NMut<'a, T> {
 		self.get_in(key).borrow_mut(s)
 	}
 
-	fn borrow_mut<'a, T: ?Sized + 'static>(&'a self, s: &'a impl Session) -> CompMut<'a, T> {
+	fn borrow_mut<'a, T: ?Sized + 'static>(&'a self, s: &'a impl Session) -> NMut<'a, T> {
 		self.borrow_mut_in(s, TypedKey::instance())
 	}
 }

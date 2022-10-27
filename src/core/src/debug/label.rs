@@ -1,27 +1,27 @@
 use std::{borrow::Cow, fmt};
 
-pub type SerializedDebugLabel = Option<Cow<'static, str>>;
+pub type ReifiedDebugLabel = Option<Cow<'static, str>>;
 
 pub trait DebugLabel {
-	fn serialize_label(self) -> SerializedDebugLabel;
+	fn reify(self) -> ReifiedDebugLabel;
 }
 
 pub const NO_LABEL: Option<&'static str> = None;
 
 impl DebugLabel for String {
-	fn serialize_label(self) -> SerializedDebugLabel {
+	fn reify(self) -> ReifiedDebugLabel {
 		Some(Cow::Owned(self))
 	}
 }
 
 impl DebugLabel for &'static str {
-	fn serialize_label(self) -> SerializedDebugLabel {
+	fn reify(self) -> ReifiedDebugLabel {
 		Some(Cow::Borrowed(self))
 	}
 }
 
 impl DebugLabel for fmt::Arguments<'_> {
-	fn serialize_label(self) -> SerializedDebugLabel {
+	fn reify(self) -> ReifiedDebugLabel {
 		if let Some(static_str) = self.as_str() {
 			Some(Cow::Borrowed(static_str))
 		} else {
@@ -31,7 +31,7 @@ impl DebugLabel for fmt::Arguments<'_> {
 }
 
 impl<T: DebugLabel> DebugLabel for Option<T> {
-	fn serialize_label(self) -> SerializedDebugLabel {
-		self.and_then(DebugLabel::serialize_label)
+	fn reify(self) -> ReifiedDebugLabel {
+		self.and_then(DebugLabel::reify)
 	}
 }

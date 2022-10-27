@@ -58,6 +58,7 @@ pub macro c_enum($(
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct CEnumMap<K: CEnum, V> {
 	_ty: PhantomInvariant<K>,
+	// TODO: Use a statically sized array once generic consts stabilize
 	map: Box<[V]>,
 }
 

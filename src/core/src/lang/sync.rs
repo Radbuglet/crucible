@@ -42,8 +42,6 @@ impl<T: ?Sized + Send> AssertSync<T> {
 	}
 }
 
-// impl<T, U> CoerceUnsized<AssertSync<U>> for AssertSync<T> where T: CoerceUnsized<U> {}
-
 // === MutexedUnsafeCell === //
 
 /// A type of [UnsafeCell] that asserts that access to the given cell will be properly synchronized.
@@ -72,7 +70,7 @@ impl<T> SyncUnsafeCell<T> {
 unsafe impl<T: ?Sized> UnsafeCellLike for SyncUnsafeCell<T> {
 	type Inner = T;
 
-	fn get(&self) -> *mut Self::Inner {
+	fn get_ptr(&self) -> *mut Self::Inner {
 		self.0.get()
 	}
 
@@ -83,8 +81,6 @@ unsafe impl<T: ?Sized> UnsafeCellLike for SyncUnsafeCell<T> {
 		self.0.into_inner()
 	}
 }
-
-// impl<T, U> CoerceUnsized<MutexedUnsafeCell<U>> for MutexedUnsafeCell<T> where T: CoerceUnsized<U> {}
 
 // === MutexedPtr === //
 

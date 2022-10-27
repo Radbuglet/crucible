@@ -18,7 +18,7 @@ impl fmt::Debug for NamedTypeId {
 			return write!(f, "TypeId<{}>", name);
 		}
 
-		f.debug_struct("TypeId").field("id", &self.id).finish()
+		self.id.fmt(f)
 	}
 }
 
@@ -61,5 +61,17 @@ impl NamedTypeId {
 impl Borrow<TypeId> for NamedTypeId {
 	fn borrow(&self) -> &TypeId {
 		&self.id
+	}
+}
+
+impl From<NamedTypeId> for TypeId {
+	fn from(id: NamedTypeId) -> Self {
+		id.raw()
+	}
+}
+
+impl From<TypeId> for NamedTypeId {
+	fn from(raw: TypeId) -> Self {
+		Self::from_raw(raw)
 	}
 }

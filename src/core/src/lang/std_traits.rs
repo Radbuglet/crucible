@@ -93,30 +93,30 @@ impl<T, const N: usize> ArrayLike for [T; N] {
 pub unsafe trait UnsafeCellLike {
 	type Inner: ?Sized;
 
-	fn get(&self) -> *mut Self::Inner;
+	fn get_ptr(&self) -> *mut Self::Inner;
 
 	fn into_inner(self) -> Self::Inner
 	where
 		Self::Inner: Sized;
 
 	fn get_mut(&mut self) -> &mut Self::Inner {
-		unsafe { &mut *self.get() }
+		unsafe { &mut *self.get_ptr() }
 	}
 
 	unsafe fn get_ref_unchecked(&self) -> &Self::Inner {
-		&*self.get()
+		&*self.get_ptr()
 	}
 
 	#[allow(clippy::mut_from_ref)] // That's the users' problem.
 	unsafe fn get_mut_unchecked(&self) -> &mut Self::Inner {
-		&mut *self.get()
+		&mut *self.get_ptr()
 	}
 }
 
 unsafe impl<T: ?Sized> UnsafeCellLike for UnsafeCell<T> {
 	type Inner = T;
 
-	fn get(&self) -> *mut Self::Inner {
+	fn get_ptr(&self) -> *mut Self::Inner {
 		// This is shadowed by the inherent `impl`.
 		self.get()
 	}
@@ -133,7 +133,7 @@ unsafe impl<T: ?Sized> UnsafeCellLike for UnsafeCell<T> {
 unsafe impl<T: ?Sized> UnsafeCellLike for RefCell<T> {
 	type Inner = T;
 
-	fn get(&self) -> *mut Self::Inner {
+	fn get_ptr(&self) -> *mut Self::Inner {
 		// This is shadowed by the inherent `impl`.
 		self.as_ptr()
 	}
