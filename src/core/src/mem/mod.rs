@@ -1,3 +1,4 @@
+pub mod alias_magic;
 pub mod array;
 pub mod c_enum;
 pub mod drop_guard;
