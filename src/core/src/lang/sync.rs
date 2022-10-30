@@ -35,9 +35,8 @@ impl<T: ?Sized> AssertSync<T> {
 	}
 }
 
-impl<T: ?Sized + Send> AssertSync<T> {
+impl<T: ?Sized> AssertSync<T> {
 	pub fn get_mut(&mut self) -> &mut T {
-		// Safety: `&mut T: Send` so long as `T: Send`.
 		&mut self.0
 	}
 }

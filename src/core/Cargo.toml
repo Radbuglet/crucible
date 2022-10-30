@@ -9,6 +9,5 @@ bytemuck = { version = "1.10.0", features = ["derive"] }
 derive-where = "1.0.0"
 itertools = "0.10.3"
 log = "0.4.17"
-owning_ref = "0.4.1"
 sealed = "0.4.0"
 thiserror = "1.0.32"

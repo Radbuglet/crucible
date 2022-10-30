@@ -2,16 +2,6 @@
 #![feature(decl_macro)]
 
 pub mod debug;
+pub mod ecs;
 pub mod lang;
 pub mod mem;
-pub mod prim;
-
-pub mod prelude {
-	pub use crate::{
-		lang::std_traits::{MutMarker, RefMarker},
-		prim::{
-			entity::{Demand, Entity, Provider, ProviderExt},
-			lock::{DynSession, NCell, NRefCell, Session, StaticSession},
-		},
-	};
-}
