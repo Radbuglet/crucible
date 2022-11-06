@@ -1,43 +1,106 @@
-use core::{any, fmt};
-use std::{cell::UnsafeCell, marker::PhantomData};
+use std::{
+	cell::{RefCell, UnsafeCell},
+	cmp, fmt, hash,
+	ops::{Deref, DerefMut},
+};
 
 use bytemuck::TransparentWrapper;
 
-use super::{marker::PhantomNoSendOrSync, std_traits::UnsafeCellLike};
+use super::std_traits::UnsafeCellLike;
 
-#[derive(Default)]
-pub struct AssertSync<T: ?Sized>(T);
+// === ExtRefCell === //
 
-// Safety: users can only unwrap references to `AssertSync` via the unsafe `AssertSync::get` method.
-unsafe impl<T: ?Sized> Sync for AssertSync<T> {}
-
-impl<T: ?Sized> fmt::Debug for AssertSync<T> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct(format!("AssertSync<{}>", any::type_name::<T>()).as_str())
-			.finish_non_exhaustive()
-	}
+#[repr(transparent)]
+pub struct ExtRefCell<T: ?Sized> {
+	cell: RefCell<T>,
 }
 
-impl<T> AssertSync<T> {
+impl<T> ExtRefCell<T> {
 	pub const fn new(value: T) -> Self {
-		Self(value)
+		Self {
+			cell: RefCell::new(value),
+		}
 	}
 
 	pub fn into_inner(self) -> T {
-		self.0
+		self.cell.into_inner()
 	}
 }
 
-impl<T: ?Sized> AssertSync<T> {
-	pub unsafe fn get(&self) -> &T {
-		// Safety: provided by caller
-		&self.0
+impl<T> From<RefCell<T>> for ExtRefCell<T> {
+	fn from(value: RefCell<T>) -> Self {
+		Self { cell: value }
 	}
 }
 
-impl<T: ?Sized> AssertSync<T> {
-	pub fn get_mut(&mut self) -> &mut T {
-		&mut self.0
+impl<T: Default> Default for ExtRefCell<T> {
+	fn default() -> Self {
+		Self {
+			cell: Default::default(),
+		}
+	}
+}
+
+impl<T: ?Sized + fmt::Debug> fmt::Debug for ExtRefCell<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		(&**self).fmt(f)
+	}
+}
+
+impl<T: Clone> Clone for ExtRefCell<T> {
+	fn clone(&self) -> Self {
+		Self {
+			cell: RefCell::new((&**self).clone()),
+		}
+	}
+}
+
+impl<T: ?Sized + Eq> Eq for ExtRefCell<T> {}
+
+impl<T: ?Sized + PartialEq> PartialEq for ExtRefCell<T> {
+	fn eq(&self, other: &Self) -> bool {
+		&*self == &*other
+	}
+}
+
+impl<T: ?Sized + PartialOrd> PartialOrd for ExtRefCell<T> {
+	fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+		(&**self).partial_cmp(&**other)
+	}
+}
+
+impl<T: ?Sized + Ord> Ord for ExtRefCell<T> {
+	fn cmp(&self, other: &Self) -> cmp::Ordering {
+		(&**self).cmp(&**other)
+	}
+}
+
+impl<T: ?Sized + hash::Hash> hash::Hash for ExtRefCell<T> {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		(&**self).hash(state);
+	}
+}
+
+// When using this wrapper, we act as if we were employing pure exterior mutability.
+unsafe impl<T: Sync> Sync for ExtRefCell<T> {}
+
+impl<T: ?Sized> Deref for ExtRefCell<T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		unsafe {
+			// Safety: `ExtRefCell` containers employ exterior mutability
+			self.cell.get_ref_unchecked()
+		}
+	}
+}
+
+impl<T: ?Sized> DerefMut for ExtRefCell<T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		unsafe {
+			// Safety: `ExtRefCell` containers employ exterior mutability
+			self.cell.get_mut_unchecked()
+		}
 	}
 }
 
@@ -80,35 +143,3 @@ unsafe impl<T: ?Sized> UnsafeCellLike for SyncUnsafeCell<T> {
 		self.0.into_inner()
 	}
 }
-
-// === MutexedPtr === //
-
-pub type SendPtrMut<T> = MutexedPtr<*mut T>;
-pub type SendPtrRef<T> = MutexedPtr<*const T>;
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct MutexedPtr<P> {
-	_ty: PhantomNoSendOrSync,
-	ptr: P,
-}
-
-impl<P> From<P> for MutexedPtr<P> {
-	fn from(ptr: P) -> Self {
-		Self {
-			_ty: PhantomData,
-			ptr,
-		}
-	}
-}
-
-impl<P> MutexedPtr<P> {
-	pub fn ptr(self) -> P {
-		self.ptr
-	}
-}
-
-unsafe impl<T: ?Sized + Send> Send for MutexedPtr<*mut T> {}
-unsafe impl<T: ?Sized + Sync> Sync for MutexedPtr<*mut T> {}
-
-unsafe impl<T: ?Sized + Send + Sync> Send for MutexedPtr<*const T> {}
-unsafe impl<T: ?Sized + Sync> Sync for MutexedPtr<*const T> {}

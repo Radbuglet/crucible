@@ -1,8 +1,10 @@
-use std::{any::type_name, collections::HashMap, num::NonZeroU32, sync::Mutex};
+use std::{any::type_name, collections::HashMap, num::NonZeroU32, ops, sync::Mutex};
 
 use derive_where::derive_where;
 
 use crate::{debug::error::ResultExt, lang::polyfill::VecPoly, mem::free_list::PureFreeList};
+
+// === Archetype === //
 
 static FREE_ARCH_IDS: Mutex<PureFreeList<()>> = Mutex::new(PureFreeList::const_new());
 
@@ -63,8 +65,11 @@ impl Entity {
 	}
 }
 
+// === Storage === //
+
 #[derive(Debug, Clone)]
 #[derive_where(Default)]
+#[repr(transparent)]
 pub struct Storage<T> {
 	// TODO: Replace with PerfectHashMap, add debug-only runtime lifetime checks
 	archetypes: HashMap<NonZeroU32, Vec<Option<T>>>,
@@ -72,7 +77,9 @@ pub struct Storage<T> {
 
 impl<T> Storage<T> {
 	pub fn new() -> Self {
-		Self::default()
+		Self {
+			archetypes: HashMap::new(),
+		}
 	}
 
 	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
@@ -132,6 +139,20 @@ impl<T> Storage<T> {
 
 	pub fn clear(&mut self) {
 		self.archetypes.clear();
+	}
+}
+
+impl<T> ops::Index<Entity> for Storage<T> {
+	type Output = T;
+
+	fn index(&self, index: Entity) -> &Self::Output {
+		self.get(index)
+	}
+}
+
+impl<T> ops::IndexMut<Entity> for Storage<T> {
+	fn index_mut(&mut self, index: Entity) -> &mut Self::Output {
+		self.get_mut(index)
 	}
 }
 

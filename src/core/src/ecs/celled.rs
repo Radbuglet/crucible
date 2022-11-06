@@ -6,66 +6,32 @@ use std::{
 
 use derive_where::derive_where;
 
-use crate::{
-	lang::{std_traits::UnsafeCellLike, sync::AssertSync},
-	mem::ptr::PointeeCastExt,
-};
+use crate::{lang::sync::ExtRefCell, mem::ptr::PointeeCastExt};
 
 use super::core::{failed_to_find_component, Entity, Storage};
 
-struct MyCell<T>(AssertSync<RefCell<T>>);
-
-impl<T: Debug> Debug for MyCell<T> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		unsafe {
-			// Safety: `RefCell` state can only be modified so long as the calling thread proves that
-			// they have mutable reference to this container. Calls like these are therefore safe.
-			self.0.get()
-		}
-		.fmt(f)
-	}
-}
-
-impl<T: Clone> Clone for MyCell<T> {
-	fn clone(&self) -> Self {
-		Self(AssertSync::new(
-			unsafe {
-				// Safety: `RefCell` state can only be modified so long as the calling thread proves
-				// that they have mutable reference to this container. Calls like these are therefore
-				// safe.
-				self.0.get()
-			}
-			.clone(),
-		))
-	}
-}
-
 #[derive(Debug)]
 #[derive_where(Default)]
+#[repr(transparent)]
 pub struct CelledStorage<T> {
-	inner: Storage<MyCell<T>>,
+	inner: Storage<ExtRefCell<T>>,
 }
 
 impl<T> CelledStorage<T> {
 	pub fn new() -> Self {
-		Self::default()
+		Self {
+			inner: Storage::new(),
+		}
 	}
 
 	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
-		let (replaced, r) = self
-			.inner
-			.add(entity, MyCell(AssertSync::new(RefCell::new(value))));
+		let (replaced, current) = self.inner.add(entity, ExtRefCell::new(value));
 
-		(
-			replaced.map(|r| r.0.into_inner().into_inner()),
-			r.0.get_mut().get_mut(),
-		)
+		(replaced.map(ExtRefCell::into_inner), current)
 	}
 
 	pub fn remove(&mut self, entity: Entity) -> Option<T> {
-		self.inner
-			.remove(entity)
-			.map(|v| v.0.into_inner().into_inner())
+		self.inner.remove(entity).map(ExtRefCell::into_inner)
 	}
 
 	pub fn remove_many<I>(&mut self, entities: I)
@@ -76,18 +42,11 @@ impl<T> CelledStorage<T> {
 	}
 
 	pub fn try_get(&self, entity: Entity) -> Option<&T> {
-		self.inner.try_get(entity).map(|v| unsafe {
-			// Safety: when interacting with just a `CelledStorage`, we expose regular borrowing
-			// semantics. `RefCell`'ed semantics are only exposed with `borrow_dyn`, which requires
-			// a mutable reference to this container.
-			v.0.get().get_ref_unchecked()
-		})
+		self.inner.try_get(entity).map(|v| &**v)
 	}
 
 	pub fn try_get_mut(&mut self, entity: Entity) -> Option<&mut T> {
-		self.inner
-			.try_get_mut(entity)
-			.map(|v| v.0.get_mut().get_mut())
+		self.inner.try_get_mut(entity).map(|v| &mut **v)
 	}
 
 	pub fn get(&self, entity: Entity) -> &T {
@@ -113,7 +72,16 @@ impl<T> CelledStorage<T> {
 	}
 
 	pub fn borrow_dyn(&mut self) -> &mut CelledStorageView<T> {
-		unsafe { self.cast_mut_via_ptr(|p| p as *mut CelledStorageView<T>) }
+		unsafe {
+			// FIXME: Reconsider transmute safety, especially as it relates to `Storage<ExtRefCell<T>>`
+			// to `Storage<RefCell<T>>` conversion. This will hopefully resolve itself as soon as we
+			// write a `PerfectHashMap`.
+			//
+			// As for logical soundness, we only expose the underlying `RefCell` when we know that we
+			// have exclusive access of the underlying container. This corresponds roughly to a
+			// `&mut T` to `&mut Cell<T>` conversion in terms of soundness semantics.
+			self.cast_mut_via_ptr(|p| p as *mut CelledStorageView<T>)
+		}
 	}
 }
 
@@ -127,33 +95,34 @@ impl<T: Clone> Clone for CelledStorage<T> {
 
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct CelledStorageView<T>(CelledStorage<T>);
+pub struct CelledStorageView<T> {
+	inner: Storage<RefCell<T>>,
+}
 
 impl<T> CelledStorageView<T> {
 	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
-		self.0.add(entity, value)
+		let (replaced, current) = self.inner.add(entity, RefCell::new(value));
+
+		(replaced.map(RefCell::into_inner), current.get_mut())
 	}
 
 	pub fn remove(&mut self, entity: Entity) -> Option<T> {
-		self.0.remove(entity)
+		self.inner.remove(entity).map(RefCell::into_inner)
 	}
 
 	pub fn remove_many<I>(&mut self, entities: I)
 	where
 		I: IntoIterator<Item = Entity>,
 	{
-		self.0.remove_many(entities);
+		self.inner.remove_many(entities);
 	}
 
 	pub fn try_get_cell(&self, entity: Entity) -> Option<&RefCell<T>> {
-		self.0.inner.try_get(entity).map(|v| unsafe {
-			// Safety: the calling thread has exclusive access to these `RefCells`, making this safe.
-			v.0.get()
-		})
+		self.inner.try_get(entity)
 	}
 
 	pub fn try_get_cell_mut(&mut self, entity: Entity) -> Option<&mut RefCell<T>> {
-		self.0.inner.try_get_mut(entity).map(|v| v.0.get_mut())
+		self.inner.try_get_mut(entity)
 	}
 
 	pub fn get_cell(&self, entity: Entity) -> &RefCell<T> {
@@ -167,7 +136,7 @@ impl<T> CelledStorageView<T> {
 	}
 
 	pub fn try_get_mut(&mut self, entity: Entity) -> Option<&mut T> {
-		self.try_get_cell_mut(entity).map(|v| v.get_mut())
+		self.try_get_cell_mut(entity).map(RefCell::get_mut)
 	}
 
 	pub fn get_mut(&mut self, entity: Entity) -> &mut T {
@@ -184,6 +153,6 @@ impl<T> CelledStorageView<T> {
 	}
 
 	pub fn clear(&mut self) {
-		self.0.clear();
+		self.inner.clear();
 	}
 }

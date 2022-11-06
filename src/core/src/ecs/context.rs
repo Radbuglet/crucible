@@ -128,19 +128,15 @@ pub trait ProviderPack<'a> {
 	fn pack_from<Q: Provider>(provider: &'a mut Q) -> Self;
 }
 
-pub unsafe trait ProviderPackPart<'a, P> {
+pub trait ProviderPackPart<'a, P> {
 	type AliasPointee: ?Sized + 'static;
 
 	unsafe fn pack_from<Q: Provider>(provider: *mut Q) -> Self;
 }
 
-pub unsafe trait ProviderPackAliasValidator<'a> {
-	fn ensure_no_alias<T: ?Sized + 'static>();
-}
-
-unsafe impl<'a, 'p, P, T> ProviderPackPart<'a, P> for &'p T
+impl<'a, 'p, P, T> ProviderPackPart<'a, P> for &'p T
 where
-	'p: 'a,
+	'a: 'p,
 	T: ?Sized + 'static,
 {
 	type AliasPointee = T;
@@ -150,9 +146,9 @@ where
 	}
 }
 
-unsafe impl<'a, 'p, P, T> ProviderPackPart<'a, P> for &'p mut T
+impl<'a, 'p, P, T> ProviderPackPart<'a, P> for &'p mut T
 where
-	'p: 'a,
+	'a: 'p,
 	T: ?Sized + 'static,
 {
 	type AliasPointee = T;

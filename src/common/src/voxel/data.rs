@@ -1,27 +1,41 @@
-// === World === //
-
 use std::collections::HashMap;
 
 use crucible_core::{
-	ecs::{celled::CelledStorage, core::Entity},
+	ecs::{
+		celled::{CelledStorage, CelledStorageView},
+		context::Provider,
+		core::Entity,
+	},
 	mem::c_enum::{CEnum, CEnumMap},
 };
 
-use super::math::{BlockFace, BlockVec, BlockVecExt, ChunkVec, CHUNK_VOLUME};
+use super::math::{
+	BlockFace, BlockVec, BlockVecExt, ChunkVec, WorldVec, WorldVecExt, CHUNK_VOLUME,
+};
+
+// === World === //
+
+pub trait ChunkFactory {
+	fn create<C>(&mut self, cx: &mut C, pos: ChunkVec) -> Entity;
+}
 
 #[derive(Debug)]
 pub struct WorldData {
 	pos_map: HashMap<ChunkVec, Entity>,
-	data: CelledStorage<ChunkData>,
 	flagged: Vec<Entity>,
 }
 
 impl WorldData {
-	pub fn add_chunk(&mut self, pos: ChunkVec, chunk: Entity) {
+	pub fn add_chunk(
+		&mut self,
+		(chunks,): (&mut CelledStorage<ChunkData>,),
+		pos: ChunkVec,
+		chunk: Entity,
+	) {
 		debug_assert!(!self.pos_map.contains_key(&pos));
 
 		// Create chunk
-		self.data.add(
+		chunks.add(
 			chunk,
 			ChunkData {
 				pos,
@@ -32,7 +46,7 @@ impl WorldData {
 		);
 
 		// Link to neighbors
-		let data = self.data.borrow_dyn();
+		let data = chunks.borrow_dyn();
 		let mut chunk_data = data.borrow_mut(chunk);
 
 		for face in BlockFace::variants() {
@@ -48,9 +62,13 @@ impl WorldData {
 		}
 	}
 
-	pub fn remove_chunk(&mut self, pos: ChunkVec) {
+	pub fn get_chunk(&self, pos: ChunkVec) -> Option<Entity> {
+		self.pos_map.get(&pos).copied()
+	}
+
+	pub fn remove_chunk(&mut self, (chunks,): (&mut CelledStorage<ChunkData>,), pos: ChunkVec) {
 		let chunk = self.pos_map[&pos];
-		let chunk_data = self.data.remove(chunk).unwrap();
+		let chunk_data = chunks.remove(chunk).unwrap();
 
 		// Unlink neighbors
 		for (face, n_ent) in chunk_data.neighbors.iter() {
@@ -58,7 +76,7 @@ impl WorldData {
 				Some(ent) => *ent,
 				None => continue,
 			};
-			let n_data = self.data.get_mut(n_ent);
+			let n_data = chunks.get_mut(n_ent);
 
 			n_data.neighbors[face.invert()] = None;
 		}
@@ -68,7 +86,7 @@ impl WorldData {
 			self.flagged.swap_remove(flagged_idx);
 
 			if let Some(moved) = self.flagged.get(flagged_idx).copied() {
-				let moved_data = self.data.get_mut(moved);
+				let moved_data = chunks.get_mut(moved);
 				moved_data.flagged = Some(flagged_idx);
 			}
 		}
@@ -94,6 +112,10 @@ impl ChunkData {
 
 	pub fn block_state(&self, pos: BlockVec) -> BlockState {
 		BlockState::decode(self.data[pos.to_index()])
+	}
+
+	pub fn set_block_state(&mut self, pos: BlockVec, state: BlockState) {
+		self.data[pos.to_index()] = state.encode();
 	}
 }
 
@@ -140,5 +162,114 @@ impl BlockState {
 		enc += (self.variant as u32) << 17;
 		enc += (self.light_level as u32) << 25;
 		enc
+	}
+}
+
+// === Location === //
+
+#[derive(Debug, Copy, Clone)]
+pub struct Location {
+	pos: WorldVec,
+	chunk: Option<Entity>,
+}
+
+impl Location {
+	pub fn new(world: &WorldData, pos: WorldVec) -> Self {
+		Self {
+			pos,
+			chunk: world.get_chunk(pos.chunk()),
+		}
+	}
+
+	pub fn refresh(&mut self, (world,): (&WorldData,)) {
+		self.chunk = world.get_chunk(self.pos.chunk());
+	}
+
+	pub fn move_to_neighbor(
+		&mut self,
+		(world, chunks): (&WorldData, &CelledStorageView<ChunkData>),
+		face: BlockFace,
+	) {
+		// Update position
+		let new_pos = self.pos + face.unit();
+		if new_pos.chunk() == self.pos.chunk() {
+			return;
+		}
+
+		// Update chunk cache
+		if let Some(chunk) = self.chunk {
+			self.chunk = chunks.borrow(chunk).neighbor(face);
+		} else {
+			self.refresh((world,));
+		}
+	}
+
+	pub fn move_by(&mut self, cx: (&WorldData, &CelledStorageView<ChunkData>), delta: WorldVec) {
+		self.move_to(cx, self.pos + delta);
+	}
+
+	pub fn move_to(
+		&mut self,
+		(world, chunks): (&WorldData, &CelledStorageView<ChunkData>),
+		new_pos: WorldVec,
+	) {
+		// Update cache
+		if let (Some(chunk), Some(face)) = (
+			self.chunk,
+			BlockFace::from_vec((new_pos.chunk() - self.pos.chunk()).to_glam()),
+		) {
+			self.chunk = chunks.borrow(chunk).neighbor(face);
+		} else {
+			self.refresh((world,));
+		}
+
+		// Update position
+		self.pos = new_pos;
+	}
+
+	pub fn state(self, (chunks,): (&CelledStorageView<ChunkData>,)) -> Option<BlockState> {
+		self.chunk
+			.map(|chunk| chunks.borrow(chunk).block_state(self.pos.block()))
+	}
+
+	pub fn set_state(self, (chunks,): (&CelledStorageView<ChunkData>,), state: BlockState) {
+		let chunk = match self.chunk {
+			Some(chunk) => chunk,
+			None => {
+				log::warn!("`set_state` called on `BlockLocation` outside of the world.");
+				return;
+			}
+		};
+
+		chunks
+			.borrow_mut(chunk)
+			.set_block_state(self.pos.block(), state);
+	}
+
+	pub fn set_state_or_create(
+		self,
+		cx: &mut impl Provider,
+		factory: &mut impl ChunkFactory,
+		state: BlockState,
+	) {
+		// TODO: implement "rest" destructing
+		let (world, chunks, rest) =
+			cx.pack::<(&mut WorldData, &mut CelledStorage<ChunkData>, &mut ())>();
+
+		// Fetch chunk
+		let chunk = match self.chunk {
+			Some(chunk) => chunk,
+			None => {
+				let pos = self.pos.chunk();
+				let chunk = factory.create(rest, pos);
+				world.add_chunk((chunks,), pos, chunk);
+				chunk
+			}
+		};
+
+		// Set block state
+		chunks
+			.get_mut(chunk)
+			.set_block_state(self.pos.block(), state);
 	}
 }

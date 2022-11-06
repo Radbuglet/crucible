@@ -283,6 +283,23 @@ c_enum! {
 
 // BlockFace
 impl BlockFace {
+	pub fn from_vec(vec: IVec3) -> Option<Self> {
+		let mut choice = None;
+
+		for axis in Axis3::variants() {
+			let comp = vec.comp(axis);
+			if comp.abs() == 1 {
+				if choice.is_some() {
+					return None;
+				}
+
+				choice = Some(BlockFace::compose(axis, Sign::of(comp).unwrap()));
+			}
+		}
+
+		choice
+	}
+
 	pub fn compose(axis: Axis3, sign: Sign) -> Self {
 		use Axis3::*;
 		use BlockFace::*;
