@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    # "src/client",
+    "src/client",
     "src/common",
     "src/core",
     "src/sfc-test",

@@ -1,14 +1,14 @@
 #![feature(never_type)]
 
 pub mod engine;
-pub mod game;
+// pub mod game;
 pub mod util;
 
 fn main() {
-	env_logger::init();
-
-	if let Err(err) = engine::main_loop::main_inner() {
-		eprintln!("{:#?}", err);
-		std::process::exit(1);
-	}
+	// 	env_logger::init();
+	//
+	// 	if let Err(err) = engine::main_loop::main_inner() {
+	// 		eprintln!("{:#?}", err);
+	// 		std::process::exit(1);
+	// 	}
 }

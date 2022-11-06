@@ -1,83 +1,40 @@
-use super::gfx::GfxContext;
-use crucible_core::{cell::filter_map_ref, lifetime::try_transform};
-use geode::prelude::*;
-use std::{
-	cell::{Ref, RefCell},
-	collections::HashMap,
+use crucible_core::{
+	ecs::core::{Entity, Storage},
+	mem::explicitly_drop::ExplicitlyDrop,
 };
+use hashbrown::HashMap;
 use thiserror::Error;
 use typed_glam::glam::UVec2;
 use winit::window::{Window, WindowId};
 
+use super::gfx::GfxContext;
+
 pub const FALLBACK_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 pub const DEFAULT_DEPTH_BUFFER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-proxy_key! {
-	pub struct DepthTextureKey of RefCell<ScreenTexture>;
-}
+// === ViewportManager === //
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ViewportManager {
-	viewports: HashMap<WindowId, Owned<Entity>>,
+	window_map: HashMap<WindowId, Entity>,
 }
 
 impl ViewportManager {
-	pub fn register(
-		&mut self,
-		s: Session,
-		main_lock: Lock,
-		gfx: &GfxContext,
-		target: Owned<Entity>,
-		window: Window,
-		surface: wgpu::Surface,
-	) {
-		let win_id = window.id();
-		let win_size = window.inner_size();
-		let config = wgpu::SurfaceConfiguration {
-			usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-			format: FALLBACK_SURFACE_FORMAT,
-			width: win_size.width,
-			height: win_size.height,
-			present_mode: wgpu::PresentMode::Fifo,
-		};
-		surface.configure(&gfx.device, &config);
-		target.add(
-			s,
-			Viewport {
-				window: Some(window),
-				surface,
-				config,
-				config_changed: false,
-			}
-			.box_obj_rw(s, main_lock),
-		);
-		self.viewports.insert(win_id, target);
-	}
-
-	pub fn unregister(&mut self, id: WindowId) -> Option<Owned<Entity>> {
-		self.viewports.remove(&id)
+	pub fn register(&mut self, (viewports,): (&Storage<Viewport>,), viewport: Entity) {
+		self.window_map
+			.insert(viewports[viewport].window().id(), viewport);
 	}
 
 	pub fn get_viewport(&self, id: WindowId) -> Option<Entity> {
-		self.viewports.get(&id).map(|viewport| viewport.weak_copy())
+		self.window_map.get(&id).copied()
 	}
 
-	pub fn all_viewports(&self) -> impl Iterator<Item = (WindowId, Entity)> + '_ {
-		self.viewports.iter().map(|(k, v)| (*k, v.weak_copy()))
-	}
-
-	pub fn mounted_viewports<'a>(
-		&'a self,
-		s: Session<'a>,
-	) -> impl Iterator<Item = (WindowId, Entity, Ref<'a, Window>)> + 'a {
-		self.all_viewports().filter_map(move |(window_id, entity)| {
-			let viewport = entity.borrow::<Viewport>(s);
-			let window = filter_map_ref(viewport, |viewport| viewport.window()).ok()?;
-
-			Some((window_id, entity, window))
-		})
+	pub fn unregister(&mut self, window_id: WindowId) {
+		self.window_map.remove(&window_id);
 	}
 }
+
+// === Viewport === //
 
 fn surface_size_from_config(config: &wgpu::SurfaceConfiguration) -> Option<UVec2> {
 	let size = UVec2::new(config.width, config.height);
@@ -93,58 +50,94 @@ fn surface_size_from_config(config: &wgpu::SurfaceConfiguration) -> Option<UVec2
 
 #[derive(Debug)]
 pub struct Viewport {
-	window: Option<Window>,
-	surface: wgpu::Surface,
-	config: wgpu::SurfaceConfiguration,
-	config_changed: bool,
+	window: Window,
+	surface: ExplicitlyDrop<wgpu::Surface>,
+	curr_config: wgpu::SurfaceConfiguration,
+	next_config: wgpu::SurfaceConfiguration,
+	config_dirty: bool,
 }
 
 impl Viewport {
+	pub fn new(
+		(gfx,): (&GfxContext,),
+		window: Window,
+		surface: Option<wgpu::Surface>,
+		config: wgpu::SurfaceConfiguration,
+	) -> Self {
+		let surface = surface.unwrap_or_else(|| unsafe {
+			// Safety: the surface lives for a strictly shorter lifetime than the window
+			gfx.instance.create_surface(&window)
+		});
+
+		Self {
+			window,
+			surface: surface.into(),
+			curr_config: config.clone(),
+			next_config: config,
+			config_dirty: false,
+		}
+	}
+
+	pub fn curr_config(&self) -> &wgpu::SurfaceConfiguration {
+		&self.curr_config
+	}
+
+	pub fn next_config(&self) -> &wgpu::SurfaceConfiguration {
+		&self.next_config
+	}
+
+	pub fn set_next_config(&mut self, config: wgpu::SurfaceConfiguration) {
+		self.next_config = config;
+		self.config_dirty = true;
+	}
+
+	pub fn set_usage(&mut self, usage: wgpu::TextureUsages) {
+		self.next_config.usage = usage;
+		self.config_dirty = true;
+	}
+
 	pub fn set_format(&mut self, format: wgpu::TextureFormat) {
-		if self.config.format != format {
-			self.config.format = format;
-			self.config_changed = true;
-		}
+		self.next_config.format = format;
+		self.config_dirty = true;
 	}
 
-	pub fn format(&self) -> wgpu::TextureFormat {
-		self.config.format
+	pub fn set_present_mode(&mut self, present_mode: wgpu::PresentMode) {
+		self.next_config.present_mode = present_mode;
+		self.config_dirty = true;
 	}
 
-	pub fn set_present_mode(&mut self, mode: wgpu::PresentMode) {
-		if self.config.present_mode != mode {
-			self.config.present_mode = mode;
-			self.config_changed = true;
-		}
+	pub fn set_alpha_mode(&mut self, alpha_mode: wgpu::CompositeAlphaMode) {
+		self.next_config.alpha_mode = alpha_mode;
+		self.config_dirty = true;
 	}
 
-	pub fn present_mode(&self) -> wgpu::PresentMode {
-		self.config.present_mode
+	pub fn curr_surface_size(&self) -> Option<UVec2> {
+		surface_size_from_config(&self.curr_config)
 	}
 
-	pub fn present_surface_size(&self) -> Option<UVec2> {
-		surface_size_from_config(&self.config)
-	}
-
-	pub fn surface_aspect(&self) -> Option<f32> {
-		self.present_surface_size().map(|size| {
+	pub fn curr_surface_aspect(&self) -> Option<f32> {
+		self.curr_surface_size().map(|size| {
 			let size = size.as_vec2();
 			size.x / size.y
 		})
 	}
 
+	pub fn window(&self) -> &Window {
+		&self.window
+	}
+
 	pub fn present(
 		&mut self,
-		gfx: &GfxContext,
+		(gfx,): (&GfxContext,),
 	) -> Result<Option<wgpu::SurfaceTexture>, OutOfDeviceMemoryError> {
 		use wgpu::SurfaceError::*;
 
 		fn normalize_swapchain_config(
+			gfx: &GfxContext,
+			window: &Window,
 			surface: &wgpu::Surface,
 			config: &mut wgpu::SurfaceConfiguration,
 			config_changed: &mut bool,
-			gfx: &GfxContext,
-			window: &Window,
 		) -> bool {
 			// Ensure that we're still using a supported format.
 			let supported_formats = surface.get_supported_formats(&gfx.adapter);
@@ -190,34 +183,31 @@ impl Viewport {
 		}
 
 		// Get window
-		let window = self
-			.window
-			.as_ref()
-			.expect("attempted to render to unmounted viewport");
-
 		// Normalize the swapchain
 		if !normalize_swapchain_config(
-			&self.surface,
-			&mut self.config,
-			&mut self.config_changed,
 			gfx,
-			window,
+			&self.window,
+			&self.surface,
+			&mut self.next_config,
+			&mut self.config_dirty,
 		) {
 			return Ok(None);
 		}
 
 		// Try to reconfigure the surface if it was updated
-		if self.config_changed {
-			self.surface.configure(&gfx.device, &self.config);
-			self.config_changed = false;
+		if self.config_dirty {
+			self.surface.configure(&gfx.device, &self.next_config);
+			self.curr_config = self.next_config.clone();
+			self.config_dirty = false;
 		}
 
+		// Acquire the frame
 		match self.surface.get_current_texture() {
 			Ok(frame) => Ok(Some(frame)),
 			Err(Timeout) => {
 				log::warn!(
 					"Request to acquire swap-chain for window {:?} timed out.",
-					window.id()
+					self.window.id()
 				);
 				Ok(None)
 			}
@@ -225,7 +215,7 @@ impl Viewport {
 			Err(Outdated) | Err(Lost) => {
 				log::warn!(
 					"Swap-chain for window {:?} is outdated or was lost.",
-					window.id()
+					self.window.id()
 				);
 
 				// Renormalize the swapchain config
@@ -233,17 +223,22 @@ impl Viewport {
 				// exceedingly rare but we're already in the slow path anyways so we might as well
 				// do things right.
 				if !normalize_swapchain_config(
-					&self.surface,
-					&mut self.config,
-					&mut self.config_changed,
 					gfx,
-					window,
+					&self.window,
+					&self.surface,
+					&mut self.next_config,
+					&mut self.config_dirty,
 				) {
 					return Ok(None);
 				}
 
+				if self.config_dirty {
+					self.curr_config = self.next_config.clone();
+					self.config_dirty = false;
+				}
+
 				// Try to recreate the swapchain and try again
-				self.surface.configure(&gfx.device, &self.config);
+				self.surface.configure(&gfx.device, &self.next_config);
 
 				match self.surface.get_current_texture() {
 					Ok(frame) => Ok(Some(frame)),
@@ -251,7 +246,7 @@ impl Viewport {
 					_ => {
 						log::warn!(
 							"Failed to acquire swap-chain for window {:?} after swap-chain was recreated.",
-							window.id()
+							self.window.id()
 						);
 						Ok(None)
 					}
@@ -259,113 +254,15 @@ impl Viewport {
 			}
 		}
 	}
+}
 
-	pub fn window(&self) -> Option<&Window> {
-		self.window.as_ref()
-	}
-
-	pub fn unmount(&mut self) -> Option<Window> {
-		self.window.take()
+impl Drop for Viewport {
+	fn drop(&mut self) {
+		// Ensure that the surface gets dropped before the window
+		ExplicitlyDrop::drop(&mut self.surface)
 	}
 }
 
 #[derive(Debug, Copy, Clone, Error)]
 #[error("out of device memory")]
 pub struct OutOfDeviceMemoryError;
-
-#[derive(Debug)]
-pub struct ViewportRenderEvent {
-	pub viewport: Entity,
-	pub engine: Entity,
-	pub frame: Option<wgpu::SurfaceTexture>,
-}
-
-pub struct ScreenTexture {
-	data: Option<ScreenTextureData>,
-	labels: Option<(String, String)>,
-	format: wgpu::TextureFormat,
-	usages: wgpu::TextureUsages,
-}
-
-struct ScreenTextureData {
-	size: UVec2,
-	texture: wgpu::Texture,
-	view: wgpu::TextureView,
-}
-
-impl ScreenTexture {
-	pub fn new(
-		_gfx: &GfxContext,
-		label: wgpu::Label,
-		format: wgpu::TextureFormat,
-		usages: wgpu::TextureUsages,
-	) -> Self {
-		let labels = label.map(|primary| (primary.to_string(), format!("{primary} view")));
-
-		Self {
-			data: None,
-			labels,
-			format,
-			usages,
-		}
-	}
-
-	pub fn format(&self) -> wgpu::TextureFormat {
-		self.format
-	}
-
-	pub fn acquire(
-		&mut self,
-		gfx: &GfxContext,
-		viewport: &Viewport,
-	) -> Option<(&wgpu::Texture, &wgpu::TextureView)> {
-		let size = viewport.present_surface_size()?;
-
-		let data = try_transform(&mut self.data, |data| {
-			if let Some(data) = data.as_mut().filter(|data| data.size == size) {
-				Some(data)
-			} else {
-				None
-			}
-		});
-
-		let data = match data {
-			Ok(data) => data,
-			Err(data) => {
-				log::info!("Resizing `ScreenTexture` to {size:?}.");
-				let texture = gfx.device.create_texture(&wgpu::TextureDescriptor {
-					label: self.labels.as_ref().map(|(a, _)| a.as_str()),
-					size: wgpu::Extent3d {
-						width: size.x,
-						height: size.y,
-						depth_or_array_layers: 1,
-					},
-					mip_level_count: 1,
-					sample_count: 1,
-					dimension: wgpu::TextureDimension::D2,
-					format: self.format,
-					usage: self.usages,
-				});
-
-				let view = texture.create_view(&wgpu::TextureViewDescriptor {
-					label: self.labels.as_ref().map(|(_, b)| b.as_str()),
-					format: None,
-					dimension: None,
-					aspect: wgpu::TextureAspect::All,
-					base_mip_level: 0,
-					mip_level_count: None,
-					base_array_layer: 0,
-					array_layer_count: None,
-				});
-
-				data.insert(ScreenTextureData {
-					size,
-					texture,
-					view,
-				})
-			}
-		};
-
-		Some((&data.texture, &data.view))
-	}
-}

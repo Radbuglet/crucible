@@ -12,12 +12,11 @@ crucible-core = { path = "../core" }
 env_logger = "0.9.0"
 fastrand = "1.7.0"
 futures = "0.3.21"
-geode = { path = "../geode" }
 hashbrown = { version = "0.12.2", features = ["raw"] }
 log = "0.4.17"
 once_cell = "1.13.0"
 parking_lot = "0.12.1"
 thiserror = "1.0.31"
 typed-glam = { path = "../typed-glam" }
-wgpu = { version = "0.13.1" }
-winit = "0.26.1"
+wgpu = { version = "0.14.0" }
+winit = "0.27.5"

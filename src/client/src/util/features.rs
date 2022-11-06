@@ -1,4 +1,4 @@
-use crucible_core::range::{as_any_range_cloned, unwrap_or_unbounded, AnyRange};
+use crucible_core::lang::polyfill::{AnyRange, BoundPoly, RangePoly};
 use std::collections::Bound;
 use std::fmt::{Debug, Display};
 
@@ -106,7 +106,7 @@ impl Default for FeatureList {
 			met_optional: 0,
 			score: 0.0,
 			total_mandatory: 0,
-			score_range: as_any_range_cloned(&(0.0..=0.0)),
+			score_range: (0.0..=0.0).any_range_cloned(),
 		}
 	}
 }
@@ -139,12 +139,8 @@ impl FeatureList {
 
 			// Low
 			if let (Some(total_low), Some(this_low)) = (
-				// The difference between the two is f32::EPSILON. Let's just treat them as being
-				// pretty much the same.
-				//
-				// - Fanatics of Infinitesimals
-				unwrap_or_unbounded(self.score_range.0),
-				unwrap_or_unbounded(score_range.0),
+				self.score_range.0.unwrap_or_unbounded(),
+				score_range.0.unwrap_or_unbounded(),
 			) {
 				self.score_range.0 = Bound::Included(total_low + this_low);
 			} else {
@@ -154,8 +150,8 @@ impl FeatureList {
 
 			// High
 			if let (Some(total_high), Some(this_high)) = (
-				unwrap_or_unbounded(self.score_range.1),
-				unwrap_or_unbounded(score_range.1),
+				self.score_range.1.unwrap_or_unbounded(),
+				score_range.1.unwrap_or_unbounded(),
 			) {
 				self.score_range.1 = Bound::Included(total_high + this_high);
 			} else {

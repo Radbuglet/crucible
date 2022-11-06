@@ -6,8 +6,7 @@ use winit::event::{
 	DeviceEvent, DeviceId, ElementState, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent,
 };
 
-/// Tracks keyboard & mouse input states. Users may still need to listen for events to detect
-/// certain actions.
+/// Tracks keyboard and mouse input states.
 pub struct InputTracker {
 	keys: HashMap<VirtualKeyCode, BoolAction>,
 	mouse_buttons: HashMap<MouseButton, BoolAction>,
@@ -36,7 +35,7 @@ impl InputTracker {
 		}
 
 		match event {
-			// On loose focus
+			// On lose focus
 			WindowEvent::Focused(has_focus) => {
 				if !*has_focus && self.has_focus {
 					for key in self.keys.values_mut() {
@@ -170,12 +169,12 @@ impl BoolAction {
 		}
 	}
 
-	/// The number of times the action's state changed since the last tick ended.
+	/// Returns the number of times the action's state changed since the last tick ended.
 	pub fn times_changed(&self) -> u8 {
 		self.changes
 	}
 
-	/// The number of times the action transitioned to a given state since the last tick ended.
+	/// Returns the number of times the action transitioned to a given state since the last tick ended.
 	pub fn times_trans(&self, state: bool) -> u8 {
 		if self.state == state {
 			(self.changes + 1) / 2
@@ -184,17 +183,17 @@ impl BoolAction {
 		}
 	}
 
-	/// The number of times the action was pressed since the last tick ended.
+	/// Returns the number of times the action was pressed since the last tick ended.
 	pub fn times_pressed(&self) -> u8 {
 		self.times_trans(true)
 	}
 
-	/// The number of times the action was released since the last tick ended.
+	/// Returns The number of times the action was released since the last tick ended.
 	pub fn times_released(&self) -> u8 {
 		self.times_trans(false)
 	}
 
-	/// Whether or not the button transitioned to a given state since the last tick ended.
+	/// Returns whether the button transitioned to a given state since the last tick ended.
 	pub fn recently_became(&self, state: bool) -> bool {
 		if self.changes == 1 {
 			self.state == state
@@ -203,17 +202,17 @@ impl BoolAction {
 		}
 	}
 
-	/// Whether or not the button became pressed since the last tick ended.
+	/// Returns whether the button became pressed since the last tick ended.
 	pub fn recently_pressed(&self) -> bool {
 		self.recently_became(true)
 	}
 
-	/// Whether or not the button became released since the last tick ended.
+	/// Returns whether the button became released since the last tick ended.
 	pub fn recently_released(&self) -> bool {
 		self.recently_became(false)
 	}
 
-	/// Signifies the end of the tick. Returns true if the resulting action is identical to `Default`.
+	/// Signals the end of the tick. Returns true if the resulting action is identical to `Default`.
 	pub fn end_tick(&mut self) -> bool {
 		self.changes = 0;
 		self.state

@@ -35,8 +35,8 @@ impl GfxContext {
 		let backends = wgpu::Backends::PRIMARY;
 		let instance = wgpu::Instance::new(backends);
 		let main_surface = unsafe {
-			// TODO: Windows can still be destroyed unexpectedly. We need tighter integration between
-			// the viewport manager and our `GfxContext`.
+			// FIXME: Windows can still be destroyed unexpectedly, potentially causing UB. We need
+			// tighter integration between the viewport manager and our `GfxContext`.
 			instance.create_surface(main_window)
 		};
 
