@@ -134,22 +134,44 @@ pub fn addr_of_ptr<T: ?Sized>(p: *const T) -> usize {
 
 // === Runtime type unification === //
 
-pub fn runtime_unify<A: 'static, B: 'static>(a: A) -> B {
-	assert_eq!(TypeId::of::<A>(), TypeId::of::<B>());
+pub fn try_runtime_unify<A: 'static, B: 'static>(a: A) -> Option<B> {
+	if TypeId::of::<A>() == TypeId::of::<B>() {
+		Some(unsafe { sizealign_checked_transmute(a) })
+	} else {
+		None
+	}
+}
 
-	unsafe { sizealign_checked_transmute(a) }
+pub fn try_runtime_unify_ref<A: ?Sized + 'static, B: ?Sized + 'static>(a: &A) -> Option<&B> {
+	if TypeId::of::<A>() == TypeId::of::<B>() {
+		Some(unsafe { sizealign_checked_transmute(a) })
+	} else {
+		None
+	}
+}
+
+pub fn try_runtime_unify_mut<A, B>(a: &mut A) -> Option<&mut B>
+where
+	A: ?Sized + 'static,
+	B: ?Sized + 'static,
+{
+	if TypeId::of::<A>() == TypeId::of::<B>() {
+		Some(unsafe { sizealign_checked_transmute(a) })
+	} else {
+		None
+	}
+}
+
+pub fn runtime_unify<A: 'static, B: 'static>(a: A) -> B {
+	try_runtime_unify(a).unwrap()
 }
 
 pub fn runtime_unify_ref<A: ?Sized + 'static, B: ?Sized + 'static>(a: &A) -> &B {
-	assert_eq!(TypeId::of::<A>(), TypeId::of::<B>());
-
-	unsafe { sizealign_checked_transmute(a) }
+	try_runtime_unify_ref(a).unwrap()
 }
 
 pub fn runtime_unify_mut<A: ?Sized + 'static, B: ?Sized + 'static>(a: &mut A) -> &mut B {
-	assert_eq!(TypeId::of::<A>(), TypeId::of::<B>());
-
-	unsafe { sizealign_checked_transmute(a) }
+	try_runtime_unify_mut(a).unwrap()
 }
 
 // === Offset-of === //

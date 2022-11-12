@@ -2,7 +2,11 @@ use std::{any::type_name, collections::HashMap, num::NonZeroU32, ops, sync::Mute
 
 use derive_where::derive_where;
 
-use crate::{debug::error::ResultExt, lang::polyfill::VecPoly, mem::free_list::PureFreeList};
+use crate::{
+	debug::{error::ResultExt, lifetime::DebugLifetime},
+	lang::polyfill::VecPoly,
+	mem::free_list::PureFreeList,
+};
 
 // === Archetype === //
 
@@ -10,9 +14,9 @@ static FREE_ARCH_IDS: Mutex<PureFreeList<()>> = Mutex::new(PureFreeList::const_n
 
 #[derive(Debug)]
 pub struct Archetype {
+	lifetime: DebugLifetime,
 	id: NonZeroU32,
-	// TODO: Improve packing with a hibitset. Implement archetypal iteration.
-	slots: PureFreeList<()>,
+	slots: PureFreeList<()>, // TODO: Improve slot packing with a hibitset.
 }
 
 impl Archetype {
@@ -25,36 +29,62 @@ impl Archetype {
 
 		// Construct archetype
 		Self {
+			lifetime: DebugLifetime::new(),
 			id,
 			slots: PureFreeList::new(),
 		}
 	}
 
-	pub fn reserve(&mut self) -> Entity {
+	pub fn spawn(&mut self) -> Entity {
 		let (_, slot) = self.slots.add(());
 
 		Entity {
+			lifetime: EntityLifetime {
+				arch: self.lifetime,
+				slot: DebugLifetime::new(),
+			},
 			arch_id: self.id,
 			slot,
 		}
 	}
 
-	pub fn unreserve(&mut self, entity: Entity) {
+	pub fn despawn(&mut self, entity: Entity) {
 		debug_assert_eq!(entity.arch_id, self.id);
+		assert!(
+			entity.lifetime.slot.is_possibly_alive(),
+			"Attempted to despawn a dead entity."
+		);
+
+		entity.lifetime.slot.destroy();
 		self.slots.remove(entity.slot);
 	}
 }
 
 impl Drop for Archetype {
 	fn drop(&mut self) {
+		self.lifetime.destroy();
+
 		let mut free_arch_ids = FREE_ARCH_IDS.lock().unwrap_pretty();
 		free_arch_ids.remove(self.id.get() - 1);
 	}
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+struct EntityLifetime {
+	// TODO: Remove arch lifetime.
+	arch: DebugLifetime,
+	slot: DebugLifetime,
+}
+
+impl EntityLifetime {
+	fn is_possibly_alive(self) -> bool {
+		self.arch.is_possibly_alive() && self.slot.is_possibly_alive()
+	}
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Entity {
-	// TODO: Debug-only runtime lifetime checks
+	lifetime: EntityLifetime,
 	arch_id: NonZeroU32,
 	slot: u32,
 }
@@ -71,8 +101,8 @@ impl Entity {
 #[derive_where(Default)]
 #[repr(transparent)]
 pub struct Storage<T> {
-	// TODO: Replace with PerfectHashMap, add debug-only runtime lifetime checks
-	archetypes: HashMap<NonZeroU32, Vec<Option<T>>>,
+	// TODO: Replace with PerfectHashMap
+	archetypes: HashMap<NonZeroU32, Vec<Option<(EntityLifetime, T)>>>,
 }
 
 impl<T> Storage<T> {
@@ -83,19 +113,39 @@ impl<T> Storage<T> {
 	}
 
 	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
+		assert!(
+			entity.lifetime.is_possibly_alive(),
+			"Attempted to attach a component to a dead entity."
+		);
+
 		let components = self
 			.archetypes
 			.entry(entity.arch_id)
 			.or_insert_with(Vec::new);
 
 		let slot = components.ensure_slot_with(entity.slot(), || None);
-		let replaced = slot.replace(value);
-		(replaced, slot.as_mut().unwrap())
+		let replaced = slot
+			.replace((entity.lifetime, value))
+			.map(|(lt, replaced)| {
+				assert!(
+					lt.is_possibly_alive(),
+					"Replaced dangling component belonging to a destroyed entity. Please detach all \
+					 components belonging to an entity before freeing them."
+				);
+				replaced
+			});
+
+		(replaced, &mut slot.as_mut().unwrap().1)
 	}
 
 	pub fn remove(&mut self, entity: Entity) -> Option<T> {
+		assert!(
+			entity.lifetime.is_possibly_alive(),
+			"Attempted to remove a component to a dead entity. Please detach components belonging to an entity *before* freeing them."
+		);
+
 		let archetype = self.archetypes.get_mut(&entity.arch_id)?;
-		let removed = archetype[entity.slot()].take();
+		let removed = archetype[entity.slot()].take().map(|(_, value)| value);
 
 		while archetype.last().is_none() {
 			archetype.pop();
@@ -114,17 +164,23 @@ impl<T> Storage<T> {
 	}
 
 	pub fn try_get(&self, entity: Entity) -> Option<&T> {
+		assert!(entity.lifetime.is_possibly_alive());
+
 		self.archetypes
 			.get(&entity.arch_id)?
 			.get(entity.slot())?
 			.as_ref()
+			.map(|(_, value)| value)
 	}
 
 	pub fn try_get_mut(&mut self, entity: Entity) -> Option<&mut T> {
+		assert!(entity.lifetime.is_possibly_alive());
+
 		self.archetypes
 			.get_mut(&entity.arch_id)?
 			.get_mut(entity.slot())?
 			.as_mut()
+			.map(|(_, value)| value)
 	}
 
 	pub fn get(&self, entity: Entity) -> &T {

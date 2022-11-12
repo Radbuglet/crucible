@@ -74,7 +74,8 @@ impl<T> CelledStorage<T> {
 	pub fn borrow_dyn(&mut self) -> &mut CelledStorageView<T> {
 		unsafe {
 			// FIXME: Reconsider transmute safety, especially as it relates to `Storage<ExtRefCell<T>>`
-			// to `Storage<RefCell<T>>` conversion. This will hopefully resolve itself as soon as we
+			// to `Storage<RefCell<T>>` conversion—`HashMap` doesn't officially guarantee the same
+			// transmute properties as `Vec<T>`. This will hopefully resolve itself as soon as we
 			// write a `PerfectHashMap`.
 			//
 			// As for logical soundness, we only expose the underlying `RefCell` when we know that we

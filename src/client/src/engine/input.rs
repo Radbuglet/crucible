@@ -7,7 +7,8 @@ use winit::event::{
 };
 
 /// Tracks keyboard and mouse input states.
-pub struct InputTracker {
+#[derive(Debug)]
+pub struct InputManager {
 	keys: HashMap<VirtualKeyCode, BoolAction>,
 	mouse_buttons: HashMap<MouseButton, BoolAction>,
 	mouse_pos: Option<PhysicalPosition<f64>>,
@@ -15,7 +16,7 @@ pub struct InputTracker {
 	has_focus: bool,
 }
 
-impl Default for InputTracker {
+impl Default for InputManager {
 	fn default() -> Self {
 		Self {
 			keys: Default::default(),
@@ -27,7 +28,7 @@ impl Default for InputTracker {
 	}
 }
 
-impl InputTracker {
+impl InputManager {
 	pub fn handle_window_event(&mut self, event: &WindowEvent) {
 		fn set_state_in_map<K: Hash + Eq>(map: &mut HashMap<K, BoolAction>, key: K, value: bool) {
 			let action = map.entry(key).or_insert_with(Default::default);

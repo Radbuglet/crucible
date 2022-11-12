@@ -1,5 +1,5 @@
 use std::{
-	any::{self, TypeId},
+	any::{self, type_name, TypeId},
 	borrow::Borrow,
 	fmt, hash,
 };
@@ -74,4 +74,8 @@ impl From<TypeId> for NamedTypeId {
 	fn from(raw: TypeId) -> Self {
 		Self::from_raw(raw)
 	}
+}
+
+pub fn are_probably_equal<A: ?Sized + 'static, B: ?Sized>() -> bool {
+	type_name::<A>() == type_name::<B>()
 }

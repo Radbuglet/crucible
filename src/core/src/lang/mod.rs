@@ -1,3 +1,4 @@
+pub mod hash;
 pub mod iter;
 pub mod lifetime;
 pub mod macros;

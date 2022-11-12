@@ -6,16 +6,15 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.58"
 bytemuck = "1.10.0"
-crevice = { version = "0.11.0", features = ["glam"] }
+crevice = { version = "0.12.0", features = ["glam"] }
 crucible-common = { path = "../common" }
 crucible-core = { path = "../core" }
-env_logger = "0.9.0"
-fastrand = "1.7.0"
-futures = "0.3.21"
-hashbrown = { version = "0.12.2", features = ["raw"] }
+env_logger = "0.9.3"
+fastrand = "1.8.0"
+futures = "0.3.25"
+hashbrown = { version = "0.13.1", features = ["raw"] }
 log = "0.4.17"
 once_cell = "1.13.0"
-parking_lot = "0.12.1"
 thiserror = "1.0.31"
 typed-glam = { path = "../typed-glam" }
 wgpu = { version = "0.14.0" }

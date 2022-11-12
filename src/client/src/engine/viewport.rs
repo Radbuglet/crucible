@@ -1,8 +1,9 @@
+use std::collections::HashMap;
+
 use crucible_core::{
 	ecs::core::{Entity, Storage},
 	mem::explicitly_drop::ExplicitlyDrop,
 };
-use hashbrown::HashMap;
 use thiserror::Error;
 use typed_glam::glam::UVec2;
 use winit::window::{Window, WindowId};
@@ -14,7 +15,7 @@ pub const DEFAULT_DEPTH_BUFFER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat
 
 // === ViewportManager === //
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ViewportManager {
 	window_map: HashMap<WindowId, Entity>,
 }
@@ -27,6 +28,10 @@ impl ViewportManager {
 
 	pub fn get_viewport(&self, id: WindowId) -> Option<Entity> {
 		self.window_map.get(&id).copied()
+	}
+
+	pub fn window_map(&self) -> &HashMap<WindowId, Entity> {
+		&self.window_map
 	}
 
 	pub fn unregister(&mut self, window_id: WindowId) {
