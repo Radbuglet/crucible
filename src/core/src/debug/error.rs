@@ -2,6 +2,7 @@
 
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::thread::panicking;
 
 use crate::lang::std_traits::ResultLike;
 
@@ -18,6 +19,14 @@ pub trait ErrorFormatExt: Error {
 
 	fn log(&self) {
 		log::error!("{}", self.format_error());
+	}
+
+	fn raise_unless_panicking(&self) {
+		if !panicking() {
+			self.raise();
+		} else {
+			self.log();
+		}
 	}
 }
 

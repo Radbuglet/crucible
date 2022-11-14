@@ -3,7 +3,10 @@ use std::{any::type_name, collections::HashMap, num::NonZeroU32, ops, sync::Mute
 use derive_where::derive_where;
 
 use crate::{
-	debug::{error::ResultExt, lifetime::DebugLifetime},
+	debug::{
+		error::ResultExt,
+		lifetime::{DebugLifetime, LifetimeDependent, LifetimeOwner},
+	},
 	lang::polyfill::VecPoly,
 	mem::free_list::PureFreeList,
 };
@@ -14,9 +17,10 @@ static FREE_ARCH_IDS: Mutex<PureFreeList<()>> = Mutex::new(PureFreeList::const_n
 
 #[derive(Debug)]
 pub struct Archetype {
-	lifetime: DebugLifetime,
 	id: NonZeroU32,
-	slots: PureFreeList<()>, // TODO: Improve slot packing with a hibitset.
+
+	// TODO: Improve slot packing with a hibitset.
+	slots: PureFreeList<LifetimeOwner<DebugLifetime>>,
 }
 
 impl Archetype {
@@ -29,20 +33,16 @@ impl Archetype {
 
 		// Construct archetype
 		Self {
-			lifetime: DebugLifetime::new(),
 			id,
 			slots: PureFreeList::new(),
 		}
 	}
 
 	pub fn spawn(&mut self) -> Entity {
-		let (_, slot) = self.slots.add(());
+		let (lifetime, slot) = self.slots.add(LifetimeOwner(DebugLifetime::new()));
 
 		Entity {
-			lifetime: EntityLifetime {
-				arch: self.lifetime,
-				slot: DebugLifetime::new(),
-			},
+			lifetime: lifetime.0,
 			arch_id: self.id,
 			slot,
 		}
@@ -51,40 +51,24 @@ impl Archetype {
 	pub fn despawn(&mut self, entity: Entity) {
 		debug_assert_eq!(entity.arch_id, self.id);
 		assert!(
-			entity.lifetime.slot.is_possibly_alive(),
+			entity.lifetime.is_possibly_alive(),
 			"Attempted to despawn a dead entity."
 		);
 
-		entity.lifetime.slot.destroy();
-		self.slots.remove(entity.slot);
+		let _ = self.slots.remove(entity.slot);
 	}
 }
 
 impl Drop for Archetype {
 	fn drop(&mut self) {
-		self.lifetime.destroy();
-
 		let mut free_arch_ids = FREE_ARCH_IDS.lock().unwrap_pretty();
 		free_arch_ids.remove(self.id.get() - 1);
 	}
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-struct EntityLifetime {
-	// TODO: Remove arch lifetime.
-	arch: DebugLifetime,
-	slot: DebugLifetime,
-}
-
-impl EntityLifetime {
-	fn is_possibly_alive(self) -> bool {
-		self.arch.is_possibly_alive() && self.slot.is_possibly_alive()
-	}
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Entity {
-	lifetime: EntityLifetime,
+	lifetime: DebugLifetime,
 	arch_id: NonZeroU32,
 	slot: u32,
 }
@@ -102,7 +86,7 @@ impl Entity {
 #[repr(transparent)]
 pub struct Storage<T> {
 	// TODO: Replace with PerfectHashMap
-	archetypes: HashMap<NonZeroU32, Vec<Option<(EntityLifetime, T)>>>,
+	archetypes: HashMap<NonZeroU32, Vec<Option<(LifetimeDependent<DebugLifetime>, T)>>>,
 }
 
 impl<T> Storage<T> {
@@ -125,10 +109,10 @@ impl<T> Storage<T> {
 
 		let slot = components.ensure_slot_with(entity.slot(), || None);
 		let replaced = slot
-			.replace((entity.lifetime, value))
+			.replace((LifetimeDependent::new(entity.lifetime), value))
 			.map(|(lt, replaced)| {
 				assert!(
-					lt.is_possibly_alive(),
+					lt.lifetime().is_possibly_alive(),
 					"Replaced dangling component belonging to a destroyed entity. Please detach all \
 					 components belonging to an entity before freeing them."
 				);
@@ -217,4 +201,37 @@ pub(super) fn failed_to_find_component<T>(entity: Entity) -> ! {
 		"failed to find entity {entity:?} with component {}",
 		type_name::<T>()
 	);
+}
+
+// === Tests === //
+
+#[cfg(test)]
+mod test {
+	use super::*;
+
+	#[test]
+	#[should_panic]
+	fn uaf_detection_tripped() {
+		let mut arch_player = Archetype::new();
+
+		let player = arch_player.spawn();
+
+		let mut storage = Storage::new();
+		storage.add(player, ());
+
+		arch_player.despawn(player);
+	}
+
+	#[test]
+	fn uaf_detection_not_tripped() {
+		let mut arch_player = Archetype::new();
+
+		let player = arch_player.spawn();
+
+		let mut storage = Storage::new();
+		storage.add(player, ());
+
+		storage.remove(player);
+		arch_player.despawn(player);
+	}
 }

@@ -1,14 +1,24 @@
-use core::fmt;
 use std::{
 	cmp::Ordering,
-	hash,
+	fmt, hash, mem,
 	num::NonZeroU64,
-	sync::atomic::{AtomicU64, Ordering::Relaxed},
+	sync::atomic::{AtomicU64, Ordering::SeqCst},
+	thread::panicking,
 };
+
+use thiserror::Error;
+
+use super::error::ErrorFormatExt;
 
 // === Global === //
 
-type LifetimeSlot = &'static AtomicU64;
+type LifetimeSlot = &'static SlotData;
+
+#[derive(Debug)]
+struct SlotData {
+	gen: AtomicU64,
+	deps: AtomicU64,
+}
 
 mod slot_db {
 	use std::sync::Mutex;
@@ -19,26 +29,33 @@ mod slot_db {
 
 	static FREE_SLOTS: Mutex<Vec<LifetimeSlot>> = Mutex::new(Vec::new());
 
-	pub fn alloc() -> LifetimeSlot {
+	pub(super) fn alloc() -> LifetimeSlot {
 		// TODO: Implement local cache to avoid excessive lock contention
 		let mut free_slots = FREE_SLOTS.lock().unwrap_pretty();
 
 		if let Some(slot) = free_slots.pop() {
 			slot
 		} else {
-			let block = Box::leak(Box::new(arr![AtomicU64::new(1); 1024]));
+			let block = Box::leak(Box::new(arr![SlotData {
+				gen: AtomicU64::new(1),
+				deps: AtomicU64::new(1),
+			}; 1024]));
 			free_slots.extend(block.into_iter().map(|r| &*r));
 			free_slots.pop().unwrap()
 		}
 	}
 
-	pub fn free(slot: LifetimeSlot) {
+	pub(super) fn free(slot: LifetimeSlot) {
 		let mut free_slots = FREE_SLOTS.lock().unwrap_pretty();
 		free_slots.push(slot);
 	}
 }
 
 // === Lifetime === //
+
+#[derive(Debug, Clone, Error)]
+#[error("attempted operation on dangling lifetime")]
+pub struct DanglingLifetimeError;
 
 #[derive(Copy, Clone)]
 pub struct Lifetime {
@@ -49,7 +66,7 @@ pub struct Lifetime {
 impl Lifetime {
 	pub fn new() -> Self {
 		let slot = slot_db::alloc();
-		let gen = slot.load(Relaxed);
+		let gen = slot.gen.load(SeqCst);
 
 		Self {
 			slot,
@@ -58,20 +75,91 @@ impl Lifetime {
 	}
 
 	pub fn is_alive(self) -> bool {
-		self.gen.get() == self.slot.load(Relaxed)
+		self.gen.get() == self.slot.gen.load(SeqCst)
 	}
 
-	pub fn destroy(self) -> bool {
+	// TODO: Verify threading semantics and potentially weaken orderings
+	pub fn try_inc_dep(self) -> Result<(), DanglingLifetimeError> {
+		match self.slot.deps.fetch_update(SeqCst, SeqCst, |deps| {
+			if self.is_alive() {
+				Some(deps + 1)
+			} else {
+				None
+			}
+		}) {
+			Ok(_) => Ok(()),
+			Err(_) => Err(DanglingLifetimeError),
+		}
+	}
+
+	pub fn inc_dep(self) {
+		if let Err(err) = self.try_inc_dep() {
+			err.raise_unless_panicking();
+		}
+	}
+
+	pub fn try_dec_dep(self) -> Result<(), DanglingLifetimeError> {
+		match self.slot.deps.fetch_update(SeqCst, SeqCst, |deps| {
+			if self.is_alive() {
+				assert!(
+					deps >= self.gen.get(),
+					"Decremented dependency counter more times than it was incremented."
+				);
+				Some(deps - 1)
+			} else {
+				None
+			}
+		}) {
+			Ok(_) => Ok(()),
+			Err(_) => Err(DanglingLifetimeError),
+		}
+	}
+
+	pub fn dec_dep(self) {
+		if let Err(err) = self.try_dec_dep() {
+			err.raise_unless_panicking();
+		}
+	}
+
+	pub fn try_destroy(self) -> Result<(), DanglingLifetimeError> {
+		let local_gen = self.gen.get();
+
+		// First, try to invalidate all existing handles.
 		let did_destroy = self
 			.slot
-			.compare_exchange(self.gen.get(), self.gen.get() + 1, Relaxed, Relaxed)
+			.gen
+			.compare_exchange(local_gen, local_gen + 1, SeqCst, SeqCst)
 			.is_ok();
 
-		if did_destroy {
-			slot_db::free(self.slot);
-			true
-		} else {
-			false
+		if !did_destroy {
+			return Err(DanglingLifetimeError);
+		}
+
+		// Then, update the dependency count so it becomes a logical zero.
+		// This will force all ongoing `inc/dec_dep` calls to retry their increment, making them
+		// realize that they have been invalidated.
+		let old_count = self.slot.deps.swap(local_gen + 1, SeqCst);
+
+		// Release the slot to the world...
+		slot_db::free(self.slot);
+
+		// ...and finally ensure that we didn't just cut off some dependency. This also guards
+		// against concurrent `inc/dec_dep` calls which may have completed their transaction while
+		// we were destroying the lifetime.
+		if old_count != local_gen {
+			if !panicking() {
+				panic!("Destroyed a lifetime with extant dependencies.");
+			}
+		}
+
+		Ok(())
+	}
+
+	pub fn destroy(self) {
+		if let Err(err) = self.try_destroy() {
+			if !panicking() {
+				err.raise();
+			}
 		}
 	}
 }
@@ -114,12 +202,20 @@ mod debug_impl {
 			!self.is_possibly_alive()
 		}
 
-		pub fn raw(self) -> Option<Lifetime> {
-			Some(self.0)
+		pub fn inc_dep(self) {
+			self.0.inc_dep();
+		}
+
+		pub fn dec_dep(self) {
+			self.0.dec_dep();
 		}
 
 		pub fn destroy(self) {
 			self.0.destroy();
+		}
+
+		pub fn raw(self) -> Option<Lifetime> {
+			Some(self.0)
 		}
 	}
 }
@@ -148,11 +244,15 @@ mod release_impl {
 			false
 		}
 
+		pub fn inc_dep(self) {}
+
+		pub fn dec_dep(self) {}
+
+		pub fn destroy(self) {}
+
 		pub fn raw(self) -> Option<Lifetime> {
 			None
 		}
-
-		pub fn destroy(self) {}
 	}
 }
 
@@ -183,5 +283,82 @@ impl Ord for DebugLifetime {
 impl PartialOrd for DebugLifetime {
 	fn partial_cmp(&self, _other: &Self) -> Option<Ordering> {
 		Some(Ordering::Equal)
+	}
+}
+
+// === Wrappers === //
+
+pub trait AnyLifetime: Copy {
+	fn inc_dep(self);
+	fn dec_dep(self);
+	fn destroy(self);
+}
+
+impl AnyLifetime for Lifetime {
+	fn inc_dep(self) {
+		self.inc_dep();
+	}
+
+	fn dec_dep(self) {
+		self.dec_dep();
+	}
+
+	fn destroy(self) {
+		self.destroy();
+	}
+}
+
+impl AnyLifetime for DebugLifetime {
+	fn inc_dep(self) {
+		self.inc_dep();
+	}
+
+	fn dec_dep(self) {
+		self.dec_dep();
+	}
+
+	fn destroy(self) {
+		self.destroy();
+	}
+}
+
+#[derive(Debug)]
+pub struct LifetimeOwner<L: AnyLifetime>(pub L);
+
+impl<L: AnyLifetime> Drop for LifetimeOwner<L> {
+	fn drop(&mut self) {
+		self.0.destroy();
+	}
+}
+
+#[derive(Debug)]
+pub struct LifetimeDependent<L: AnyLifetime>(L);
+
+impl<L: AnyLifetime> LifetimeDependent<L> {
+	pub fn new(lifetime: L) -> Self {
+		lifetime.inc_dep();
+		Self(lifetime)
+	}
+
+	pub fn lifetime(&self) -> L {
+		self.0
+	}
+
+	pub fn defuse(self) -> L {
+		let lifetime = self.0;
+		mem::forget(self);
+		lifetime
+	}
+}
+
+impl<L: AnyLifetime> Clone for LifetimeDependent<L> {
+	fn clone(&self) -> Self {
+		Self::new(self.lifetime())
+	}
+}
+
+impl<L: AnyLifetime> Drop for LifetimeDependent<L> {
+	fn drop(&mut self) {
+		self.0.dec_dep();
 	}
 }
