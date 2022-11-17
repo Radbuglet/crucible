@@ -15,4 +15,9 @@ impl SceneManager {
 	pub fn current(&self) -> Entity {
 		self.current.expect("no initial scene set")
 	}
+
+	pub fn set_next_scene(&mut self, next: Entity) {
+		debug_assert!(self.next.is_none());
+		self.next = Some(next);
+	}
 }

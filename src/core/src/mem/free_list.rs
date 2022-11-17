@@ -5,7 +5,7 @@ use bytemuck::TransparentWrapper;
 #[derive(Debug)]
 pub struct FreeList<T, H: Handle = FreeListHandle> {
 	slots: Vec<Option<(T, H::Meta)>>,
-	free: Vec<usize>,
+	free: Vec<usize>, // TODO: Improve slot packing with a hibitset.
 	state: H::State,
 }
 

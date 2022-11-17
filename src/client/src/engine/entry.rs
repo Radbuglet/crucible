@@ -149,10 +149,7 @@ pub async fn main_inner() -> anyhow::Result<()> {
 
 	// Run event loop
 	event_loop.run(move |event, _proxy, flow| {
-		use winit::{
-			event::{Event::*, WindowEvent::*},
-			event_loop::ControlFlow,
-		};
+		use winit::event::{Event::*, WindowEvent::*};
 
 		flow.set_poll();
 
@@ -167,7 +164,7 @@ pub async fn main_inner() -> anyhow::Result<()> {
 				root.input_mgr.handle_window_event(&event);
 
 				if let CloseRequested = event {
-					*flow = ControlFlow::Exit;
+					flow.set_exit();
 				}
 			}
 			DeviceEvent { device_id, event } => {

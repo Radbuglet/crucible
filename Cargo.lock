@@ -386,6 +386,7 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "derive-where",
+ "fastrand",
  "itertools",
  "log",
  "sealed",

@@ -18,8 +18,7 @@ static FREE_ARCH_IDS: Mutex<PureFreeList<()>> = Mutex::new(PureFreeList::const_n
 #[derive(Debug)]
 pub struct Archetype {
 	id: NonZeroU32,
-
-	// TODO: Improve slot packing with a hibitset.
+	lifetime: LifetimeOwner<DebugLifetime>,
 	slots: PureFreeList<LifetimeOwner<DebugLifetime>>,
 }
 
@@ -34,7 +33,15 @@ impl Archetype {
 		// Construct archetype
 		Self {
 			id,
+			lifetime: LifetimeOwner(DebugLifetime::new()),
 			slots: PureFreeList::new(),
+		}
+	}
+
+	pub fn id(&self) -> ArchetypeId {
+		ArchetypeId {
+			lifetime: self.lifetime.0,
+			arch_id: self.id,
 		}
 	}
 
@@ -63,6 +70,22 @@ impl Drop for Archetype {
 	fn drop(&mut self) {
 		let mut free_arch_ids = FREE_ARCH_IDS.lock().unwrap_pretty();
 		free_arch_ids.remove(self.id.get() - 1);
+	}
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ArchetypeId {
+	lifetime: DebugLifetime,
+	arch_id: NonZeroU32,
+}
+
+impl ArchetypeId {
+	pub fn as_entity(self) -> Entity {
+		Entity {
+			lifetime: self.lifetime,
+			arch_id: NonZeroU32::new(u32::MAX).unwrap(),
+			slot: self.arch_id.get(),
+		}
 	}
 }
 
@@ -97,11 +120,6 @@ impl<T> Storage<T> {
 	}
 
 	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
-		assert!(
-			entity.lifetime.is_possibly_alive(),
-			"Attempted to attach a component to a dead entity."
-		);
-
 		let components = self
 			.archetypes
 			.entry(entity.arch_id)
@@ -110,24 +128,12 @@ impl<T> Storage<T> {
 		let slot = components.ensure_slot_with(entity.slot(), || None);
 		let replaced = slot
 			.replace((LifetimeDependent::new(entity.lifetime), value))
-			.map(|(lt, replaced)| {
-				assert!(
-					lt.lifetime().is_possibly_alive(),
-					"Replaced dangling component belonging to a destroyed entity. Please detach all \
-					 components belonging to an entity before freeing them."
-				);
-				replaced
-			});
+			.map(|(_, replaced)| replaced);
 
 		(replaced, &mut slot.as_mut().unwrap().1)
 	}
 
 	pub fn remove(&mut self, entity: Entity) -> Option<T> {
-		assert!(
-			entity.lifetime.is_possibly_alive(),
-			"Attempted to remove a component to a dead entity. Please detach components belonging to an entity *before* freeing them."
-		);
-
 		let archetype = self.archetypes.get_mut(&entity.arch_id)?;
 		let removed = archetype[entity.slot()].take().map(|(_, value)| value);
 

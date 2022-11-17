@@ -7,5 +7,6 @@ pub mod free_list;
 pub mod inline;
 pub mod layout;
 pub mod linked_list;
+pub mod perfect_map;
 pub mod ptr;
 pub mod wide_option;

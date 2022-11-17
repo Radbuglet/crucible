@@ -179,6 +179,17 @@ macro tup_impl_pack($($para:ident:$field:tt),*) {
 
 impl_tuples!(tup_impl_pack);
 
+// === `unpack` === //
+
+pub macro unpack(
+	$src:expr => {
+		$($name:pat_param = $ty:ty),*
+		$(,)?
+	}
+) {
+	let ($($name,)*) = Provider::pack::<($($ty,)*)>($src);
+}
+
 // === Tests === //
 
 #[cfg(test)]
