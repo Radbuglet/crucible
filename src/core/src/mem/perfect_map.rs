@@ -10,17 +10,19 @@ fn new_rng() -> Rng {
 	Rng::with_seed(0xBADF00D)
 }
 
-fn scramble(state: u64) -> u64 {
-	Rng::with_seed(state).u64(..)
+fn scramble(state: u64) -> usize {
+	// The `wrapping_sub` avoids an addition in `gen_u64` which is only necessary when using the
+	// `Rng` instance as an actual RNG.
+	Rng::with_seed(state.wrapping_sub(0xA0761D6478BD642F)).usize(..)
 }
 
-fn randomize(key: u32, hash: u32) -> u64 {
+fn randomize(key: u32, hash: u32) -> usize {
 	scramble(((key as u64) << 32) + hash as u64)
 }
 
 fn randomize_idx(key: u32, hash: u32, len: usize) -> usize {
 	debug_assert!(len.is_power_of_two());
-	(randomize(key, hash) & (len as u64 - 1)) as usize
+	randomize(key, hash) & (len - 1)
 }
 
 // === Phf === //
@@ -28,7 +30,6 @@ fn randomize_idx(key: u32, hash: u32, len: usize) -> usize {
 #[derive(Debug, Clone)]
 pub struct Phf {
 	main_key: u32,
-	slot_count: usize,
 	bucket_keys: Vec<u32>,
 }
 
@@ -134,7 +135,6 @@ impl Phf {
 			log::trace!("Generated PHF in {} bucket rehashe(s).", curr_gen);
 			break (
 				Self {
-					slot_count,
 					bucket_keys,
 					main_key,
 				},
@@ -143,12 +143,12 @@ impl Phf {
 		}
 	}
 
-	pub fn find_slot(&self, hash: u32) -> usize {
+	pub fn find_slot(&self, hash: u32, slot_count: usize) -> usize {
 		assert!(!self.bucket_keys.is_empty());
 
 		let bucket_index = randomize_idx(self.main_key, hash, self.bucket_keys.len());
 		let bucket_key = self.bucket_keys[bucket_index];
-		let entry_index = randomize_idx(bucket_key, hash, self.slot_count);
+		let entry_index = randomize_idx(bucket_key, hash, slot_count);
 		entry_index
 	}
 }
@@ -176,7 +176,7 @@ mod test {
 		let (phf, slot_to_idx) = Phf::new(elem_hashes.iter().copied());
 
 		for (i, &hash) in elem_hashes.iter().enumerate() {
-			assert_eq!(slot_to_idx[phf.find_slot(hash)], i);
+			assert_eq!(slot_to_idx[phf.find_slot(hash, slot_to_idx.len())], i);
 		}
 	}
 }
