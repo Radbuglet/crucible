@@ -1,4 +1,5 @@
 use std::{
+	cell::RefCell,
 	cmp::Ordering,
 	fmt, hash, mem,
 	num::NonZeroU64,
@@ -9,6 +10,11 @@ use std::{
 use thiserror::Error;
 
 use super::error::ErrorFormatExt;
+use crate::mem::{
+	array::arr,
+	pool::{GlobalPool, LocalPool},
+	ptr::leak_on_heap,
+};
 
 // === Global === //
 
@@ -20,35 +26,35 @@ struct SlotData {
 	deps: AtomicU64,
 }
 
-mod slot_db {
-	use std::sync::Mutex;
+const POOL_BLOCK_SIZE: usize = 1024;
 
-	use crate::{debug::error::ResultExt, mem::array::arr};
+static GLOBAL_POOL: GlobalPool<LifetimeSlot> = GlobalPool::new();
 
-	use super::*;
+thread_local! {
+	static LOCAL_POOL: RefCell<LocalPool<LifetimeSlot>> = const { RefCell::new(LocalPool::new()) };
+}
 
-	static FREE_SLOTS: Mutex<Vec<LifetimeSlot>> = Mutex::new(Vec::new());
+fn alloc_slot() -> LifetimeSlot {
+	LOCAL_POOL.with(|local_pool| {
+		let mut local_pool = local_pool.borrow_mut();
 
-	pub(super) fn alloc() -> LifetimeSlot {
-		// TODO: Implement local cache to avoid excessive lock contention
-		let mut free_slots = FREE_SLOTS.lock().unwrap_pretty();
-
-		if let Some(slot) = free_slots.pop() {
-			slot
-		} else {
-			let block = Box::leak(Box::new(arr![SlotData {
+		local_pool.acquire(&GLOBAL_POOL, || {
+			let values = leak_on_heap(arr![SlotData {
 				gen: AtomicU64::new(1),
 				deps: AtomicU64::new(1),
-			}; 1024]));
-			free_slots.extend(block.into_iter().map(|r| &*r));
-			free_slots.pop().unwrap()
-		}
-	}
+			}; POOL_BLOCK_SIZE]);
 
-	pub(super) fn free(slot: LifetimeSlot) {
-		let mut free_slots = FREE_SLOTS.lock().unwrap_pretty();
-		free_slots.push(slot);
-	}
+			values.into_iter().map(|v| &*v).collect()
+		})
+	})
+}
+
+fn free_slot(slot: LifetimeSlot) {
+	LOCAL_POOL.with(|local_pool| {
+		local_pool
+			.borrow_mut()
+			.release(&GLOBAL_POOL, POOL_BLOCK_SIZE, slot);
+	});
 }
 
 // === Lifetime === //
@@ -65,7 +71,7 @@ pub struct Lifetime {
 
 impl Lifetime {
 	pub fn new() -> Self {
-		let slot = slot_db::alloc();
+		let slot = alloc_slot();
 		let gen = slot.gen.load(SeqCst);
 
 		Self {
@@ -141,7 +147,7 @@ impl Lifetime {
 		let old_count = self.slot.deps.swap(local_gen + 1, SeqCst);
 
 		// Release the slot to the world...
-		slot_db::free(self.slot);
+		free_slot(self.slot);
 
 		// ...and finally ensure that we didn't just cut off some dependency. This also guards
 		// against concurrent `inc/dec_dep` calls which may have completed their transaction while

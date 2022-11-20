@@ -2,7 +2,7 @@ use std::mem::{self, ManuallyDrop};
 
 use crate::mem::ptr::PointeeCastExt;
 
-use super::ptr::leak_box;
+use super::ptr::leak_on_heap;
 
 // === Inline Store === //
 
@@ -75,7 +75,7 @@ impl<C> BoxableInlineStore<C> {
 		if Self::can_accommodate::<T>() {
 			Self::new_inline(value)
 		} else {
-			Self::new_inline(leak_box(value) as *mut T as *mut ())
+			Self::new_inline(leak_on_heap(value) as *mut T as *mut ())
 		}
 	}
 

@@ -1,8 +1,4 @@
-use crate::{
-	debug::lifetime::DebugLifetime,
-	lang::{macros::impl_tuples, polyfill::OptionPoly},
-	mem::ptr::PointeeCastExt,
-};
+use crate::{debug::lifetime::DebugLifetime, lang::polyfill::OptionPoly, mem::ptr::PointeeCastExt};
 
 use super::core::{ArchetypeId, Entity, Storage, StorageRunView};
 
@@ -73,7 +69,32 @@ macro impl_query($($para:ident:$field:tt),*) {
 		}
 	}
 }
-impl_tuples!(impl_query; no_unit);
+
+// FIXME: Use `impl_tuples` once rust-analyzer stops freaking out about it.
+impl_query!(A:0);
+impl_query!(A:0, B:1);
+impl_query!(A:0, B:1, C:2);
+impl_query!(A:0, B:1, C:2, D:3);
+impl_query!(A:0, B:1, C:2, D:3, E:4);
+impl_query!(A:0, B:1, C:2, D:3, E:4, F:5);
+impl_query!(A:0, B:1, C:2, D:3, E:4, F:5, G: 6);
+impl_query!(A:0, B:1, C:2, D:3, E:4, F:5, G: 6, H:7);
+impl_query!(A:0, B:1, C:2, D:3, E:4, F:5, G: 6, H:7, I:8);
+
+impl<T: IntoQueryPartIter> Query for T {
+	type Iter = QueryIter<(T::Iter,)>;
+
+	fn query_in(self, archetype: ArchetypeId) -> Self::Iter {
+		let iter = self.into_iter(archetype);
+
+		QueryIter {
+			archetype,
+			slot: 0,
+			max_slot: iter.max_slot(archetype),
+			parts: (iter,),
+		}
+	}
+}
 
 pub trait IntoQueryPartIter {
 	type Output;
@@ -132,7 +153,7 @@ impl<'a, T> QueryPartIter for &'a mut StorageRunView<T> {
 	unsafe fn get(&mut self, _archetype: ArchetypeId, slot: u32) -> (DebugLifetime, Self::Output) {
 		(*self)
 			.get_mut(slot)
-			// Safety: TODO
+			// FIXME: This is also likely illegal.
 			.map(|(lt, v)| (lt, v.prolong_mut()))
 			.expect("missing component!")
 	}

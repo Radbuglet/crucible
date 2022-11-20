@@ -32,7 +32,7 @@ pub const unsafe fn sizealign_checked_transmute<A, B>(a: A) -> B {
 
 // === Allocation === //
 
-pub fn leak_box<'a, T>(val: T) -> &'a mut T {
+pub fn leak_on_heap<'a, T>(val: T) -> &'a mut T {
 	Box::leak(Box::new(val))
 }
 
