@@ -1,6 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use crucible_core::mem::perfect_map::Phf;
-use nohash_hasher::BuildNoHashHasher;
+use crucible_core::{mem::perfect_map::Phf, lang::hash::NoOpBuildHasher};
 
 use std::{collections::HashSet, hint::black_box};
 
@@ -48,7 +47,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 			black_box(&elem_hashes)
 				.iter()
 				.copied()
-				.collect::<HashSet<_, BuildNoHashHasher<u32>>>()
+				.collect::<HashSet<_, NoOpBuildHasher>>()
 		});
 	});
 
@@ -57,7 +56,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 		let mut elem_hashes = hashes
 			.iter()
 			.copied()
-			.collect::<HashSet<_, BuildNoHashHasher<u32>>>();
+			.collect::<HashSet<_, NoOpBuildHasher>>();
 
 		let mut i = 0;
 

@@ -1,5 +1,10 @@
 use std::{
-	any::type_name, collections::hash_map, collections::HashMap, num::NonZeroU32, ops, sync::Mutex,
+	any::type_name,
+	collections::hash_map,
+	collections::HashMap,
+	num::NonZeroU32,
+	ops::{self, Deref, DerefMut},
+	sync::Mutex,
 };
 
 use derive_where::derive_where;
@@ -10,12 +15,33 @@ use crate::{
 		lifetime::{DebugLifetime, LifetimeDependent, LifetimeOwner},
 	},
 	lang::polyfill::VecPoly,
-	mem::free_list::PureFreeList,
+	mem::{free_list::PureFreeList, ptr::PointeeCastExt},
 };
+
+// === Handles === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ArchetypeId {
+	pub lifetime: DebugLifetime,
+	pub id: NonZeroU32,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+pub struct Entity {
+	pub lifetime: DebugLifetime,
+	pub arch: ArchetypeId,
+	pub slot: u32,
+}
+
+impl Entity {
+	pub fn slot_usize(&self) -> usize {
+		self.slot as usize
+	}
+}
 
 // === Archetype === //
 
-static FREE_ARCH_IDS: Mutex<PureFreeList<()>> = Mutex::new(PureFreeList::const_new());
+static ARCH_ID_FREE_LIST: Mutex<PureFreeList<()>> = Mutex::new(PureFreeList::const_new());
 
 #[derive(Debug)]
 pub struct Archetype {
@@ -27,9 +53,9 @@ pub struct Archetype {
 impl Archetype {
 	pub fn new() -> Self {
 		// Generate archetype ID
-		let mut free_arch_ids = FREE_ARCH_IDS.lock().unwrap_pretty();
+		let mut free_arch_ids = ARCH_ID_FREE_LIST.lock().unwrap_pretty();
 		let (_, id) = free_arch_ids.add(());
-		let id = id.checked_add(1).expect("created too many Archetypes.");
+		let id = id.checked_add(1).expect("created too many archetypes.");
 		let id = NonZeroU32::new(id).unwrap();
 
 		// Construct archetype
@@ -43,18 +69,19 @@ impl Archetype {
 	pub fn spawn(&mut self) -> Entity {
 		let (lifetime, slot) = self.slots.add(LifetimeOwner(DebugLifetime::new()));
 
+		assert_ne!(slot, u32::MAX, "spawned too many entities");
+
 		Entity {
-			own_lifetime: lifetime.0,
-			arch_lifetime: self.lifetime.0,
-			arch_id: self.id,
+			lifetime: lifetime.0,
+			arch: self.id(),
 			slot,
 		}
 	}
 
 	pub fn despawn(&mut self, entity: Entity) {
-		debug_assert_eq!(entity.arch_id, self.id);
+		debug_assert_eq!(entity.arch.id, self.id);
 		assert!(
-			entity.own_lifetime.is_possibly_alive(),
+			entity.lifetime.is_possibly_alive(),
 			"Attempted to despawn a dead entity."
 		);
 
@@ -78,7 +105,7 @@ impl Archetype {
 
 impl Drop for Archetype {
 	fn drop(&mut self) {
-		let mut free_arch_ids = FREE_ARCH_IDS.lock().unwrap_pretty();
+		let mut free_arch_ids = ARCH_ID_FREE_LIST.lock().unwrap_pretty();
 		free_arch_ids.remove(self.id.get() - 1);
 	}
 }
@@ -101,9 +128,8 @@ impl Iterator for ArchetypeIter<'_> {
 			match slots.get(slot as usize) {
 				Some(Some((lt, _))) => {
 					break Some(Entity {
-						arch_id: self.archetype.id,
-						arch_lifetime: self.archetype.lifetime.0,
-						own_lifetime: lt.0,
+						lifetime: lt.0,
+						arch: self.archetype.id(),
 						slot,
 					})
 				}
@@ -123,43 +149,13 @@ impl<'a> IntoIterator for &'a Archetype {
 	}
 }
 
-// === Handles === //
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct ArchetypeId {
-	lifetime: DebugLifetime,
-	id: NonZeroU32,
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Entity {
-	arch_lifetime: DebugLifetime, // TODO: Store in `own_lifetime`'s "associated metadata" once implemented.
-	own_lifetime: DebugLifetime,
-	arch_id: NonZeroU32,
-	slot: u32,
-}
-
-impl Entity {
-	pub fn arch(&self) -> ArchetypeId {
-		ArchetypeId {
-			lifetime: self.arch_lifetime,
-			id: self.arch_id,
-		}
-	}
-
-	fn slot(&self) -> usize {
-		self.slot as usize
-	}
-}
-
 // === Storage === //
 
 #[derive(Debug, Clone)]
 #[derive_where(Default)]
 #[repr(transparent)]
 pub struct Storage<T> {
-	// TODO: Replace with PerfectHashMap
-	archetypes: HashMap<NonZeroU32, Vec<Option<(LifetimeDependent<DebugLifetime>, T)>>>,
+	archetypes: HashMap<NonZeroU32, StorageRun<T>>,
 }
 
 impl<T> Storage<T> {
@@ -169,29 +165,48 @@ impl<T> Storage<T> {
 		}
 	}
 
+	pub fn get_run(&self, archetype: ArchetypeId) -> Option<&StorageRun<T>> {
+		assert!(archetype.lifetime.is_possibly_alive());
+
+		self.archetypes.get(&archetype.id)
+	}
+
+	pub fn get_run_mut(&mut self, archetype: ArchetypeId) -> Option<&mut StorageRun<T>> {
+		assert!(archetype.lifetime.is_possibly_alive());
+
+		self.archetypes.get_mut(&archetype.id)
+	}
+
+	pub fn get_run_view(&self, archetype: ArchetypeId) -> &StorageRunView<T> {
+		match self.get_run(archetype) {
+			Some(run) => run.as_view(),
+			None => StorageRunView::new_empty(),
+		}
+	}
+
+	pub fn get_run_view_mut(&mut self, archetype: ArchetypeId) -> &mut StorageRunView<T> {
+		match self.get_run_mut(archetype) {
+			Some(run) => run.as_mut_view(),
+			None => StorageRunView::new_empty(),
+		}
+	}
+
+	pub fn get_or_create_run(&mut self, archetype: ArchetypeId) -> &mut StorageRun<T> {
+		assert!(archetype.lifetime.is_possibly_alive());
+
+		self.archetypes
+			.entry(archetype.id)
+			.or_insert_with(Default::default)
+	}
+
 	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
-		let components = self
-			.archetypes
-			.entry(entity.arch_id)
-			.or_insert_with(Vec::new);
-
-		let slot = components.ensure_slot_with(entity.slot(), || None);
-		let replaced = slot
-			.replace((LifetimeDependent::new(entity.own_lifetime), value))
-			.map(|(_, replaced)| replaced);
-
-		(replaced, &mut slot.as_mut().unwrap().1)
+		self.get_or_create_run(entity.arch).add(entity, value)
 	}
 
 	pub fn remove(&mut self, entity: Entity) -> Option<T> {
-		let archetype = self.archetypes.get_mut(&entity.arch_id)?;
-		let removed = archetype[entity.slot()].take().map(|(_, value)| value);
-
-		while archetype.last().is_none() {
-			archetype.pop();
-		}
-
-		removed
+		self.archetypes
+			.get_mut(&entity.arch.id)?
+			.remove(entity.slot)
 	}
 
 	pub fn remove_many<I>(&mut self, entities: I)
@@ -203,34 +218,22 @@ impl<T> Storage<T> {
 		}
 	}
 
-	pub fn try_get(&self, entity: Entity) -> Option<&T> {
-		assert!(entity.own_lifetime.is_possibly_alive());
+	pub fn get(&self, entity: Entity) -> Option<&T> {
+		assert!(entity.lifetime.is_possibly_alive());
 
 		self.archetypes
-			.get(&entity.arch_id)?
-			.get(entity.slot())?
-			.as_ref()
-			.map(|(_, value)| value)
+			.get(&entity.arch.id)?
+			.get(entity.slot)
+			.map(|(_, v)| v)
 	}
 
-	pub fn try_get_mut(&mut self, entity: Entity) -> Option<&mut T> {
-		assert!(entity.own_lifetime.is_possibly_alive());
+	pub fn get_mut(&mut self, entity: Entity) -> Option<&mut T> {
+		assert!(entity.lifetime.is_possibly_alive());
 
 		self.archetypes
-			.get_mut(&entity.arch_id)?
-			.get_mut(entity.slot())?
-			.as_mut()
-			.map(|(_, value)| value)
-	}
-
-	pub fn get(&self, entity: Entity) -> &T {
-		self.try_get(entity)
-			.unwrap_or_else(|| failed_to_find_component::<T>(entity))
-	}
-
-	pub fn get_mut(&mut self, entity: Entity) -> &mut T {
-		self.try_get_mut(entity)
-			.unwrap_or_else(|| failed_to_find_component::<T>(entity))
+			.get_mut(&entity.arch.id)?
+			.get_mut(entity.slot)
+			.map(|(_, v)| v)
 	}
 
 	pub fn clear(&mut self) {
@@ -241,14 +244,16 @@ impl<T> Storage<T> {
 impl<T> ops::Index<Entity> for Storage<T> {
 	type Output = T;
 
-	fn index(&self, index: Entity) -> &Self::Output {
-		self.get(index)
+	fn index(&self, entity: Entity) -> &Self::Output {
+		self.get(entity)
+			.unwrap_or_else(|| failed_to_find_component::<T>(entity))
 	}
 }
 
 impl<T> ops::IndexMut<Entity> for Storage<T> {
-	fn index_mut(&mut self, index: Entity) -> &mut Self::Output {
-		self.get_mut(index)
+	fn index_mut(&mut self, entity: Entity) -> &mut Self::Output {
+		self.get_mut(entity)
+			.unwrap_or_else(|| failed_to_find_component::<T>(entity))
 	}
 }
 
@@ -259,12 +264,105 @@ pub(super) fn failed_to_find_component<T>(entity: Entity) -> ! {
 	);
 }
 
+type StorageRunSlot<T> = Option<(LifetimeDependent<DebugLifetime>, T)>;
+
+#[derive(Debug, Clone)]
+#[derive_where(Default)]
+pub struct StorageRun<T> {
+	comps: Vec<StorageRunSlot<T>>,
+}
+
+impl<T> StorageRun<T> {
+	pub fn new() -> Self {
+		Self { comps: Vec::new() }
+	}
+
+	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
+		let slot = self.comps.ensure_slot_with(entity.slot_usize(), || None);
+		let replaced = slot
+			.replace((LifetimeDependent::new(entity.lifetime), value))
+			.map(|(_, replaced)| replaced);
+
+		(replaced, &mut slot.as_mut().unwrap().1)
+	}
+
+	pub fn remove(&mut self, slot: u32) -> Option<T> {
+		let removed = self.comps[slot as usize].take().map(|(_, value)| value);
+
+		while matches!(self.comps.last(), Some(None)) {
+			self.comps.pop();
+		}
+
+		removed
+	}
+
+	pub fn as_view(&self) -> &StorageRunView<T> {
+		unsafe {
+			self.comps
+				.as_slice()
+				.cast_ref_via_ptr(|slice: *const [StorageRunSlot<T>]| {
+					slice as *const StorageRunView<T>
+				})
+		}
+	}
+
+	pub fn as_mut_view(&mut self) -> &mut StorageRunView<T> {
+		unsafe {
+			self.comps
+				.as_mut_slice()
+				.cast_mut_via_ptr(|slice: *mut [StorageRunSlot<T>]| slice as *mut StorageRunView<T>)
+		}
+	}
+}
+
+impl<T> Deref for StorageRun<T> {
+	type Target = StorageRunView<T>;
+
+	fn deref(&self) -> &Self::Target {
+		self.as_view()
+	}
+}
+
+impl<T> DerefMut for StorageRun<T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		self.as_mut_view()
+	}
+}
+
+#[repr(transparent)]
+pub struct StorageRunView<T>([StorageRunSlot<T>]);
+
+impl<T> StorageRunView<T> {
+	pub fn new_empty<'a>() -> &'a mut StorageRunView<T> {
+		let slice: &'a mut [StorageRunSlot<T>] = &mut [];
+
+		unsafe { slice.cast_mut_via_ptr(|slice| slice as *mut StorageRunView<T>) }
+	}
+
+	pub fn get(&self, slot: u32) -> Option<(DebugLifetime, &T)> {
+		match self.0.get(slot as usize) {
+			Some(Some((lt, value))) => Some((lt.lifetime(), value)),
+			_ => None,
+		}
+	}
+
+	pub fn get_mut(&mut self, slot: u32) -> Option<(DebugLifetime, &mut T)> {
+		match self.0.get_mut(slot as usize) {
+			Some(Some((lt, value))) => Some((lt.lifetime(), value)),
+			_ => None,
+		}
+	}
+
+	pub fn max_slot(&self) -> u32 {
+		self.0.len() as u32
+	}
+}
+
 // === ArchetypeMap === //
 
 #[derive(Debug, Clone)]
 #[derive_where(Default)]
 pub struct ArchetypeMap<T> {
-	// TODO: Replace with PerfectHashMap
 	map: HashMap<NonZeroU32, (LifetimeDependent<DebugLifetime>, T)>,
 }
 

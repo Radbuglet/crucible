@@ -1,5 +1,3 @@
-use sealed::sealed;
-
 // === `WithContext` === //
 
 #[derive(Debug, Clone)]
@@ -38,12 +36,10 @@ pub trait ContextualIter<C>: Sized {
 
 // === Flow Iter === //
 
-#[sealed]
 pub trait FlowIterExt: Sized + Iterator {
 	fn flow(self) -> FlowIter<Self>;
 }
 
-#[sealed]
 impl<T, I: Iterator<Item = Flow<T>>> FlowIterExt for I {
 	fn flow(self) -> FlowIter<Self> {
 		FlowIter {

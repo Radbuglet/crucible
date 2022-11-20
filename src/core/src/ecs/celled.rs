@@ -1,5 +1,4 @@
 use std::{
-	any::type_name,
 	cell::{Ref, RefCell, RefMut},
 	fmt::Debug,
 };
@@ -9,6 +8,8 @@ use derive_where::derive_where;
 use crate::{lang::sync::ExtRefCell, mem::ptr::PointeeCastExt};
 
 use super::core::{failed_to_find_component, Entity, Storage};
+
+// TODO: Update re-exposed interface to match `Storage`'s
 
 #[derive(Debug)]
 #[derive_where(Default)]
@@ -42,29 +43,21 @@ impl<T> CelledStorage<T> {
 	}
 
 	pub fn try_get(&self, entity: Entity) -> Option<&T> {
-		self.inner.try_get(entity).map(|v| &**v)
+		self.inner.get(entity).map(|v| &**v)
 	}
 
 	pub fn try_get_mut(&mut self, entity: Entity) -> Option<&mut T> {
-		self.inner.try_get_mut(entity).map(|v| &mut **v)
+		self.inner.get_mut(entity).map(|v| &mut **v)
 	}
 
 	pub fn get(&self, entity: Entity) -> &T {
-		self.try_get(entity).unwrap_or_else(|| {
-			panic!(
-				"failed to find entity {entity:?} with component {}",
-				type_name::<T>()
-			)
-		})
+		self.try_get(entity)
+			.unwrap_or_else(|| failed_to_find_component::<T>(entity))
 	}
 
 	pub fn get_mut(&mut self, entity: Entity) -> &mut T {
-		self.try_get_mut(entity).unwrap_or_else(|| {
-			panic!(
-				"failed to find entity {entity:?} with component {}",
-				type_name::<T>()
-			)
-		})
+		self.try_get_mut(entity)
+			.unwrap_or_else(|| failed_to_find_component::<T>(entity))
 	}
 
 	pub fn clear(&mut self) {
@@ -119,11 +112,11 @@ impl<T> CelledStorageView<T> {
 	}
 
 	pub fn try_get_cell(&self, entity: Entity) -> Option<&RefCell<T>> {
-		self.inner.try_get(entity)
+		self.inner.get(entity)
 	}
 
 	pub fn try_get_cell_mut(&mut self, entity: Entity) -> Option<&mut RefCell<T>> {
-		self.inner.try_get_mut(entity)
+		self.inner.get_mut(entity)
 	}
 
 	pub fn get_cell(&self, entity: Entity) -> &RefCell<T> {

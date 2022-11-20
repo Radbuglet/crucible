@@ -4,6 +4,8 @@ use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::thread::panicking;
 
+use derive_where::derive_where;
+
 use crate::lang::std_traits::ResultLike;
 
 // === Standard Error Extensions === //
@@ -17,10 +19,6 @@ pub trait ErrorFormatExt: Error {
 		panic!("{}", self.format_error());
 	}
 
-	fn log(&self) {
-		log::error!("{}", self.format_error());
-	}
-
 	fn raise_unless_panicking(&self) {
 		if !panicking() {
 			self.raise();
@@ -28,19 +26,16 @@ pub trait ErrorFormatExt: Error {
 			self.log();
 		}
 	}
+
+	fn log(&self) {
+		log::error!("{}", self.format_error());
+	}
 }
 
 impl<T: ?Sized + Error> ErrorFormatExt for T {}
 
+#[derive_where(Copy, Clone)]
 pub struct FormattedError<'a, T: ?Sized>(pub &'a T);
-
-impl<T: ?Sized> Copy for FormattedError<'_, T> {}
-
-impl<T: ?Sized> Clone for FormattedError<'_, T> {
-	fn clone(&self) -> Self {
-		*self
-	}
-}
 
 impl<T: ?Sized + Error> Display for FormattedError<'_, T> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {

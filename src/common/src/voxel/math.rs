@@ -18,7 +18,9 @@ pub const CHUNK_VOLUME: i32 = CHUNK_EDGE.pow(3);
 
 pub type WorldVec = TypedVector<WorldVecFlavor>;
 
-pub struct WorldVecFlavor(!);
+pub struct WorldVecFlavor {
+	_private: (),
+}
 
 impl VecFlavor for WorldVecFlavor {
 	type Backing = glam::IVec3;
@@ -94,7 +96,9 @@ impl WorldVecExt for WorldVec {
 
 pub type ChunkVec = TypedVector<ChunkVecFlavor>;
 
-pub struct ChunkVecFlavor(!);
+pub struct ChunkVecFlavor {
+	_private: (),
+}
 
 impl VecFlavor for ChunkVecFlavor {
 	type Backing = glam::IVec3;
@@ -128,7 +132,9 @@ impl ChunkVecExt for ChunkVec {
 
 pub type BlockVec = TypedVector<BlockVecFlavor>;
 
-pub struct BlockVecFlavor(!);
+pub struct BlockVecFlavor {
+	_private: (),
+}
 
 impl VecFlavor for BlockVecFlavor {
 	type Backing = glam::IVec3;
@@ -227,7 +233,9 @@ impl Iterator for BlockPosIter {
 /// `(-2..-1, -3..-2, 1..2)`.
 pub type EntityVec = TypedVector<EntityVecFlavor>;
 
-pub struct EntityVecFlavor(!);
+pub struct EntityVecFlavor {
+	_private: (),
+}
 
 impl VecFlavor for EntityVecFlavor {
 	type Backing = DVec3;

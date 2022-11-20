@@ -1,119 +1,139 @@
-use super::core::{ArchetypeId, Entity};
+use crate::{
+	debug::lifetime::DebugLifetime,
+	lang::{macros::impl_tuples, polyfill::OptionPoly},
+	mem::ptr::PointeeCastExt,
+};
+
+use super::core::{ArchetypeId, Entity, Storage, StorageRunView};
+
+// === Core === //
 
 pub trait Query {
 	type Iter;
 
-	fn query_in(self, archetype: ArchetypeId) -> Self::Iter;
+	fn query_in(self, id: ArchetypeId) -> Self::Iter;
 }
 
-pub trait IntoQueryPart {
-	type Iter: QueryPart<Output = Self::Output>;
+pub struct QueryIter<T> {
+	archetype: ArchetypeId,
+	slot: u32,
+	max_slot: u32,
+	parts: T,
+}
+
+macro impl_query($($para:ident:$field:tt),*) {
+	impl<$($para: IntoQueryPartIter),*> Query for ($($para,)*) {
+		type Iter = QueryIter<($($para::Iter,)*)>;
+
+		fn query_in(self, archetype: ArchetypeId) -> Self::Iter {
+			let mut slot_count = None;
+			let parts = (
+				$({
+					let iter = self.$field.into_iter(archetype);
+					let iter_slot_count = iter.max_slot(archetype);
+					assert!(slot_count.p_is_none_or(|count| count == iter_slot_count));
+					slot_count = Some(iter_slot_count);
+					iter
+				},)*
+			);
+
+			QueryIter {
+				archetype,
+				slot: 0,
+				max_slot: slot_count.unwrap(),
+				parts,
+			}
+		}
+	}
+
+	impl<$($para: QueryPartIter),*> Iterator for QueryIter<($($para,)*)> {
+		type Item = (Entity, $($para::Output),*);
+
+		fn next(&mut self) -> Option<Self::Item> {
+			let slot = self.slot;
+			if slot < self.max_slot {
+				self.slot += 1;
+
+				let res = (
+					// Safety: `slot` is monotonically increasing
+					$(unsafe { self.parts.$field.get(self.archetype, slot) },)*
+				);
+
+				let lifetime = (res.0).0;
+				let entity = Entity {
+					lifetime,
+					arch: self.archetype,
+					slot: self.slot,
+				};
+
+				Some(( entity, $((res.$field).1),* ))
+			} else {
+				None
+			}
+		}
+	}
+}
+impl_tuples!(impl_query; no_unit);
+
+pub trait IntoQueryPartIter {
+	type Output;
+	type Iter: QueryPartIter<Output = Self::Output>;
+
+	fn into_iter(self, archetype: ArchetypeId) -> Self::Iter;
+}
+
+pub trait QueryPartIter {
 	type Output;
 
-	fn into_query_part(self) -> Self::Iter;
+	fn max_slot(&self, archetype: ArchetypeId) -> u32;
+
+	unsafe fn get(&mut self, archetype: ArchetypeId, slot: u32) -> (DebugLifetime, Self::Output);
 }
 
-pub trait QueryPart {
-	type Output;
+// === Storage === //
 
-	fn is_main(&self) -> bool;
-	fn next_main(&mut self, archetype: ArchetypeId) -> Option<(Entity, Self::Output)>;
+impl<'a, T> IntoQueryPartIter for &'a Storage<T> {
+	type Output = &'a T;
+	type Iter = &'a StorageRunView<T>;
 
-	fn next_puppet(&mut self, target: Entity, archetype: ArchetypeId) -> Option<Self::Output>;
-	fn process_missing(&mut self, target: Entity, archetype: ArchetypeId);
-}
-
-// === EntityQuery and ArchQuery === //
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Default)]
-pub struct EntityQuery;
-
-impl IntoQueryPart for EntityQuery {
-	type Iter = Self;
-	type Output = Entity;
-
-	fn into_query_part(self) -> Self::Iter {
-		self
+	fn into_iter(self, archetype: ArchetypeId) -> Self::Iter {
+		self.get_run_view(archetype)
 	}
 }
 
-impl QueryPart for EntityQuery {
-	type Output = Entity;
+impl<'a, T> QueryPartIter for &'a StorageRunView<T> {
+	type Output = &'a T;
 
-	fn is_main(&self) -> bool {
-		false
+	fn max_slot(&self, _archetype: ArchetypeId) -> u32 {
+		(*self).max_slot()
 	}
 
-	fn next_main(&mut self, _archetype: ArchetypeId) -> Option<(Entity, Self::Output)> {
-		unimplemented!()
-	}
-
-	fn next_puppet(&mut self, target: Entity, _archetype: ArchetypeId) -> Option<Self::Output> {
-		Some(target)
-	}
-
-	fn process_missing(&mut self, _target: Entity, _archetype: ArchetypeId) {
-		unimplemented!()
+	unsafe fn get(&mut self, _archetype: ArchetypeId, slot: u32) -> (DebugLifetime, Self::Output) {
+		(*self).get(slot).expect("missing component!")
 	}
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Default)]
-pub struct ArchQuery;
+impl<'a, T> IntoQueryPartIter for &'a mut Storage<T> {
+	type Output = &'a mut T;
+	type Iter = &'a mut StorageRunView<T>;
 
-impl IntoQueryPart for ArchQuery {
-	type Iter = Self;
-	type Output = ArchetypeId;
-
-	fn into_query_part(self) -> Self::Iter {
-		self
+	fn into_iter(self, archetype: ArchetypeId) -> Self::Iter {
+		self.get_run_view_mut(archetype)
 	}
 }
 
-impl QueryPart for ArchQuery {
-	type Output = ArchetypeId;
+impl<'a, T> QueryPartIter for &'a mut StorageRunView<T> {
+	type Output = &'a mut T;
 
-	fn is_main(&self) -> bool {
-		false
+	fn max_slot(&self, _archetype: ArchetypeId) -> u32 {
+		(**self).max_slot()
 	}
 
-	fn next_main(&mut self, _archetype: ArchetypeId) -> Option<(Entity, Self::Output)> {
-		unimplemented!()
-	}
-
-	fn next_puppet(&mut self, _target: Entity, archetype: ArchetypeId) -> Option<Self::Output> {
-		Some(archetype)
-	}
-
-	fn process_missing(&mut self, _target: Entity, _archetype: ArchetypeId) {
-		unimplemented!()
+	unsafe fn get(&mut self, _archetype: ArchetypeId, slot: u32) -> (DebugLifetime, Self::Output) {
+		(*self)
+			.get_mut(slot)
+			// Safety: TODO
+			.map(|(lt, v)| (lt, v.prolong_mut()))
+			.expect("missing component!")
 	}
 }
-
-// === OptionalQuery === //
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Default)]
-pub struct OptionalQuery<T>(pub T);
-
-impl<T: QueryPart> QueryPart for OptionalQuery<T> {
-	type Output = T::Output;
-
-	fn is_main(&self) -> bool {
-		false
-	}
-
-	fn next_main(&mut self, _archetype: ArchetypeId) -> Option<(Entity, Self::Output)> {
-		unimplemented!()
-	}
-
-	fn next_puppet(&mut self, target: Entity, archetype: ArchetypeId) -> Option<Self::Output> {
-		self.0.next_puppet(target, archetype)
-	}
-
-	fn process_missing(&mut self, _target: Entity, _archetype: ArchetypeId) {
-		// ignored
-	}
-}
-
-// === Storage Queries === //
-
-// TODO

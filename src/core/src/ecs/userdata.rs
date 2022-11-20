@@ -11,11 +11,11 @@ pub type Userdata = Box<dyn UserdataValue>;
 
 impl Storage<Userdata> {
 	pub fn get_downcast<T: 'static>(&self, entity: Entity) -> &T {
-		self.get(entity).downcast_ref()
+		self[entity].downcast_ref()
 	}
 
 	pub fn get_downcast_mut<T: 'static>(&mut self, entity: Entity) -> &mut T {
-		self.get_mut(entity).downcast_mut()
+		self[entity].downcast_mut()
 	}
 }
 

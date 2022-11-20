@@ -172,26 +172,20 @@ impl fmt::Debug for Lifetime {
 	}
 }
 
-impl Default for Lifetime {
-	fn default() -> Self {
-		Self::new()
-	}
-}
-
 // === DebugLifetime === //
 
 #[allow(dead_code)]
 mod debug_impl {
 	use super::*;
 
-	#[derive(Debug, Copy, Clone, Default)]
+	#[derive(Debug, Copy, Clone)]
 	pub struct DebugLifetime(Lifetime);
 
 	impl DebugLifetime {
 		pub const IS_ENABLED: bool = true;
 
 		pub fn new() -> Self {
-			Self::default()
+			Self(Lifetime::new())
 		}
 
 		pub fn is_possibly_alive(self) -> bool {
@@ -224,7 +218,7 @@ mod debug_impl {
 mod release_impl {
 	use super::*;
 
-	#[derive(Debug, Copy, Clone, Default)]
+	#[derive(Debug, Copy, Clone)]
 	pub struct DebugLifetime {
 		_private: (),
 	}
@@ -233,7 +227,7 @@ mod release_impl {
 		pub const IS_ENABLED: bool = false;
 
 		pub fn new() -> Self {
-			Self::default()
+			Self { _private: () }
 		}
 
 		pub fn is_possibly_alive(self) -> bool {

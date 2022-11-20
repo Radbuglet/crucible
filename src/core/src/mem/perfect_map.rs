@@ -39,8 +39,6 @@ impl Phf {
 		S: Clone + IntoIterator<IntoIter = SI>,
 		SI: ExactSizeIterator<Item = u32>,
 	{
-		// TODO: Check for overflows.
-
 		#[derive(Debug)]
 		struct Bucket {
 			// The actual index of the bucket in the `bucket_keys` list.
