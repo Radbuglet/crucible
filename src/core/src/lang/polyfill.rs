@@ -193,6 +193,6 @@ impl<T> VecPoly for Vec<T> {
 		F: FnMut() -> Self::Elem,
 	{
 		self.ensure_length_with(index + 1, f);
-		self.last_mut().unwrap()
+		&mut self[index]
 	}
 }

@@ -38,7 +38,7 @@ impl Phf {
 		S: Clone + IntoIterator<IntoIter = SI>,
 		SI: ExactSizeIterator<Item = u32>,
 	{
-		// TODO: Check number sizes
+		// TODO: Check for overflows.
 
 		#[derive(Debug)]
 		struct Bucket {
@@ -57,6 +57,10 @@ impl Phf {
 		let elem_count = elems.clone().into_iter().len();
 		let slot_count = elem_count.next_power_of_two();
 		let bucket_count = ((elem_count + DEFAULT_LAMBDA - 1) / DEFAULT_LAMBDA).next_power_of_two();
+		let max_bucket_key = slot_count
+			.checked_mul(slot_count)
+			.and_then(|value| u32::try_from(value).ok())
+			.unwrap_or(u32::MAX);
 
 		let mut buckets = (0..bucket_count)
 			.map(|index| Bucket {
@@ -81,7 +85,7 @@ impl Phf {
 			}
 
 			for (i, hash) in elems.clone().into_iter().enumerate() {
-				buckets[randomize(main_key, hash) as usize % bucket_count]
+				buckets[randomize_idx(main_key, hash, bucket_count)]
 					.keys
 					.push((i, hash));
 			}
@@ -96,7 +100,7 @@ impl Phf {
 
 			'setting_buckets: for bucket in &buckets {
 				// Try to find an appropriate key
-				'finding_key: for bucket_key in 0..(slot_count * slot_count) as u32 {
+				'finding_key: for bucket_key in 0..=max_bucket_key {
 					curr_gen += 1;
 
 					// Try to slot things in using the key.
@@ -145,7 +149,7 @@ impl Phf {
 		let bucket_index = randomize_idx(self.main_key, hash, self.bucket_keys.len());
 		let bucket_key = self.bucket_keys[bucket_index];
 		let entry_index = randomize_idx(bucket_key, hash, self.slot_count);
-		entry_index as usize
+		entry_index
 	}
 }
 

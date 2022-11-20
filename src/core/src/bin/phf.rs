@@ -24,12 +24,11 @@ fn main() {
 
 	// Benchmark
 	for _ in 0..100 {
-		let hash = elem_hashes[0];
 		let start = Instant::now();
 		let mut accum = 0;
 
 		for _ in 0..1_000_000 {
-			accum += phf.find_slot(hash);
+			accum += phf.find_slot(fastrand::u32(0..elem_hashes.len() as u32));
 			black_box(());
 		}
 
