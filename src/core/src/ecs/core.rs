@@ -18,6 +18,8 @@ use crate::{
 	mem::{free_list::PureFreeList, ptr::PointeeCastExt},
 };
 
+use super::query::{Query, QueryIter};
+
 // === Handles === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -238,6 +240,14 @@ impl<T> Storage<T> {
 
 	pub fn clear(&mut self) {
 		self.archetypes.clear();
+	}
+
+	pub fn query_in_ref(&self, archetype: ArchetypeId) -> QueryIter<(&StorageRunView<T>,)> {
+		(self,).query_in(archetype)
+	}
+
+	pub fn query_in_mut(&mut self, archetype: ArchetypeId) -> QueryIter<(&mut StorageRunView<T>,)> {
+		(self,).query_in(archetype)
 	}
 }
 

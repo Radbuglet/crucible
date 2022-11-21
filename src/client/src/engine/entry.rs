@@ -30,7 +30,16 @@ struct EngineRoot {
 	viewports: Storage<Viewport>,
 	userdata: Storage<Userdata>,
 	update_handlers: Storage<fn(Entity, &mut Storage<Userdata>)>,
-	render_handlers: Storage<fn(Entity, &mut Storage<Userdata>, &GfxContext)>,
+	render_handlers: Storage<
+		fn(
+			Entity,
+			(
+				&mut Storage<Userdata>,
+				&GfxContext,
+				&mut wgpu::SurfaceTexture,
+			),
+		),
+	>,
 }
 
 impl EngineRoot {
@@ -132,16 +141,54 @@ pub async fn main_inner() -> anyhow::Result<()> {
 		let render_handlers = &mut root.render_handlers;
 
 		let scene = scene_arch.spawn();
-		userdata.add(scene, Box::new(4u32));
+		userdata.add(scene, Box::new(0f64));
 
 		update_handlers.add(scene, |me, userdata| {
-			let me_data = userdata.get_downcast_mut::<u32>(me);
-			*me_data += 1;
+			let me_data = userdata.get_downcast_mut::<f64>(me);
+			*me_data += 0.01;
 		});
 
-		render_handlers.add(scene, |me, userdata, _gfx| {
-			let me_data = userdata.get_downcast::<u32>(me);
-			dbg!(me_data);
+		render_handlers.add(scene, |me, (userdata, gfx, frame)| {
+			let me_data = userdata.get_downcast::<f64>(me);
+
+			let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+				label: Some("frame view"),
+				format: None,
+				dimension: None,
+				aspect: wgpu::TextureAspect::All,
+				base_mip_level: 0,
+				mip_level_count: None,
+				base_array_layer: 0,
+				array_layer_count: None,
+			});
+
+			let mut encoder = gfx
+				.device
+				.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+					label: Some("main viewport renderer"),
+				});
+
+			let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+				label: Some("main render pass"),
+				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+					view: &view,
+					ops: wgpu::Operations {
+						load: wgpu::LoadOp::Clear(wgpu::Color {
+							r: 0.5 + 0.5 * me_data.cos(),
+							g: 0.1,
+							b: 0.1,
+							a: 1.0,
+						}),
+						store: true,
+					},
+					resolve_target: None,
+				})],
+				depth_stencil_attachment: None,
+			});
+
+			drop(pass);
+
+			gfx.queue.submit([encoder.finish()]);
 		});
 
 		scene_mgr.set_initial(scene);
@@ -170,10 +217,43 @@ pub async fn main_inner() -> anyhow::Result<()> {
 			DeviceEvent { device_id, event } => {
 				root.input_mgr.handle_device_event(device_id, &event);
 			}
-			MainEventsCleared => {}
+			MainEventsCleared => {
+				// Process update
+				let curr_scene = root.scene_mgr.current();
+				root.update_handlers[curr_scene](curr_scene, &mut root.userdata);
+
+				// Request redraws
+				for (&_window, &viewport) in root.viewport_mgr.window_map() {
+					root.viewports[viewport].window().request_redraw();
+				}
+			}
 
 			// Then, redraws are processed.
-			RedrawRequested(_) => {}
+			RedrawRequested(window_id) => {
+				let Some(viewport) = root.viewport_mgr.get_viewport(window_id) else {
+					return;
+				};
+
+				// Acquire frame
+				let viewport_data = &mut root.viewports[viewport];
+				let Ok(surface) = viewport_data.present((&root.gfx,)) else {
+					log::error!("Failed to render to {viewport:?}");
+					return;
+				};
+
+				let Some(mut frame) = surface else {
+					return;
+				};
+
+				// Process render
+				let curr_scene = root.scene_mgr.current();
+				root.render_handlers[curr_scene](
+					curr_scene,
+					(&mut root.userdata, &root.gfx, &mut frame),
+				);
+
+				frame.present();
+			}
 			RedrawEventsCleared => {}
 
 			// This runs at program termination.

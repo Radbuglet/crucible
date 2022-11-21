@@ -5,14 +5,21 @@ use crucible_core::ecs::{
 	userdata::Userdata,
 };
 
+use super::player::camera::FreeCamController;
+
 #[derive(Debug)]
 pub struct PlayScene {
 	// Archetypes
 	arch_world: Archetype,
+	arch_player: Archetype,
 
 	// Storages
 	world_datas: Storage<WorldData>,
 	chunk_datas: Storage<ChunkData>,
+	cameras: Storage<FreeCamController>,
+
+	// Resources
+	local_player: Entity,
 }
 
 impl PlayScene {
@@ -24,4 +31,6 @@ impl PlayScene {
 
 		let me = userdatas.get_downcast_mut::<Self>(me);
 	}
+
+	pub fn on_render() {}
 }

@@ -81,21 +81,6 @@ impl_query!(A:0, B:1, C:2, D:3, E:4, F:5, G: 6);
 impl_query!(A:0, B:1, C:2, D:3, E:4, F:5, G: 6, H:7);
 impl_query!(A:0, B:1, C:2, D:3, E:4, F:5, G: 6, H:7, I:8);
 
-impl<T: IntoQueryPartIter> Query for T {
-	type Iter = QueryIter<(T::Iter,)>;
-
-	fn query_in(self, archetype: ArchetypeId) -> Self::Iter {
-		let iter = self.into_iter(archetype);
-
-		QueryIter {
-			archetype,
-			slot: 0,
-			max_slot: iter.max_slot(archetype),
-			parts: (iter,),
-		}
-	}
-}
-
 pub trait IntoQueryPartIter {
 	type Output;
 	type Iter: QueryPartIter<Output = Self::Output>;

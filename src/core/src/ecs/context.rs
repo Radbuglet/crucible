@@ -1,20 +1,32 @@
 use std::{
 	any::{type_name, TypeId},
+	collections::HashMap,
+	fmt,
 	marker::PhantomData,
 	ptr::{addr_of, addr_of_mut},
 };
 
-use crate::{lang::macros::impl_tuples, mem::alias_magic::has_aliases};
+use crate::{
+	debug::type_id::NamedTypeId,
+	lang::macros::impl_tuples,
+	mem::{alias_magic::has_aliases, inline::MaybeBoxedCopy, ptr::All},
+};
 
 // === Provider === //
 
 pub unsafe trait Provider: Sized {
-	unsafe fn try_get_raw<'a, U: ?Sized + 'static>(me: *const Self) -> Option<*const &'a U>;
+	// === Required methods === //
 
-	unsafe fn try_get_raw_mut<'a, U: ?Sized + 'static>(me: *mut Self) -> Option<*mut &'a mut U>;
+	fn build_dyn_provider<'r>(&'r mut self, provider: &mut DynProvider<'r>);
 
-	unsafe fn get_raw<'a, U: ?Sized + 'static>(me: *const Self) -> *const &'a U {
-		Self::try_get_raw::<U>(me).unwrap_or_else(|| {
+	unsafe fn try_get_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U>;
+
+	unsafe fn try_get_mut_unchecked<'a, U: ?Sized + 'static>(me: *mut Self) -> Option<&'a mut U>;
+
+	// === Derived getters === //
+
+	unsafe fn get_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> &'a U {
+		Self::try_get_unchecked::<U>(me).unwrap_or_else(|| {
 			panic!(
 				"provider does not have immutable component of type {:?}",
 				type_name::<U>()
@@ -22,21 +34,21 @@ pub unsafe trait Provider: Sized {
 		})
 	}
 
-	unsafe fn get_raw_mut<'a, U: ?Sized + 'static>(me: *mut Self) -> *mut &'a mut U {
-		Self::try_get_raw_mut::<U>(me).unwrap_or_else(|| {
+	unsafe fn get_mut_unchecked<'a, U: ?Sized + 'static>(me: *mut Self) -> &'a mut U {
+		Self::try_get_mut_unchecked::<U>(me).unwrap_or_else(|| {
 			panic!(
-				"provider does not have immutable component of type {:?}",
+				"provider does not have mutable component of type {:?}",
 				type_name::<U>()
 			)
 		})
 	}
 
 	fn try_get<'a, U: ?Sized + 'static>(&'a self) -> Option<&'a U> {
-		unsafe { Self::try_get_raw::<'a, U>(self).map(|p| &**p) }
+		unsafe { Self::try_get_unchecked::<'a, U>(self) }
 	}
 
 	fn try_get_mut<'a, U: ?Sized + 'static>(&'a mut self) -> Option<&'a mut U> {
-		unsafe { Self::try_get_raw_mut::<'a, U>(self).map(|p| &mut **p) }
+		unsafe { Self::try_get_mut_unchecked::<'a, U>(self) }
 	}
 
 	fn get<U: ?Sized + 'static>(&self) -> &U {
@@ -57,37 +69,56 @@ pub unsafe trait Provider: Sized {
 		})
 	}
 
+	// === Conversions === //
+
 	fn pack<'a, P: ProviderPack<'a>>(&'a mut self) -> P {
 		P::pack_from(self)
+	}
+
+	fn as_dyn(&mut self) -> DynProvider {
+		let mut target = DynProvider::default();
+		self.build_dyn_provider(&mut target);
+		target
 	}
 }
 
 unsafe impl<T: ?Sized + 'static> Provider for &T {
-	unsafe fn try_get_raw<'a, U: ?Sized + 'static>(me: *const Self) -> Option<*const &'a U> {
+	fn build_dyn_provider<'r>(&'r mut self, provider: &mut DynProvider<'r>) {
+		provider.add_ref(*self);
+	}
+
+	unsafe fn try_get_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
 		if TypeId::of::<T>() == TypeId::of::<U>() {
-			Some(me.cast::<&'a U>())
+			let p_me = me.cast::<*const U>().read(); // &T -> *const T -> *const U
+			Some(&*p_me)
 		} else {
 			None
 		}
 	}
 
-	unsafe fn try_get_raw_mut<'a, U: ?Sized + 'static>(_me: *mut Self) -> Option<*mut &'a mut U> {
+	unsafe fn try_get_mut_unchecked<'a, U: ?Sized + 'static>(_me: *mut Self) -> Option<&'a mut U> {
 		None
 	}
 }
 
 unsafe impl<T: ?Sized + 'static> Provider for &mut T {
-	unsafe fn try_get_raw<'a, U: ?Sized + 'static>(me: *const Self) -> Option<*const &'a U> {
+	fn build_dyn_provider<'r>(&'r mut self, provider: &mut DynProvider<'r>) {
+		provider.add_mut(*self);
+	}
+
+	unsafe fn try_get_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
 		if TypeId::of::<T>() == TypeId::of::<U>() {
-			Some(me.cast::<&'a U>())
+			let p_me = me.cast::<*const U>().read(); // &mut T -> *mut T -> *const T -> *const U
+			Some(&*p_me)
 		} else {
 			None
 		}
 	}
 
-	unsafe fn try_get_raw_mut<'a, U: ?Sized + 'static>(me: *mut Self) -> Option<*mut &'a mut U> {
+	unsafe fn try_get_mut_unchecked<'a, U: ?Sized + 'static>(me: *mut Self) -> Option<&'a mut U> {
 		if TypeId::of::<T>() == TypeId::of::<U>() {
-			Some(me.cast::<&'a mut U>())
+			let p_me = me.cast::<*mut U>().read(); // &mut T -> *mut T -> *mut U
+			Some(&mut *p_me)
 		} else {
 			None
 		}
@@ -97,17 +128,22 @@ unsafe impl<T: ?Sized + 'static> Provider for &mut T {
 macro tup_impl_provider($($para:ident:$field:tt),*) {
 	unsafe impl<$($para: Provider),*> Provider for ($($para,)*) {
 		#[allow(unused)]
-		unsafe fn try_get_raw<'a, U: ?Sized + 'static>(me: *const Self) -> Option<*const &'a U> {
-			$(if let Some(p) = <$para as Provider>::try_get_raw(addr_of!((*me).$field)) {
-					return Some(p);
+		fn build_dyn_provider<'r>(&'r mut self, provider: &mut DynProvider<'r>) {
+			$(self.$field.build_dyn_provider(provider);)*
+		}
+
+		#[allow(unused)]
+		unsafe fn try_get_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
+			$(if let Some(p) = <$para as Provider>::try_get_unchecked(addr_of!((*me).$field)) {
+				return Some(p);
 			})*
 
 			None
 		}
 
 		#[allow(unused)]
-		unsafe fn try_get_raw_mut<'a, U: ?Sized + 'static>(me: *mut Self) -> Option<*mut &'a mut U> {
-			$(if let Some(p) = <$para as Provider>::try_get_raw_mut(addr_of_mut!((*me).$field)) {
+		unsafe fn try_get_mut_unchecked<'a, U: ?Sized + 'static>(me: *mut Self) -> Option<&'a mut U> {
+			$(if let Some(p) = <$para as Provider>::try_get_mut_unchecked(addr_of_mut!((*me).$field)) {
 				return Some(p);
 			})*
 
@@ -117,6 +153,81 @@ macro tup_impl_provider($($para:ident:$field:tt),*) {
 }
 
 impl_tuples!(tup_impl_provider);
+
+// === DynProvider === //
+
+#[derive(Default)]
+pub struct DynProvider<'r> {
+	_ty: PhantomData<&'r dyn All>,
+	comps: HashMap<NamedTypeId, (bool, MaybeBoxedCopy<*mut dyn All>)>,
+}
+
+impl fmt::Debug for DynProvider<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("DynProvider")
+			.field("comps", &self.comps.keys().collect::<Vec<_>>())
+			.finish()
+	}
+}
+
+impl<'r> DynProvider<'r> {
+	pub fn add_ref<T: ?Sized + 'static>(&mut self, comp: &'r T) {
+		unsafe { self.add_ref_raw(comp) }
+	}
+
+	pub fn add_mut<T: ?Sized + 'static>(&mut self, comp: &'r mut T) {
+		unsafe { self.add_mut_raw(comp) }
+	}
+
+	pub unsafe fn add_raw<T: ?Sized + 'static>(&mut self, is_mutable: bool, comp: *const T) {
+		self.comps.insert(
+			NamedTypeId::of::<T>(),
+			(is_mutable, MaybeBoxedCopy::new(comp)),
+		);
+	}
+
+	pub unsafe fn add_ref_raw<T: ?Sized + 'static>(&mut self, comp: *const T) {
+		self.add_raw(false, comp);
+	}
+
+	pub unsafe fn add_mut_raw<T: ?Sized + 'static>(&mut self, comp: *mut T) {
+		self.add_raw(true, comp);
+	}
+
+	pub fn remove<T: ?Sized + 'static>(&mut self) {
+		self.comps.remove(&NamedTypeId::of::<T>());
+	}
+}
+
+unsafe impl Provider for DynProvider<'_> {
+	fn build_dyn_provider<'r>(&'r mut self, provider: &mut DynProvider<'r>) {
+		for (&key, (is_mutable, comp)) in &self.comps {
+			provider.comps.insert(key, (*is_mutable, comp.clone()));
+		}
+	}
+
+	unsafe fn try_get_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
+		let me = &*me;
+
+		me.comps
+			.get(&NamedTypeId::of::<U>())
+			.map(|(_mutable, ptr)| &*ptr.get::<*const U>())
+	}
+
+	unsafe fn try_get_mut_unchecked<'a, U: ?Sized + 'static>(me: *mut Self) -> Option<&'a mut U> {
+		let me = &*me;
+
+		me.comps
+			.get(&NamedTypeId::of::<U>())
+			.and_then(|(mutable, ptr)| {
+				if *mutable {
+					Some(&mut *ptr.get::<*mut U>())
+				} else {
+					None
+				}
+			})
+	}
+}
 
 // === ProviderPack === //
 
@@ -142,7 +253,7 @@ where
 	type AliasPointee = T;
 
 	unsafe fn pack_from<Q: Provider>(provider: *mut Q) -> Self {
-		*Q::get_raw(provider)
+		Q::get_unchecked(provider)
 	}
 }
 
@@ -154,7 +265,7 @@ where
 	type AliasPointee = T;
 
 	unsafe fn pack_from<Q: Provider>(provider: *mut Q) -> Self {
-		*Q::get_raw_mut(provider)
+		Q::get_mut_unchecked(provider)
 	}
 }
 
@@ -207,7 +318,20 @@ mod test {
 		receiver(d.pack());
 	}
 
-	fn receiver((b, c): (&mut u32, &str)) {
+	fn receiver(mut cx: (&mut u32, &str)) {
+		assert_eq!(*cx.0, 2);
+		assert_eq!(cx.1, "foo");
+
+		receiver_2(&mut cx.as_dyn());
+	}
+
+	fn receiver_2(cx: &mut DynProvider) {
+		dbg!(&cx);
+		unpack!(cx => {
+			b = &mut u32,
+			c = &str,
+		});
+
 		assert_eq!(*b, 2);
 		assert_eq!(c, "foo");
 	}
