@@ -1,16 +1,19 @@
 use anyhow::Context;
 use crucible_core::ecs::{
-	core::{Archetype, Entity, Storage},
+	context::Provider,
+	core::{Archetype, Storage},
 	userdata::Userdata,
 };
 use wgpu::SurfaceConfiguration;
-use winit::{event_loop::EventLoop, window::WindowBuilder};
+use winit::{dpi::LogicalSize, event_loop::EventLoop, window::WindowBuilder};
+
+use crate::game::entry::PlayScene;
 
 use super::{
 	gfx::{GfxContext, GfxFeatureNeedsScreen},
 	input::InputManager,
 	resources::ResourceManager,
-	scene::SceneManager,
+	scene::{SceneManager, SceneRenderHandler, SceneUpdateHandler},
 	viewport::{Viewport, ViewportManager},
 };
 
@@ -29,17 +32,8 @@ struct EngineRoot {
 	// Storages
 	viewports: Storage<Viewport>,
 	userdata: Storage<Userdata>,
-	update_handlers: Storage<fn(Entity, &mut Storage<Userdata>)>,
-	render_handlers: Storage<
-		fn(
-			Entity,
-			(
-				&mut Storage<Userdata>,
-				&GfxContext,
-				&mut wgpu::SurfaceTexture,
-			),
-		),
-	>,
+	update_handlers: Storage<SceneUpdateHandler>,
+	render_handlers: Storage<SceneRenderHandler>,
 }
 
 impl EngineRoot {
@@ -48,6 +42,7 @@ impl EngineRoot {
 		let event_loop = EventLoop::new();
 		let main_window = WindowBuilder::new()
 			.with_title("Crucible")
+			.with_inner_size(LogicalSize::new(1920, 1080))
 			.with_visible(false)
 			.build(&event_loop)
 			.context("failed to create main window")?;
@@ -134,62 +129,12 @@ pub async fn main_inner() -> anyhow::Result<()> {
 	// Setup initial scene
 	{
 		let scene_mgr = &mut root.scene_mgr;
-
-		let userdata = &mut root.userdata;
-		let scene_arch = &mut root.scene_arch;
-		let update_handlers = &mut root.update_handlers;
-		let render_handlers = &mut root.render_handlers;
-
-		let scene = scene_arch.spawn();
-		userdata.add(scene, Box::new(0f64));
-
-		update_handlers.add(scene, |me, userdata| {
-			let me_data = userdata.get_downcast_mut::<f64>(me);
-			*me_data += 0.01;
-		});
-
-		render_handlers.add(scene, |me, (userdata, gfx, frame)| {
-			let me_data = userdata.get_downcast::<f64>(me);
-
-			let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
-				label: Some("frame view"),
-				format: None,
-				dimension: None,
-				aspect: wgpu::TextureAspect::All,
-				base_mip_level: 0,
-				mip_level_count: None,
-				base_array_layer: 0,
-				array_layer_count: None,
-			});
-
-			let mut encoder = gfx
-				.device
-				.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-					label: Some("main viewport renderer"),
-				});
-
-			let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-				label: Some("main render pass"),
-				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-					view: &view,
-					ops: wgpu::Operations {
-						load: wgpu::LoadOp::Clear(wgpu::Color {
-							r: 0.5 + 0.5 * me_data.cos(),
-							g: 0.1,
-							b: 0.1,
-							a: 1.0,
-						}),
-						store: true,
-					},
-					resolve_target: None,
-				})],
-				depth_stencil_attachment: None,
-			});
-
-			drop(pass);
-
-			gfx.queue.submit([encoder.finish()]);
-		});
+		let scene = PlayScene::spawn((
+			&mut root.scene_arch,
+			&mut root.userdata,
+			&mut root.update_handlers,
+			&mut root.render_handlers,
+		));
 
 		scene_mgr.set_initial(scene);
 	}
@@ -220,7 +165,10 @@ pub async fn main_inner() -> anyhow::Result<()> {
 			MainEventsCleared => {
 				// Process update
 				let curr_scene = root.scene_mgr.current();
-				root.update_handlers[curr_scene](curr_scene, &mut root.userdata);
+				root.update_handlers[curr_scene](
+					curr_scene,
+					&mut (&mut root.input_mgr, &mut root.userdata).as_dyn(),
+				);
 
 				// Request redraws
 				for (&_window, &viewport) in root.viewport_mgr.window_map() {
@@ -249,7 +197,8 @@ pub async fn main_inner() -> anyhow::Result<()> {
 				let curr_scene = root.scene_mgr.current();
 				root.render_handlers[curr_scene](
 					curr_scene,
-					(&mut root.userdata, &root.gfx, &mut frame),
+					&mut (&mut root.userdata, &root.gfx).as_dyn(),
+					&mut frame,
 				);
 
 				frame.present();

@@ -105,6 +105,12 @@ impl Archetype {
 	}
 }
 
+impl Default for Archetype {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl Drop for Archetype {
 	fn drop(&mut self) {
 		let mut free_arch_ids = ARCH_ID_FREE_LIST.lock().unwrap_pretty();

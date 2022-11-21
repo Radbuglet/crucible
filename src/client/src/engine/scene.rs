@@ -1,4 +1,7 @@
-use crucible_core::ecs::core::Entity;
+use crucible_core::ecs::{context::DynProvider, core::Entity};
+
+pub type SceneUpdateHandler = fn(Entity, &mut DynProvider);
+pub type SceneRenderHandler = fn(Entity, &mut DynProvider, &mut wgpu::SurfaceTexture);
 
 #[derive(Debug, Default)]
 pub struct SceneManager {
