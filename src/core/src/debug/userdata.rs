@@ -1,9 +1,17 @@
 use std::{
 	any::{type_name, Any},
 	fmt,
+	ops::Deref,
+	sync::Arc,
 };
 
+use derive_where::derive_where;
+
 use crate::lang::lifetime::try_transform_mut;
+
+// === Userdata === //
+
+pub type Userdata = Box<dyn UserdataValue>;
 
 pub trait UserdataValue: fmt::Debug + Any + Send + Sync {
 	#[doc(hidden)]
@@ -61,5 +69,41 @@ impl dyn UserdataValue {
 			Ok(val) => val,
 			Err(val) => val.unexpected_userdata::<T>(),
 		}
+	}
+}
+
+// === UserdataArcRef === //
+
+#[derive(Debug)]
+#[derive_where(Copy, Clone)]
+pub struct UserdataArcRef<'a, T: 'static> {
+	arc: &'a Arc<dyn UserdataValue>,
+	val: &'a T,
+}
+
+impl<'a, T: 'static> UserdataArcRef<'a, T> {
+	pub fn new(arc: &'a Arc<dyn UserdataValue>) -> Self {
+		Self {
+			arc,
+			val: arc.downcast_ref(),
+		}
+	}
+}
+
+impl<'a, T> Into<Arc<T>> for UserdataArcRef<'a, T> {
+	fn into(self) -> Arc<T> {
+		let ptr = Arc::into_raw(self.arc.clone());
+
+		// Safety: we already verified that `dyn Userdata` was actually `T` in the constructor.
+		let ptr = ptr as *const T;
+		unsafe { Arc::from_raw(ptr) }
+	}
+}
+
+impl<'a, T> Deref for UserdataArcRef<'a, T> {
+	type Target = &'a T; // This should allow users to borrow the value for its full duration.
+
+	fn deref(&self) -> &Self::Target {
+		&self.val
 	}
 }

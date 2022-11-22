@@ -368,7 +368,7 @@ checksum = "cb3faad1502613f2bbc3825b9e96d7d604eec2716c4723903d1ad31139d8f05c"
 dependencies = [
  "bytemuck",
  "crevice-derive",
- "glam 0.22.0",
+ "glam",
  "mint",
 ]
 
@@ -854,12 +854,6 @@ dependencies = [
  "libc",
  "wasi",
 ]
-
-[[package]]
-name = "glam"
-version = "0.21.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "518faa5064866338b013ff9b2350dc318e14cc4fcd6cb8206d7e7c9886c98815"
 
 [[package]]
 name = "glam"
@@ -1846,7 +1840,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "crucible-core",
- "glam 0.21.3",
+ "glam",
  "num-traits",
 ]
 

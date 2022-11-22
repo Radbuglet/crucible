@@ -1,8 +1,10 @@
 use anyhow::Context;
-use crucible_core::ecs::{
-	context::Provider,
-	core::{Archetype, Storage},
-	userdata::Userdata,
+use crucible_core::{
+	debug::userdata::Userdata,
+	ecs::{
+		context::Provider,
+		core::{Archetype, Storage},
+	},
 };
 use wgpu::SurfaceConfiguration;
 use winit::{dpi::LogicalSize, event_loop::EventLoop, window::WindowBuilder};

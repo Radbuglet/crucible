@@ -1,15 +1,12 @@
-// TODO: Define cost sets
-
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
 
 use crevice::std430::AsStd430;
 use crucible_common::voxel::math::{BlockFace, Sign};
-use geode::prelude::*;
 use typed_glam::glam;
 
-use crate::engine::services::{
+use crate::engine::{
 	gfx::GfxContext,
-	resources::{ResourceBundle, ResourceBundleCtor, ResourceDescriptor, ResourceManager},
+	resources::{ResourceDescriptor, ResourceManager},
 };
 
 // === OpaqueBlockShader === //
@@ -17,55 +14,47 @@ use crate::engine::services::{
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct OpaqueBlockShaderDesc;
 
-impl<'a> ResourceDescriptor<&'a GfxContext> for OpaqueBlockShaderDesc {
+impl ResourceDescriptor for OpaqueBlockShaderDesc {
+	type Context<'a> = &'a GfxContext;
 	type Resource = wgpu::ShaderModule;
-	type Error = !;
 
-	fn create(
+	fn construct(
 		&self,
-		s: Session,
 		_res_mgr: &mut ResourceManager,
-		gfx: &'a GfxContext,
-	) -> Result<Owned<ResourceBundle<Self::Resource>>, Self::Error> {
-		let opaque_block_module = gfx
-			.device
-			.create_shader_module(wgpu::ShaderModuleDescriptor {
-				label: Some("opaque_block.wgsl"),
-				source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-					"shaders/opaque_block.wgsl"
-				))),
-			})
-			.box_obj(s);
-
-		Ok(ResourceBundle::spawn(
-			s,
-			ResourceBundleCtor {
-				resource: opaque_block_module.into(),
-			},
-		))
+		gfx: Self::Context<'_>,
+	) -> Arc<Self::Resource> {
+		Arc::new(
+			gfx.device
+				.create_shader_module(wgpu::ShaderModuleDescriptor {
+					label: Some("opaque_block.wgsl"),
+					source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+						"shaders/opaque_block.wgsl"
+					))),
+				}),
+		)
 	}
 }
 
-// === VoxelPipelineLayout === //
-
+// // === VoxelPipelineLayout === //
+//
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct VoxelPipelineLayoutDesc;
 
+#[derive(Debug)]
 pub struct VoxelPipelineLayout {
 	pub uniform_group_layout: wgpu::BindGroupLayout,
 	pub pipeline_layout: wgpu::PipelineLayout,
 }
 
-impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelPipelineLayoutDesc {
+impl ResourceDescriptor for VoxelPipelineLayoutDesc {
+	type Context<'a> = &'a GfxContext;
 	type Resource = VoxelPipelineLayout;
-	type Error = !;
 
-	fn create(
+	fn construct(
 		&self,
-		s: Session,
 		_res_mgr: &mut ResourceManager,
-		gfx: &'a GfxContext,
-	) -> Result<Owned<ResourceBundle<Self::Resource>>, Self::Error> {
+		gfx: Self::Context<'_>,
+	) -> Arc<Self::Resource> {
 		let uniform_group_layout =
 			gfx.device
 				.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -90,23 +79,15 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelPipelineLayoutDesc {
 				push_constant_ranges: &[],
 			});
 
-		let bundle = VoxelPipelineLayout {
+		Arc::new(VoxelPipelineLayout {
 			uniform_group_layout,
 			pipeline_layout,
-		}
-		.box_obj(s);
-
-		Ok(ResourceBundle::spawn(
-			s,
-			ResourceBundleCtor {
-				resource: bundle.into(),
-			},
-		))
+		})
 	}
 }
-
-// === VoxelRenderingPipeline === //
-
+//
+// // === VoxelRenderingPipeline === //
+//
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct VoxelRenderingPipelineDesc {
 	pub surface_format: wgpu::TextureFormat,
@@ -115,18 +96,17 @@ pub struct VoxelRenderingPipelineDesc {
 	pub back_face_culling: bool,
 }
 
-impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelRenderingPipelineDesc {
+impl ResourceDescriptor for VoxelRenderingPipelineDesc {
+	type Context<'a> = &'a GfxContext;
 	type Resource = wgpu::RenderPipeline;
-	type Error = !;
 
-	fn create(
+	fn construct(
 		&self,
-		s: Session,
 		res_mgr: &mut ResourceManager,
-		gfx: &'a GfxContext,
-	) -> Result<Owned<ResourceBundle<Self::Resource>>, Self::Error> {
-		let shader = res_mgr.load(s, gfx, OpaqueBlockShaderDesc).resource(s);
-		let layout = res_mgr.load(s, gfx, VoxelPipelineLayoutDesc).resource(s);
+		gfx: Self::Context<'_>,
+	) -> Arc<Self::Resource> {
+		let shader: Arc<wgpu::ShaderModule> = res_mgr.load(&OpaqueBlockShaderDesc, gfx).into();
+		let layout: Arc<VoxelPipelineLayout> = res_mgr.load(&VoxelPipelineLayoutDesc, gfx).into();
 
 		let pipeline = gfx
 			.device
@@ -134,7 +114,7 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelRenderingPipelineDesc {
 				label: Some("opaque voxel pipeline"),
 				layout: Some(&layout.pipeline_layout),
 				vertex: wgpu::VertexState {
-					module: shader,
+					module: &shader,
 					entry_point: "vs_main",
 					buffers: &[wgpu::VertexBufferLayout {
 						array_stride: VoxelVertex::std430_size_static() as wgpu::BufferAddress,
@@ -181,24 +161,18 @@ impl<'a> ResourceDescriptor<&'a GfxContext> for VoxelRenderingPipelineDesc {
 					})],
 				}),
 				multiview: None,
-			})
-			.box_obj(s);
+			});
 
-		Ok(ResourceBundle::spawn(
-			s,
-			ResourceBundleCtor {
-				resource: pipeline.into(),
-			},
-		))
+		Arc::new(pipeline)
 	}
 
-	fn keep_alive(&self, s: Session, res_mgr: &mut ResourceManager, ctx: &'a GfxContext) {
-		res_mgr.keep_alive(s, ctx, OpaqueBlockShaderDesc);
-		res_mgr.keep_alive(s, ctx, VoxelPipelineLayoutDesc);
+	fn keep_alive(&self, res_mgr: &mut ResourceManager) {
+		res_mgr.keep_alive(&OpaqueBlockShaderDesc);
+		res_mgr.keep_alive(&VoxelPipelineLayoutDesc);
 	}
 }
-
-// === VoxelUniformManager === //
+//
+// // === VoxelUniformManager === //
 
 pub struct VoxelUniforms {
 	uniform_bind_group: wgpu::BindGroup,
@@ -206,8 +180,8 @@ pub struct VoxelUniforms {
 }
 
 impl VoxelUniforms {
-	pub fn new(s: Session, gfx: &GfxContext, res_mgr: &mut ResourceManager) -> Self {
-		let layout = res_mgr.load(s, gfx, VoxelPipelineLayoutDesc).resource(s);
+	pub fn new((gfx, res_mgr): (&GfxContext, &mut ResourceManager)) -> Self {
+		let layout = res_mgr.load(&VoxelPipelineLayoutDesc, gfx);
 
 		let uniform_buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("uniform buffer"),

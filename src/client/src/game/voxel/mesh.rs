@@ -95,11 +95,7 @@ impl VoxelWorldMesh {
 
 						// Mesh it!
 						let center_pos = WorldVec::compose(chunk_data.pos(), center_pos);
-						VoxelVertex::push_quad(
-							&mut vertices,
-							center_pos.to_glam().as_vec3(),
-							face,
-						);
+						VoxelVertex::push_quad(&mut vertices, center_pos.to_glam().as_vec3(), face);
 					}
 				}
 				vertices

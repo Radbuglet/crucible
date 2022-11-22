@@ -1,13 +1,11 @@
 use std::cell::{Ref, RefMut};
 
-use crate::debug::userdata::UserdataValue;
+use crate::debug::userdata::Userdata;
 
 use super::{
 	celled::{CelledStorage, CelledStorageView},
 	core::{Entity, Storage},
 };
-
-pub type Userdata = Box<dyn UserdataValue>;
 
 impl Storage<Userdata> {
 	pub fn get_downcast<T: 'static>(&self, entity: Entity) -> &T {

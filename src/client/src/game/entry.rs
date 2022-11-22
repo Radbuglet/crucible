@@ -1,7 +1,9 @@
-use crucible_core::ecs::{
-	context::{unpack, DynProvider},
-	core::{Archetype, Entity, Storage},
-	userdata::Userdata,
+use crucible_core::{
+	debug::userdata::Userdata,
+	ecs::{
+		context::{unpack, DynProvider},
+		core::{Archetype, Entity, Storage},
+	},
 };
 
 use crate::engine::{
