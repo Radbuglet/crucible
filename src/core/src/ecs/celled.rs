@@ -9,8 +9,6 @@ use crate::{lang::sync::ExtRefCell, mem::ptr::PointeeCastExt};
 
 use super::core::{failed_to_find_component, Entity, Storage};
 
-// TODO: Update re-exposed interface to match `Storage`'s
-
 #[derive(Debug)]
 #[derive_where(Default)]
 #[repr(transparent)]
@@ -64,7 +62,7 @@ impl<T> CelledStorage<T> {
 		self.inner.clear();
 	}
 
-	pub fn borrow_dyn(&mut self) -> &mut CelledStorageView<T> {
+	pub fn as_celled_view(&mut self) -> &mut CelledStorageView<T> {
 		unsafe {
 			// FIXME: Reconsider transmute safety, especially as it relates to `Storage<ExtRefCell<T>>`
 			// to `Storage<RefCell<T>>` conversion—`HashMap` doesn't officially guarantee the same

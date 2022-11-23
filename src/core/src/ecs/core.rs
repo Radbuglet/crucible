@@ -1,7 +1,6 @@
 use std::{
 	any::type_name,
-	collections::hash_map,
-	collections::HashMap,
+	collections::{HashMap, HashSet},
 	num::NonZeroU32,
 	ops::{self, Deref, DerefMut},
 	sync::Mutex,
@@ -12,7 +11,7 @@ use derive_where::derive_where;
 use crate::{
 	debug::{
 		error::ResultExt,
-		lifetime::{DebugLifetime, LifetimeDependent, LifetimeOwner},
+		lifetime::{DebugLifetime, Dependable, Dependent, LifetimeOwner},
 	},
 	lang::polyfill::VecPoly,
 	mem::{free_list::PureFreeList, ptr::PointeeCastExt},
@@ -28,6 +27,16 @@ pub struct ArchetypeId {
 	pub id: NonZeroU32,
 }
 
+impl Dependable for ArchetypeId {
+	fn inc_dep(self) {
+		self.lifetime.inc_dep();
+	}
+
+	fn dec_dep(self) {
+		self.lifetime.dec_dep();
+	}
+}
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Entity {
 	pub lifetime: DebugLifetime,
@@ -40,6 +49,23 @@ impl Entity {
 		self.slot as usize
 	}
 }
+
+impl Dependable for Entity {
+	fn inc_dep(self) {
+		self.lifetime.inc_dep();
+	}
+
+	fn dec_dep(self) {
+		self.lifetime.dec_dep();
+	}
+}
+
+// === Containers === //
+
+pub type EntityMap<T> = HashMap<Dependent<Entity>, T>;
+pub type EntitySet = HashSet<Dependent<Entity>>;
+pub type ArchetypeMap<T> = HashMap<Dependent<ArchetypeId>, T>;
+pub type ArchetypeSet = HashSet<Dependent<ArchetypeId>>;
 
 // === Archetype === //
 
@@ -280,7 +306,7 @@ pub(super) fn failed_to_find_component<T>(entity: Entity) -> ! {
 	);
 }
 
-type StorageRunSlot<T> = Option<(LifetimeDependent<DebugLifetime>, T)>;
+type StorageRunSlot<T> = Option<(Dependent<DebugLifetime>, T)>;
 
 #[derive(Debug, Clone)]
 #[derive_where(Default)]
@@ -296,7 +322,7 @@ impl<T> StorageRun<T> {
 	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
 		let slot = self.comps.ensure_slot_with(entity.slot_usize(), || None);
 		let replaced = slot
-			.replace((LifetimeDependent::new(entity.lifetime), value))
+			.replace((Dependent::new(entity.lifetime), value))
 			.map(|(_, replaced)| replaced);
 
 		(replaced, &mut slot.as_mut().unwrap().1)
@@ -357,14 +383,14 @@ impl<T> StorageRunView<T> {
 
 	pub fn get(&self, slot: u32) -> Option<(DebugLifetime, &T)> {
 		match self.0.get(slot as usize) {
-			Some(Some((lt, value))) => Some((lt.lifetime(), value)),
+			Some(Some((lt, value))) => Some((lt.get(), value)),
 			_ => None,
 		}
 	}
 
 	pub fn get_mut(&mut self, slot: u32) -> Option<(DebugLifetime, &mut T)> {
 		match self.0.get_mut(slot as usize) {
-			Some(Some((lt, value))) => Some((lt.lifetime(), value)),
+			Some(Some((lt, value))) => Some((lt.get(), value)),
 			_ => None,
 		}
 	}
@@ -372,154 +398,6 @@ impl<T> StorageRunView<T> {
 	pub fn max_slot(&self) -> u32 {
 		self.0.len() as u32
 	}
-}
-
-// === ArchetypeMap === //
-
-#[derive(Debug, Clone)]
-#[derive_where(Default)]
-pub struct ArchetypeMap<T> {
-	map: HashMap<NonZeroU32, (LifetimeDependent<DebugLifetime>, T)>,
-}
-
-impl<T> ArchetypeMap<T> {
-	pub fn new() -> Self {
-		Self::default()
-	}
-
-	pub fn add(&mut self, id: ArchetypeId, value: T) -> Option<T> {
-		self.map
-			.insert(id.id, (LifetimeDependent::new(id.lifetime), value))
-			.map(|(_, v)| v)
-	}
-
-	pub fn remove(&mut self, id: ArchetypeId) -> Option<T> {
-		self.map.remove(&id.id).map(|(_, v)| v)
-	}
-
-	pub fn remove_many<I>(&mut self, archetypes: I)
-	where
-		I: IntoIterator<Item = ArchetypeId>,
-	{
-		for arch in archetypes {
-			self.remove(arch);
-		}
-	}
-
-	pub fn try_get(&self, id: ArchetypeId) -> Option<&T> {
-		self.map.get(&id.id).map(|(_, v)| v)
-	}
-
-	pub fn try_get_mut(&mut self, id: ArchetypeId) -> Option<&mut T> {
-		self.map.get_mut(&id.id).map(|(_, v)| v)
-	}
-
-	pub fn get(&self, id: ArchetypeId) -> &T {
-		self.try_get(id)
-			.unwrap_or_else(|| failed_to_find_archetype_meta::<T>(id))
-	}
-
-	pub fn get_mut(&mut self, id: ArchetypeId) -> &mut T {
-		self.try_get_mut(id)
-			.unwrap_or_else(|| failed_to_find_archetype_meta::<T>(id))
-	}
-
-	pub fn clear(&mut self) {
-		self.map.clear();
-	}
-
-	pub fn iter(&self) -> ArchetypeMapIter<T> {
-		ArchetypeMapIter {
-			iter: self.map.iter(),
-		}
-	}
-
-	pub fn iter_mut(&mut self) -> ArchetypeMapIterMut<T> {
-		ArchetypeMapIterMut {
-			iter: self.map.iter_mut(),
-		}
-	}
-}
-
-impl<T> ops::Index<ArchetypeId> for ArchetypeMap<T> {
-	type Output = T;
-
-	fn index(&self, index: ArchetypeId) -> &Self::Output {
-		self.get(index)
-	}
-}
-
-impl<T> ops::IndexMut<ArchetypeId> for ArchetypeMap<T> {
-	fn index_mut(&mut self, index: ArchetypeId) -> &mut Self::Output {
-		self.get_mut(index)
-	}
-}
-
-#[derive(Debug, Clone)]
-pub struct ArchetypeMapIter<'a, T> {
-	iter: hash_map::Iter<'a, NonZeroU32, (LifetimeDependent<DebugLifetime>, T)>,
-}
-
-impl<'a, T> Iterator for ArchetypeMapIter<'a, T> {
-	type Item = (ArchetypeId, &'a T);
-
-	fn next(&mut self) -> Option<Self::Item> {
-		self.iter.next().map(|(&id, (lt, val))| {
-			(
-				ArchetypeId {
-					id,
-					lifetime: lt.lifetime(),
-				},
-				val,
-			)
-		})
-	}
-}
-
-impl<'a, T> IntoIterator for &'a ArchetypeMap<T> {
-	type Item = (ArchetypeId, &'a T);
-	type IntoIter = ArchetypeMapIter<'a, T>;
-
-	fn into_iter(self) -> Self::IntoIter {
-		self.iter()
-	}
-}
-
-#[derive(Debug)]
-pub struct ArchetypeMapIterMut<'a, T> {
-	iter: hash_map::IterMut<'a, NonZeroU32, (LifetimeDependent<DebugLifetime>, T)>,
-}
-
-impl<'a, T> Iterator for ArchetypeMapIterMut<'a, T> {
-	type Item = (ArchetypeId, &'a mut T);
-
-	fn next(&mut self) -> Option<Self::Item> {
-		self.iter.next().map(|(&id, (lt, val))| {
-			(
-				ArchetypeId {
-					id,
-					lifetime: lt.lifetime(),
-				},
-				val,
-			)
-		})
-	}
-}
-
-impl<'a, T> IntoIterator for &'a mut ArchetypeMap<T> {
-	type Item = (ArchetypeId, &'a mut T);
-	type IntoIter = ArchetypeMapIterMut<'a, T>;
-
-	fn into_iter(self) -> Self::IntoIter {
-		self.iter_mut()
-	}
-}
-
-pub(super) fn failed_to_find_archetype_meta<T>(id: ArchetypeId) -> ! {
-	panic!(
-		"failed to find archetype {id:?} with metadata of type {}",
-		type_name::<T>()
-	);
 }
 
 // === Tests === //

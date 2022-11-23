@@ -1,4 +1,5 @@
-pub macro impl_tuples_with {
+pub macro impl_tuples {
+	// === impl_tuples_with === //
 	(
 		$target:path : []
 		$(| [
@@ -19,7 +20,7 @@ pub macro impl_tuples_with {
 			$($($($pre)*,)*)?
 			$($next)*
 		);
-		impl_tuples_with!(
+		impl_tuples!(
 			$target : [
 				$($rest)*
 			] | [
@@ -28,11 +29,10 @@ pub macro impl_tuples_with {
 			]
 		);
 	},
-}
 
-pub macro impl_tuples {
+	// === impl_tuples === //
 	($target:path; no_unit) => {
-		impl_tuples_with!(
+		impl_tuples!(
 			$target : [
 				{A: 0}
 				{B: 1}

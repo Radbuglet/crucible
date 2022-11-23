@@ -16,23 +16,24 @@ use super::{
 	input::InputManager,
 	resources::ResourceManager,
 	scene::{SceneManager, SceneRenderHandler, SceneUpdateHandler},
-	viewport::{Viewport, ViewportManager},
+	viewport::{FullScreenTexture, Viewport, ViewportManager},
 };
 
 struct EngineRoot {
 	// Services
 	gfx: GfxContext,
 	res_mgr: ResourceManager,
-	input_mgr: InputManager,
 	viewport_mgr: ViewportManager,
 	scene_mgr: SceneManager,
 
 	// Archetypes
-	viewport_arch: Archetype,
+	_viewport_arch: Archetype,
 	scene_arch: Archetype,
 
 	// Storages
 	viewports: Storage<Viewport>,
+	depth_textures: Storage<FullScreenTexture>,
+	input_managers: Storage<InputManager>,
 	userdata: Storage<Userdata>,
 	update_handlers: Storage<SceneUpdateHandler>,
 	render_handlers: Storage<SceneRenderHandler>,
@@ -59,6 +60,8 @@ impl EngineRoot {
 		let mut viewport_mgr = ViewportManager::default();
 		let mut viewport_arch = Archetype::new();
 		let mut viewports = Storage::new();
+		let mut depth_textures = Storage::new();
+		let mut input_managers = Storage::new();
 
 		let main_viewport = viewport_arch.spawn();
 		viewports.add(
@@ -77,11 +80,17 @@ impl EngineRoot {
 				},
 			),
 		);
+		depth_textures.add(
+			main_viewport,
+			FullScreenTexture::new(
+				"depth texture",
+				wgpu::TextureFormat::Depth32Float,
+				wgpu::TextureUsages::RENDER_ATTACHMENT,
+			),
+		);
+		input_managers.add(main_viewport, InputManager::default());
 
 		viewport_mgr.register((&viewports,), main_viewport);
-
-		// Create input tracker
-		let input_mgr = InputManager::default();
 
 		// Create scene manager
 		let scene_mgr = SceneManager::default();
@@ -99,16 +108,17 @@ impl EngineRoot {
 				// Services
 				gfx,
 				res_mgr,
-				input_mgr,
 				viewport_mgr,
 				scene_mgr,
 
 				// Archetypes
-				viewport_arch,
+				_viewport_arch: viewport_arch,
 				scene_arch,
 
 				// Storages
 				viewports,
+				depth_textures,
+				input_managers,
 				userdata,
 				update_handlers,
 				render_handlers,
@@ -131,12 +141,25 @@ pub async fn main_inner() -> anyhow::Result<()> {
 	// Setup initial scene
 	{
 		let scene_mgr = &mut root.scene_mgr;
-		let scene = PlayScene::spawn((
-			&mut root.scene_arch,
-			&mut root.userdata,
-			&mut root.update_handlers,
-			&mut root.render_handlers,
-		));
+		let main_viewport = root
+			.viewport_mgr
+			.window_map()
+			.values()
+			.copied()
+			.next()
+			.unwrap();
+
+		let scene = PlayScene::spawn(
+			(
+				&mut root.scene_arch,
+				&mut root.userdata,
+				&mut root.update_handlers,
+				&mut root.render_handlers,
+				&root.gfx,
+				&mut root.res_mgr,
+			),
+			main_viewport,
+		);
 
 		scene_mgr.set_initial(scene);
 	}
@@ -150,31 +173,45 @@ pub async fn main_inner() -> anyhow::Result<()> {
 		match event {
 			// First window events and device events are dispatched.
 			WindowEvent { window_id, event } => {
-				let Some(_viewport) = root.viewport_mgr.get_viewport(window_id) else {
+				let Some(viewport) = root.viewport_mgr.get_viewport(window_id) else {
 					return;
 				};
 
 				// Process window event
-				root.input_mgr.handle_window_event(&event);
+				root.input_managers[viewport].handle_window_event(&event);
 
 				if let CloseRequested = event {
 					flow.set_exit();
 				}
 			}
 			DeviceEvent { device_id, event } => {
-				root.input_mgr.handle_device_event(device_id, &event);
+				for (_, &viewport) in root.viewport_mgr.window_map() {
+					root.input_managers[viewport].handle_device_event(device_id, &event);
+				}
 			}
 			MainEventsCleared => {
 				// Process update
 				let curr_scene = root.scene_mgr.current();
-				root.update_handlers[curr_scene](
-					curr_scene,
-					&mut (&mut root.input_mgr, &mut root.userdata).as_dyn(),
+				let mut cx = (
+					&root.gfx,
+					&mut root.viewport_mgr,
+					&mut root.depth_textures,
+					&mut root.input_managers,
+					&mut root.viewports,
+					&mut root.userdata,
+					&mut root.res_mgr,
 				);
+
+				root.update_handlers[curr_scene](curr_scene, &mut cx.as_dyn());
 
 				// Request redraws
 				for (&_window, &viewport) in root.viewport_mgr.window_map() {
 					root.viewports[viewport].window().request_redraw();
+				}
+
+				// Clear input queue
+				for (_, &viewport) in root.viewport_mgr.window_map() {
+					root.input_managers[viewport].end_tick();
 				}
 			}
 
@@ -197,11 +234,14 @@ pub async fn main_inner() -> anyhow::Result<()> {
 
 				// Process render
 				let curr_scene = root.scene_mgr.current();
-				root.render_handlers[curr_scene](
-					curr_scene,
-					&mut (&mut root.userdata, &root.gfx).as_dyn(),
-					&mut frame,
+				let mut cx = (
+					&mut root.userdata,
+					&root.gfx,
+					&mut root.res_mgr,
+					&mut root.viewports,
+					&mut root.depth_textures,
 				);
+				root.render_handlers[curr_scene](curr_scene, &mut cx.as_dyn(), &mut frame);
 
 				frame.present();
 			}

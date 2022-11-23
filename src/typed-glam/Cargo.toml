@@ -6,5 +6,5 @@ edition = "2021"
 [dependencies]
 bytemuck = { version = "1.10.0", features = ["derive"] }
 crucible-core = { path = "../core" }
-glam = "0.22.0"
+glam = "0.21.2"
 num-traits = "0.2.15"

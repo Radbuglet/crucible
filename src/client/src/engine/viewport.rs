@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::{borrow::Borrow, collections::HashMap};
 
 use crucible_core::{
+	debug::label::{DebugLabel, ReifiedDebugLabel},
 	ecs::core::{Entity, Storage},
-	mem::explicitly_drop::ExplicitlyDrop,
+	lang::explicitly_bind::ExplicitlyBind,
 };
 use thiserror::Error;
 use typed_glam::glam::UVec2;
@@ -56,7 +57,7 @@ fn surface_size_from_config(config: &wgpu::SurfaceConfiguration) -> Option<UVec2
 #[derive(Debug)]
 pub struct Viewport {
 	window: Window,
-	surface: ExplicitlyDrop<wgpu::Surface>,
+	surface: ExplicitlyBind<wgpu::Surface>,
 	curr_config: wgpu::SurfaceConfiguration,
 	next_config: wgpu::SurfaceConfiguration,
 	config_dirty: bool,
@@ -264,10 +265,112 @@ impl Viewport {
 impl Drop for Viewport {
 	fn drop(&mut self) {
 		// Ensure that the surface gets dropped before the window
-		ExplicitlyDrop::drop(&mut self.surface)
+		ExplicitlyBind::drop(&mut self.surface)
 	}
 }
 
 #[derive(Debug, Copy, Clone, Error)]
 #[error("out of device memory")]
 pub struct OutOfDeviceMemoryError;
+
+#[derive(Debug)]
+pub struct FullScreenTexture {
+	texture: Option<(wgpu::Texture, wgpu::TextureView)>,
+	conf_label: ReifiedDebugLabel,
+	conf_size: UVec2,
+	conf_format: wgpu::TextureFormat,
+	conf_usages: wgpu::TextureUsages,
+	conf_dirty: bool,
+}
+
+impl FullScreenTexture {
+	pub fn new(
+		label: impl DebugLabel,
+		format: wgpu::TextureFormat,
+		usages: wgpu::TextureUsages,
+	) -> Self {
+		Self {
+			texture: None,
+			conf_label: label.reify(),
+			conf_size: UVec2::ZERO,
+			conf_format: format,
+			conf_usages: usages,
+			conf_dirty: false,
+		}
+	}
+
+	pub fn label(&self) -> &ReifiedDebugLabel {
+		&self.conf_label
+	}
+
+	pub fn set_label(&mut self, label: impl DebugLabel) {
+		self.conf_label = label.reify();
+		self.conf_dirty = true;
+	}
+
+	pub fn format(&self) -> wgpu::TextureFormat {
+		self.conf_format
+	}
+
+	pub fn set_format(&mut self, format: wgpu::TextureFormat) {
+		if self.conf_format != format {
+			self.conf_format = format;
+			self.conf_dirty = true;
+		}
+	}
+
+	pub fn usages(&self) -> wgpu::TextureUsages {
+		self.conf_usages
+	}
+
+	pub fn set_usages(&mut self, usages: wgpu::TextureUsages) {
+		if self.conf_usages != usages {
+			self.conf_usages = usages;
+			self.conf_dirty = true;
+		}
+	}
+
+	pub fn wgpu_descriptor(&self) -> wgpu::TextureDescriptor {
+		wgpu::TextureDescriptor {
+			label: self.conf_label.as_ref().map(Borrow::borrow),
+			size: wgpu::Extent3d {
+				width: self.conf_size.x,
+				height: self.conf_size.y,
+				depth_or_array_layers: 1,
+			},
+			mip_level_count: 1,
+			sample_count: 1,
+			dimension: wgpu::TextureDimension::D2,
+			format: self.conf_format,
+			usage: self.conf_usages,
+		}
+	}
+
+	pub fn acquire(
+		&mut self,
+		(gfx, viewport): (&GfxContext, &Viewport),
+	) -> Option<(&mut wgpu::Texture, &mut wgpu::TextureView)> {
+		if let Some(curr_size) = viewport.curr_surface_size() {
+			// Look for a size mismatch
+			if curr_size != self.conf_size {
+				self.conf_size = curr_size;
+				self.conf_dirty = true;
+			}
+
+			// Rebuild the texture if the config is dirty or if the texture is not yet bound.
+			if self.conf_dirty || self.texture.is_none() {
+				let texture = gfx.device.create_texture(&self.wgpu_descriptor());
+				let view = texture.create_view(&wgpu::TextureViewDescriptor {
+					label: self.conf_label.as_ref().map(Borrow::borrow),
+					..Default::default()
+				});
+				self.texture = Some((texture, view));
+				self.conf_dirty = false;
+			}
+		} else {
+			self.texture = None;
+		}
+
+		self.texture.as_mut().map(|(tex, view)| (tex, view))
+	}
+}

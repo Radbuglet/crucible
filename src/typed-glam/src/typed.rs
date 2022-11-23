@@ -2,7 +2,6 @@ use bytemuck::TransparentWrapper;
 use crucible_core::lang::{marker::PhantomInvariant, std_traits::ArrayLike};
 
 use std::{
-	any::type_name,
 	fmt, hash,
 	iter::{Product, Sum},
 	marker::PhantomData,
@@ -160,9 +159,7 @@ impl<F: ?Sized + VecFlavor> TypedVector<F> {
 // NumericVector
 impl<F: ?Sized + VecFlavor> fmt::Debug for TypedVector<F> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_tuple(format!("TypedVector<{}>", type_name::<F>()).as_str())
-			.field(&self.as_glam())
-			.finish()
+		f.debug_tuple(F::DEBUG_NAME).field(&self.as_glam()).finish()
 	}
 }
 
@@ -504,7 +501,6 @@ where
 }
 
 // NumericVector2
-// TODO: Make this, and other variadic traits, inherent
 impl<B, F> From<(B::Comp, B::Comp)> for TypedVector<F>
 where
 	B: NumericVector2,

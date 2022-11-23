@@ -1,11 +1,8 @@
 use std::{
 	any::{type_name, Any},
 	fmt,
-	ops::Deref,
 	sync::Arc,
 };
-
-use derive_where::derive_where;
 
 use crate::lang::lifetime::try_transform_mut;
 
@@ -72,38 +69,13 @@ impl dyn UserdataValue {
 	}
 }
 
-// === UserdataArcRef === //
+// === Userdata Conversions === //
 
-#[derive(Debug)]
-#[derive_where(Copy, Clone)]
-pub struct UserdataArcRef<'a, T: 'static> {
-	arc: &'a Arc<dyn UserdataValue>,
-	val: &'a T,
-}
+pub fn downcast_userdata_arc<T: UserdataValue>(arc: Arc<dyn UserdataValue>) -> Arc<T> {
+	let _ = arc.downcast_ref::<T>();
+	let ptr = Arc::into_raw(arc);
 
-impl<'a, T: 'static> UserdataArcRef<'a, T> {
-	pub fn new(arc: &'a Arc<dyn UserdataValue>) -> Self {
-		Self {
-			arc,
-			val: arc.downcast_ref(),
-		}
-	}
-}
-
-impl<'a, T> Into<Arc<T>> for UserdataArcRef<'a, T> {
-	fn into(self) -> Arc<T> {
-		let ptr = Arc::into_raw(self.arc.clone());
-
-		// Safety: we already verified that `dyn Userdata` was actually `T` in the constructor.
-		let ptr = ptr as *const T;
-		unsafe { Arc::from_raw(ptr) }
-	}
-}
-
-impl<'a, T> Deref for UserdataArcRef<'a, T> {
-	type Target = &'a T; // This should allow users to borrow the value for its full duration.
-
-	fn deref(&self) -> &Self::Target {
-		&self.val
-	}
+	// Safety: we already verified that `dyn Userdata` was actually `T` by down-casting it.
+	let ptr = ptr as *const T;
+	unsafe { Arc::from_raw(ptr) }
 }

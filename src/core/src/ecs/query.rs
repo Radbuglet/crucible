@@ -1,4 +1,8 @@
-use crate::{debug::lifetime::DebugLifetime, lang::polyfill::OptionPoly, mem::ptr::PointeeCastExt};
+use crate::{
+	debug::lifetime::DebugLifetime,
+	lang::{macros::impl_tuples, polyfill::OptionPoly},
+	mem::ptr::PointeeCastExt,
+};
 
 use super::core::{ArchetypeId, Entity, Storage, StorageRunView};
 
@@ -70,16 +74,7 @@ macro impl_query($($para:ident:$field:tt),*) {
 	}
 }
 
-// FIXME: Use `impl_tuples` once rust-analyzer stops freaking out about it.
-impl_query!(A:0);
-impl_query!(A:0, B:1);
-impl_query!(A:0, B:1, C:2);
-impl_query!(A:0, B:1, C:2, D:3);
-impl_query!(A:0, B:1, C:2, D:3, E:4);
-impl_query!(A:0, B:1, C:2, D:3, E:4, F:5);
-impl_query!(A:0, B:1, C:2, D:3, E:4, F:5, G: 6);
-impl_query!(A:0, B:1, C:2, D:3, E:4, F:5, G: 6, H:7);
-impl_query!(A:0, B:1, C:2, D:3, E:4, F:5, G: 6, H:7, I:8);
+impl_tuples!(impl_query; no_unit);
 
 pub trait IntoQueryPartIter {
 	type Output;

@@ -19,14 +19,16 @@ pub unsafe trait Provider: Sized {
 
 	fn build_dyn_provider<'r>(&'r mut self, provider: &mut DynProvider<'r>);
 
-	unsafe fn try_get_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U>;
+	unsafe fn try_get_comp_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U>;
 
-	unsafe fn try_get_mut_unchecked<'a, U: ?Sized + 'static>(me: *mut Self) -> Option<&'a mut U>;
+	unsafe fn try_get_comp_mut_unchecked<'a, U: ?Sized + 'static>(
+		me: *mut Self,
+	) -> Option<&'a mut U>;
 
 	// === Derived getters === //
 
-	unsafe fn get_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> &'a U {
-		Self::try_get_unchecked::<U>(me).unwrap_or_else(|| {
+	unsafe fn get_comp_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> &'a U {
+		Self::try_get_comp_unchecked::<U>(me).unwrap_or_else(|| {
 			panic!(
 				"provider does not have immutable component of type {:?}",
 				type_name::<U>()
@@ -34,8 +36,8 @@ pub unsafe trait Provider: Sized {
 		})
 	}
 
-	unsafe fn get_mut_unchecked<'a, U: ?Sized + 'static>(me: *mut Self) -> &'a mut U {
-		Self::try_get_mut_unchecked::<U>(me).unwrap_or_else(|| {
+	unsafe fn get_comp_mut_unchecked<'a, U: ?Sized + 'static>(me: *mut Self) -> &'a mut U {
+		Self::try_get_comp_mut_unchecked::<U>(me).unwrap_or_else(|| {
 			panic!(
 				"provider does not have mutable component of type {:?}",
 				type_name::<U>()
@@ -43,16 +45,16 @@ pub unsafe trait Provider: Sized {
 		})
 	}
 
-	fn try_get<'a, U: ?Sized + 'static>(&'a self) -> Option<&'a U> {
-		unsafe { Self::try_get_unchecked::<'a, U>(self) }
+	fn try_get_comp<'a, U: ?Sized + 'static>(&'a self) -> Option<&'a U> {
+		unsafe { Self::try_get_comp_unchecked::<'a, U>(self) }
 	}
 
-	fn try_get_mut<'a, U: ?Sized + 'static>(&'a mut self) -> Option<&'a mut U> {
-		unsafe { Self::try_get_mut_unchecked::<'a, U>(self) }
+	fn try_get_comp_mut<'a, U: ?Sized + 'static>(&'a mut self) -> Option<&'a mut U> {
+		unsafe { Self::try_get_comp_mut_unchecked::<'a, U>(self) }
 	}
 
-	fn get<U: ?Sized + 'static>(&self) -> &U {
-		self.try_get::<U>().unwrap_or_else(|| {
+	fn get_comp<U: ?Sized + 'static>(&self) -> &U {
+		self.try_get_comp::<U>().unwrap_or_else(|| {
 			panic!(
 				"provider does not have immutable component of type {:?}",
 				type_name::<U>()
@@ -60,8 +62,8 @@ pub unsafe trait Provider: Sized {
 		})
 	}
 
-	fn get_mut<U: ?Sized + 'static>(&mut self) -> &mut U {
-		self.try_get_mut::<U>().unwrap_or_else(|| {
+	fn get_comp_mut<U: ?Sized + 'static>(&mut self) -> &mut U {
+		self.try_get_comp_mut::<U>().unwrap_or_else(|| {
 			panic!(
 				"provider does not have mutable component of type {:?}",
 				type_name::<U>()
@@ -87,7 +89,7 @@ unsafe impl<T: ?Sized + 'static> Provider for &T {
 		provider.add_ref(*self);
 	}
 
-	unsafe fn try_get_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
+	unsafe fn try_get_comp_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
 		if TypeId::of::<T>() == TypeId::of::<U>() {
 			let p_me = me.cast::<*const U>().read(); // &T -> *const T -> *const U
 			Some(&*p_me)
@@ -96,7 +98,9 @@ unsafe impl<T: ?Sized + 'static> Provider for &T {
 		}
 	}
 
-	unsafe fn try_get_mut_unchecked<'a, U: ?Sized + 'static>(_me: *mut Self) -> Option<&'a mut U> {
+	unsafe fn try_get_comp_mut_unchecked<'a, U: ?Sized + 'static>(
+		_me: *mut Self,
+	) -> Option<&'a mut U> {
 		None
 	}
 }
@@ -106,7 +110,7 @@ unsafe impl<T: ?Sized + 'static> Provider for &mut T {
 		provider.add_mut(*self);
 	}
 
-	unsafe fn try_get_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
+	unsafe fn try_get_comp_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
 		if TypeId::of::<T>() == TypeId::of::<U>() {
 			let p_me = me.cast::<*const U>().read(); // &mut T -> *mut T -> *const T -> *const U
 			Some(&*p_me)
@@ -115,7 +119,9 @@ unsafe impl<T: ?Sized + 'static> Provider for &mut T {
 		}
 	}
 
-	unsafe fn try_get_mut_unchecked<'a, U: ?Sized + 'static>(me: *mut Self) -> Option<&'a mut U> {
+	unsafe fn try_get_comp_mut_unchecked<'a, U: ?Sized + 'static>(
+		me: *mut Self,
+	) -> Option<&'a mut U> {
 		if TypeId::of::<T>() == TypeId::of::<U>() {
 			let p_me = me.cast::<*mut U>().read(); // &mut T -> *mut T -> *mut U
 			Some(&mut *p_me)
@@ -133,8 +139,8 @@ macro tup_impl_provider($($para:ident:$field:tt),*) {
 		}
 
 		#[allow(unused)]
-		unsafe fn try_get_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
-			$(if let Some(p) = <$para as Provider>::try_get_unchecked(addr_of!((*me).$field)) {
+		unsafe fn try_get_comp_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
+			$(if let Some(p) = <$para as Provider>::try_get_comp_unchecked(addr_of!((*me).$field)) {
 				return Some(p);
 			})*
 
@@ -142,8 +148,8 @@ macro tup_impl_provider($($para:ident:$field:tt),*) {
 		}
 
 		#[allow(unused)]
-		unsafe fn try_get_mut_unchecked<'a, U: ?Sized + 'static>(me: *mut Self) -> Option<&'a mut U> {
-			$(if let Some(p) = <$para as Provider>::try_get_mut_unchecked(addr_of_mut!((*me).$field)) {
+		unsafe fn try_get_comp_mut_unchecked<'a, U: ?Sized + 'static>(me: *mut Self) -> Option<&'a mut U> {
+			$(if let Some(p) = <$para as Provider>::try_get_comp_mut_unchecked(addr_of_mut!((*me).$field)) {
 				return Some(p);
 			})*
 
@@ -206,7 +212,7 @@ unsafe impl Provider for DynProvider<'_> {
 		}
 	}
 
-	unsafe fn try_get_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
+	unsafe fn try_get_comp_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
 		let me = &*me;
 
 		me.comps
@@ -214,7 +220,9 @@ unsafe impl Provider for DynProvider<'_> {
 			.map(|(_mutable, ptr)| &*ptr.get::<*const U>())
 	}
 
-	unsafe fn try_get_mut_unchecked<'a, U: ?Sized + 'static>(me: *mut Self) -> Option<&'a mut U> {
+	unsafe fn try_get_comp_mut_unchecked<'a, U: ?Sized + 'static>(
+		me: *mut Self,
+	) -> Option<&'a mut U> {
 		let me = &*me;
 
 		me.comps
@@ -253,7 +261,7 @@ where
 	type AliasPointee = T;
 
 	unsafe fn pack_from<Q: Provider>(provider: *mut Q) -> Self {
-		Q::get_unchecked(provider)
+		Q::get_comp_unchecked(provider)
 	}
 }
 
@@ -265,7 +273,7 @@ where
 	type AliasPointee = T;
 
 	unsafe fn pack_from<Q: Provider>(provider: *mut Q) -> Self {
-		Q::get_mut_unchecked(provider)
+		Q::get_comp_mut_unchecked(provider)
 	}
 }
 
@@ -298,7 +306,7 @@ pub macro unpack(
 		$(,)?
 	}
 ) {
-	let ($($name,)*) = Provider::pack::<($($ty,)*)>($src);
+	let ($($name,)*): ($($ty,)*) = Provider::pack($src);
 }
 
 // === Tests === //
@@ -314,7 +322,7 @@ mod test {
 		let c = "foo";
 		let mut d = (&a, &mut b, c);
 
-		assert_eq!(*d.get::<i32>(), 1);
+		assert_eq!(*d.get_comp::<i32>(), 1);
 		receiver(d.pack());
 	}
 

@@ -105,8 +105,8 @@ impl ResourceDescriptor for VoxelRenderingPipelineDesc {
 		res_mgr: &mut ResourceManager,
 		gfx: Self::Context<'_>,
 	) -> Arc<Self::Resource> {
-		let shader: Arc<wgpu::ShaderModule> = res_mgr.load(&OpaqueBlockShaderDesc, gfx).into();
-		let layout: Arc<VoxelPipelineLayout> = res_mgr.load(&VoxelPipelineLayoutDesc, gfx).into();
+		let shader = res_mgr.load(&OpaqueBlockShaderDesc, gfx);
+		let layout = res_mgr.load(&VoxelPipelineLayoutDesc, gfx);
 
 		let pipeline = gfx
 			.device
@@ -174,6 +174,7 @@ impl ResourceDescriptor for VoxelRenderingPipelineDesc {
 //
 // // === VoxelUniformManager === //
 
+#[derive(Debug)]
 pub struct VoxelUniforms {
 	uniform_bind_group: wgpu::BindGroup,
 	uniform_buffer: wgpu::Buffer,
@@ -209,7 +210,7 @@ impl VoxelUniforms {
 		}
 	}
 
-	pub fn set_pass_state<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+	pub fn write_pass_state<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
 		pass.set_bind_group(0, &self.uniform_bind_group, &[]);
 	}
 

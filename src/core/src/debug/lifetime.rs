@@ -1,7 +1,8 @@
 use std::{
+	borrow::Borrow,
 	cell::RefCell,
 	cmp::Ordering,
-	fmt, hash, mem,
+	fmt, hash,
 	num::NonZeroU64,
 	sync::atomic::{AtomicU64, Ordering::SeqCst},
 	thread::panicking,
@@ -9,7 +10,7 @@ use std::{
 
 use thiserror::Error;
 
-use super::error::ErrorFormatExt;
+use super::error::{ErrorFormatExt, ResultExt};
 use crate::mem::{
 	array::arr,
 	pool::{GlobalPool, LocalPool},
@@ -99,9 +100,7 @@ impl Lifetime {
 	}
 
 	pub fn inc_dep(self) {
-		if let Err(err) = self.try_inc_dep() {
-			err.raise_unless_panicking();
-		}
+		self.try_inc_dep().log();
 	}
 
 	pub fn try_dec_dep(self) -> Result<(), DanglingLifetimeError> {
@@ -122,9 +121,7 @@ impl Lifetime {
 	}
 
 	pub fn dec_dep(self) {
-		if let Err(err) = self.try_dec_dep() {
-			err.raise_unless_panicking();
-		}
+		self.try_dec_dep().log();
 	}
 
 	pub fn try_destroy(self) -> Result<(), DanglingLifetimeError> {
@@ -149,13 +146,11 @@ impl Lifetime {
 		// Release the slot to the world...
 		free_slot(self.slot);
 
-		// ...and finally ensure that we didn't just cut off some dependency. This also guards
-		// against concurrent `inc/dec_dep` calls which may have completed their transaction while
+		// ...and finally, warn of a potential UAF if we just cut off some dependency. This also
+		// detects concurrent `inc/dec_dep` calls, which may have completed their transaction while
 		// we were destroying the lifetime.
 		if old_count != local_gen {
-			if !panicking() {
-				panic!("Destroyed a lifetime with extant dependencies.");
-			}
+			log::error!("Destroyed a lifetime with extant dependencies.");
 		}
 
 		Ok(())
@@ -288,41 +283,52 @@ impl PartialOrd for DebugLifetime {
 
 // === Wrappers === //
 
-pub trait AnyLifetime: Copy {
+pub trait Dependable: Copy {
 	fn inc_dep(self);
 	fn dec_dep(self);
+}
+
+pub trait AnyLifetime: Copy + Dependable {
 	fn destroy(self);
 }
 
+impl Dependable for Lifetime {
+	fn inc_dep(self) {
+		// Name resolution prioritizes inherent method of the same name.
+		self.inc_dep();
+	}
+
+	fn dec_dep(self) {
+		// Name resolution prioritizes inherent method of the same name.
+		self.dec_dep();
+	}
+}
+
 impl AnyLifetime for Lifetime {
+	fn destroy(self) {
+		// Name resolution prioritizes inherent method of the same name.
+		self.destroy()
+	}
+}
+
+impl Dependable for DebugLifetime {
 	fn inc_dep(self) {
 		self.inc_dep();
 	}
 
 	fn dec_dep(self) {
 		self.dec_dep();
-	}
-
-	fn destroy(self) {
-		self.destroy();
 	}
 }
 
 impl AnyLifetime for DebugLifetime {
-	fn inc_dep(self) {
-		self.inc_dep();
-	}
-
-	fn dec_dep(self) {
-		self.dec_dep();
-	}
-
 	fn destroy(self) {
-		self.destroy();
+		// Name resolution prioritizes inherent method of the same name.
+		self.destroy()
 	}
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct LifetimeOwner<L: AnyLifetime>(pub L);
 
 impl<L: AnyLifetime> Drop for LifetimeOwner<L> {
@@ -331,33 +337,39 @@ impl<L: AnyLifetime> Drop for LifetimeOwner<L> {
 	}
 }
 
-#[derive(Debug)]
-pub struct LifetimeDependent<L: AnyLifetime>(L);
+#[derive(Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
+pub struct Dependent<L: Dependable>(L);
 
-impl<L: AnyLifetime> LifetimeDependent<L> {
+impl<L: Dependable> Dependent<L> {
 	pub fn new(lifetime: L) -> Self {
 		lifetime.inc_dep();
 		Self(lifetime)
 	}
 
-	pub fn lifetime(&self) -> L {
+	pub fn get(&self) -> L {
 		self.0
 	}
 
-	pub fn defuse(self) -> L {
+	pub fn into_inner(self) -> L {
 		let lifetime = self.0;
-		mem::forget(self);
+		drop(self);
 		lifetime
 	}
 }
 
-impl<L: AnyLifetime> Clone for LifetimeDependent<L> {
-	fn clone(&self) -> Self {
-		Self::new(self.lifetime())
+impl<L: Dependable> Borrow<L> for Dependent<L> {
+	fn borrow(&self) -> &L {
+		&self.0
 	}
 }
 
-impl<L: AnyLifetime> Drop for LifetimeDependent<L> {
+impl<L: Dependable> Clone for Dependent<L> {
+	fn clone(&self) -> Self {
+		Self::new(self.get())
+	}
+}
+
+impl<L: Dependable> Drop for Dependent<L> {
 	fn drop(&mut self) {
 		self.0.dec_dep();
 	}
