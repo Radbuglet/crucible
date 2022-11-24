@@ -1,5 +1,6 @@
 pub mod alias_magic;
 pub mod array;
+pub mod auto_map;
 pub mod c_enum;
 pub mod drop_guard;
 pub mod free_list;

@@ -51,7 +51,7 @@ impl ResourceManager {
 
 		// Insert an unfinished resource stub into the registry. This is used to detect cyclic
 		// resource dependencies.
-		let desc_hash = self.hasher.hash_one(&desc);
+		let desc_hash = self.hasher.p_hash_one(&desc);
 
 		self.resources.insert(
 			desc_hash,
@@ -85,7 +85,7 @@ impl ResourceManager {
 	}
 
 	pub fn find<D: ResourceDescriptor>(&self, desc: &D) -> Option<Arc<D::Resource>> {
-		let hash = self.hasher.hash_one(desc);
+		let hash = self.hasher.p_hash_one(desc);
 		let entry = self.resources.get(hash, |res| {
 			res.desc_hash == hash
 				&& res

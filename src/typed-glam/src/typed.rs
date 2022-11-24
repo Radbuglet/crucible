@@ -159,7 +159,7 @@ impl<F: ?Sized + VecFlavor> TypedVector<F> {
 // NumericVector
 impl<F: ?Sized + VecFlavor> fmt::Debug for TypedVector<F> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_tuple(F::DEBUG_NAME).field(&self.as_glam()).finish()
+		fmt::Display::fmt(&self, f)
 	}
 }
 

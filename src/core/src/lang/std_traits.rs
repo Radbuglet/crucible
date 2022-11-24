@@ -5,7 +5,7 @@ use std::{
 	ops::{Index, IndexMut},
 };
 
-use crate::mem::{array::arr_from_iter, c_enum::c_enum};
+use crate::mem::{array::arr_from_iter, c_enum::c_enum, ptr::PointeeCastExt};
 
 use super::marker::PhantomInvariant;
 
@@ -88,9 +88,9 @@ impl<T, const N: usize> ArrayLike for [T; N] {
 	}
 }
 
-// === UnsafeCellLike === //
+// === CellLike === //
 
-pub unsafe trait UnsafeCellLike {
+pub unsafe trait CellLike {
 	type Inner: ?Sized;
 
 	fn get_ptr(&self) -> *mut Self::Inner;
@@ -113,7 +113,7 @@ pub unsafe trait UnsafeCellLike {
 	}
 }
 
-unsafe impl<T: ?Sized> UnsafeCellLike for UnsafeCell<T> {
+unsafe impl<T: ?Sized> CellLike for UnsafeCell<T> {
 	type Inner = T;
 
 	fn get_ptr(&self) -> *mut Self::Inner {
@@ -130,7 +130,7 @@ unsafe impl<T: ?Sized> UnsafeCellLike for UnsafeCell<T> {
 	}
 }
 
-unsafe impl<T: ?Sized> UnsafeCellLike for RefCell<T> {
+unsafe impl<T: ?Sized> CellLike for RefCell<T> {
 	type Inner = T;
 
 	fn get_ptr(&self) -> *mut Self::Inner {
@@ -144,6 +144,18 @@ unsafe impl<T: ?Sized> UnsafeCellLike for RefCell<T> {
 	{
 		// This is shadowed by the inherent `impl`.
 		self.into_inner()
+	}
+}
+
+// === UnsafeCellLike === //
+
+pub unsafe trait TransparentCellLike: CellLike {
+	fn from_mut(inner: &mut Self::Inner) -> &mut Self;
+}
+
+unsafe impl<T: ?Sized> TransparentCellLike for UnsafeCell<T> {
+	fn from_mut(inner: &mut Self::Inner) -> &mut Self {
+		unsafe { inner.cast_mut_via_ptr(|p| p as *mut Self) }
 	}
 }
 

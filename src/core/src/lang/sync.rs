@@ -6,7 +6,9 @@ use std::{
 
 use bytemuck::TransparentWrapper;
 
-use super::std_traits::UnsafeCellLike;
+use crate::mem::ptr::PointeeCastExt;
+
+use super::std_traits::{CellLike, TransparentCellLike};
 
 // === ExtRefCell === //
 
@@ -104,7 +106,7 @@ impl<T: ?Sized> DerefMut for ExtRefCell<T> {
 	}
 }
 
-// === MutexedUnsafeCell === //
+// === SyncUnsafeCell === //
 
 /// A type of [UnsafeCell] that asserts that access to the given cell will be properly synchronized.
 #[derive(Default, TransparentWrapper)]
@@ -129,7 +131,7 @@ impl<T> SyncUnsafeCell<T> {
 	}
 }
 
-unsafe impl<T: ?Sized> UnsafeCellLike for SyncUnsafeCell<T> {
+unsafe impl<T: ?Sized> CellLike for SyncUnsafeCell<T> {
 	type Inner = T;
 
 	fn get_ptr(&self) -> *mut Self::Inner {
@@ -141,5 +143,11 @@ unsafe impl<T: ?Sized> UnsafeCellLike for SyncUnsafeCell<T> {
 		Self::Inner: Sized,
 	{
 		self.0.into_inner()
+	}
+}
+
+unsafe impl<T: ?Sized> TransparentCellLike for SyncUnsafeCell<T> {
+	fn from_mut(inner: &mut Self::Inner) -> &mut Self {
+		unsafe { inner.cast_mut_via_ptr(|p| p as *mut Self) }
 	}
 }

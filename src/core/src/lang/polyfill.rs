@@ -1,4 +1,7 @@
-use std::hash::{self, Hasher};
+use std::{
+	hash::{self, Hasher},
+	ops::{Bound, RangeBounds},
+};
 
 use super::std_traits::{OptionLike, ResultLike};
 
@@ -31,9 +34,6 @@ impl<T> OptionPoly for Option<T> {
 }
 
 // === Range === //
-
-use core::ops::Bound;
-use std::ops::RangeBounds;
 
 pub type AnyRange<T> = (Bound<T>, Bound<T>);
 
@@ -101,7 +101,7 @@ impl FloatPoly for f32 {
 // === Hasher === //
 
 pub trait BuildHasherPoly: hash::BuildHasher {
-	fn hash_one<H: ?Sized + hash::Hash>(&self, target: &H) -> u64 {
+	fn p_hash_one<H: ?Sized + hash::Hash>(&self, target: &H) -> u64 {
 		let mut hasher = self.build_hasher();
 		target.hash(&mut hasher);
 		hasher.finish()

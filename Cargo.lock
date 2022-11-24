@@ -526,6 +526,7 @@ dependencies = [
  "criterion",
  "derive-where",
  "fastrand",
+ "hashbrown 0.13.1",
  "log",
  "thiserror",
 ]

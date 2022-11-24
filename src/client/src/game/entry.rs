@@ -71,10 +71,11 @@ impl PlayScene {
 	) -> Entity {
 		// Create scene state
 		let mut scene_state = Box::new(Self::default());
-		scene_state.main_viewport.bind(main_viewport);
-		scene_state
-			.voxel_uniforms
-			.bind(VoxelUniforms::new((gfx, res_mgr)));
+		ExplicitlyBind::bind(&mut scene_state.main_viewport, main_viewport);
+		ExplicitlyBind::bind(
+			&mut scene_state.voxel_uniforms,
+			VoxelUniforms::new((gfx, res_mgr)),
+		);
 
 		// Create scene entity
 		let scene = scene_arch.spawn();

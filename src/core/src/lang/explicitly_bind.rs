@@ -20,13 +20,13 @@ impl<T> ExplicitlyBind<T> {
 		Self(None)
 	}
 
-	pub fn bind(&mut self, value: T) {
+	pub fn bind(me: &mut Self, value: T) {
 		assert!(
-			self.0.is_none(),
+			me.0.is_none(),
 			"Late-bound to a value that was already bound."
 		);
 
-		self.0 = Some(value);
+		me.0 = Some(value);
 	}
 
 	pub fn into_inner(me: Self) -> T {
