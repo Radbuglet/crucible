@@ -59,6 +59,7 @@ pub trait GlamConvert: Sized {
 	fn from_glam_mut(glam: &mut Self::Glam) -> &mut Self;
 
 	// === Derived === //
+
 	// N.B. Default `impl`s are copied verbatim into `TypedGlam`'s inherent impls to make them `const`
 	// safe. If you change things here, you should probably change them there as well.
 
