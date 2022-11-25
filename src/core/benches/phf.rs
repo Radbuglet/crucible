@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use crucible_core::{mem::perfect_map::Phf, lang::hash::NoOpBuildHasher};
+use crucible_core::{lang::hash::NoOpBuildHasher, mem::perfect_map::Phf};
 
 use std::{collections::HashSet, hint::black_box};
 
@@ -35,8 +35,10 @@ fn criterion_benchmark(c: &mut Criterion) {
 				i = 0;
 			}
 
+			let hash = hashes[i];
+
 			black_box(&mut phf);
-			slot_to_idx[phf.find_slot(hashes[i], slot_to_idx.len())]
+			hashes[slot_to_idx[phf.find_slot(hash, slot_to_idx.len())]] == hash
 		});
 	});
 

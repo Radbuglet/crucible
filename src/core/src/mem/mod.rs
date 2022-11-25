@@ -7,7 +7,6 @@ pub mod free_list;
 pub mod inline;
 pub mod layout;
 pub mod linked_list;
-pub mod loan;
 pub mod perfect_map;
 pub mod pool;
 pub mod ptr;
