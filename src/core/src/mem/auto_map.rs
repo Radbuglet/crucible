@@ -214,6 +214,39 @@ where
 	// 	todo!()
 	// }
 
+	// TODO: We should just expose the regular entry API.
+	pub fn get_or_insert_with<F>(&mut self, k: K, f: F) -> AutoMut<K, V, P>
+	where
+		F: FnOnce() -> V,
+	{
+		let map = &mut self.raw_map;
+		let hash = map.hasher().p_hash_one(&k);
+
+		let bucket = if let Some(bucket) = map.raw_table().find(hash, |(k2, _)| &k == k2) {
+			bucket
+		} else {
+			// TODO: Replace with the more direct approach once we can borrow
+			//  `impl BuildHasher` and `RawTable` concurrently.
+			let (k, _) = map.insert_unique_unchecked(k, f());
+			let k_ptr = k as *const K;
+
+			map.raw_table()
+				.find(hash, |(k2, _)| k_ptr == k2 as *const K)
+				.unwrap()
+		};
+
+		AutoMut {
+			guard: DropGuard::new(
+				AutoMutInner {
+					policy: &self.policy,
+					table: UnsafeCell::from_mut(map.raw_table()),
+					bucket,
+				},
+				AutoMutDropHandler,
+			),
+		}
+	}
+
 	pub fn get<Q: ?Sized>(&self, k: &Q) -> Option<&V>
 	where
 		K: Borrow<Q>,
@@ -238,7 +271,7 @@ where
 		self.raw_map.contains_key(k)
 	}
 
-	pub fn get_mut<Q: ?Sized>(&mut self, k: &Q) -> Option<AutoRef<K, V, P>>
+	pub fn get_mut<Q: ?Sized>(&mut self, k: &Q) -> Option<AutoMut<K, V, P>>
 	where
 		K: Borrow<Q>,
 		Q: hash::Hash + Eq,
@@ -247,14 +280,14 @@ where
 		let table = self.raw_map.raw_table();
 		let bucket = table.find(hash, |(k2, _)| k2.borrow() == k)?;
 
-		Some(AutoRef {
+		Some(AutoMut {
 			guard: DropGuard::new(
-				AutoRefInner {
+				AutoMutInner {
 					policy: &self.policy,
 					table: UnsafeCell::from_mut(table),
 					bucket,
 				},
-				AutoRefDropHandler,
+				AutoMutDropHandler,
 			),
 		})
 	}
@@ -326,7 +359,7 @@ impl<'a, K, V, S, P> IntoIterator for &'a mut AutoHashMap<K, V, S, P>
 where
 	P: ForgetPolicy<V>,
 {
-	type Item = (&'a K, AutoRef<'a, K, V, P>);
+	type Item = (&'a K, AutoMut<'a, K, V, P>);
 	type IntoIter = AutoMapIterMut<'a, K, V, P>;
 
 	fn into_iter(self) -> Self::IntoIter {
@@ -343,7 +376,7 @@ pub struct AutoMapIterMut<'a, K, V, P> {
 }
 
 impl<'a, K: 'a, V: 'a, P: ForgetPolicy<V>> Iterator for AutoMapIterMut<'a, K, V, P> {
-	type Item = (&'a K, AutoRef<'a, K, V, P>);
+	type Item = (&'a K, AutoMut<'a, K, V, P>);
 
 	fn next(&mut self) -> Option<Self::Item> {
 		let bucket = self.iter.next()?;
@@ -352,14 +385,14 @@ impl<'a, K: 'a, V: 'a, P: ForgetPolicy<V>> Iterator for AutoMapIterMut<'a, K, V,
 
 		Some((
 			key,
-			AutoRef {
+			AutoMut {
 				guard: DropGuard::new(
-					AutoRefInner {
+					AutoMutInner {
 						policy: self.policy,
 						table: self.table,
 						bucket,
 					},
-					AutoRefDropHandler,
+					AutoMutDropHandler,
 				),
 			},
 		))
@@ -381,7 +414,7 @@ impl<'a, K: 'a, V: 'a, P: ForgetPolicy<V>> ExactSizeIterator for AutoMapIterMut<
 pub struct AutoMapValuesMut<'a, K, V, P>(AutoMapIterMut<'a, K, V, P>);
 
 impl<'a, K: 'a, V: 'a, P: ForgetPolicy<V>> Iterator for AutoMapValuesMut<'a, K, V, P> {
-	type Item = AutoRef<'a, K, V, P>;
+	type Item = AutoMut<'a, K, V, P>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		self.0.next().map(|(_, v)| v)
@@ -400,25 +433,25 @@ impl<'a, K: 'a, V: 'a, P: ForgetPolicy<V>> ExactSizeIterator for AutoMapValuesMu
 
 // === AutoRef === //
 
-pub struct AutoRef<'a, K, V, P: ForgetPolicy<V>> {
-	guard: DropGuard<AutoRefInner<'a, K, V, P>, AutoRefDropHandler>,
+pub struct AutoMut<'a, K, V, P: ForgetPolicy<V>> {
+	guard: DropGuard<AutoMutInner<'a, K, V, P>, AutoMutDropHandler>,
 }
 
-struct AutoRefInner<'a, K, V, P: ForgetPolicy<V>> {
+struct AutoMutInner<'a, K, V, P: ForgetPolicy<V>> {
 	policy: &'a P,
 	table: &'a UnsafeCell<RawTable<(K, V)>>,
 	bucket: Bucket<(K, V)>,
 }
 
-struct AutoRefDropHandler;
+struct AutoMutDropHandler;
 
-impl<'a, K, V, P: ForgetPolicy<V>> AutoRef<'a, K, V, P> {
+impl<'a, K, V, P: ForgetPolicy<V>> AutoMut<'a, K, V, P> {
 	pub fn defuse(me: Self) -> &'a mut V {
 		&mut unsafe { DropGuard::defuse(me.guard).bucket.as_mut() }.1
 	}
 }
 
-impl<K, V, P: ForgetPolicy<V>> Deref for AutoRef<'_, K, V, P> {
+impl<K, V, P: ForgetPolicy<V>> Deref for AutoMut<'_, K, V, P> {
 	type Target = V;
 
 	fn deref(&self) -> &Self::Target {
@@ -426,16 +459,16 @@ impl<K, V, P: ForgetPolicy<V>> Deref for AutoRef<'_, K, V, P> {
 	}
 }
 
-impl<K, V, P: ForgetPolicy<V>> DerefMut for AutoRef<'_, K, V, P> {
+impl<K, V, P: ForgetPolicy<V>> DerefMut for AutoMut<'_, K, V, P> {
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		unsafe { &mut (*self.guard.bucket.as_ptr()).1 }
 	}
 }
 
-impl<'a, K, V, P: ForgetPolicy<V>> DropGuardHandler<AutoRefInner<'a, K, V, P>>
-	for AutoRefDropHandler
+impl<'a, K, V, P: ForgetPolicy<V>> DropGuardHandler<AutoMutInner<'a, K, V, P>>
+	for AutoMutDropHandler
 {
-	fn destruct(self, inner: AutoRefInner<'a, K, V, P>) {
+	fn destruct(self, inner: AutoMutInner<'a, K, V, P>) {
 		if !inner
 			.policy
 			.is_alive(unsafe { &mut inner.bucket.as_mut().1 })

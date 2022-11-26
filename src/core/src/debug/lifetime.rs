@@ -5,12 +5,11 @@ use std::{
 	fmt, hash,
 	num::NonZeroU64,
 	sync::atomic::{AtomicU64, Ordering::SeqCst},
-	thread::panicking,
 };
 
 use thiserror::Error;
 
-use super::error::{ErrorFormatExt, ResultExt};
+use super::error::ResultExt;
 use crate::mem::{
 	array::arr,
 	pool::{GlobalPool, LocalPool},
@@ -100,7 +99,7 @@ impl Lifetime {
 	}
 
 	pub fn inc_dep(self) {
-		self.try_inc_dep().log();
+		self.try_inc_dep().unwrap_unless_panicking();
 	}
 
 	pub fn try_dec_dep(self) -> Result<(), DanglingLifetimeError> {
@@ -121,7 +120,7 @@ impl Lifetime {
 	}
 
 	pub fn dec_dep(self) {
-		self.try_dec_dep().log();
+		self.try_dec_dep().unwrap_unless_panicking();
 	}
 
 	pub fn try_destroy(self) -> Result<(), DanglingLifetimeError> {
@@ -150,18 +149,14 @@ impl Lifetime {
 		// detects concurrent `inc/dec_dep` calls, which may have completed their transaction while
 		// we were destroying the lifetime.
 		if old_count != local_gen {
-			log::error!("Destroyed a lifetime with extant dependencies.");
+			return Err(DanglingLifetimeError);
 		}
 
 		Ok(())
 	}
 
 	pub fn destroy(self) {
-		if let Err(err) = self.try_destroy() {
-			if !panicking() {
-				err.raise();
-			}
-		}
+		self.try_destroy().unwrap_unless_panicking();
 	}
 }
 

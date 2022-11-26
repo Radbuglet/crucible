@@ -2,7 +2,7 @@ use std::{
 	any::type_name,
 	collections::{HashMap, HashSet},
 	num::NonZeroU32,
-	ops,
+	ops::{self, Deref, DerefMut},
 	sync::Mutex,
 };
 
@@ -15,7 +15,7 @@ use crate::{
 	},
 	lang::polyfill::VecPoly,
 	mem::{
-		auto_map::{AutoHashMap, CanForget},
+		auto_map::{AutoHashMap, AutoMut, CanForget, DefaultForgetPolicy},
 		free_list::PureFreeList,
 	},
 };
@@ -208,10 +208,10 @@ impl<T> Storage<T> {
 		self.archetypes.get(&archetype.id)
 	}
 
-	pub fn get_run_mut(&mut self, archetype: ArchetypeId) -> Option<&mut StorageRun<T>> {
+	pub fn get_run_mut(&mut self, archetype: ArchetypeId) -> Option<StorageRunRefMut<T>> {
 		assert!(archetype.lifetime.is_possibly_alive());
 
-		self.archetypes.get_mut(&archetype.id)
+		self.archetypes.get_mut(&archetype.id).map(StorageRunRefMut)
 	}
 
 	pub fn get_run_slice(&self, archetype: ArchetypeId) -> &[Option<StorageRunSlot<T>>] {
@@ -226,21 +226,25 @@ impl<T> Storage<T> {
 		archetype: ArchetypeId,
 	) -> &mut [Option<StorageRunSlot<T>>] {
 		match self.get_run_mut(archetype) {
-			Some(run) => run.as_mut_slice(),
+			Some(run) => run.defuse_auto_removal().as_mut_slice(),
 			None => &mut [],
 		}
 	}
 
-	pub fn get_or_create_run(&mut self, archetype: ArchetypeId) -> &mut StorageRun<T> {
+	pub fn get_or_create_run(&mut self, archetype: ArchetypeId) -> StorageRunRefMut<T> {
 		assert!(archetype.lifetime.is_possibly_alive());
 
-		self.archetypes
-			.entry(archetype.id)
-			.or_insert_with(Default::default)
+		let run = self
+			.archetypes
+			.get_or_insert_with(archetype.id, || Default::default());
+
+		StorageRunRefMut(run)
 	}
 
 	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
-		self.get_or_create_run(entity.arch).add(entity, value)
+		self.get_or_create_run(entity.arch)
+			.defuse_auto_removal()
+			.add(entity, value)
 	}
 
 	pub fn remove(&mut self, entity: Entity) -> Option<T> {
@@ -270,8 +274,7 @@ impl<T> Storage<T> {
 	pub fn get_mut(&mut self, entity: Entity) -> Option<&mut T> {
 		assert!(entity.lifetime.is_possibly_alive());
 
-		self.archetypes
-			.get_mut(&entity.arch.id)?
+		AutoMut::defuse(self.archetypes.get_mut(&entity.arch.id)?)
 			.get_mut(entity.slot)
 			.map(StorageRunSlot::value_mut)
 	}
@@ -376,6 +379,28 @@ impl<T> StorageRun<T> {
 impl<T> CanForget for StorageRun<T> {
 	fn is_alive(&self) -> bool {
 		!self.comps.is_empty()
+	}
+}
+
+pub struct StorageRunRefMut<'a, T>(AutoMut<'a, NonZeroU32, StorageRun<T>, DefaultForgetPolicy>);
+
+impl<'a, T> StorageRunRefMut<'a, T> {
+	pub fn defuse_auto_removal(self) -> &'a mut StorageRun<T> {
+		AutoMut::defuse(self.0)
+	}
+}
+
+impl<T> Deref for StorageRunRefMut<'_, T> {
+	type Target = StorageRun<T>;
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl<T> DerefMut for StorageRunRefMut<'_, T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0
 	}
 }
 

@@ -64,6 +64,7 @@ impl<T: ?Sized + Error> Display for FormattedError<'_, T> {
 pub trait ResultExt: ResultLike {
 	fn unwrap_pretty(self) -> Self::Success;
 	fn log(self) -> Option<Self::Success>;
+	fn unwrap_unless_panicking(self) -> Option<Self::Success>;
 }
 
 impl<T, E: Error> ResultExt for Result<T, E> {
@@ -79,6 +80,16 @@ impl<T, E: Error> ResultExt for Result<T, E> {
 			Ok(val) => Some(val),
 			Err(err) => {
 				err.log();
+				None
+			}
+		}
+	}
+
+	fn unwrap_unless_panicking(self) -> Option<T> {
+		match self {
+			Ok(val) => Some(val),
+			Err(err) => {
+				err.raise_unless_panicking();
 				None
 			}
 		}
