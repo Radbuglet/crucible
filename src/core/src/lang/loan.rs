@@ -3,8 +3,6 @@ use core::{
 	ops::{Deref, DerefMut},
 };
 
-// === Core === //
-
 pub trait Lender: Sized {
 	type Loan;
 	type Shark;
@@ -72,7 +70,3 @@ where
 		A::repay(loan, shark);
 	}
 }
-
-// === Primitives === //
-
-// TODO

@@ -147,8 +147,6 @@ unsafe impl<T: ?Sized> CellLike for RefCell<T> {
 	}
 }
 
-// === UnsafeCellLike === //
-
 pub unsafe trait TransparentCellLike: CellLike {
 	fn from_mut(inner: &mut Self::Inner) -> &mut Self;
 }

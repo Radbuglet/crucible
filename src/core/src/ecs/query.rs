@@ -4,7 +4,7 @@ use crate::{
 	mem::ptr::PointeeCastExt,
 };
 
-use super::core::{ArchetypeId, Entity, Storage, StorageRunView};
+use super::core::{ArchetypeId, Entity, Storage, StorageRunSlice};
 
 // === Core === //
 
@@ -56,7 +56,7 @@ macro impl_query($($para:ident:$field:tt),*) {
 
 				let res = (
 					// Safety: `slot` is monotonically increasing
-					$(unsafe { self.parts.$field.get(self.archetype, slot) },)*
+					$(unsafe { self.parts.$field.query_single(self.archetype, slot) },)*
 				);
 
 				let lifetime = (res.0).0;
@@ -88,53 +88,71 @@ pub trait QueryPartIter {
 
 	fn max_slot(&self, archetype: ArchetypeId) -> u32;
 
-	unsafe fn get(&mut self, archetype: ArchetypeId, slot: u32) -> (DebugLifetime, Self::Output);
+	unsafe fn query_single(
+		&mut self,
+		archetype: ArchetypeId,
+		slot: u32,
+	) -> (DebugLifetime, Self::Output);
 }
 
 // === Storage === //
 
 impl<'a, T> IntoQueryPartIter for &'a Storage<T> {
 	type Output = &'a T;
-	type Iter = &'a StorageRunView<T>;
+	type Iter = &'a StorageRunSlice<T>;
 
 	fn into_iter(self, archetype: ArchetypeId) -> Self::Iter {
-		self.get_run_view(archetype)
+		self.get_run_slice(archetype)
 	}
 }
 
-impl<'a, T> QueryPartIter for &'a StorageRunView<T> {
+impl<'a, T> QueryPartIter for &'a StorageRunSlice<T> {
 	type Output = &'a T;
 
 	fn max_slot(&self, _archetype: ArchetypeId) -> u32 {
-		(*self).max_slot()
+		self.len() as u32
 	}
 
-	unsafe fn get(&mut self, _archetype: ArchetypeId, slot: u32) -> (DebugLifetime, Self::Output) {
-		(*self).get(slot).expect("missing component!")
+	unsafe fn query_single(
+		&mut self,
+		_archetype: ArchetypeId,
+		slot: u32,
+	) -> (DebugLifetime, Self::Output) {
+		let slot = self
+			.get(slot as usize)
+			.and_then(|slot| slot.as_ref())
+			.expect("missing component!");
+
+		(slot.lifetime(), slot.value())
 	}
 }
 
 impl<'a, T> IntoQueryPartIter for &'a mut Storage<T> {
 	type Output = &'a mut T;
-	type Iter = &'a mut StorageRunView<T>;
+	type Iter = &'a mut StorageRunSlice<T>;
 
 	fn into_iter(self, archetype: ArchetypeId) -> Self::Iter {
-		self.get_run_view_mut(archetype)
+		self.get_run_slice_mut(archetype)
 	}
 }
 
-impl<'a, T> QueryPartIter for &'a mut StorageRunView<T> {
+impl<'a, T> QueryPartIter for &'a mut StorageRunSlice<T> {
 	type Output = &'a mut T;
 
 	fn max_slot(&self, _archetype: ArchetypeId) -> u32 {
-		(**self).max_slot()
+		self.len() as u32
 	}
 
-	unsafe fn get(&mut self, _archetype: ArchetypeId, slot: u32) -> (DebugLifetime, Self::Output) {
-		(*self)
-			.get_mut(slot)
-			// FIXME: This is also likely illegal.
-			.map(|(lt, v)| (lt, v.prolong_mut()))
+	unsafe fn query_single(
+		&mut self,
+		_archetype: ArchetypeId,
+		slot: u32,
+	) -> (DebugLifetime, Self::Output) {
+		self.get_mut(slot as usize)
+			.and_then(|slot| slot.as_mut())
+			// FIXME: Use a more standard multi-borrow pattern that doesn't run the risk of causing
+			//  aliasing issues.
+			.map(|slot| (slot.lifetime(), slot.value_mut().prolong_mut()))
 			.expect("missing component!")
 	}
 }

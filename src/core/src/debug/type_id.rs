@@ -76,6 +76,6 @@ impl From<TypeId> for NamedTypeId {
 	}
 }
 
-pub fn are_probably_equal<A: ?Sized + 'static, B: ?Sized>() -> bool {
+pub fn are_probably_equal<A: ?Sized, B: ?Sized>() -> bool {
 	type_name::<A>() == type_name::<B>()
 }

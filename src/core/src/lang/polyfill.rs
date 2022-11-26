@@ -90,7 +90,7 @@ impl FloatPoly for f32 {
 	fn from_frac(num: u32, denom: u32) -> Option<f32> {
 		if denom != 0 {
 			// Yes, there are truncation errors with this routine. However, none of the routines
-			// using this object are dealing with big fractions so this is fine.
+			// using this method are dealing with big fractions so this is fine.
 			Some((num as f64 / denom as f64) as f32)
 		} else {
 			None

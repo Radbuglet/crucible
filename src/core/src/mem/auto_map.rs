@@ -18,9 +18,71 @@ use crate::lang::{
 	std_traits::{CellLike, TransparentCellLike},
 };
 
-use super::drop_guard::{DropGuard, DropGuardHandler};
+use super::{
+	drop_guard::{DropGuard, DropGuardHandler},
+	ptr::unchecked_unify,
+};
 
 // === AutoHashMap === //
+
+pub struct AutoHashMapBuilder<S = RandomState, P = DefaultForgetPolicy> {
+	hasher: Option<S>,
+	forget_policy: Option<P>,
+	capacity: Option<usize>,
+}
+
+impl AutoHashMapBuilder {
+	pub fn new() -> Self {
+		Self {
+			hasher: None,
+			forget_policy: None,
+			capacity: None,
+		}
+	}
+}
+
+impl<S, P> AutoHashMapBuilder<S, P> {
+	pub fn with_hasher<S2>(self, hasher: S2) -> AutoHashMapBuilder<S2, P> {
+		AutoHashMapBuilder {
+			hasher: Some(hasher),
+			forget_policy: self.forget_policy,
+			capacity: self.capacity,
+		}
+	}
+
+	pub fn with_forget_policy<P2>(self, policy: P2) -> AutoHashMapBuilder<S, P2> {
+		AutoHashMapBuilder {
+			hasher: self.hasher,
+			forget_policy: Some(policy),
+			capacity: self.capacity,
+		}
+	}
+
+	pub fn with_capacity(self, capacity: usize) -> AutoHashMapBuilder<S, P> {
+		AutoHashMapBuilder {
+			hasher: self.hasher,
+			forget_policy: self.forget_policy,
+			capacity: Some(capacity),
+		}
+	}
+
+	pub fn build<K, V>(self) -> AutoHashMap<K, V, S, P> {
+		let hash_builder = self
+			.hasher
+			.unwrap_or_else(|| unsafe { unchecked_unify(RandomState::default()) });
+
+		let policy = self
+			.forget_policy
+			.unwrap_or_else(|| unsafe { unchecked_unify(DefaultForgetPolicy) });
+
+		let raw_map = match self.capacity {
+			Some(capacity) => HashMap::with_capacity_and_hasher(capacity, hash_builder),
+			None => HashMap::with_hasher(hash_builder),
+		};
+
+		AutoHashMap { policy, raw_map }
+	}
+}
 
 #[derive_where(Debug; K: fmt::Debug, V: fmt::Debug, P: fmt::Debug)]
 #[derive_where(Default; S: Default, P: Default)]
@@ -44,7 +106,9 @@ impl<K, V> AutoHashMap<K, V> {
 }
 
 impl<K, V, S, P> AutoHashMap<K, V, S, P> {
-	// TODO: Implement builder
+	pub fn builder() -> AutoHashMapBuilder {
+		AutoHashMapBuilder::new()
+	}
 
 	pub fn capacity(&self) -> usize {
 		self.raw_map.capacity()

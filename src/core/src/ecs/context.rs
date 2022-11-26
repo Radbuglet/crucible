@@ -14,7 +14,7 @@ use crate::{
 
 // === Provider === //
 
-pub unsafe trait Provider: Sized {
+pub trait Provider: Sized {
 	// === Required methods === //
 
 	fn build_dyn_provider<'r>(&'r mut self, provider: &mut DynProvider<'r>);
@@ -84,7 +84,7 @@ pub unsafe trait Provider: Sized {
 	}
 }
 
-unsafe impl<T: ?Sized + 'static> Provider for &T {
+impl<T: ?Sized + 'static> Provider for &T {
 	fn build_dyn_provider<'r>(&'r mut self, provider: &mut DynProvider<'r>) {
 		provider.add_ref(*self);
 	}
@@ -105,7 +105,7 @@ unsafe impl<T: ?Sized + 'static> Provider for &T {
 	}
 }
 
-unsafe impl<T: ?Sized + 'static> Provider for &mut T {
+impl<T: ?Sized + 'static> Provider for &mut T {
 	fn build_dyn_provider<'r>(&'r mut self, provider: &mut DynProvider<'r>) {
 		provider.add_mut(*self);
 	}
@@ -132,7 +132,7 @@ unsafe impl<T: ?Sized + 'static> Provider for &mut T {
 }
 
 macro tup_impl_provider($($para:ident:$field:tt),*) {
-	unsafe impl<$($para: Provider),*> Provider for ($($para,)*) {
+	impl<$($para: Provider),*> Provider for ($($para,)*) {
 		#[allow(unused)]
 		fn build_dyn_provider<'r>(&'r mut self, provider: &mut DynProvider<'r>) {
 			$(self.$field.build_dyn_provider(provider);)*
@@ -205,7 +205,7 @@ impl<'r> DynProvider<'r> {
 	}
 }
 
-unsafe impl Provider for DynProvider<'_> {
+impl Provider for DynProvider<'_> {
 	fn build_dyn_provider<'r>(&'r mut self, provider: &mut DynProvider<'r>) {
 		for (&key, (is_mutable, comp)) in &self.comps {
 			provider.comps.insert(key, (*is_mutable, comp.clone()));

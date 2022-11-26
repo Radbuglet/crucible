@@ -6,7 +6,10 @@ use std::{
 	ptr,
 };
 
-use crate::lang::macros::{ignore, impl_tuples};
+use crate::{
+	debug::type_id::are_probably_equal,
+	lang::macros::{ignore, impl_tuples},
+};
 
 // === Transmute === //
 
@@ -172,6 +175,11 @@ pub fn runtime_unify_ref<A: ?Sized + 'static, B: ?Sized + 'static>(a: &A) -> &B 
 
 pub fn runtime_unify_mut<A: ?Sized + 'static, B: ?Sized + 'static>(a: &mut A) -> &mut B {
 	try_runtime_unify_mut(a).unwrap()
+}
+
+pub unsafe fn unchecked_unify<A, B>(a: A) -> B {
+	assert!(are_probably_equal::<A, B>());
+	sizealign_checked_transmute(a)
 }
 
 // === Offset-of === //

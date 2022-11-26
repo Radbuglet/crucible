@@ -2,7 +2,7 @@ use std::{
 	any::type_name,
 	collections::{HashMap, HashSet},
 	num::NonZeroU32,
-	ops::{self, Deref, DerefMut},
+	ops,
 	sync::Mutex,
 };
 
@@ -14,7 +14,10 @@ use crate::{
 		lifetime::{DebugLifetime, Dependable, Dependent, LifetimeOwner},
 	},
 	lang::polyfill::VecPoly,
-	mem::{free_list::PureFreeList, ptr::PointeeCastExt},
+	mem::{
+		auto_map::{AutoHashMap, CanForget},
+		free_list::PureFreeList,
+	},
 };
 
 use super::query::{Query, QueryIter};
@@ -189,13 +192,13 @@ impl<'a> IntoIterator for &'a Archetype {
 #[derive_where(Default)]
 #[repr(transparent)]
 pub struct Storage<T> {
-	archetypes: HashMap<NonZeroU32, StorageRun<T>>,
+	archetypes: AutoHashMap<NonZeroU32, StorageRun<T>>,
 }
 
 impl<T> Storage<T> {
 	pub fn new() -> Self {
 		Self {
-			archetypes: HashMap::new(),
+			archetypes: AutoHashMap::new(),
 		}
 	}
 
@@ -211,17 +214,20 @@ impl<T> Storage<T> {
 		self.archetypes.get_mut(&archetype.id)
 	}
 
-	pub fn get_run_view(&self, archetype: ArchetypeId) -> &StorageRunView<T> {
+	pub fn get_run_slice(&self, archetype: ArchetypeId) -> &[Option<StorageRunSlot<T>>] {
 		match self.get_run(archetype) {
-			Some(run) => run.as_view(),
-			None => StorageRunView::new_empty(),
+			Some(run) => run.as_slice(),
+			None => &[],
 		}
 	}
 
-	pub fn get_run_view_mut(&mut self, archetype: ArchetypeId) -> &mut StorageRunView<T> {
+	pub fn get_run_slice_mut(
+		&mut self,
+		archetype: ArchetypeId,
+	) -> &mut [Option<StorageRunSlot<T>>] {
 		match self.get_run_mut(archetype) {
-			Some(run) => run.as_mut_view(),
-			None => StorageRunView::new_empty(),
+			Some(run) => run.as_mut_slice(),
+			None => &mut [],
 		}
 	}
 
@@ -258,7 +264,7 @@ impl<T> Storage<T> {
 		self.archetypes
 			.get(&entity.arch.id)?
 			.get(entity.slot)
-			.map(|(_, v)| v)
+			.map(StorageRunSlot::value)
 	}
 
 	pub fn get_mut(&mut self, entity: Entity) -> Option<&mut T> {
@@ -267,18 +273,21 @@ impl<T> Storage<T> {
 		self.archetypes
 			.get_mut(&entity.arch.id)?
 			.get_mut(entity.slot)
-			.map(|(_, v)| v)
+			.map(StorageRunSlot::value_mut)
 	}
 
 	pub fn clear(&mut self) {
 		self.archetypes.clear();
 	}
 
-	pub fn query_in_ref(&self, archetype: ArchetypeId) -> QueryIter<(&StorageRunView<T>,)> {
+	pub fn query_in_ref(&self, archetype: ArchetypeId) -> QueryIter<(&StorageRunSlice<T>,)> {
 		(self,).query_in(archetype)
 	}
 
-	pub fn query_in_mut(&mut self, archetype: ArchetypeId) -> QueryIter<(&mut StorageRunView<T>,)> {
+	pub fn query_in_mut(
+		&mut self,
+		archetype: ArchetypeId,
+	) -> QueryIter<(&mut StorageRunSlice<T>,)> {
 		(self,).query_in(archetype)
 	}
 }
@@ -306,12 +315,12 @@ pub(super) fn failed_to_find_component<T>(entity: Entity) -> ! {
 	);
 }
 
-type StorageRunSlot<T> = Option<(Dependent<DebugLifetime>, T)>;
+pub type StorageRunSlice<T> = [Option<StorageRunSlot<T>>];
 
 #[derive(Debug, Clone)]
 #[derive_where(Default)]
 pub struct StorageRun<T> {
-	comps: Vec<StorageRunSlot<T>>,
+	comps: Vec<Option<StorageRunSlot<T>>>,
 }
 
 impl<T> StorageRun<T> {
@@ -322,14 +331,17 @@ impl<T> StorageRun<T> {
 	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
 		let slot = self.comps.ensure_slot_with(entity.slot_usize(), || None);
 		let replaced = slot
-			.replace((Dependent::new(entity.lifetime), value))
-			.map(|(_, replaced)| replaced);
+			.replace(StorageRunSlot {
+				lifetime: Dependent::new(entity.lifetime),
+				value,
+			})
+			.map(|v| v.value);
 
-		(replaced, &mut slot.as_mut().unwrap().1)
+		(replaced, slot.as_mut().unwrap().value_mut())
 	}
 
 	pub fn remove(&mut self, slot: u32) -> Option<T> {
-		let removed = self.comps[slot as usize].take().map(|(_, value)| value);
+		let removed = self.comps[slot as usize].take().map(|v| v.value);
 
 		while matches!(self.comps.last(), Some(None)) {
 			self.comps.pop();
@@ -338,65 +350,52 @@ impl<T> StorageRun<T> {
 		removed
 	}
 
-	pub fn as_view(&self) -> &StorageRunView<T> {
-		unsafe {
-			self.comps
-				.as_slice()
-				.cast_ref_via_ptr(|slice: *const [StorageRunSlot<T>]| {
-					slice as *const StorageRunView<T>
-				})
-		}
+	pub fn get(&self, slot: u32) -> Option<&StorageRunSlot<T>> {
+		self.comps.get(slot as usize).and_then(|opt| opt.as_ref())
 	}
 
-	pub fn as_mut_view(&mut self) -> &mut StorageRunView<T> {
-		unsafe {
-			self.comps
-				.as_mut_slice()
-				.cast_mut_via_ptr(|slice: *mut [StorageRunSlot<T>]| slice as *mut StorageRunView<T>)
-		}
-	}
-}
-
-impl<T> Deref for StorageRun<T> {
-	type Target = StorageRunView<T>;
-
-	fn deref(&self) -> &Self::Target {
-		self.as_view()
-	}
-}
-
-impl<T> DerefMut for StorageRun<T> {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		self.as_mut_view()
-	}
-}
-
-#[repr(transparent)]
-pub struct StorageRunView<T>([StorageRunSlot<T>]);
-
-impl<T> StorageRunView<T> {
-	pub fn new_empty<'a>() -> &'a mut StorageRunView<T> {
-		let slice: &'a mut [StorageRunSlot<T>] = &mut [];
-
-		unsafe { slice.cast_mut_via_ptr(|slice| slice as *mut StorageRunView<T>) }
-	}
-
-	pub fn get(&self, slot: u32) -> Option<(DebugLifetime, &T)> {
-		match self.0.get(slot as usize) {
-			Some(Some((lt, value))) => Some((lt.get(), value)),
-			_ => None,
-		}
-	}
-
-	pub fn get_mut(&mut self, slot: u32) -> Option<(DebugLifetime, &mut T)> {
-		match self.0.get_mut(slot as usize) {
-			Some(Some((lt, value))) => Some((lt.get(), value)),
-			_ => None,
-		}
+	pub fn get_mut(&mut self, slot: u32) -> Option<&mut StorageRunSlot<T>> {
+		self.comps
+			.get_mut(slot as usize)
+			.and_then(|opt| opt.as_mut())
 	}
 
 	pub fn max_slot(&self) -> u32 {
-		self.0.len() as u32
+		self.comps.len() as u32
+	}
+
+	pub fn as_slice(&self) -> &StorageRunSlice<T> {
+		self.comps.as_slice()
+	}
+
+	pub fn as_mut_slice(&mut self) -> &mut StorageRunSlice<T> {
+		self.comps.as_mut_slice()
+	}
+}
+
+impl<T> CanForget for StorageRun<T> {
+	fn is_alive(&self) -> bool {
+		!self.comps.is_empty()
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct StorageRunSlot<T> {
+	lifetime: Dependent<DebugLifetime>,
+	value: T,
+}
+
+impl<T> StorageRunSlot<T> {
+	pub fn lifetime(&self) -> DebugLifetime {
+		self.lifetime.get()
+	}
+
+	pub fn value(&self) -> &T {
+		&self.value
+	}
+
+	pub fn value_mut(&mut self) -> &mut T {
+		&mut self.value
 	}
 }
 
