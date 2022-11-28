@@ -58,12 +58,12 @@ impl EngineRoot {
 
 		// Create main viewport
 		let mut viewport_mgr = ViewportManager::default();
-		let mut viewport_arch = Archetype::new();
+		let mut viewport_arch = Archetype::default();
 		let mut viewports = Storage::new();
 		let mut depth_textures = Storage::new();
 		let mut input_managers = Storage::new();
 
-		let main_viewport = viewport_arch.spawn();
+		let main_viewport = viewport_arch.spawn("main viewport");
 		viewports.add(
 			main_viewport,
 			Viewport::new(
@@ -94,7 +94,7 @@ impl EngineRoot {
 
 		// Create scene manager
 		let scene_mgr = SceneManager::default();
-		let scene_arch = Archetype::new();
+		let scene_arch = Archetype::default();
 		let userdata = Storage::new();
 		let update_handlers = Storage::new();
 		let render_handlers = Storage::new();

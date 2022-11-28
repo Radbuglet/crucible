@@ -1,8 +1,10 @@
 //! Error reporting built off the Rust standard library [Error] trait.
 
-use std::error::Error;
-use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::thread::panicking;
+use std::{
+	error::Error,
+	fmt::{Display, Formatter, Result as FmtResult},
+	thread::panicking,
+};
 
 use derive_where::derive_where;
 
@@ -19,16 +21,16 @@ pub trait ErrorFormatExt: Error {
 		panic!("{}", self.format_error());
 	}
 
+	fn log(&self) {
+		log::error!("{}", self.format_error());
+	}
+
 	fn raise_unless_panicking(&self) {
 		if !panicking() {
 			self.raise();
 		} else {
 			self.log();
 		}
-	}
-
-	fn log(&self) {
-		log::error!("{}", self.format_error());
 	}
 }
 
@@ -102,15 +104,15 @@ pub type AnyhowErrorBoxed = Box<AnyhowErrorInner>;
 pub type AnyhowErrorInner = dyn Error + Send + Sync + 'static;
 
 pub trait AnyhowConvertExt {
-	type StdError;
+	type AsStd;
 
-	fn into_std_error(self) -> Self::StdError;
+	fn into_std_error(self) -> Self::AsStd;
 }
 
 impl<T> AnyhowConvertExt for anyhow::Result<T> {
-	type StdError = Result<T, AnyhowErrorBoxed>;
+	type AsStd = Result<T, AnyhowErrorBoxed>;
 
-	fn into_std_error(self) -> Self::StdError {
+	fn into_std_error(self) -> Self::AsStd {
 		self.map_err(|err| err.into())
 	}
 }

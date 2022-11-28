@@ -11,6 +11,7 @@ use derive_where::derive_where;
 use crate::{
 	debug::{
 		error::ResultExt,
+		label::{DebugLabel, NO_LABEL},
 		lifetime::{DebugLifetime, Dependable, Dependent, LifetimeOwner},
 	},
 	lang::polyfill::VecPoly,
@@ -82,7 +83,7 @@ pub struct Archetype {
 }
 
 impl Archetype {
-	pub fn new() -> Self {
+	pub fn new<L: DebugLabel>(name: L) -> Self {
 		// Generate archetype ID
 		let mut free_arch_ids = ARCH_ID_FREE_LIST.lock().unwrap_pretty();
 		let (_, id) = free_arch_ids.add(());
@@ -92,13 +93,13 @@ impl Archetype {
 		// Construct archetype
 		Self {
 			id,
-			lifetime: LifetimeOwner(DebugLifetime::new()),
+			lifetime: LifetimeOwner(DebugLifetime::new(name)),
 			slots: PureFreeList::new(),
 		}
 	}
 
-	pub fn spawn(&mut self) -> Entity {
-		let (lifetime, slot) = self.slots.add(LifetimeOwner(DebugLifetime::new()));
+	pub fn spawn<L: DebugLabel>(&mut self, name: L) -> Entity {
+		let (lifetime, slot) = self.slots.add(LifetimeOwner(DebugLifetime::new(name)));
 
 		assert_ne!(slot, u32::MAX, "spawned too many entities");
 
@@ -136,7 +137,7 @@ impl Archetype {
 
 impl Default for Archetype {
 	fn default() -> Self {
-		Self::new()
+		Self::new(NO_LABEL)
 	}
 }
 
@@ -421,38 +422,5 @@ impl<T> StorageRunSlot<T> {
 
 	pub fn value_mut(&mut self) -> &mut T {
 		&mut self.value
-	}
-}
-
-// === Tests === //
-
-#[cfg(test)]
-mod test {
-	use super::*;
-
-	#[test]
-	#[should_panic]
-	fn uaf_detection_tripped() {
-		let mut arch_player = Archetype::new();
-
-		let player = arch_player.spawn();
-
-		let mut storage = Storage::new();
-		storage.add(player, ());
-
-		arch_player.despawn(player);
-	}
-
-	#[test]
-	fn uaf_detection_not_tripped() {
-		let mut arch_player = Archetype::new();
-
-		let player = arch_player.spawn();
-
-		let mut storage = Storage::new();
-		storage.add(player, ());
-
-		storage.remove(player);
-		arch_player.despawn(player);
 	}
 }

@@ -1,19 +1,10 @@
-use std::{
-	borrow::Borrow,
-	cell::RefCell,
-	cmp::Ordering,
-	fmt, hash,
-	num::NonZeroU64,
-	sync::atomic::{AtomicU64, Ordering::SeqCst},
-};
+use std::{borrow::Borrow, cmp::Ordering, fmt, hash, num::NonZeroU64};
 
 use thiserror::Error;
 
-use super::error::ResultExt;
-use crate::mem::{
-	array::arr,
-	pool::{GlobalPool, LocalPool},
-	ptr::leak_on_heap,
+use super::{
+	error::ResultExt,
+	label::{DebugLabel, ReifiedDebugLabel},
 };
 
 // === Global === //
@@ -21,47 +12,68 @@ use crate::mem::{
 type LifetimeSlot = &'static SlotData;
 
 #[derive(Debug)]
-struct SlotData {
-	gen: AtomicU64,
-	deps: AtomicU64,
+struct SlotData(parking_lot::Mutex<SlotDataInner>);
+
+#[derive(Debug)]
+struct SlotDataInner {
+	gen: NonZeroU64,
+	deps: usize,
+	curr_name: ReifiedDebugLabel,
+	dead_name: ReifiedDebugLabel,
 }
 
-const POOL_BLOCK_SIZE: usize = 1024;
+mod db {
+	use std::{cell::RefCell, num::NonZeroU64};
 
-static GLOBAL_POOL: GlobalPool<LifetimeSlot> = GlobalPool::new();
+	use parking_lot::Mutex;
 
-thread_local! {
-	static LOCAL_POOL: RefCell<LocalPool<LifetimeSlot>> = const { RefCell::new(LocalPool::new()) };
-}
+	use super::{LifetimeSlot, SlotData, SlotDataInner};
 
-fn alloc_slot() -> LifetimeSlot {
-	LOCAL_POOL.with(|local_pool| {
-		let mut local_pool = local_pool.borrow_mut();
+	use crate::mem::{
+		array::arr,
+		pool::{GlobalPool, LocalPool},
+		ptr::leak_on_heap,
+	};
 
-		local_pool.acquire(&GLOBAL_POOL, || {
-			let values = leak_on_heap(arr![SlotData {
-				gen: AtomicU64::new(1),
-				deps: AtomicU64::new(1),
-			}; POOL_BLOCK_SIZE]);
+	const POOL_BLOCK_SIZE: usize = 1024;
 
-			values.into_iter().map(|v| &*v).collect()
+	static GLOBAL_POOL: GlobalPool<LifetimeSlot> = GlobalPool::new();
+
+	thread_local! {
+		static LOCAL_POOL: RefCell<LocalPool<LifetimeSlot>> = const { RefCell::new(LocalPool::new()) };
+	}
+
+	pub(super) fn alloc_slot() -> LifetimeSlot {
+		LOCAL_POOL.with(|local_pool| {
+			let mut local_pool = local_pool.borrow_mut();
+
+			local_pool.acquire(&GLOBAL_POOL, || {
+				let values = leak_on_heap(arr![SlotData(Mutex::new(SlotDataInner {
+					gen: NonZeroU64::new(1).unwrap(),
+					deps: 0,
+					curr_name: None,
+					dead_name: None,
+				})); POOL_BLOCK_SIZE]);
+
+				values.into_iter().map(|v| &*v).collect()
+			})
 		})
-	})
-}
+	}
 
-fn free_slot(slot: LifetimeSlot) {
-	LOCAL_POOL.with(|local_pool| {
-		local_pool
-			.borrow_mut()
-			.release(&GLOBAL_POOL, POOL_BLOCK_SIZE, slot);
-	});
+	pub(super) fn free_slot(slot: LifetimeSlot) {
+		LOCAL_POOL.with(|local_pool| {
+			local_pool
+				.borrow_mut()
+				.release(&GLOBAL_POOL, POOL_BLOCK_SIZE, slot);
+		});
+	}
 }
 
 // === Lifetime === //
 
 #[derive(Debug, Clone, Error)]
-#[error("attempted operation on dangling lifetime")]
-pub struct DanglingLifetimeError;
+#[error("attempted operation on dangling {0:?}")]
+pub struct DanglingLifetimeError(pub Lifetime);
 
 #[derive(Copy, Clone)]
 pub struct Lifetime {
@@ -70,100 +82,119 @@ pub struct Lifetime {
 }
 
 impl Lifetime {
-	pub fn new() -> Self {
-		let slot = alloc_slot();
-		let gen = slot.gen.load(SeqCst);
+	pub fn new<L: DebugLabel>(name: L) -> Self {
+		let curr_name = name.reify();
+
+		let slot = db::alloc_slot();
+		let mut slot_guard = slot.0.lock();
+		slot_guard.curr_name = curr_name;
 
 		Self {
 			slot,
-			gen: NonZeroU64::new(gen).unwrap(),
+			gen: slot_guard.gen,
 		}
 	}
 
 	pub fn is_alive(self) -> bool {
-		self.gen.get() == self.slot.gen.load(SeqCst)
+		self.gen == self.slot.0.lock().gen
 	}
 
-	// TODO: Verify threading semantics and potentially weaken orderings
 	pub fn try_inc_dep(self) -> Result<(), DanglingLifetimeError> {
-		match self.slot.deps.fetch_update(SeqCst, SeqCst, |deps| {
-			if self.is_alive() {
-				Some(deps + 1)
-			} else {
-				None
-			}
-		}) {
-			Ok(_) => Ok(()),
-			Err(_) => Err(DanglingLifetimeError),
+		let mut slot_guard = self.slot.0.lock();
+
+		if slot_guard.gen != self.gen {
+			return Err(DanglingLifetimeError(self));
 		}
+
+		slot_guard.deps = slot_guard.deps.checked_add(1).unwrap_or_else(|| {
+			panic!(
+				"Marked too many dependencies on `Lifetime` with name {:?}.",
+				slot_guard.curr_name,
+			)
+		});
+
+		Ok(())
 	}
 
 	pub fn inc_dep(self) {
-		self.try_inc_dep().unwrap_unless_panicking();
-	}
-
-	pub fn try_dec_dep(self) -> Result<(), DanglingLifetimeError> {
-		match self.slot.deps.fetch_update(SeqCst, SeqCst, |deps| {
-			if self.is_alive() {
-				assert!(
-					deps >= self.gen.get(),
-					"Decremented dependency counter more times than it was incremented."
-				);
-				Some(deps - 1)
-			} else {
-				None
-			}
-		}) {
-			Ok(_) => Ok(()),
-			Err(_) => Err(DanglingLifetimeError),
-		}
+		self.try_inc_dep().log();
 	}
 
 	pub fn dec_dep(self) {
-		self.try_dec_dep().unwrap_unless_panicking();
+		let mut slot_guard = self.slot.0.lock();
+
+		if slot_guard.gen != self.gen {
+			return;
+		}
+
+		slot_guard.deps = slot_guard.deps.checked_sub(1).unwrap_or_else(|| {
+			panic!(
+				"Decremented dependency counter of `Lifetime` with name {:?} more times than it was incremented.",
+				slot_guard.curr_name,
+			)
+		});
 	}
 
 	pub fn try_destroy(self) -> Result<(), DanglingLifetimeError> {
-		let local_gen = self.gen.get();
+		let mut slot_guard = self.slot.0.lock();
 
-		// First, try to invalidate all existing handles.
-		let did_destroy = self
-			.slot
-			.gen
-			.compare_exchange(local_gen, local_gen + 1, SeqCst, SeqCst)
-			.is_ok();
-
-		if !did_destroy {
-			return Err(DanglingLifetimeError);
+		// Ensure that the lifetime is still alive
+		if slot_guard.gen != self.gen {
+			return Err(DanglingLifetimeError(self));
 		}
 
-		// Then, update the dependency count so it becomes a logical zero.
-		// This will force all ongoing `inc/dec_dep` calls to retry their increment, making them
-		// realize that they have been invalidated.
-		let old_count = self.slot.deps.swap(local_gen + 1, SeqCst);
+		// See if we're disconnecting the lifetime from any of its dependencies.
+		if slot_guard.deps > 0 {
+			log::error!(
+				"Disconnected `Lifetime` with name {:?} from {} dependenc{}.",
+				slot_guard.curr_name,
+				slot_guard.deps,
+				if slot_guard.deps > 0 { "ies" } else { "y" }
+			);
+		}
 
-		// Release the slot to the world...
-		free_slot(self.slot);
+		// Reset its state
+		slot_guard.gen = slot_guard.gen.saturating_add(1);
+		slot_guard.deps = 0;
+		slot_guard.dead_name = slot_guard.curr_name.take();
 
-		// ...and finally, warn of a potential UAF if we just cut off some dependency. This also
-		// detects concurrent `inc/dec_dep` calls, which may have completed their transaction while
-		// we were destroying the lifetime.
-		if old_count != local_gen {
-			return Err(DanglingLifetimeError);
+		// Release the slot
+		if slot_guard.gen.get() != u64::MAX {
+			drop(slot_guard);
+			db::free_slot(self.slot);
+		} else {
+			log::error!(
+				"A given `Lifetime` was somehow used more than `u64::MAX` times and is being leaked. \
+				 How long-running is this application?"
+			);
 		}
 
 		Ok(())
 	}
 
 	pub fn destroy(self) {
-		self.try_destroy().unwrap_unless_panicking();
+		self.try_destroy().log();
 	}
 }
 
 impl fmt::Debug for Lifetime {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let slot_guard = self.slot.0.lock();
+
 		f.debug_struct("Lifetime")
-			.field("is_alive", &self.is_alive())
+			.field("name", {
+				let local_gen = self.gen.get();
+				let curr_gen = slot_guard.gen.get();
+
+				if local_gen == curr_gen {
+					&slot_guard.curr_name
+				} else if local_gen == curr_gen - 1 {
+					&slot_guard.dead_name
+				} else {
+					&"name unavailable"
+				}
+			})
+			.field("is_alive", &(slot_guard.gen == self.gen))
 			.finish_non_exhaustive()
 	}
 }
@@ -180,8 +211,8 @@ mod debug_impl {
 	impl DebugLifetime {
 		pub const IS_ENABLED: bool = true;
 
-		pub fn new() -> Self {
-			Self(Lifetime::new())
+		pub fn new<L: DebugLabel>(name: L) -> Self {
+			Self(Lifetime::new(name))
 		}
 
 		pub fn is_possibly_alive(self) -> bool {
@@ -222,7 +253,9 @@ mod release_impl {
 	impl DebugLifetime {
 		pub const IS_ENABLED: bool = false;
 
-		pub fn new() -> Self {
+		pub fn new<L: DebugLabel>(name: L) -> Self {
+			let _name = name;
+
 			Self { _private: () }
 		}
 

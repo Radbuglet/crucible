@@ -528,6 +528,7 @@ dependencies = [
  "fastrand",
  "hashbrown 0.13.1",
  "log",
+ "parking_lot",
  "thiserror",
 ]
 

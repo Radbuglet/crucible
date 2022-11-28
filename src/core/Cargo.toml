@@ -10,6 +10,7 @@ derive-where = "1.0.0"
 fastrand = "1.8.0"
 hashbrown = { version = "0.13.1", features = ["raw"] }
 log = "0.4.17"
+parking_lot = "0.12.1"
 thiserror = "1.0.37"
 
 [dev-dependencies]

@@ -1,5 +1,5 @@
 use std::{
-	any::{type_name, TypeId},
+	any::type_name,
 	collections::HashMap,
 	fmt,
 	marker::PhantomData,
@@ -90,7 +90,7 @@ impl<T: ?Sized + 'static> Provider for &T {
 	}
 
 	unsafe fn try_get_comp_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
-		if TypeId::of::<T>() == TypeId::of::<U>() {
+		if NamedTypeId::of::<T>() == NamedTypeId::of::<U>() {
 			let p_me = me.cast::<*const U>().read(); // &T -> *const T -> *const U
 			Some(&*p_me)
 		} else {
@@ -111,7 +111,7 @@ impl<T: ?Sized + 'static> Provider for &mut T {
 	}
 
 	unsafe fn try_get_comp_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U> {
-		if TypeId::of::<T>() == TypeId::of::<U>() {
+		if NamedTypeId::of::<T>() == NamedTypeId::of::<U>() {
 			let p_me = me.cast::<*const U>().read(); // &mut T -> *mut T -> *const T -> *const U
 			Some(&*p_me)
 		} else {
@@ -122,7 +122,7 @@ impl<T: ?Sized + 'static> Provider for &mut T {
 	unsafe fn try_get_comp_mut_unchecked<'a, U: ?Sized + 'static>(
 		me: *mut Self,
 	) -> Option<&'a mut U> {
-		if TypeId::of::<T>() == TypeId::of::<U>() {
+		if NamedTypeId::of::<T>() == NamedTypeId::of::<U>() {
 			let p_me = me.cast::<*mut U>().read(); // &mut T -> *mut T -> *mut U
 			Some(&mut *p_me)
 		} else {

@@ -78,7 +78,7 @@ impl PlayScene {
 		);
 
 		// Create scene entity
-		let scene = scene_arch.spawn();
+		let scene = scene_arch.spawn("main scene");
 
 		userdatas.add(scene, scene_state);
 		update_handlers.add(scene, Self::on_update);
@@ -298,7 +298,7 @@ impl PlayScene {
 			arch_chunk = &mut Archetype,
 		});
 
-		let chunk = arch_chunk.spawn();
+		let chunk = arch_chunk.spawn(format_args!("chunk at {pos:?}"));
 		log::info!("Spawning chunk at {pos:?}");
 		chunk
 	}
