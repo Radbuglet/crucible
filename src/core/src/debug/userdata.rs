@@ -1,7 +1,6 @@
 use std::{
 	any::{type_name, Any},
 	fmt,
-	sync::Arc,
 };
 
 use crate::lang::lifetime::try_transform_mut;
@@ -67,15 +66,4 @@ impl dyn UserdataValue {
 			Err(val) => val.unexpected_userdata::<T>(),
 		}
 	}
-}
-
-// === Userdata Conversions === //
-
-pub fn downcast_userdata_arc<T: UserdataValue>(arc: Arc<dyn UserdataValue>) -> Arc<T> {
-	let _ = arc.downcast_ref::<T>();
-	let ptr = Arc::into_raw(arc);
-
-	// Safety: we already verified that `dyn Userdata` was actually `T` by down-casting it.
-	let ptr = ptr as *const T;
-	unsafe { Arc::from_raw(ptr) }
 }

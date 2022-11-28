@@ -239,21 +239,17 @@ impl Provider for DynProvider<'_> {
 
 // === ProviderPack === //
 
-pub struct SpreadProviderPointee {
-	_private: (),
-}
-
 pub trait ProviderPack<'a> {
 	fn pack_from<Q: Provider>(provider: &'a mut Q) -> Self;
 }
 
-pub trait ProviderPackPart<'a, P> {
+pub trait ProviderPackPart<'a> {
 	type AliasPointee: ?Sized + 'static;
 
 	unsafe fn pack_from<Q: Provider>(provider: *mut Q) -> Self;
 }
 
-impl<'a, 'p, P, T> ProviderPackPart<'a, P> for &'p T
+impl<'a, 'p, T> ProviderPackPart<'a> for &'p T
 where
 	'a: 'p,
 	T: ?Sized + 'static,
@@ -265,7 +261,7 @@ where
 	}
 }
 
-impl<'a, 'p, P, T> ProviderPackPart<'a, P> for &'p mut T
+impl<'a, 'p, T> ProviderPackPart<'a> for &'p mut T
 where
 	'a: 'p,
 	T: ?Sized + 'static,
@@ -278,12 +274,12 @@ where
 }
 
 macro tup_impl_pack($($para:ident:$field:tt),*) {
-	impl<'a, $($para: ProviderPackPart<'a, Self>),*> ProviderPack<'a> for ($($para,)*) {
+	impl<'a, $($para: ProviderPackPart<'a>),*> ProviderPack<'a> for ($($para,)*) {
 		#[allow(unused)]
 		fn pack_from<Q: Provider>(provider: &'a mut Q) -> Self {
 			// Check aliasing
 			if let Some((offending)) = has_aliases::<(
-				$(PhantomData<<$para as ProviderPackPart<'a, Self>>::AliasPointee>,)*
+				$(PhantomData<<$para as ProviderPackPart<'a>>::AliasPointee>,)*
 			)>() {
 				panic!("{offending:?} was repeated in the pack target. This is not allowed for aliasing reasons.");
 			}
@@ -291,7 +287,7 @@ macro tup_impl_pack($($para:ident:$field:tt),*) {
 			// Pack the tuple
 			let provider = provider as *mut Q;
 
-			($( unsafe { <$para as ProviderPackPart<'a, Self>>::pack_from(provider) }, )*)
+			($( unsafe { <$para as ProviderPackPart<'a>>::pack_from(provider) }, )*)
 		}
 	}
 }
@@ -317,13 +313,13 @@ mod test {
 
 	#[test]
 	fn test() {
-		let a = 1i32;
-		let mut b = 2u32;
-		let c = "foo";
-		let mut d = (&a, &mut b, c);
+		let comp_a = 1i32;
+		let mut comp_b = 2u32;
+		let comp_c = "foo";
 
-		assert_eq!(*d.get_comp::<i32>(), 1);
-		receiver(d.pack());
+		let mut provider = (&comp_a, &mut comp_b, comp_c);
+		assert_eq!(*provider.get_comp::<i32>(), 1);
+		receiver(provider.pack());
 	}
 
 	fn receiver(mut cx: (&mut u32, &str)) {

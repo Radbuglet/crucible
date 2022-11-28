@@ -1,6 +1,6 @@
 use crucible_core::{
-	debug::userdata::{downcast_userdata_arc, Userdata, UserdataValue},
-	lang::polyfill::{BuildHasherPoly, OptionPoly},
+	debug::userdata::{Userdata, UserdataValue},
+	lang::{polyfill::{BuildHasherPoly, OptionPoly}, loan::downcast_userdata_arc},
 };
 
 use hashbrown::raw::RawTable;
