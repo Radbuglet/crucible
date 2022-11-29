@@ -6,10 +6,10 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.58"
 bytemuck = "1.10.0"
-crevice = { version = "0.11.0", features = ["glam"] }
+crevice = { version = "0.12.0", features = ["glam"] }
 crucible-common = { path = "../common" }
 crucible-core = { path = "../core" }
-env_logger = "0.9.3"
+env_logger = "0.10.0"
 fastrand = "1.8.0"
 futures = "0.3.25"
 hashbrown = { version = "0.13.1", features = ["raw"] }

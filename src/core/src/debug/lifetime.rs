@@ -175,6 +175,29 @@ impl Lifetime {
 	pub fn destroy(self) {
 		self.try_destroy().log();
 	}
+
+	pub fn debug_name(self) -> LifetimeName {
+		LifetimeName(self)
+	}
+
+	fn fmt_lifetime_name(self, slot_guard: &SlotDataInner) -> &str {
+		let local_gen = self.gen.get();
+		let curr_gen = slot_guard.gen.get();
+
+		let name = if local_gen == curr_gen {
+			Some(&slot_guard.curr_name)
+		} else if local_gen == curr_gen - 1 {
+			Some(&slot_guard.dead_name)
+		} else {
+			None
+		};
+
+		match name {
+			Some(Some(name)) => &name,
+			Some(None) => "<name unspecified>",
+			None => "<name unavailable>",
+		}
+	}
 }
 
 impl fmt::Debug for Lifetime {
@@ -182,20 +205,26 @@ impl fmt::Debug for Lifetime {
 		let slot_guard = self.slot.0.lock();
 
 		f.debug_struct("Lifetime")
-			.field("name", {
-				let local_gen = self.gen.get();
-				let curr_gen = slot_guard.gen.get();
-
-				if local_gen == curr_gen {
-					&slot_guard.curr_name
-				} else if local_gen == curr_gen - 1 {
-					&slot_guard.dead_name
-				} else {
-					&"name unavailable"
-				}
-			})
+			.field("name", &self.fmt_lifetime_name(&slot_guard))
 			.field("is_alive", &(slot_guard.gen == self.gen))
 			.finish_non_exhaustive()
+	}
+}
+
+#[derive(Copy, Clone)]
+pub struct LifetimeName(pub Lifetime);
+
+impl fmt::Debug for LifetimeName {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let slot_guard = self.0.slot.0.lock();
+		fmt::Debug::fmt(self.0.fmt_lifetime_name(&slot_guard), f)
+	}
+}
+
+impl fmt::Display for LifetimeName {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let slot_guard = self.0.slot.0.lock();
+		f.write_str(self.0.fmt_lifetime_name(&slot_guard))
 	}
 }
 
