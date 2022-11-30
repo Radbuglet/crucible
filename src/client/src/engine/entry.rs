@@ -9,7 +9,10 @@ use crucible_core::{
 use wgpu::SurfaceConfiguration;
 use winit::{dpi::LogicalSize, event_loop::EventLoop, window::WindowBuilder};
 
-use crate::game::entry::PlayScene;
+use crate::{
+	engine::scene::{SceneRenderEvent, SceneUpdateEvent},
+	game::entry::PlayScene,
+};
 
 use super::{
 	gfx::{GfxContext, GfxFeatureNeedsScreen},
@@ -202,7 +205,7 @@ pub async fn main_inner() -> anyhow::Result<()> {
 					&mut root.res_mgr,
 				);
 
-				root.update_handlers[curr_scene](curr_scene, &mut cx.as_dyn());
+				root.update_handlers[curr_scene](&mut cx.as_dyn(), curr_scene, SceneUpdateEvent {});
 
 				// Request redraws
 				for (&_window, &viewport) in root.viewport_mgr.window_map() {
@@ -241,7 +244,11 @@ pub async fn main_inner() -> anyhow::Result<()> {
 					&mut root.viewports,
 					&mut root.depth_textures,
 				);
-				root.render_handlers[curr_scene](curr_scene, &mut cx.as_dyn(), &mut frame);
+				root.render_handlers[curr_scene](
+					&mut cx.as_dyn(),
+					curr_scene,
+					SceneRenderEvent { frame: &mut frame },
+				);
 
 				frame.present();
 			}

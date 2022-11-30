@@ -1,11 +1,16 @@
+#![allow(dead_code)]
+
 use crucible_core::{
 	debug::userdata::{Userdata, UserdataValue},
-	lang::{polyfill::{BuildHasherPoly, OptionPoly}, loan::downcast_userdata_arc},
+	lang::{
+		loan::downcast_userdata_arc,
+		polyfill::{BuildHasherPoly, OptionPoly},
+	},
 };
 
-use hashbrown::raw::RawTable;
+use hashbrown::HashMap;
 
-use std::{collections::hash_map::RandomState, hash::Hash, sync::Arc};
+use std::{hash::Hash, sync::Arc};
 
 pub trait ResourceDescriptor: 'static + UserdataValue + Hash + Eq + Clone {
 	type Context<'a>;
@@ -23,19 +28,16 @@ pub trait ResourceDescriptor: 'static + UserdataValue + Hash + Eq + Clone {
 	}
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct ResourceManager {
-	hasher: RandomState,
-	resources: RawTable<ReifiedResource>,
+	resources: HashMap<ReifiedDescriptor, Option<Arc<dyn UserdataValue>>>,
 	// TODO: Implement automatic cleanup
 }
 
 #[derive(Debug)]
-struct ReifiedResource {
-	desc_hash: u64,
+struct ReifiedDescriptor {
+	hash: u64,
 	desc: Userdata,
-	// `None` if the resource hasn't loaded yet.
-	res: Option<Arc<dyn UserdataValue>>,
 }
 
 impl ResourceManager {
@@ -51,25 +53,24 @@ impl ResourceManager {
 
 		// Insert an unfinished resource stub into the registry. This is used to detect cyclic
 		// resource dependencies.
-		let desc_hash = self.hasher.p_hash_one(&desc);
+		let hash = self.resources.hasher().p_hash_one(&desc);
+		let reified_desc = ReifiedDescriptor {
+			hash,
+			desc: Box::new(desc.clone()),
+		};
 
-		self.resources.insert(
-			desc_hash,
-			ReifiedResource {
-				desc_hash,
-				desc: Box::new(desc.clone()),
-				res: None,
-			},
-			|res| res.desc_hash,
-		);
+		self.resources
+			.raw_table()
+			.insert(hash, (reified_desc, None), |(desc, _)| desc.hash);
 
 		// Construct the resource
 		let res = desc.construct(self, cx);
 
 		// Update the stub to contain the resource.
-		let stub = self
+		let (_, stub) = self
 			.resources
-			.get_mut(desc_hash, |candidate| {
+			.raw_table()
+			.get_mut(hash, |(candidate, _)| {
 				candidate
 					.desc
 					.try_downcast_ref::<D>()
@@ -77,25 +78,24 @@ impl ResourceManager {
 			})
 			.unwrap();
 
-		stub.res = Some(res);
+		*stub = Some(res);
 
 		// Convert it into an `Arc<D::Resource>`
-		let res = stub.res.as_ref().unwrap();
+		let res = stub.as_ref().unwrap();
 		downcast_userdata_arc(res.clone())
 	}
 
 	pub fn find<D: ResourceDescriptor>(&self, desc: &D) -> Option<Arc<D::Resource>> {
-		let hash = self.hasher.p_hash_one(desc);
-		let entry = self.resources.get(hash, |res| {
-			res.desc_hash == hash
-				&& res
+		let hash = self.resources.hasher().p_hash_one(desc);
+		let (_, res) = self.resources.raw_entry().from_hash(hash, |candidate| {
+			candidate.hash == hash
+				&& candidate
 					.desc
 					.try_downcast_ref::<D>()
-					.p_is_some_and(|desc_rhs| desc == desc_rhs)
+					.p_is_some_and(|candidate| desc == candidate)
 		})?;
 
-		let res = entry
-			.res
+		let res = res
 			.as_ref()
 			.unwrap_or_else(|| panic!("Detected recursive dependency on dependency {desc:?}."));
 

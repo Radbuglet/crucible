@@ -1,7 +1,17 @@
+#![allow(dead_code)]
+
 use crucible_core::ecs::{context::DynProvider, core::Entity};
 
-pub type SceneUpdateHandler = fn(Entity, &mut DynProvider);
-pub type SceneRenderHandler = fn(Entity, &mut DynProvider, &mut wgpu::SurfaceTexture);
+pub type SceneUpdateHandler = fn(&mut DynProvider, Entity, SceneUpdateEvent);
+pub type SceneRenderHandler = fn(&mut DynProvider, Entity, SceneRenderEvent);
+
+#[derive(Debug)]
+pub struct SceneUpdateEvent {}
+
+#[derive(Debug)]
+pub struct SceneRenderEvent<'a> {
+	pub frame: &'a mut wgpu::SurfaceTexture,
+}
 
 #[derive(Debug, Default)]
 pub struct SceneManager {

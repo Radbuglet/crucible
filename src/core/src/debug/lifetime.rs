@@ -30,9 +30,8 @@ mod db {
 	use super::{LifetimeSlot, SlotData, SlotDataInner};
 
 	use crate::mem::{
-		array::arr,
+		array::vec_from_fn,
 		pool::{GlobalPool, LocalPool},
-		ptr::leak_on_heap,
 	};
 
 	const POOL_BLOCK_SIZE: usize = 1024;
@@ -48,12 +47,18 @@ mod db {
 			let mut local_pool = local_pool.borrow_mut();
 
 			local_pool.acquire(&GLOBAL_POOL, || {
-				let values = leak_on_heap(arr![SlotData(Mutex::new(SlotDataInner {
-					gen: NonZeroU64::new(1).unwrap(),
-					deps: 0,
-					curr_name: None,
-					dead_name: None,
-				})); POOL_BLOCK_SIZE]);
+				let values = vec_from_fn(
+					|| {
+						SlotData(Mutex::new(SlotDataInner {
+							gen: NonZeroU64::new(1).unwrap(),
+							deps: 0,
+							curr_name: None,
+							dead_name: None,
+						}))
+					},
+					POOL_BLOCK_SIZE,
+				)
+				.leak();
 
 				values.into_iter().map(|v| &*v).collect()
 			})

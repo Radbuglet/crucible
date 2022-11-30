@@ -12,7 +12,6 @@ use winit::window::{Window, WindowId};
 use super::gfx::GfxContext;
 
 pub const FALLBACK_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
-pub const DEFAULT_DEPTH_BUFFER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 // === ViewportManager === //
 

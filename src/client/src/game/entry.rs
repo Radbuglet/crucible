@@ -24,7 +24,7 @@ use crate::{
 		gfx::GfxContext,
 		input::InputManager,
 		resources::ResourceManager,
-		scene::{SceneRenderHandler, SceneUpdateHandler},
+		scene::{SceneRenderEvent, SceneRenderHandler, SceneUpdateEvent, SceneUpdateHandler},
 		viewport::{FullScreenTexture, Viewport},
 	},
 	game::{player::camera::InputActions, voxel::pipeline::VoxelRenderingPipelineDesc},
@@ -87,7 +87,7 @@ impl PlayScene {
 		scene
 	}
 
-	pub fn on_update(me: Entity, cx: &mut DynProvider) {
+	pub fn on_update(cx: &mut DynProvider, me: Entity, _event: SceneUpdateEvent) {
 		// Extract context
 		unpack!(cx => {
 			gfx = &GfxContext,
@@ -198,7 +198,7 @@ impl PlayScene {
 		me.world_mesh.update_chunks(cx, None);
 	}
 
-	pub fn on_render(me: Entity, cx: &mut DynProvider, frame: &mut wgpu::SurfaceTexture) {
+	pub fn on_render(cx: &mut DynProvider, me: Entity, event: SceneRenderEvent) {
 		// Extract context
 		unpack!(cx => {
 			userdata = &mut Storage<Userdata>,
@@ -209,6 +209,7 @@ impl PlayScene {
 		});
 
 		let me = userdata.get_downcast_mut::<Self>(me);
+		let frame = event.frame;
 
 		// Acquire viewport and depth texture
 		let viewport = &viewports[*me.main_viewport];
