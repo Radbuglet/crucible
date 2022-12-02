@@ -18,7 +18,7 @@ use crucible_core::{
 };
 use wgpu::util::DeviceExt;
 
-use crate::engine::gfx::GfxContext;
+use crate::engine::io::gfx::GfxContext;
 
 use super::pipeline::{VoxelUniforms, VoxelVertex};
 

@@ -5,7 +5,7 @@ use crucible_common::voxel::math::{BlockFace, Sign};
 use typed_glam::glam;
 
 use crate::engine::{
-	gfx::GfxContext,
+	io::gfx::GfxContext,
 	resources::{ResourceDescriptor, ResourceManager},
 };
 

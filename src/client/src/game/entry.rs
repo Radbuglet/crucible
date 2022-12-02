@@ -21,11 +21,13 @@ use winit::{
 
 use crate::{
 	engine::{
-		gfx::GfxContext,
-		input::InputManager,
+		io::{
+			gfx::GfxContext,
+			input::InputManager,
+			viewport::{FullScreenTexture, Viewport},
+		},
 		resources::ResourceManager,
 		scene::{SceneRenderEvent, SceneRenderHandler, SceneUpdateEvent, SceneUpdateHandler},
-		viewport::{FullScreenTexture, Viewport},
 	},
 	game::{player::camera::InputActions, voxel::pipeline::VoxelRenderingPipelineDesc},
 };

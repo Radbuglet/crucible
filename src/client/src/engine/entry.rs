@@ -7,7 +7,12 @@ use crucible_core::{
 	},
 };
 use wgpu::SurfaceConfiguration;
-use winit::{dpi::LogicalSize, event_loop::EventLoop, window::WindowBuilder};
+use winit::{
+	dpi::LogicalSize,
+	event::{DeviceEvent, DeviceId, WindowEvent},
+	event_loop::EventLoopBuilder,
+	window::{WindowBuilder, WindowId},
+};
 
 use crate::{
 	engine::scene::{SceneRenderEvent, SceneUpdateEvent},
@@ -15,12 +20,17 @@ use crate::{
 };
 
 use super::{
-	gfx::{GfxContext, GfxFeatureNeedsScreen},
-	input::InputManager,
+	io::{
+		gfx::{GfxContext, GfxFeatureNeedsScreen},
+		input::InputManager,
+		main_loop::{MainLoop, MainLoopHandler, WinitEventLoop, WinitEventProxy},
+		viewport::{FullScreenTexture, Viewport, ViewportManager},
+	},
 	resources::ResourceManager,
 	scene::{SceneManager, SceneRenderHandler, SceneUpdateHandler},
-	viewport::{FullScreenTexture, Viewport, ViewportManager},
 };
+
+// === EngineRoot === //
 
 struct EngineRoot {
 	// Services
@@ -43,9 +53,9 @@ struct EngineRoot {
 }
 
 impl EngineRoot {
-	async fn new() -> anyhow::Result<(EventLoop<()>, Self)> {
+	async fn new() -> anyhow::Result<(WinitEventLoop, Self)> {
 		// Create main window
-		let event_loop = EventLoop::new();
+		let event_loop = EventLoopBuilder::with_user_event().build();
 		let main_window = WindowBuilder::new()
 			.with_title("Crucible")
 			.with_inner_size(LogicalSize::new(1920, 1080))
@@ -130,135 +140,132 @@ impl EngineRoot {
 	}
 }
 
-pub async fn main_inner() -> anyhow::Result<()> {
-	let (event_loop, mut root) = EngineRoot::new().await?;
+impl MainLoopHandler for EngineRoot {
+	fn on_update(&mut self, _cx: (&mut MainLoop, &WinitEventProxy)) {
+		let mut cx = (
+			&self.gfx,
+			&mut self.viewport_mgr,
+			&mut self.depth_textures,
+			&mut self.input_managers,
+			&mut self.viewports,
+			&mut self.userdata,
+			&mut self.res_mgr,
+		);
 
-	// Make all viewports visible
-	{
-		let viewports = &mut root.viewports;
-		for &viewport in root.viewport_mgr.window_map().values() {
-			viewports[viewport].window().set_visible(true);
+		let scene = self.scene_mgr.current();
+		self.update_handlers[scene](&mut cx.as_dyn(), scene, SceneUpdateEvent {});
+
+		// Request redraws
+		for (&_window, &viewport) in self.viewport_mgr.window_map() {
+			self.viewports[viewport].window().request_redraw();
+		}
+
+		// Clear input queue
+		for (_, &viewport) in self.viewport_mgr.window_map() {
+			self.input_managers[viewport].end_tick();
 		}
 	}
 
-	// Setup initial scene
-	{
-		let scene_mgr = &mut root.scene_mgr;
-		let main_viewport = root
-			.viewport_mgr
-			.window_map()
-			.values()
-			.copied()
-			.next()
-			.unwrap();
+	fn on_render(&mut self, _cx: (&mut MainLoop, &WinitEventProxy), window_id: WindowId) {
+		let Some(viewport) = self.viewport_mgr.get_viewport(window_id) else {
+			return;
+		};
 
-		let scene = PlayScene::spawn(
-			(
-				&mut root.scene_arch,
-				&mut root.userdata,
-				&mut root.update_handlers,
-				&mut root.render_handlers,
-				&root.gfx,
-				&mut root.res_mgr,
-			),
-			main_viewport,
+		// Acquire frame
+		let viewport_data = &mut self.viewports[viewport];
+		let Ok(surface) = viewport_data.present((&self.gfx,)) else {
+			log::error!("Failed to render to {viewport:?}");
+			return;
+		};
+
+		let Some(mut frame) = surface else {
+			return;
+		};
+
+		// Process render
+		let curr_scene = self.scene_mgr.current();
+		let mut cx = (
+			&mut self.userdata,
+			&self.gfx,
+			&mut self.res_mgr,
+			&mut self.viewports,
+			&mut self.depth_textures,
+		);
+		self.render_handlers[curr_scene](
+			&mut cx.as_dyn(),
+			curr_scene,
+			SceneRenderEvent { frame: &mut frame },
 		);
 
-		scene_mgr.set_initial(scene);
+		frame.present();
+	}
+
+	fn on_window_input(
+		&mut self,
+		(main_loop, _proxy): (&mut MainLoop, &WinitEventProxy),
+		window_id: WindowId,
+		event: WindowEvent,
+	) {
+		let Some(viewport) = self.viewport_mgr.get_viewport(window_id) else {
+			log::warn!("Unknown viewport with window ID {window_id:?}");
+			return;
+		};
+
+		self.input_managers[viewport].handle_window_event(&event);
+
+		if let WindowEvent::CloseRequested = &event {
+			main_loop.exit();
+		}
+	}
+
+	fn on_device_input(
+		&mut self,
+		_cx: (&mut MainLoop, &WinitEventProxy),
+		device_id: DeviceId,
+		event: DeviceEvent,
+	) {
+		for &viewport in self.viewport_mgr.window_map().values() {
+			self.input_managers[viewport].handle_device_event(device_id, &event);
+		}
+	}
+}
+
+// === Main === //
+
+pub async fn main_inner() -> anyhow::Result<()> {
+	// Construct engine root
+	let (event_loop, mut root) = EngineRoot::new().await?;
+
+	// Setup initial scene
+	let scene_mgr = &mut root.scene_mgr;
+	let main_viewport = root
+		.viewport_mgr
+		.window_map()
+		.values()
+		.copied()
+		.next()
+		.unwrap();
+
+	let scene = PlayScene::spawn(
+		(
+			&mut root.scene_arch,
+			&mut root.userdata,
+			&mut root.update_handlers,
+			&mut root.render_handlers,
+			&root.gfx,
+			&mut root.res_mgr,
+		),
+		main_viewport,
+	);
+
+	scene_mgr.set_initial(scene);
+
+	// Make all viewports visible
+	let viewports = &mut root.viewports;
+	for &viewport in root.viewport_mgr.window_map().values() {
+		viewports[viewport].window().set_visible(true);
 	}
 
 	// Run event loop
-	event_loop.run(move |event, _proxy, flow| {
-		use winit::event::{Event::*, WindowEvent::*};
-
-		flow.set_poll();
-
-		match event {
-			// First window events and device events are dispatched.
-			WindowEvent { window_id, event } => {
-				let Some(viewport) = root.viewport_mgr.get_viewport(window_id) else {
-					return;
-				};
-
-				// Process window event
-				root.input_managers[viewport].handle_window_event(&event);
-
-				if let CloseRequested = event {
-					flow.set_exit();
-				}
-			}
-			DeviceEvent { device_id, event } => {
-				for (_, &viewport) in root.viewport_mgr.window_map() {
-					root.input_managers[viewport].handle_device_event(device_id, &event);
-				}
-			}
-			MainEventsCleared => {
-				// Process update
-				let curr_scene = root.scene_mgr.current();
-				let mut cx = (
-					&root.gfx,
-					&mut root.viewport_mgr,
-					&mut root.depth_textures,
-					&mut root.input_managers,
-					&mut root.viewports,
-					&mut root.userdata,
-					&mut root.res_mgr,
-				);
-
-				root.update_handlers[curr_scene](&mut cx.as_dyn(), curr_scene, SceneUpdateEvent {});
-
-				// Request redraws
-				for (&_window, &viewport) in root.viewport_mgr.window_map() {
-					root.viewports[viewport].window().request_redraw();
-				}
-
-				// Clear input queue
-				for (_, &viewport) in root.viewport_mgr.window_map() {
-					root.input_managers[viewport].end_tick();
-				}
-			}
-
-			// Then, redraws are processed.
-			RedrawRequested(window_id) => {
-				let Some(viewport) = root.viewport_mgr.get_viewport(window_id) else {
-					return;
-				};
-
-				// Acquire frame
-				let viewport_data = &mut root.viewports[viewport];
-				let Ok(surface) = viewport_data.present((&root.gfx,)) else {
-					log::error!("Failed to render to {viewport:?}");
-					return;
-				};
-
-				let Some(mut frame) = surface else {
-					return;
-				};
-
-				// Process render
-				let curr_scene = root.scene_mgr.current();
-				let mut cx = (
-					&mut root.userdata,
-					&root.gfx,
-					&mut root.res_mgr,
-					&mut root.viewports,
-					&mut root.depth_textures,
-				);
-				root.render_handlers[curr_scene](
-					&mut cx.as_dyn(),
-					curr_scene,
-					SceneRenderEvent { frame: &mut frame },
-				);
-
-				frame.present();
-			}
-			RedrawEventsCleared => {}
-
-			// This runs at program termination.
-			LoopDestroyed => {
-				log::info!("Goodbye!");
-			}
-			_ => {}
-		}
-	});
+	MainLoop::start(event_loop, root);
 }
