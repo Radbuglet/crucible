@@ -5,9 +5,10 @@ use crucible_common::voxel::{
 use crucible_core::{
 	debug::{error::ResultExt, userdata::Userdata},
 	ecs::{
-		celled::CelledStorage,
-		context::{unpack, DynProvider},
-		core::{Archetype, Entity, Storage},
+		entity::{Archetype, Entity},
+		provider::{unpack, DynProvider},
+		storage::CelledStorage,
+		storage::Storage,
 	},
 	lang::explicitly_bind::ExplicitlyBind,
 	mem::c_enum::CEnum,

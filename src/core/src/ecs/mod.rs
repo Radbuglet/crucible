@@ -1,5 +1,5 @@
-pub mod celled;
-pub mod context;
-pub mod core;
+pub mod entity;
+pub mod provider;
 pub mod query;
+pub mod storage;
 pub mod userdata;

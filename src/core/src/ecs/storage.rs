@@ -1,191 +1,26 @@
 use std::{
 	any::type_name,
-	collections::{HashMap, HashSet},
+	cell::{Ref, RefCell, RefMut},
+	fmt::Debug,
 	num::NonZeroU32,
 	ops::{self, Deref, DerefMut},
-	sync::Mutex,
 };
 
 use derive_where::derive_where;
 
 use crate::{
-	debug::{
-		error::ResultExt,
-		label::{DebugLabel, NO_LABEL},
-		lifetime::{DebugLifetime, Dependable, Dependent, LifetimeOwner},
-	},
-	lang::polyfill::VecPoly,
+	debug::lifetime::{DebugLifetime, Dependent},
+	lang::{polyfill::VecPoly, sync::ExtRefCell},
 	mem::{
 		auto_map::{AutoHashMap, AutoMut, CanForget, DefaultForgetPolicy},
-		free_list::PureFreeList,
+		ptr::PointeeCastExt,
 	},
 };
 
-use super::query::{Query, QueryIter};
-
-// === Handles === //
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct ArchetypeId {
-	pub lifetime: DebugLifetime,
-	pub id: NonZeroU32,
-}
-
-impl Dependable for ArchetypeId {
-	fn inc_dep(self) {
-		self.lifetime.inc_dep();
-	}
-
-	fn dec_dep(self) {
-		self.lifetime.dec_dep();
-	}
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Entity {
-	pub lifetime: DebugLifetime,
-	pub arch: ArchetypeId,
-	pub slot: u32,
-}
-
-impl Entity {
-	pub fn slot_usize(&self) -> usize {
-		self.slot as usize
-	}
-}
-
-impl Dependable for Entity {
-	fn inc_dep(self) {
-		self.lifetime.inc_dep();
-	}
-
-	fn dec_dep(self) {
-		self.lifetime.dec_dep();
-	}
-}
-
-// === Containers === //
-
-pub type EntityMap<T> = HashMap<Dependent<Entity>, T>;
-pub type EntitySet = HashSet<Dependent<Entity>>;
-pub type ArchetypeMap<T> = HashMap<Dependent<ArchetypeId>, T>;
-pub type ArchetypeSet = HashSet<Dependent<ArchetypeId>>;
-
-// === Archetype === //
-
-static ARCH_ID_FREE_LIST: Mutex<PureFreeList<()>> = Mutex::new(PureFreeList::const_new());
-
-#[derive(Debug)]
-pub struct Archetype {
-	id: NonZeroU32,
-	lifetime: LifetimeOwner<DebugLifetime>,
-	slots: PureFreeList<LifetimeOwner<DebugLifetime>>,
-}
-
-impl Archetype {
-	pub fn new<L: DebugLabel>(name: L) -> Self {
-		// Generate archetype ID
-		let mut free_arch_ids = ARCH_ID_FREE_LIST.lock().unwrap_pretty();
-		let (_, id) = free_arch_ids.add(());
-		let id = id.checked_add(1).expect("created too many archetypes.");
-		let id = NonZeroU32::new(id).unwrap();
-
-		// Construct archetype
-		Self {
-			id,
-			lifetime: LifetimeOwner(DebugLifetime::new(name)),
-			slots: PureFreeList::new(),
-		}
-	}
-
-	pub fn spawn<L: DebugLabel>(&mut self, name: L) -> Entity {
-		let (lifetime, slot) = self.slots.add(LifetimeOwner(DebugLifetime::new(name)));
-
-		assert_ne!(slot, u32::MAX, "spawned too many entities");
-
-		Entity {
-			lifetime: lifetime.0,
-			arch: self.id(),
-			slot,
-		}
-	}
-
-	pub fn despawn(&mut self, entity: Entity) {
-		debug_assert_eq!(entity.arch.id, self.id);
-		assert!(
-			entity.lifetime.is_possibly_alive(),
-			"Attempted to despawn a dead entity."
-		);
-
-		let _ = self.slots.remove(entity.slot);
-	}
-
-	pub fn id(&self) -> ArchetypeId {
-		ArchetypeId {
-			lifetime: self.lifetime.0,
-			id: self.id,
-		}
-	}
-
-	pub fn entities(&self) -> ArchetypeIter {
-		ArchetypeIter {
-			archetype: self,
-			slot: 0,
-		}
-	}
-}
-
-impl Default for Archetype {
-	fn default() -> Self {
-		Self::new(NO_LABEL)
-	}
-}
-
-impl Drop for Archetype {
-	fn drop(&mut self) {
-		let mut free_arch_ids = ARCH_ID_FREE_LIST.lock().unwrap_pretty();
-		free_arch_ids.remove(self.id.get() - 1);
-	}
-}
-
-#[derive(Debug, Clone)]
-pub struct ArchetypeIter<'a> {
-	archetype: &'a Archetype,
-	slot: u32,
-}
-
-impl Iterator for ArchetypeIter<'_> {
-	type Item = Entity;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		let slots = self.archetype.slots.slots();
-
-		loop {
-			let slot = self.slot;
-			self.slot += 1;
-			match slots.get(slot as usize) {
-				Some(Some((lt, _))) => {
-					break Some(Entity {
-						lifetime: lt.0,
-						arch: self.archetype.id(),
-						slot,
-					})
-				}
-				Some(None) => {}
-				None => break None,
-			}
-		}
-	}
-}
-
-impl<'a> IntoIterator for &'a Archetype {
-	type Item = Entity;
-	type IntoIter = ArchetypeIter<'a>;
-
-	fn into_iter(self) -> Self::IntoIter {
-		self.entities()
-	}
-}
+use super::{
+	entity::{ArchetypeId, Entity},
+	query::{Query, QueryIter},
+};
 
 // === Storage === //
 
@@ -422,5 +257,147 @@ impl<T> StorageRunSlot<T> {
 
 	pub fn value_mut(&mut self) -> &mut T {
 		&mut self.value
+	}
+}
+
+// === Celled Storage === //
+
+#[derive(Debug)]
+#[derive_where(Default)]
+#[repr(transparent)]
+pub struct CelledStorage<T> {
+	inner: Storage<ExtRefCell<T>>,
+}
+
+impl<T> CelledStorage<T> {
+	pub fn new() -> Self {
+		Self {
+			inner: Storage::new(),
+		}
+	}
+
+	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
+		let (replaced, current) = self.inner.add(entity, ExtRefCell::new(value));
+
+		(replaced.map(ExtRefCell::into_inner), current)
+	}
+
+	pub fn remove(&mut self, entity: Entity) -> Option<T> {
+		self.inner.remove(entity).map(ExtRefCell::into_inner)
+	}
+
+	pub fn remove_many<I>(&mut self, entities: I)
+	where
+		I: IntoIterator<Item = Entity>,
+	{
+		self.inner.remove_many(entities);
+	}
+
+	pub fn try_get(&self, entity: Entity) -> Option<&T> {
+		self.inner.get(entity).map(|v| &**v)
+	}
+
+	pub fn try_get_mut(&mut self, entity: Entity) -> Option<&mut T> {
+		self.inner.get_mut(entity).map(|v| &mut **v)
+	}
+
+	pub fn get(&self, entity: Entity) -> &T {
+		self.try_get(entity)
+			.unwrap_or_else(|| failed_to_find_component::<T>(entity))
+	}
+
+	pub fn get_mut(&mut self, entity: Entity) -> &mut T {
+		self.try_get_mut(entity)
+			.unwrap_or_else(|| failed_to_find_component::<T>(entity))
+	}
+
+	pub fn clear(&mut self) {
+		self.inner.clear();
+	}
+
+	pub fn as_celled_view(&mut self) -> &mut CelledStorageView<T> {
+		unsafe {
+			// FIXME: Reconsider transmute safety, especially as it relates to `Storage<ExtRefCell<T>>`
+			// to `Storage<RefCell<T>>` conversion—`HashMap` doesn't officially guarantee the same
+			// transmute properties as `Vec<T>`. This will hopefully resolve itself as soon as we
+			// write a `PerfectHashMap`.
+			//
+			// As for logical soundness, we only expose the underlying `RefCell` when we know that we
+			// have exclusive access of the underlying container. This corresponds roughly to a
+			// `&mut T` to `&mut Cell<T>` conversion in terms of soundness semantics.
+			self.cast_mut_via_ptr(|p| p as *mut CelledStorageView<T>)
+		}
+	}
+}
+
+impl<T: Clone> Clone for CelledStorage<T> {
+	fn clone(&self) -> Self {
+		Self {
+			inner: self.inner.clone(),
+		}
+	}
+}
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct CelledStorageView<T> {
+	inner: Storage<RefCell<T>>,
+}
+
+impl<T> CelledStorageView<T> {
+	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
+		let (replaced, current) = self.inner.add(entity, RefCell::new(value));
+
+		(replaced.map(RefCell::into_inner), current.get_mut())
+	}
+
+	pub fn remove(&mut self, entity: Entity) -> Option<T> {
+		self.inner.remove(entity).map(RefCell::into_inner)
+	}
+
+	pub fn remove_many<I>(&mut self, entities: I)
+	where
+		I: IntoIterator<Item = Entity>,
+	{
+		self.inner.remove_many(entities);
+	}
+
+	pub fn try_get_cell(&self, entity: Entity) -> Option<&RefCell<T>> {
+		self.inner.get(entity)
+	}
+
+	pub fn try_get_cell_mut(&mut self, entity: Entity) -> Option<&mut RefCell<T>> {
+		self.inner.get_mut(entity)
+	}
+
+	pub fn get_cell(&self, entity: Entity) -> &RefCell<T> {
+		self.try_get_cell(entity)
+			.unwrap_or_else(|| failed_to_find_component::<T>(entity))
+	}
+
+	pub fn get_cell_mut(&mut self, entity: Entity) -> &mut RefCell<T> {
+		self.try_get_cell_mut(entity)
+			.unwrap_or_else(|| failed_to_find_component::<T>(entity))
+	}
+
+	pub fn try_get_mut(&mut self, entity: Entity) -> Option<&mut T> {
+		self.try_get_cell_mut(entity).map(RefCell::get_mut)
+	}
+
+	pub fn get_mut(&mut self, entity: Entity) -> &mut T {
+		self.try_get_mut(entity)
+			.unwrap_or_else(|| failed_to_find_component::<T>(entity))
+	}
+
+	pub fn borrow(&self, entity: Entity) -> Ref<T> {
+		self.get_cell(entity).borrow()
+	}
+
+	pub fn borrow_mut(&self, entity: Entity) -> RefMut<T> {
+		self.get_cell(entity).borrow_mut()
+	}
+
+	pub fn clear(&mut self) {
+		self.inner.clear();
 	}
 }

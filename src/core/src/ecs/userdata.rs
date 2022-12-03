@@ -3,8 +3,8 @@ use std::cell::{Ref, RefMut};
 use crate::debug::userdata::Userdata;
 
 use super::{
-	celled::{CelledStorage, CelledStorageView},
-	core::{Entity, Storage},
+	entity::Entity,
+	storage::{CelledStorage, CelledStorageView, Storage},
 };
 
 impl Storage<Userdata> {

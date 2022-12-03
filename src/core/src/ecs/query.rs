@@ -4,7 +4,10 @@ use crate::{
 	mem::ptr::PointeeCastExt,
 };
 
-use super::core::{ArchetypeId, Entity, Storage, StorageRunSlice};
+use super::{
+	entity::{ArchetypeId, Entity},
+	storage::{Storage, StorageRunSlice},
+};
 
 // === Core === //
 

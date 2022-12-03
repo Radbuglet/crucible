@@ -2,9 +2,9 @@ use std::{collections::HashMap, mem};
 
 use crucible_core::{
 	ecs::{
-		celled::{CelledStorage, CelledStorageView},
-		context::{DynProvider, Provider},
-		core::Entity,
+		entity::Entity,
+		provider::{DynProvider, Provider},
+		storage::{CelledStorage, CelledStorageView},
 	},
 	mem::c_enum::{CEnum, CEnumMap},
 };

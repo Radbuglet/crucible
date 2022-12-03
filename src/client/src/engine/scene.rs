@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crucible_core::ecs::{context::DynProvider, core::Entity};
+use crucible_core::ecs::{entity::Entity, provider::DynProvider};
 
 pub type SceneUpdateHandler = fn(&mut DynProvider, Entity, SceneUpdateEvent);
 pub type SceneRenderHandler = fn(&mut DynProvider, Entity, SceneRenderEvent);

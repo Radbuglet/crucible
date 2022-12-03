@@ -10,8 +10,8 @@ use crucible_common::voxel::{
 use crucible_core::{
 	debug::lifetime::Dependent,
 	ecs::{
-		celled::CelledStorage,
-		core::{Entity, Storage},
+		entity::Entity,
+		storage::{CelledStorage, Storage},
 	},
 	lang::polyfill::OptionPoly,
 	mem::c_enum::CEnum,

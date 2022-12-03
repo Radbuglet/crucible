@@ -2,7 +2,7 @@ use std::{borrow::Borrow, collections::HashMap};
 
 use crucible_core::{
 	debug::label::{DebugLabel, ReifiedDebugLabel},
-	ecs::core::{Entity, Storage},
+	ecs::{entity::Entity, storage::Storage},
 	lang::explicitly_bind::ExplicitlyBind,
 };
 use thiserror::Error;
