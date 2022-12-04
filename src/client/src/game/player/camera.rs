@@ -10,7 +10,7 @@ pub struct FreeCamController {
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct InputActions {
+pub struct FreeCamInputs {
 	pub up: bool,
 	pub down: bool,
 	pub left: bool,
@@ -19,7 +19,7 @@ pub struct InputActions {
 	pub back: bool,
 }
 
-impl InputActions {
+impl FreeCamInputs {
 	pub fn heading(&self) -> Vec3 {
 		let mut heading = Vec3::ZERO;
 
@@ -66,7 +66,7 @@ impl FreeCamController {
 		self.rot.y = self.rot.y.clamp(-PI / 2., PI / 2.);
 	}
 
-	pub fn process(&mut self, actions: InputActions) {
+	pub fn process(&mut self, actions: FreeCamInputs) {
 		let heading = self.rot_matrix().transform_point3(actions.heading());
 
 		self.pos_vel += heading;

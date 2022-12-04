@@ -1,4 +1,6 @@
-use std::{mem, sync::Mutex};
+use std::mem;
+
+use parking_lot::Mutex;
 
 use crate::{lang::polyfill::OptionPoly, mem::ptr::addr_of_ptr};
 
@@ -61,7 +63,7 @@ impl<T: 'static> LocalPool<T> {
 		}
 
 		// Attempt to steal a block from the global pool.
-		let mut global_pool_blocks = global.pools.lock().unwrap();
+		let mut global_pool_blocks = global.pools.lock();
 
 		if let Some(pool) = global_pool_blocks.pop() {
 			// We drop the pool first because updating `local_pool` may cause a deallocation and we
@@ -95,7 +97,7 @@ impl<T: 'static> LocalPool<T> {
 		// ...and send it to the global pool once it fills up.
 		if self.indebted_pool.len() >= block_size {
 			let pool = mem::replace(&mut self.indebted_pool, Vec::new());
-			global.pools.lock().unwrap().push(pool);
+			global.pools.lock().push(pool);
 		}
 	}
 }
@@ -110,7 +112,7 @@ impl<T: 'static> Drop for LocalPool<T> {
 		};
 
 		// Register any non-empty pools into the global pool.
-		let mut pools = global.pools.lock().unwrap();
+		let mut pools = global.pools.lock();
 
 		if !self.local_pool.is_empty() {
 			pools.push(mem::replace(&mut self.local_pool, Vec::new()));

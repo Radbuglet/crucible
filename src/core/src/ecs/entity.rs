@@ -1,12 +1,12 @@
 use std::{
 	collections::{HashMap, HashSet},
 	num::NonZeroU32,
-	sync::Mutex,
 };
+
+use parking_lot::Mutex;
 
 use crate::{
 	debug::{
-		error::ResultExt,
 		label::{DebugLabel, NO_LABEL},
 		lifetime::{DebugLifetime, Dependable, Dependent, LifetimeOwner},
 	},
@@ -75,7 +75,7 @@ pub struct Archetype {
 impl Archetype {
 	pub fn new<L: DebugLabel>(name: L) -> Self {
 		// Generate archetype ID
-		let mut free_arch_ids = ARCH_ID_FREE_LIST.lock().unwrap_pretty();
+		let mut free_arch_ids = ARCH_ID_FREE_LIST.lock();
 		let (_, id) = free_arch_ids.add(());
 		let id = id.checked_add(1).expect("created too many archetypes.");
 		let id = NonZeroU32::new(id).unwrap();
@@ -133,7 +133,7 @@ impl Default for Archetype {
 
 impl Drop for Archetype {
 	fn drop(&mut self) {
-		let mut free_arch_ids = ARCH_ID_FREE_LIST.lock().unwrap_pretty();
+		let mut free_arch_ids = ARCH_ID_FREE_LIST.lock();
 		free_arch_ids.remove(self.id.get() - 1);
 	}
 }

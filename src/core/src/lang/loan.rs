@@ -1,11 +1,9 @@
-use std::{
-	fmt,
-	ops::Deref,
-	sync::{Arc, PoisonError, RwLock, RwLockReadGuard, TryLockError, TryLockResult},
-};
+use std::{fmt, ops::Deref, sync::Arc};
+
+use parking_lot::{RwLock, RwLockReadGuard};
 
 use crate::{
-	debug::userdata::UserdataValue,
+	debug::userdata::{ErasedUserdataValue, UserdataValue},
 	mem::{
 		drop_guard::{DropGuard, DropGuardHandler},
 		ptr::{addr_of_ptr, PointeeCastExt},
@@ -44,25 +42,16 @@ struct ArcReadGuardInner<T: ?Sized + 'static> {
 struct ArcReadGuardDtor;
 
 impl<T: ?Sized + 'static> ArcReadGuard<T> {
-	pub fn try_new(arc: Arc<RwLock<T>>) -> TryLockResult<Self> {
+	pub fn try_new(arc: Arc<RwLock<T>>) -> Option<Self> {
 		let arc_val: &RwLock<T> = &*arc;
 		let arc_val = unsafe { arc_val.prolong() };
 
-		let (guard, poisoned) = match arc_val.try_read() {
-			Ok(guard) => (guard, false),
-			Err(TryLockError::Poisoned(poisoned)) => (poisoned.into_inner(), true),
-			Err(TryLockError::WouldBlock) => return Err(TryLockError::WouldBlock),
-		};
-
-		let guard = Self(DropGuard::new(
-			ArcReadGuardInner { arc, guard },
-			ArcReadGuardDtor,
-		));
-
-		match poisoned {
-			false => Ok(guard),
-			true => Err(TryLockError::Poisoned(PoisonError::new(guard))),
-		}
+		arc_val.try_read().map(|guard| {
+			Self(DropGuard::new(
+				ArcReadGuardInner { arc, guard },
+				ArcReadGuardDtor,
+			))
+		})
 	}
 
 	pub fn into_arc(self) -> Arc<RwLock<T>> {

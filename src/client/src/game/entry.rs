@@ -30,7 +30,7 @@ use crate::{
 		resources::ResourceManager,
 		scene::{SceneRenderEvent, SceneRenderHandler, SceneUpdateEvent, SceneUpdateHandler},
 	},
-	game::{player::camera::InputActions, voxel::pipeline::VoxelRenderingPipelineDesc},
+	game::{player::camera::FreeCamInputs, voxel::pipeline::VoxelRenderingPipelineDesc},
 };
 
 use super::{
@@ -90,7 +90,7 @@ impl PlayScene {
 		scene
 	}
 
-	pub fn on_update(cx: &mut DynProvider, me: Entity, _event: SceneUpdateEvent) {
+	fn on_update(cx: &mut DynProvider, me: Entity, _event: SceneUpdateEvent) {
 		// Extract context
 		unpack!(cx => {
 			gfx = &GfxContext,
@@ -121,7 +121,7 @@ impl PlayScene {
 				// Update camera
 				me.free_cam.handle_mouse_move(input_mgr.mouse_delta());
 
-				me.free_cam.process(InputActions {
+				me.free_cam.process(FreeCamInputs {
 					up: input_mgr.key(VirtualKeyCode::E).state(),
 					down: input_mgr.key(VirtualKeyCode::Q).state(),
 					left: input_mgr.key(VirtualKeyCode::A).state(),
@@ -201,7 +201,7 @@ impl PlayScene {
 		me.world_mesh.update_chunks(cx, None);
 	}
 
-	pub fn on_render(cx: &mut DynProvider, me: Entity, event: SceneRenderEvent) {
+	fn on_render(cx: &mut DynProvider, me: Entity, event: SceneRenderEvent) {
 		// Extract context
 		unpack!(cx => {
 			userdata = &mut Storage<Userdata>,

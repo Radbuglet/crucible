@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crucible_core::{
-	debug::userdata::{Userdata, UserdataValue},
+	debug::userdata::{ErasedUserdataValue, Userdata, UserdataValue},
 	lang::{
 		loan::downcast_userdata_arc,
 		polyfill::{BuildHasherPoly, OptionPoly},
