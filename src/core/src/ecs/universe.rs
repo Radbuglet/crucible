@@ -1,12 +1,16 @@
-use std::{ops::Deref, sync::Arc};
+use std::{
+	any::type_name,
+	ops::{Deref, DerefMut},
+	sync::Arc,
+};
 
 use hashbrown::HashMap;
 use parking_lot::{Mutex, RwLock};
 
 use crate::{
 	debug::{type_id::NamedTypeId, userdata::UserdataValue},
-	lang::loan::{downcast_userdata_arc, ArcReadGuard},
-	mem::ptr::runtime_unify_ref,
+	lang::loan::{downcast_userdata_arc, BorrowingRwReadGuard, BorrowingRwWriteGuard, Mapped},
+	mem::ptr::{runtime_unify_mut, runtime_unify_ref},
 };
 
 use super::provider::{DynProvider, Provider, ProviderPackPart};
@@ -94,13 +98,15 @@ impl UniverseHandle {
 	}
 }
 
-pub trait AutoValue: Default + UserdataValue {}
+pub trait AutoValue: UserdataValue {
+	fn create(universe: &UniverseHandle) -> Self;
+}
 
-// === AutoStorage === //
+// === AutoRef === //
 
 #[derive(Debug)]
 pub enum AutoRef<'a, T: AutoValue> {
-	Mutexed(ArcReadGuard<T>),
+	Mutexed(Mapped<Arc<RwLock<T>>, BorrowingRwReadGuard<T>>),
 	Ref(&'a T),
 }
 
@@ -109,8 +115,8 @@ impl<T: AutoValue> Deref for AutoRef<'_, T> {
 
 	fn deref(&self) -> &Self::Target {
 		match self {
-			AutoRef::Mutexed(guard) => &guard,
-			AutoRef::Ref(value) => &value,
+			Self::Mutexed(guard) => &guard,
+			Self::Ref(value) => &value,
 		}
 	}
 }
@@ -126,13 +132,7 @@ impl<T: AutoValue> Provider for AutoRef<'_, T> {
 	{
 		if NamedTypeId::of::<T>() == NamedTypeId::of::<U>() {
 			let me: &'a Self = &*me;
-			let comp = match me {
-				AutoRef::Mutexed(guard) => &**guard,
-				AutoRef::Ref(value) => &value,
-			};
-			let comp = runtime_unify_ref::<T, U>(comp);
-
-			Some(comp)
+			Some(runtime_unify_ref::<T, U>(&**me))
 		} else {
 			None
 		}
@@ -154,7 +154,7 @@ impl<'a, T: AutoValue> ProviderPackPart<'a> for AutoRef<'a, T> {
 	unsafe fn pack_from<Q: 'a + Provider>(provider: *mut Q) -> Self {
 		// Try to get a reference from the provider itself.
 		if let Some(value) = Q::try_get_comp_unchecked(provider) {
-			return AutoRef::Ref(value);
+			return Self::Ref(value);
 		}
 
 		// Otherwise, borrow from the universe.
@@ -163,9 +163,95 @@ impl<'a, T: AutoValue> ProviderPackPart<'a> for AutoRef<'a, T> {
 		let universe = Q::try_get_comp_unchecked::<UniverseHandle>(provider)
 			.expect("attempted to fetch a `AutoRef` without providing a `Universe` to do so.");
 
-		let arc = universe.acquire_or_create::<T, _>(|| Default::default());
-		let arc = ArcReadGuard::try_new(arc).unwrap();
+		let arc = universe.acquire_or_create::<T, _>(|| T::create(universe));
+		let arc = BorrowingRwReadGuard::try_new(arc).unwrap_or_else(|_arc| {
+			panic!("Failed to acquire {:?} immutably.", type_name::<Self>())
+		});
 
-		AutoRef::Mutexed(arc)
+		Self::Mutexed(arc)
+	}
+}
+
+// === AutoMut === //
+
+#[derive(Debug)]
+pub enum AutoMut<'a, T: AutoValue> {
+	Mutexed(Mapped<Arc<RwLock<T>>, BorrowingRwWriteGuard<T>>),
+	Ref(&'a mut T),
+}
+
+impl<T: AutoValue> Deref for AutoMut<'_, T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		match self {
+			Self::Mutexed(guard) => &guard,
+			Self::Ref(value) => &value,
+		}
+	}
+}
+
+impl<T: AutoValue> DerefMut for AutoMut<'_, T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		match self {
+			Self::Mutexed(guard) => &mut *guard,
+			Self::Ref(value) => &mut *value,
+		}
+	}
+}
+
+impl<T: AutoValue> Provider for AutoMut<'_, T> {
+	fn build_dyn_provider<'r>(&'r mut self, provider: &mut DynProvider<'r>) {
+		provider.add_ref::<T>(&*self);
+	}
+
+	unsafe fn try_get_comp_unchecked<'a, U: ?Sized + 'static>(me: *const Self) -> Option<&'a U>
+	where
+		Self: 'a,
+	{
+		if NamedTypeId::of::<T>() == NamedTypeId::of::<U>() {
+			let me: &'a Self = &*me;
+			Some(runtime_unify_ref::<T, U>(&**me))
+		} else {
+			None
+		}
+	}
+
+	unsafe fn try_get_comp_mut_unchecked<'a, U: ?Sized + 'static>(
+		me: *mut Self,
+	) -> Option<&'a mut U>
+	where
+		Self: 'a,
+	{
+		if NamedTypeId::of::<T>() == NamedTypeId::of::<U>() {
+			let me: &'a mut Self = &mut *me;
+			Some(runtime_unify_mut::<T, U>(&mut **me))
+		} else {
+			None
+		}
+	}
+}
+
+impl<'a, T: AutoValue> ProviderPackPart<'a> for AutoMut<'a, T> {
+	type AliasPointee = T;
+
+	unsafe fn pack_from<Q: 'a + Provider>(provider: *mut Q) -> Self {
+		// Try to get a reference from the provider itself.
+		if let Some(value) = Q::try_get_comp_mut_unchecked(provider) {
+			return Self::Ref(value);
+		}
+
+		// Otherwise, borrow from the universe.
+		// Safety: `UniverseHandle` is never exposed mutably because outside code can't even create a
+		// mutable reference to this type.
+		let universe = Q::try_get_comp_unchecked::<UniverseHandle>(provider)
+			.expect("attempted to fetch a `AutoRef` without providing a `Universe` to do so.");
+
+		let arc = universe.acquire_or_create::<T, _>(|| T::create(universe));
+		let arc = BorrowingRwWriteGuard::try_new(arc).unwrap_or_else(|_arc| {
+			panic!("Failed to acquire {:?} immutably.", type_name::<Self>())
+		});
+
+		Self::Mutexed(arc)
 	}
 }
