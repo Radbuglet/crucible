@@ -324,13 +324,32 @@ impl_tuples!(tup_impl_pack);
 
 // === `unpack` === //
 
+#[doc(hidden)]
+pub struct AdditionalDisambiguationType;
+
+#[doc(hidden)]
+pub trait ProviderPackDisambiguationTrait: Provider {
+	fn pack_crucible_core_macro_disambiguator<'a, P: ProviderPack<'a>>(
+		&'a mut self,
+		_disambiguator: AdditionalDisambiguationType,
+	) -> P {
+		P::pack_from(self)
+	}
+}
+
+impl<T: ?Sized + Provider> ProviderPackDisambiguationTrait for T {}
+
 pub macro unpack(
 	$src:expr => {
 		$($name:pat_param = $ty:ty),*
 		$(,)?
 	}
 ) {
-	let ($($name,)*): ($($ty,)*) = Provider::pack($src);
+	let ($($name,)*): ($($ty,)*) = {
+		use ProviderPackDisambiguationTrait;
+
+		$src.pack_crucible_core_macro_disambiguator(AdditionalDisambiguationType)
+	};
 }
 
 // === Tests === //

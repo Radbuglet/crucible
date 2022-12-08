@@ -1,4 +1,4 @@
-use core::{cell::UnsafeCell, marker::PhantomData};
+use std::{cell::UnsafeCell, marker::PhantomData};
 
 pub type PhantomInvariant<T> = PhantomData<fn(T) -> T>;
 pub type PhantomIn<T> = PhantomData<fn(T)>;

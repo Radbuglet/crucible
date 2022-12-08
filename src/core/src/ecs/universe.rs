@@ -248,9 +248,8 @@ impl<'a, T: AutoValue> ProviderPackPart<'a> for AutoMut<'a, T> {
 			.expect("attempted to fetch a `AutoRef` without providing a `Universe` to do so.");
 
 		let arc = universe.acquire_or_create::<T, _>(|| T::create(universe));
-		let arc = BorrowingRwWriteGuard::try_new(arc).unwrap_or_else(|_arc| {
-			panic!("Failed to acquire {:?} immutably.", type_name::<Self>())
-		});
+		let arc = BorrowingRwWriteGuard::try_new(arc)
+			.unwrap_or_else(|_arc| panic!("Failed to acquire {:?} mutably.", type_name::<Self>()));
 
 		Self::Mutexed(arc)
 	}

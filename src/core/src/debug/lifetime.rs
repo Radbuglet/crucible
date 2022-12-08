@@ -431,6 +431,12 @@ impl<L: Dependable> Clone for Dependent<L> {
 	}
 }
 
+impl<L: Dependable> From<L> for Dependent<L> {
+	fn from(value: L) -> Self {
+		Self::new(value)
+	}
+}
+
 impl<L: Dependable> Drop for Dependent<L> {
 	fn drop(&mut self) {
 		self.0.dec_dep();

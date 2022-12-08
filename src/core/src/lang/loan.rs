@@ -1,6 +1,5 @@
-use core::fmt;
 use std::{
-	hash,
+	fmt, hash,
 	ops::{Deref, DerefMut},
 	sync::Arc,
 };
@@ -285,6 +284,12 @@ impl<T: ?Sized> Deref for LentMut<T> {
 impl<T: ?Sized> DerefMut for LentMut<T> {
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		unsafe { &mut *self.0 }
+	}
+}
+
+impl<T: ?Sized + fmt::Debug> fmt::Debug for LentMut<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_tuple("LentMut").field(&&*self).finish()
 	}
 }
 

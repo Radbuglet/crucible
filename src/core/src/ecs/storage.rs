@@ -11,7 +11,7 @@ use derive_where::derive_where;
 use crate::{
 	debug::{
 		lifetime::{DebugLifetime, Dependent},
-		userdata::{ErasedUserdataValue, Userdata},
+		userdata::{ErasedUserdataValue, Userdata, UserdataValue},
 	},
 	lang::{polyfill::VecPoly, sync::ExtRefCell},
 	mem::{
@@ -23,9 +23,17 @@ use crate::{
 use super::{
 	entity::{ArchetypeId, Entity},
 	query::{Query, QueryIter},
+	universe::{AutoValue, UniverseHandle},
 };
 
 // === Storage === //
+
+fn failed_to_find_component<T>(entity: Entity) -> ! {
+	panic!(
+		"failed to find entity {entity:?} with component {}",
+		type_name::<T>()
+	);
+}
 
 #[derive(Debug, Clone)]
 #[derive_where(Default)]
@@ -150,11 +158,10 @@ impl<T> ops::IndexMut<Entity> for Storage<T> {
 	}
 }
 
-fn failed_to_find_component<T>(entity: Entity) -> ! {
-	panic!(
-		"failed to find entity {entity:?} with component {}",
-		type_name::<T>()
-	);
+impl<T: UserdataValue> AutoValue for Storage<T> {
+	fn create(_universe: &UniverseHandle) -> Self {
+		Self::new()
+	}
 }
 
 pub type StorageRunSlice<T> = [Option<StorageRunSlot<T>>];
@@ -330,6 +337,12 @@ impl<T> CelledStorage<T> {
 			// `&mut T` to `&mut Cell<T>` conversion in terms of soundness semantics.
 			self.cast_mut_via_ptr(|p| p as *mut CelledStorageView<T>)
 		}
+	}
+}
+
+impl<T: UserdataValue> AutoValue for CelledStorage<T> {
+	fn create(_universe: &UniverseHandle) -> Self {
+		Self::new()
 	}
 }
 

@@ -1,5 +1,4 @@
-use core::{fmt, hash, ops::Index};
-use std::{marker::PhantomData, ops::IndexMut};
+use std::{fmt, hash, marker::PhantomData, ops::Index, ops::IndexMut};
 
 use super::array::boxed_arr_from_fn;
 use crate::lang::marker::PhantomInvariant;

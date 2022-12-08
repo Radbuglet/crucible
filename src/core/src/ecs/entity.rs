@@ -1,7 +1,5 @@
-use std::{
-	collections::{HashMap, HashSet},
-	num::NonZeroU32,
-};
+use hashbrown::{HashMap, HashSet};
+use std::num::NonZeroU32;
 
 use parking_lot::Mutex;
 
