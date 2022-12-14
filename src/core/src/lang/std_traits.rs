@@ -187,6 +187,13 @@ impl Mutability {
 			Self::Mutable => "mutably",
 		}
 	}
+
+	pub fn inverse(self) -> Self {
+		match self {
+			Self::Immutable => Self::Mutable,
+			Self::Mutable => Self::Immutable,
+		}
+	}
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

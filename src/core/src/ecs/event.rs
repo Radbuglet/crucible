@@ -56,7 +56,7 @@ impl Drop for Scheduler {
 	fn drop(&mut self) {
 		if !self.events.is_empty() {
 			log::warn!(
-				"Leaked {} event{} on the EventBus: {:#?}",
+				"Leaked {} event{} on the Scheduler: {:#?}",
 				self.events.len(),
 				if self.events.len() == 1 { "" } else { "s" },
 				self.events
