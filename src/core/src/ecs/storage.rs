@@ -11,7 +11,7 @@ use derive_where::derive_where;
 use crate::{
 	debug::{
 		lifetime::{DebugLifetime, Dependent},
-		userdata::{ErasedUserdataValue, Userdata, UserdataValue},
+		userdata::{ErasedUserdataValue, Userdata},
 	},
 	lang::{polyfill::VecPoly, sync::ExtRefCell},
 	mem::{
@@ -23,7 +23,6 @@ use crate::{
 use super::{
 	entity::{ArchetypeId, Entity},
 	query::{Query, QueryIter},
-	universe::{AutoValue, UniverseHandle},
 };
 
 // === Storage === //
@@ -155,12 +154,6 @@ impl<T> ops::IndexMut<Entity> for Storage<T> {
 	fn index_mut(&mut self, entity: Entity) -> &mut Self::Output {
 		self.get_mut(entity)
 			.unwrap_or_else(|| failed_to_find_component::<T>(entity))
-	}
-}
-
-impl<T: UserdataValue> AutoValue for Storage<T> {
-	fn create(_universe: &UniverseHandle) -> Self {
-		Self::new()
 	}
 }
 
@@ -337,12 +330,6 @@ impl<T> CelledStorage<T> {
 			// `&mut T` to `&mut Cell<T>` conversion in terms of soundness semantics.
 			self.cast_mut_via_ptr(|p| p as *mut CelledStorageView<T>)
 		}
-	}
-}
-
-impl<T: UserdataValue> AutoValue for CelledStorage<T> {
-	fn create(_universe: &UniverseHandle) -> Self {
-		Self::new()
 	}
 }
 
