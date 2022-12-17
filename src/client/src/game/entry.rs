@@ -1,6 +1,7 @@
 use crucible_common::voxel::{
+	cast::RayCast,
 	data::{BlockState, Location, VoxelChunkData, VoxelWorldData},
-	math::{BlockFace, ChunkVec, WorldVec},
+	math::{BlockFace, ChunkVec, EntityVec, WorldVec},
 };
 use crucible_core::{
 	debug::{error::ResultExt, userdata::Userdata},
@@ -10,7 +11,7 @@ use crucible_core::{
 		storage::CelledStorage,
 		storage::Storage,
 	},
-	lang::explicitly_bind::ExplicitlyBind,
+	lang::{explicitly_bind::ExplicitlyBind, polyfill::OptionPoly},
 	mem::c_enum::CEnum,
 };
 use typed_glam::glam::Mat4;
@@ -152,6 +153,57 @@ impl PlayScene {
 									light_level: 255,
 								},
 							);
+						}
+					}
+				}
+
+				if input_mgr.button(MouseButton::Right).recently_pressed() {
+					let mut ray = RayCast::new_uncached(
+						EntityVec::from_glam(me.free_cam.pos().as_dvec3()),
+						EntityVec::from_glam(me.free_cam.facing().as_dvec3()),
+					);
+
+					let cx = (&me.world_data, &*me.chunk_datas.as_celled_view());
+
+					for mut isect in ray.step_for(cx, 6.) {
+						if isect
+							.block
+							.state(cx)
+							.p_is_some_and(|state| state.material != 0)
+						{
+							let mut target = isect.block.at_neighbor(cx, isect.face.invert());
+							target.set_state_or_create(
+								(&mut me.world_data, &mut me.chunk_datas, &mut me.arch_chunk),
+								Self::chunk_factory,
+								BlockState {
+									material: 1,
+									variant: 0,
+									light_level: 255,
+								},
+							);
+							break;
+						}
+					}
+				} else if input_mgr.button(MouseButton::Left).recently_pressed() {
+					let mut ray = RayCast::new_uncached(
+						EntityVec::from_glam(me.free_cam.pos().as_dvec3()),
+						EntityVec::from_glam(me.free_cam.facing().as_dvec3()),
+					);
+
+					let cx = (&me.world_data, &*me.chunk_datas.as_celled_view());
+
+					for mut isect in ray.step_for(cx, 6.) {
+						if isect
+							.block
+							.state(cx)
+							.p_is_some_and(|state| state.material != 0)
+						{
+							isect.block.set_state_or_create(
+								(&mut me.world_data, &mut me.chunk_datas, &mut me.arch_chunk),
+								Self::chunk_factory,
+								BlockState::default(),
+							);
+							break;
 						}
 					}
 				}

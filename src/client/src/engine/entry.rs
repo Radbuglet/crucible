@@ -187,6 +187,7 @@ impl MainLoopHandler for EngineRoot {
 			&mut self.res_mgr,
 			&mut self.viewports,
 			&mut self.depth_textures,
+			&mut self.input_managers,
 		);
 		self.render_handlers[curr_scene](
 			&mut cx.as_dyn(),

@@ -213,6 +213,13 @@ impl Location {
 		}
 	}
 
+	pub fn new_uncached(pos: WorldVec) -> Self {
+		Self {
+			pos,
+			chunk_cache: None,
+		}
+	}
+
 	pub fn refresh(&mut self, (world,): (&VoxelWorldData,)) {
 		self.chunk_cache = world.get_chunk(self.pos.chunk());
 	}
@@ -237,10 +244,11 @@ impl Location {
 		face: BlockFace,
 	) {
 		// Update position
-		let new_pos = self.pos + face.unit();
+		let old_pos = self.pos;
+		self.pos += face.unit();
 
 		// Update chunk cache
-		if new_pos.chunk() != self.pos.chunk() {
+		if old_pos.chunk() != self.pos.chunk() {
 			if let Some(chunk) = self.chunk_cache {
 				self.chunk_cache = chunks.borrow(chunk).neighbor(face);
 			} else {
