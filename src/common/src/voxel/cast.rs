@@ -8,7 +8,7 @@ use smallvec::SmallVec;
 use crate::voxel::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt};
 
 use super::{
-	data::{Location, VoxelChunkData, VoxelWorldData},
+	data::{BlockLocation, EntityLocation, VoxelChunkData, VoxelWorldData},
 	math::EntityVec,
 };
 
@@ -16,16 +16,13 @@ use super::{
 
 #[derive(Debug, Clone)]
 pub struct RayCast {
-	loc: Location,
-	pos: EntityVec,
+	loc: EntityLocation,
 	dir: EntityVec,
 	dist: f64,
 }
 
 impl RayCast {
-	pub fn new_at(loc: Location, pos: EntityVec, dir: EntityVec) -> Self {
-		debug_assert_eq!(loc.pos(), pos.block_pos());
-
+	pub fn new_at(loc: EntityLocation, dir: EntityVec) -> Self {
 		let (dir, dist) = {
 			let dir_len_recip = dir.length_recip();
 
@@ -36,24 +33,19 @@ impl RayCast {
 			}
 		};
 
-		Self {
-			loc,
-			pos,
-			dir,
-			dist,
-		}
+		Self { loc, dir, dist }
 	}
 
 	pub fn new_uncached(pos: EntityVec, dir: EntityVec) -> Self {
-		Self::new_at(Location::new_uncached(pos.block_pos()), pos, dir)
+		Self::new_at(EntityLocation::new_uncached(pos), dir)
 	}
 
-	pub fn loc(&mut self) -> &mut Location {
+	pub fn loc(&mut self) -> &mut EntityLocation {
 		&mut self.loc
 	}
 
 	pub fn pos(&self) -> EntityVec {
-		self.pos
+		self.loc.pos()
 	}
 
 	pub fn dir(&self) -> EntityVec {
@@ -68,14 +60,13 @@ impl RayCast {
 		&mut self,
 		cx: (&VoxelWorldData, &CelledStorageView<VoxelChunkData>),
 	) -> SmallVec<[RayCastIntersection; 3]> {
-		debug_assert_eq!(self.loc.pos(), self.pos.block_pos());
-
 		let mut intersections = SmallVec::<[RayCastIntersection; 3]>::new();
 
 		// Collect intersections
+		let mut block_loc = self.loc.as_block_location();
 		{
-			let step_line = Line3::new_origin_delta(self.pos, self.dir);
-			self.pos += self.dir;
+			let step_line = Line3::new_origin_delta(self.pos(), self.dir);
+			self.loc.move_relative(cx, self.dir);
 
 			let start_block = step_line.start.block_pos();
 			let end_block = step_line.end.block_pos();
@@ -97,7 +88,7 @@ impl RayCast {
 
 				intersections.push(RayCastIntersection {
 					_non_exhaustive: (),
-					block: self.loc, // This will be updated in a bit.
+					block: block_loc, // This will be updated in a bit.
 					face,
 					distance: self.dist + isect_lerp,
 					pos: isect_pos,
@@ -109,8 +100,8 @@ impl RayCast {
 
 		// Update block positions
 		for isect in &mut intersections {
-			isect.block = self.loc.at_neighbor(cx, isect.face);
-			self.loc = isect.block;
+			isect.block = block_loc.at_neighbor(cx, isect.face);
+			block_loc = isect.block;
 		}
 
 		// Update distance accumulator
@@ -133,7 +124,7 @@ impl RayCast {
 #[derive(Debug, Clone)]
 pub struct RayCastIntersection {
 	_non_exhaustive: (),
-	pub block: Location,
+	pub block: BlockLocation,
 	pub face: BlockFace,
 	pub pos: EntityVec,
 	pub distance: f64,

@@ -2,7 +2,7 @@ use num_traits::Signed;
 use typed_glam::{
 	ext::VecExt,
 	glam::{self, DVec3, IVec3},
-	traits::NumericVector3,
+	traits::{NumericVector3, SignedNumericVector3},
 	typed::{FlavorCastFrom, TypedVector, VecFlavor},
 };
 
@@ -26,6 +26,12 @@ impl VecFlavor for WorldVecFlavor {
 	type Backing = glam::IVec3;
 
 	const DEBUG_NAME: &'static str = "WorldVec";
+}
+
+impl FlavorCastFrom<EntityVec> for WorldVecFlavor {
+	fn cast_from(vec: EntityVec) -> TypedVector<Self> {
+		vec.block_pos()
+	}
 }
 
 impl FlavorCastFrom<glam::IVec3> for WorldVecFlavor {
@@ -360,7 +366,19 @@ impl BlockFace {
 	}
 
 	pub fn unit(self) -> IVec3 {
-		self.axis().unit() * self.sign().unit::<i32>()
+		self.unit_typed()
+	}
+
+	pub fn unit_typed<V>(self) -> V
+	where
+		V: SignedNumericVector3,
+	{
+		let v = self.axis().unit_typed::<V>();
+		if self.sign() == Sign::Negative {
+			-v
+		} else {
+			v
+		}
 	}
 
 	pub fn ortho(self) -> (Self, Self) {
@@ -382,12 +400,16 @@ impl BlockFace {
 // Axis3
 impl Axis3 {
 	pub fn unit(self) -> IVec3 {
+		self.unit_typed()
+	}
+
+	pub fn unit_typed<V: NumericVector3>(self) -> V {
 		use Axis3::*;
 
 		match self {
-			X => IVec3::X,
-			Y => IVec3::Y,
-			Z => IVec3::Z,
+			X => V::X,
+			Y => V::Y,
+			Z => V::Z,
 		}
 	}
 }

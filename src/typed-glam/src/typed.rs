@@ -10,9 +10,9 @@ use std::{
 
 use crate::traits::{
 	floating_vector_forwards, numeric_vector_forwards, signed_vector_forwards, Dim2, Dim3, Dim4,
-	DimClass, FloatingVector, FloatingVector2, FloatingVector3, FloatingVector4, GlamConvert,
+	DimClass, FloatingVector, FloatingVector2, FloatingVector3, FloatingVector4, GlamBacked,
 	IntegerVector, NumericVector, NumericVector2, NumericVector3, NumericVector4,
-	SignedNumericVector2, SignedNumericVector3, SignedNumericVector4, SignedVector,
+	SignedNumericVector2, SignedNumericVector3, SignedNumericVector4, SignedVector, VecFrom,
 };
 
 // === Flavor traits === //
@@ -35,22 +35,6 @@ impl<F: ?Sized + VecFlavor> FlavorCastFrom<TypedVector<F>> for F {
 	}
 }
 
-// === CastTarget === //
-
-pub trait CastTarget<F: ?Sized + VecFlavor> {
-	fn cast_from(vec: TypedVector<F>) -> Self;
-}
-
-impl<S, D> CastTarget<S> for TypedVector<D>
-where
-	S: ?Sized + VecFlavor,
-	D: ?Sized + VecFlavor + FlavorCastFrom<TypedVector<S>>,
-{
-	fn cast_from(vec: TypedVector<S>) -> Self {
-		D::cast_from(vec)
-	}
-}
-
 // === TypedVector === //
 
 pub type TypedVector<F> = TypedVectorImpl<F, <<F as VecFlavor>::Backing as NumericVector>::Dim>;
@@ -63,22 +47,32 @@ pub struct TypedVectorImpl<F: ?Sized + VecFlavor, D: DimClass> {
 
 unsafe impl<F: ?Sized + VecFlavor> TransparentWrapper<F::Backing> for TypedVector<F> {}
 
-// TypedVector
+// `VecFrom` and `NumericVector`
 impl<F: ?Sized + VecFlavor> TypedVector<F> {
-	pub fn new_from<T>(v: T) -> Self
+	pub fn cast_from<T>(v: T) -> Self
 	where
 		F: FlavorCastFrom<T>,
 	{
 		F::cast_from(v)
 	}
 
-	pub fn cast<T: CastTarget<F>>(self) -> T {
+	pub fn cast<T: VecFrom<Self>>(self) -> T {
 		T::cast_from(self)
 	}
 }
 
+impl<F, V> VecFrom<V> for TypedVector<F>
+where
+	F: ?Sized + VecFlavor,
+	F: FlavorCastFrom<V>,
+{
+	fn cast_from(other: V) -> Self {
+		F::cast_from(other)
+	}
+}
+
 // GlamConvert
-impl<F: ?Sized + VecFlavor> GlamConvert for TypedVector<F> {
+impl<F: ?Sized + VecFlavor> GlamBacked for TypedVector<F> {
 	type Glam = F::Backing;
 
 	fn to_glam(self) -> Self::Glam {
@@ -137,21 +131,21 @@ impl<F: ?Sized + VecFlavor> TypedVector<F> {
 	// Copied from `GlamConvert`
 	pub fn map_glam<R, C>(self, f: C) -> R
 	where
-		R: GlamConvert,
+		R: GlamBacked,
 		C: FnOnce(F::Backing) -> R::Glam,
 	{
 		R::from_glam(f(self.to_glam()))
 	}
 
-	pub fn cast_glam<T: GlamConvert<Glam = F::Backing>>(self) -> T {
+	pub fn cast_glam<T: GlamBacked<Glam = F::Backing>>(self) -> T {
 		T::from_glam(self.to_glam())
 	}
 
-	pub fn cast_glam_ref<T: GlamConvert<Glam = F::Backing>>(&self) -> &T {
+	pub fn cast_glam_ref<T: GlamBacked<Glam = F::Backing>>(&self) -> &T {
 		T::from_glam_ref(self.as_glam())
 	}
 
-	pub fn cast_glam_mut<T: GlamConvert<Glam = F::Backing>>(&mut self) -> &mut T {
+	pub fn cast_glam_mut<T: GlamBacked<Glam = F::Backing>>(&mut self) -> &mut T {
 		T::from_glam_mut(self.as_glam_mut())
 	}
 }

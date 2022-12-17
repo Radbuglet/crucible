@@ -135,7 +135,7 @@ impl PlayScene {
 				if input_mgr.key(VirtualKeyCode::Space).state() {
 					// Determine camera position
 					let pos = me.free_cam.pos();
-					let pos = WorldVec::new_from(pos.floor().as_ivec3());
+					let pos = WorldVec::cast_from(pos.floor().as_ivec3());
 					let pos = Location::new(&me.world_data, pos);
 
 					for x in -3..=3 {

@@ -43,7 +43,7 @@ impl DimClass for Dim4 {
 
 // === Definitions === //
 
-pub trait GlamConvert: Sized {
+pub trait GlamBacked: Sized {
 	type Glam;
 
 	fn to_glam(self) -> Self::Glam;
@@ -65,23 +65,27 @@ pub trait GlamConvert: Sized {
 
 	fn map_glam<R, F>(self, f: F) -> R
 	where
-		R: GlamConvert,
+		R: GlamBacked,
 		F: FnOnce(Self::Glam) -> R::Glam,
 	{
 		R::from_glam(f(self.to_glam()))
 	}
 
-	fn cast_glam<T: GlamConvert<Glam = Self::Glam>>(self) -> T {
+	fn cast_glam<T: GlamBacked<Glam = Self::Glam>>(self) -> T {
 		T::from_glam(self.to_glam())
 	}
 
-	fn cast_glam_ref<T: GlamConvert<Glam = Self::Glam>>(&self) -> &T {
+	fn cast_glam_ref<T: GlamBacked<Glam = Self::Glam>>(&self) -> &T {
 		T::from_glam_ref(self.as_glam())
 	}
 
-	fn cast_glam_mut<T: GlamConvert<Glam = Self::Glam>>(&mut self) -> &mut T {
+	fn cast_glam_mut<T: GlamBacked<Glam = Self::Glam>>(&mut self) -> &mut T {
 		T::from_glam_mut(self.as_glam_mut())
 	}
+}
+
+pub trait VecFrom<C> {
+	fn cast_from(other: C) -> Self;
 }
 
 // TODO: BoolVector trait
@@ -107,7 +111,8 @@ pub trait NumericVector:
 	+ IndexMut<usize>
 	+ for<'a> Sum<&'a Self>
 	+ for<'a> Product<&'a Self>
-	+ GlamConvert
+	+ GlamBacked
+	+ VecFrom<Self>
 {
 	// Types
 	type Dim: DimClass;
@@ -145,6 +150,11 @@ pub trait NumericVector:
 
 	// Woo! Inner products!
 	fn dot(self, rhs: Self) -> Self::Comp;
+
+	// Typed-glam extensions
+	fn cast<V: VecFrom<Self>>(self) -> V {
+		V::cast_from(self)
+	}
 }
 
 pub trait IntegerVector:
@@ -216,7 +226,7 @@ pub trait NumericVector2:
 	fn y_mut(&mut self) -> &mut Self::Comp;
 }
 
-pub trait SignedNumericVector2: NumericVector2 {
+pub trait SignedNumericVector2: NumericVector2 + SignedVector {
 	const NEG_X: Self;
 	const NEG_Y: Self;
 }
@@ -243,7 +253,7 @@ pub trait NumericVector3:
 	fn z_mut(&mut self) -> &mut Self::Comp;
 }
 
-pub trait SignedNumericVector3: NumericVector3 {
+pub trait SignedNumericVector3: NumericVector3 + SignedVector {
 	const NEG_X: Self;
 	const NEG_Y: Self;
 	const NEG_Z: Self;
@@ -274,7 +284,7 @@ pub trait NumericVector4:
 	fn w_mut(&mut self) -> &mut Self::Comp;
 }
 
-pub trait SignedNumericVector4: NumericVector4 {
+pub trait SignedNumericVector4: NumericVector4 + SignedVector {
 	const NEG_X: Self;
 	const NEG_Y: Self;
 	const NEG_Z: Self;
@@ -301,7 +311,7 @@ pub trait FloatingVector4: FloatingVector + SignedNumericVector4 {}
 // === Implementations === //
 
 macro impl_glam_convert_identity($($ty:ty),*$(,)?) {$(
-	impl GlamConvert for $ty {
+	impl GlamBacked for $ty {
 		type Glam = Self;
 
 		fn to_glam(self) -> Self::Glam {
@@ -432,6 +442,12 @@ macro impl_numeric_vector(
 	$($ty:ty, $bool_ty:ty, $comp:ty, $dim:ty);
 	*$(;)?
 ) {$(
+	impl VecFrom<$ty> for $ty {
+		fn cast_from(other: $ty) -> Self {
+			other
+		}
+	}
+
 	impl NumericVector for $ty {
 		type Dim = $dim;
 		type Comp = $comp;

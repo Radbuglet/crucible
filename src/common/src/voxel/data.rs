@@ -8,9 +8,11 @@ use crucible_core::{
 	},
 	mem::c_enum::{CEnum, CEnumMap},
 };
+use typed_glam::{traits::SignedNumericVector3, typed::FlavorCastFrom};
 
 use super::math::{
-	BlockFace, BlockVec, BlockVecExt, ChunkVec, WorldVec, WorldVecExt, CHUNK_VOLUME,
+	BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, WorldVec, WorldVecExt, WorldVecFlavor,
+	CHUNK_VOLUME,
 };
 
 // === World === //
@@ -199,21 +201,28 @@ impl BlockState {
 
 // === Location === //
 
+pub type BlockLocation = Location<WorldVec>;
+pub type EntityLocation = Location<EntityVec>;
+
 #[derive(Debug, Copy, Clone)]
-pub struct Location {
-	pos: WorldVec,
+pub struct Location<V> {
+	pos: V,
 	chunk_cache: Option<Entity>,
 }
 
-impl Location {
-	pub fn new(world: &VoxelWorldData, pos: WorldVec) -> Self {
+impl<V> Location<V>
+where
+	WorldVecFlavor: FlavorCastFrom<V>,
+	V: SignedNumericVector3,
+{
+	pub fn new(world: &VoxelWorldData, pos: V) -> Self {
 		Self {
 			pos,
-			chunk_cache: world.get_chunk(pos.chunk()),
+			chunk_cache: world.get_chunk(WorldVec::cast_from(pos).chunk()),
 		}
 	}
 
-	pub fn new_uncached(pos: WorldVec) -> Self {
+	pub fn new_uncached(pos: V) -> Self {
 		Self {
 			pos,
 			chunk_cache: None,
@@ -221,10 +230,10 @@ impl Location {
 	}
 
 	pub fn refresh(&mut self, (world,): (&VoxelWorldData,)) {
-		self.chunk_cache = world.get_chunk(self.pos.chunk());
+		self.chunk_cache = world.get_chunk(WorldVec::cast_from(self.pos).chunk());
 	}
 
-	pub fn pos(&self) -> WorldVec {
+	pub fn pos(&self) -> V {
 		self.pos
 	}
 
@@ -245,10 +254,10 @@ impl Location {
 	) {
 		// Update position
 		let old_pos = self.pos;
-		self.pos += face.unit();
+		self.pos += face.unit_typed::<V>();
 
 		// Update chunk cache
-		if old_pos.chunk() != self.pos.chunk() {
+		if WorldVec::cast_from(old_pos).chunk() != WorldVec::cast_from(self.pos).chunk() {
 			if let Some(chunk) = self.chunk_cache {
 				self.chunk_cache = chunks.borrow(chunk).neighbor(face);
 			} else {
@@ -269,12 +278,14 @@ impl Location {
 	pub fn move_to(
 		&mut self,
 		(world, chunks): (&VoxelWorldData, &CelledStorageView<VoxelChunkData>),
-		new_pos: WorldVec,
+		new_pos: V,
 	) {
-		if let (Some(chunk), Some(face)) = (
-			self.chunk_cache,
-			BlockFace::from_vec((new_pos.chunk() - self.pos.chunk()).to_glam()),
-		) {
+		let chunk_delta =
+			WorldVec::cast_from(new_pos).chunk() - WorldVec::cast_from(self.pos).chunk();
+
+		if let (Some(chunk), Some(face)) =
+			(self.chunk_cache, BlockFace::from_vec(chunk_delta.to_glam()))
+		{
 			self.pos = new_pos;
 			self.chunk_cache = chunks.borrow(chunk).neighbor(face);
 		} else {
@@ -286,7 +297,7 @@ impl Location {
 	pub fn at_absolute(
 		mut self,
 		cx: (&VoxelWorldData, &CelledStorageView<VoxelChunkData>),
-		new_pos: WorldVec,
+		new_pos: V,
 	) -> Self {
 		self.move_to(cx, new_pos);
 		self
@@ -295,7 +306,7 @@ impl Location {
 	pub fn move_relative(
 		&mut self,
 		cx: (&VoxelWorldData, &CelledStorageView<VoxelChunkData>),
-		delta: WorldVec,
+		delta: V,
 	) {
 		self.move_to(cx, self.pos + delta);
 	}
@@ -303,7 +314,7 @@ impl Location {
 	pub fn at_relative(
 		mut self,
 		cx: (&VoxelWorldData, &CelledStorageView<VoxelChunkData>),
-		delta: WorldVec,
+		delta: V,
 	) -> Self {
 		self.move_relative(cx, delta);
 		self
@@ -313,8 +324,11 @@ impl Location {
 		&mut self,
 		(world, chunks): (&VoxelWorldData, &CelledStorageView<VoxelChunkData>),
 	) -> Option<BlockState> {
-		self.chunk((world,))
-			.map(|chunk| chunks.borrow(chunk).block_state(self.pos.block()))
+		self.chunk((world,)).map(|chunk| {
+			chunks
+				.borrow(chunk)
+				.block_state(WorldVec::cast_from(self.pos).block())
+		})
 	}
 
 	pub fn set_state(
@@ -330,9 +344,11 @@ impl Location {
 			}
 		};
 
-		chunks
-			.borrow_mut(chunk)
-			.set_block_state((&chunk, world), self.pos.block(), state);
+		chunks.borrow_mut(chunk).set_block_state(
+			(&chunk, world),
+			WorldVec::cast_from(self.pos).block(),
+			state,
+		);
 	}
 
 	pub fn set_state_or_create(
@@ -349,7 +365,7 @@ impl Location {
 		let chunk = match self.chunk((world,)) {
 			Some(chunk) => chunk,
 			None => {
-				let pos = self.pos.chunk();
+				let pos = WorldVec::cast_from(self.pos).chunk();
 				let chunk = factory(&mut extra.as_dyn(), pos);
 				world.add_chunk((chunks,), pos, chunk);
 				chunk
@@ -357,8 +373,17 @@ impl Location {
 		};
 
 		// Set block state
-		chunks
-			.get_mut(chunk)
-			.set_block_state((&chunk, world), self.pos.block(), state);
+		chunks.get_mut(chunk).set_block_state(
+			(&chunk, world),
+			WorldVec::cast_from(self.pos).block(),
+			state,
+		);
+	}
+
+	pub fn as_block_location(&self) -> BlockLocation {
+		BlockLocation {
+			chunk_cache: self.chunk_cache,
+			pos: WorldVec::cast_from(self.pos),
+		}
 	}
 }
