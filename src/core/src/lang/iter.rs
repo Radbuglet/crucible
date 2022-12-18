@@ -82,3 +82,79 @@ pub enum Flow<T> {
 	Yield(T),
 	Break(T),
 }
+
+// === Volumetric === //
+
+// pub type VolumetricIter<const N: usize> = GenericVolumetricIter<N, ()>;
+
+#[derive(Debug, Clone)]
+pub struct VolumetricIter<const N: usize> {
+	pos: Option<[u32; N]>,
+	max: [u32; N],
+}
+
+impl<const N: usize> VolumetricIter<N> {
+	// TODO: Make bounds inclusive
+	pub const fn new(max: [u32; N]) -> Self {
+		let mut i = 0;
+		while i < N {
+			if max[i] == 0 {
+				return Self { pos: None, max };
+			}
+			i += 1;
+		}
+
+		Self {
+			pos: Some([0; N]),
+			max,
+		}
+	}
+
+	pub fn next_capturing<F>(&mut self, mut on_rollback: F) -> Option<[u32; N]>
+	where
+		F: FnMut(usize),
+	{
+		// Handle the empty iterator special case.
+		if N == 0 {
+			return None;
+		}
+
+		// Save the previous result so our iterator includes (0, ..., 0) automatically.
+		// If the `pos` is `None`, we have exhausted our iterator and can early-return.
+		let pos = self.pos.as_mut()?;
+		let next = pos.clone();
+
+		// Update the position for the next query
+		let mut i = N - 1;
+		loop {
+			// If we're at our maximum...
+			if pos[i] >= self.max[i] - 1 {
+				// Wrap our value back to zero...
+				pos[i] = 0;
+				on_rollback(i);
+
+				// And move on to update the next place value.
+				if i > 0 {
+					i -= 1;
+				} else {
+					// ...unless we've the entire volume.
+					self.pos = None;
+					break;
+				}
+			} else {
+				pos[i] += 1;
+				break;
+			}
+		}
+
+		Some(next)
+	}
+}
+
+impl<const N: usize> Iterator for VolumetricIter<N> {
+	type Item = [u32; N];
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.next_capturing(|_| {})
+	}
+}

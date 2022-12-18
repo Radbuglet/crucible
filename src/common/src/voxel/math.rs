@@ -51,7 +51,7 @@ pub trait WorldVecExt: Sized {
 	fn decompose(self) -> (ChunkVec, BlockVec);
 	fn chunk(self) -> ChunkVec;
 	fn block(self) -> BlockVec;
-	fn min_corner_pos(self) -> EntityVec;
+	fn as_entity_vec(self) -> EntityVec;
 	fn block_interface_layer(self, face: BlockFace) -> f64;
 }
 
@@ -82,12 +82,12 @@ impl WorldVecExt for WorldVec {
 		)
 	}
 
-	fn min_corner_pos(self) -> EntityVec {
+	fn as_entity_vec(self) -> EntityVec {
 		self.map_glam(|raw| raw.as_dvec3())
 	}
 
 	fn block_interface_layer(self, face: BlockFace) -> f64 {
-		let corner = self.min_corner_pos();
+		let corner = self.as_entity_vec();
 		let (axis, sign) = face.decompose();
 
 		if sign == Sign::Positive {
@@ -258,6 +258,12 @@ impl FlavorCastFrom<glam::DVec3> for EntityVecFlavor {
 impl FlavorCastFrom<f64> for EntityVecFlavor {
 	fn cast_from(v: f64) -> EntityVec {
 		EntityVec::splat(v)
+	}
+}
+
+impl FlavorCastFrom<WorldVec> for EntityVecFlavor {
+	fn cast_from(v: WorldVec) -> EntityVec {
+		v.as_entity_vec()
 	}
 }
 

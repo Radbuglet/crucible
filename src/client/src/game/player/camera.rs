@@ -1,11 +1,17 @@
 use std::f32::consts::{PI, TAU};
 
+use crucible_common::voxel::{
+	cast::move_rigid_body,
+	data::{VoxelChunkData, VoxelWorldData},
+	math::EntityVec,
+};
+use crucible_core::ecs::storage::CelledStorageView;
 use typed_glam::glam::{Mat4, Vec2, Vec3};
 
 #[derive(Debug, Clone, Default)]
 pub struct FreeCamController {
-	pos: Vec3,
-	pos_vel: Vec3,
+	pos: EntityVec,
+	pos_vel: EntityVec,
 	rot: Vec2,
 }
 
@@ -52,7 +58,7 @@ impl FreeCamInputs {
 }
 
 impl FreeCamController {
-	pub fn pos(&self) -> Vec3 {
+	pub fn pos(&self) -> EntityVec {
 		self.pos
 	}
 
@@ -66,12 +72,24 @@ impl FreeCamController {
 		self.rot.y = self.rot.y.clamp(-PI / 2., PI / 2.);
 	}
 
-	pub fn process(&mut self, actions: FreeCamInputs) {
-		let heading = self.rot_matrix().transform_point3(actions.heading());
+	pub fn process(
+		&mut self,
+		cx: (&VoxelWorldData, &CelledStorageView<VoxelChunkData>),
+		actions: FreeCamInputs,
+	) {
+		// Update velocity
+		let heading = self
+			.rot_matrix()
+			.transform_point3(actions.heading())
+			.as_dvec3();
 
-		self.pos_vel += heading;
+		self.pos_vel += heading * 0.3;
 		self.pos_vel *= 0.7;
-		self.pos += self.pos_vel * 0.3;
+
+		// Move body
+		let size = EntityVec::ONE * 0.5;
+
+		self.pos = move_rigid_body(cx, self.pos - size / 2., size, self.pos_vel) + size / 2.;
 	}
 
 	pub fn rot_matrix(&self) -> Mat4 {
@@ -79,6 +97,6 @@ impl FreeCamController {
 	}
 
 	pub fn view_matrix(&self) -> Mat4 {
-		self.rot_matrix().inverse() * Mat4::from_translation(-self.pos)
+		self.rot_matrix().inverse() * Mat4::from_translation(-self.pos().as_glam().as_vec3())
 	}
 }

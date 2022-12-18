@@ -1,6 +1,9 @@
 use crucible_core::{
 	ecs::storage::CelledStorageView,
-	lang::iter::{ContextualIter, WithContext},
+	lang::{
+		iter::{ContextualIter, WithContext},
+		polyfill::OptionPoly,
+	},
 	mem::c_enum::CEnum,
 };
 use smallvec::SmallVec;
@@ -9,7 +12,7 @@ use crate::voxel::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, W
 
 use super::{
 	data::{BlockLocation, EntityLocation, VoxelChunkData, VoxelWorldData},
-	math::EntityVec,
+	math::{EntityVec, WorldVec},
 };
 
 // === RayCast === //
@@ -198,4 +201,52 @@ impl<'a>
 			None
 		}
 	}
+}
+
+// === Collisions === //
+
+pub fn move_rigid_body(
+	cx: (&VoxelWorldData, &CelledStorageView<VoxelChunkData>),
+	src: EntityVec,
+	size: EntityVec,
+	delta: EntityVec,
+) -> EntityVec {
+	let mut loc = EntityLocation::new(&cx.0, src);
+
+	'a: for movement_axis in Axis3::variants() {
+		// Decompose delta
+		let movement_unit = movement_axis.unit_typed::<EntityVec>();
+		let movement_delta = delta.comp(movement_axis);
+		let movement_magnitude = movement_delta.abs();
+		let movement_sign = Sign::of(movement_delta).unwrap_or(Sign::Positive);
+
+		// Determine the occlusion candidate volume
+		let volume_start = match movement_sign {
+			// Align to the far side of the collider
+			Sign::Positive => loc.at_relative(cx, movement_unit * size.comp(movement_axis)),
+			// Align to the destination corner
+			Sign::Negative => loc.at_relative(cx, -movement_unit * movement_magnitude),
+		};
+		let mut volume_size = size;
+		*volume_size.comp_mut(movement_axis) = movement_magnitude;
+
+		let volume_end = volume_start.pos() + volume_size;
+		let volume_size = volume_end.block_pos() - volume_start.pos().block_pos() + WorldVec::ONE;
+
+		// Check volume for occluding blocks
+		for mut occluder in volume_start.iter_volume(cx, volume_size) {
+			if occluder
+				.state(cx)
+				.p_is_some_and(|state| state.material != 0)
+			{
+				// TODO: Allow partial movements
+				continue 'a;
+			}
+		}
+
+		// Otherwise, commit the movement in full
+		loc.move_relative(cx, movement_unit * movement_delta);
+	}
+
+	loc.pos()
 }

@@ -6,13 +6,16 @@ use crucible_core::{
 		provider::{DynProvider, Provider},
 		storage::{CelledStorage, CelledStorageView},
 	},
+	lang::iter::VolumetricIter,
 	mem::c_enum::{CEnum, CEnumMap},
 };
-use typed_glam::{traits::SignedNumericVector3, typed::FlavorCastFrom};
+use typed_glam::{
+	ext::VecExt,
+	traits::{SignedNumericVector3, VecFrom},
+};
 
 use super::math::{
-	BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, WorldVec, WorldVecExt, WorldVecFlavor,
-	CHUNK_VOLUME,
+	BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, WorldVec, WorldVecExt, CHUNK_VOLUME,
 };
 
 // === World === //
@@ -212,7 +215,8 @@ pub struct Location<V> {
 
 impl<V> Location<V>
 where
-	WorldVecFlavor: FlavorCastFrom<V>,
+	WorldVec: VecFrom<V>,
+	V: VecFrom<WorldVec>,
 	V: SignedNumericVector3,
 {
 	pub fn new(world: &VoxelWorldData, pos: V) -> Self {
@@ -235,6 +239,15 @@ where
 
 	pub fn pos(&self) -> V {
 		self.pos
+	}
+
+	pub fn set_pos_within_chunk(&mut self, pos: V) {
+		debug_assert_eq!(
+			WorldVec::cast_from(pos).chunk(),
+			WorldVec::cast_from(self.pos).chunk()
+		);
+
+		self.pos = pos;
 	}
 
 	pub fn chunk(&mut self, (world,): (&VoxelWorldData,)) -> Option<Entity> {
@@ -385,5 +398,58 @@ where
 			chunk_cache: self.chunk_cache,
 			pos: WorldVec::cast_from(self.pos),
 		}
+	}
+
+	pub fn iter_volume<'a>(
+		self,
+		cx: (&'a VoxelWorldData, &'a CelledStorageView<VoxelChunkData>),
+		size: WorldVec,
+	) -> impl Iterator<Item = Self> + 'a {
+		debug_assert!(size.all(|v| u32::try_from(v).is_ok()));
+
+		// 		let mut fingers = [self; 3];
+		// 		let mut iter = VolumetricIter::new([size.x() as u32, size.y() as u32, size.z() as u32]);
+		//
+		// 		std::iter::from_fn(move || {
+		// 			let [x, y, z] = iter.next_capturing(|i| {
+		// 				if i > 0 {
+		// 					fingers[i] = fingers[i - 1];
+		// 					fingers[i - 1].move_to_neighbor(
+		// 						cx,
+		// 						match i {
+		// 							1 => BlockFace::PositiveX,
+		// 							2 => BlockFace::PositiveY,
+		// 							_ => unreachable!(),
+		// 						},
+		// 					)
+		// 				}
+		// 			})?;
+		//
+		// 			let curr = fingers[2];
+		//
+		// 			// Workaround for #81448
+		// 			// TODO: Remove when fixed
+		// 			fn workaround(a: WorldVec, b: WorldVec) -> WorldVec {
+		// 				a + b
+		// 			}
+		//
+		// 			debug_assert_eq!(
+		// 				workaround(
+		// 					WorldVec::cast_from(self.pos()),
+		// 					WorldVec::new(x as i32, y as i32, z as i32)
+		// 				),
+		// 				WorldVec::cast_from(curr.pos())
+		// 			);
+		//
+		// 			fingers[2].move_to_neighbor(cx, BlockFace::PositiveZ);
+		//
+		// 			Some(curr)
+		// 		})
+
+		VolumetricIter::new([size.x() as u32, size.y() as u32, size.z() as u32]).map(
+			move |[x, y, z]| {
+				self.at_relative(cx, WorldVec::new(x as i32, y as i32, z as i32).cast())
+			},
+		)
 	}
 }

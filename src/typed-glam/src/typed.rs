@@ -51,9 +51,9 @@ unsafe impl<F: ?Sized + VecFlavor> TransparentWrapper<F::Backing> for TypedVecto
 impl<F: ?Sized + VecFlavor> TypedVector<F> {
 	pub fn cast_from<T>(v: T) -> Self
 	where
-		F: FlavorCastFrom<T>,
+		Self: VecFrom<T>,
 	{
-		F::cast_from(v)
+		<Self as VecFrom<T>>::cast_from(v)
 	}
 
 	pub fn cast<T: VecFrom<Self>>(self) -> T {

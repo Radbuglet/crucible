@@ -1,6 +1,6 @@
 use crucible_common::voxel::{
 	cast::RayCast,
-	data::{BlockState, Location, VoxelChunkData, VoxelWorldData},
+	data::{BlockState, EntityLocation, Location, VoxelChunkData, VoxelWorldData},
 	math::{BlockFace, ChunkVec, EntityVec, WorldVec},
 };
 use crucible_core::{
@@ -11,7 +11,7 @@ use crucible_core::{
 		storage::CelledStorage,
 		storage::Storage,
 	},
-	lang::{explicitly_bind::ExplicitlyBind, polyfill::OptionPoly},
+	lang::{explicitly_bind::ExplicitlyBind, iter::VolumetricIter, polyfill::OptionPoly},
 	mem::c_enum::CEnum,
 };
 use typed_glam::glam::Mat4;
@@ -122,44 +122,47 @@ impl PlayScene {
 				// Update camera
 				me.free_cam.handle_mouse_move(input_mgr.mouse_delta());
 
-				me.free_cam.process(FreeCamInputs {
-					up: input_mgr.key(VirtualKeyCode::E).state(),
-					down: input_mgr.key(VirtualKeyCode::Q).state(),
-					left: input_mgr.key(VirtualKeyCode::A).state(),
-					right: input_mgr.key(VirtualKeyCode::D).state(),
-					fore: input_mgr.key(VirtualKeyCode::W).state(),
-					back: input_mgr.key(VirtualKeyCode::S).state(),
-				});
+				me.free_cam.process(
+					(&me.world_data, &*me.chunk_datas.as_celled_view()),
+					FreeCamInputs {
+						up: input_mgr.key(VirtualKeyCode::E).state(),
+						down: input_mgr.key(VirtualKeyCode::Q).state(),
+						left: input_mgr.key(VirtualKeyCode::A).state(),
+						right: input_mgr.key(VirtualKeyCode::D).state(),
+						fore: input_mgr.key(VirtualKeyCode::W).state(),
+						back: input_mgr.key(VirtualKeyCode::S).state(),
+					},
+				);
 
 				// Handle chunk filling
 				if input_mgr.key(VirtualKeyCode::Space).state() {
 					// Determine camera position
 					let pos = me.free_cam.pos();
-					let pos = WorldVec::cast_from(pos.floor().as_ivec3());
+					let pos = WorldVec::cast_from(pos.floor());
 					let pos = Location::new(&me.world_data, pos);
 
-					for x in -3..=3 {
-						for z in -3..=3 {
-							pos.at_relative(
-								(&me.world_data, me.chunk_datas.as_celled_view()),
-								WorldVec::new(x, 0, z),
-							)
-							.set_state_or_create(
-								(&mut me.world_data, &mut me.chunk_datas, &mut me.arch_chunk),
-								Self::chunk_factory,
-								BlockState {
-									material: 1,
-									variant: 0,
-									light_level: 255,
-								},
-							);
-						}
+					for [x, y, z] in VolumetricIter::new([7, 7, 7]) {
+						let [x, y, z] = [x as i32 - 3, y as i32 - 10, z as i32 - 3];
+
+						pos.at_relative(
+							(&me.world_data, me.chunk_datas.as_celled_view()),
+							WorldVec::new(x, y, z),
+						)
+						.set_state_or_create(
+							(&mut me.world_data, &mut me.chunk_datas, &mut me.arch_chunk),
+							Self::chunk_factory,
+							BlockState {
+								material: 1,
+								variant: 0,
+								light_level: 255,
+							},
+						);
 					}
 				}
 
 				if input_mgr.button(MouseButton::Right).recently_pressed() {
-					let mut ray = RayCast::new_uncached(
-						EntityVec::from_glam(me.free_cam.pos().as_dvec3()),
+					let mut ray = RayCast::new_at(
+						EntityLocation::new(&me.world_data, me.free_cam.pos()),
 						EntityVec::from_glam(me.free_cam.facing().as_dvec3()),
 					);
 
@@ -186,7 +189,7 @@ impl PlayScene {
 					}
 				} else if input_mgr.button(MouseButton::Left).recently_pressed() {
 					let mut ray = RayCast::new_uncached(
-						EntityVec::from_glam(me.free_cam.pos().as_dvec3()),
+						me.free_cam.pos(),
 						EntityVec::from_glam(me.free_cam.facing().as_dvec3()),
 					);
 
