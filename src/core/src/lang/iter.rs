@@ -85,8 +85,6 @@ pub enum Flow<T> {
 
 // === Volumetric === //
 
-// pub type VolumetricIter<const N: usize> = GenericVolumetricIter<N, ()>;
-
 #[derive(Debug, Clone)]
 pub struct VolumetricIter<const N: usize> {
 	pos: Option<[u32; N]>,
@@ -96,14 +94,6 @@ pub struct VolumetricIter<const N: usize> {
 impl<const N: usize> VolumetricIter<N> {
 	// TODO: Make bounds inclusive
 	pub const fn new(max: [u32; N]) -> Self {
-		let mut i = 0;
-		while i < N {
-			if max[i] == 0 {
-				return Self { pos: None, max };
-			}
-			i += 1;
-		}
-
 		Self {
 			pos: Some([0; N]),
 			max,
@@ -128,7 +118,7 @@ impl<const N: usize> VolumetricIter<N> {
 		let mut i = N - 1;
 		loop {
 			// If we're at our maximum...
-			if pos[i] >= self.max[i] - 1 {
+			if pos[i] >= self.max[i] {
 				// Wrap our value back to zero...
 				pos[i] = 0;
 				on_rollback(i);

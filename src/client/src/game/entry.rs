@@ -141,7 +141,7 @@ impl PlayScene {
 					let pos = WorldVec::cast_from(pos.floor());
 					let pos = Location::new(&me.world_data, pos);
 
-					for [x, y, z] in VolumetricIter::new([7, 7, 7]) {
+					for [x, y, z] in VolumetricIter::new([6, 6, 6]) {
 						let [x, y, z] = [x as i32 - 3, y as i32 - 10, z as i32 - 3];
 
 						pos.at_relative(

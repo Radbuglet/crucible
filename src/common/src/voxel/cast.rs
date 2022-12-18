@@ -12,7 +12,7 @@ use crate::voxel::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, W
 
 use super::{
 	data::{BlockLocation, EntityLocation, VoxelChunkData, VoxelWorldData},
-	math::{EntityVec, WorldVec},
+	math::EntityVec,
 };
 
 // === RayCast === //
@@ -231,7 +231,7 @@ pub fn move_rigid_body(
 		*volume_size.comp_mut(movement_axis) = movement_magnitude;
 
 		let volume_end = volume_start.pos() + volume_size;
-		let volume_size = volume_end.block_pos() - volume_start.pos().block_pos() + WorldVec::ONE;
+		let volume_size = volume_end.block_pos() - volume_start.pos().block_pos();
 
 		// Check volume for occluding blocks
 		for mut occluder in volume_start.iter_volume(cx, volume_size) {
