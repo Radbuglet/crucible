@@ -15,6 +15,7 @@ use crucible_core::{
 	mem::c_enum::CEnum,
 };
 use typed_glam::glam::Mat4;
+use wgpu::util::DeviceExt;
 use winit::{
 	dpi::PhysicalPosition,
 	event::{MouseButton, VirtualKeyCode},
@@ -73,12 +74,37 @@ impl PlayScene {
 		),
 		main_viewport: Entity,
 	) -> Entity {
+		// Create block texture
+		let block_image = image::load_from_memory(include_bytes!(
+			"./voxel/textures/placeholder_material_1.png"
+		))
+		.unwrap();
+
+		let block_texture = gfx.device.create_texture_with_data(
+			&gfx.queue,
+			&wgpu::TextureDescriptor {
+				label: Some("block :)"),
+				size: wgpu::Extent3d {
+					width: block_image.width(),
+					height: block_image.height(),
+					depth_or_array_layers: 1,
+				},
+				mip_level_count: 1,
+				sample_count: 1,
+				dimension: wgpu::TextureDimension::D2,
+				format: wgpu::TextureFormat::Rgba32Float,
+				usage: wgpu::TextureUsages::TEXTURE_BINDING,
+			},
+			bytemuck::cast_slice(&block_image.into_rgba32f()),
+		);
+		let block_texture_view = block_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
 		// Create scene state
 		let mut scene_state = Box::new(Self::default());
 		ExplicitlyBind::bind(&mut scene_state.main_viewport, main_viewport);
 		ExplicitlyBind::bind(
 			&mut scene_state.voxel_uniforms,
-			VoxelUniforms::new((gfx, res_mgr)),
+			VoxelUniforms::new((gfx, res_mgr), &block_texture_view),
 		);
 
 		// Create scene entity

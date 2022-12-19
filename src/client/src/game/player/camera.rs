@@ -83,8 +83,8 @@ impl FreeCamController {
 			.transform_point3(actions.heading())
 			.as_dvec3();
 
-		self.pos_vel += heading * 0.3;
-		self.pos_vel *= 0.7;
+		self.pos_vel += heading * 0.2;
+		self.pos_vel *= 0.5;
 
 		// Move body
 		let size = EntityVec::ONE * 0.5;

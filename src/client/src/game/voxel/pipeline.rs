@@ -59,16 +59,34 @@ impl ResourceDescriptor for VoxelPipelineLayoutDesc {
 			gfx.device
 				.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
 					label: None,
-					entries: &[wgpu::BindGroupLayoutEntry {
-						binding: 0,
-						visibility: wgpu::ShaderStages::VERTEX,
-						ty: wgpu::BindingType::Buffer {
-							ty: wgpu::BufferBindingType::Uniform,
-							has_dynamic_offset: false,
-							min_binding_size: None,
+					entries: &[
+						wgpu::BindGroupLayoutEntry {
+							binding: 0,
+							visibility: wgpu::ShaderStages::VERTEX,
+							ty: wgpu::BindingType::Buffer {
+								ty: wgpu::BufferBindingType::Uniform,
+								has_dynamic_offset: false,
+								min_binding_size: None,
+							},
+							count: None,
 						},
-						count: None,
-					}],
+						wgpu::BindGroupLayoutEntry {
+							binding: 1,
+							visibility: wgpu::ShaderStages::FRAGMENT,
+							ty: wgpu::BindingType::Texture {
+								sample_type: wgpu::TextureSampleType::Float { filterable: false },
+								view_dimension: wgpu::TextureViewDimension::D2,
+								multisampled: false,
+							},
+							count: None,
+						},
+						wgpu::BindGroupLayoutEntry {
+							binding: 2,
+							visibility: wgpu::ShaderStages::FRAGMENT,
+							ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+							count: None,
+						},
+					],
 				});
 
 		let pipeline_layout = gfx
@@ -119,7 +137,18 @@ impl ResourceDescriptor for VoxelRenderingPipelineDesc {
 					buffers: &[wgpu::VertexBufferLayout {
 						array_stride: VoxelVertex::std430_size_static() as wgpu::BufferAddress,
 						step_mode: wgpu::VertexStepMode::Vertex,
-						attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+						attributes: &[
+							wgpu::VertexAttribute {
+								shader_location: 0,
+								offset: 0,
+								format: wgpu::VertexFormat::Float32x3,
+							},
+							wgpu::VertexAttribute {
+								shader_location: 1,
+								offset: 16,
+								format: wgpu::VertexFormat::Float32x2,
+							},
+						],
 					}],
 				},
 				primitive: wgpu::PrimitiveState {
@@ -176,47 +205,66 @@ impl ResourceDescriptor for VoxelRenderingPipelineDesc {
 
 #[derive(Debug)]
 pub struct VoxelUniforms {
-	uniform_bind_group: wgpu::BindGroup,
-	uniform_buffer: wgpu::Buffer,
+	bind_group: wgpu::BindGroup,
+	_sampler: wgpu::Sampler,
+	buffer: wgpu::Buffer,
 }
 
 impl VoxelUniforms {
-	pub fn new((gfx, res_mgr): (&GfxContext, &mut ResourceManager)) -> Self {
+	pub fn new(
+		(gfx, res_mgr): (&GfxContext, &mut ResourceManager),
+		texture: &wgpu::TextureView,
+	) -> Self {
 		let layout = res_mgr.load(&VoxelPipelineLayoutDesc, gfx);
 
-		let uniform_buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
+		let buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("uniform buffer"),
 			mapped_at_creation: false,
 			size: ShaderUniformBuffer::std430_size_static() as u64,
 			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
 		});
 
+		let sampler = gfx
+			.device
+			.create_sampler(&wgpu::SamplerDescriptor::default());
+
 		let bind_group = gfx.device.create_bind_group(&wgpu::BindGroupDescriptor {
 			label: None,
 			layout: &layout.uniform_group_layout,
-			entries: &[wgpu::BindGroupEntry {
-				binding: 0,
-				resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-					buffer: &uniform_buffer,
-					offset: 0,
-					size: None,
-				}),
-			}],
+			entries: &[
+				wgpu::BindGroupEntry {
+					binding: 0,
+					resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+						buffer: &buffer,
+						offset: 0,
+						size: None,
+					}),
+				},
+				wgpu::BindGroupEntry {
+					binding: 1,
+					resource: wgpu::BindingResource::TextureView(&texture),
+				},
+				wgpu::BindGroupEntry {
+					binding: 2,
+					resource: wgpu::BindingResource::Sampler(&sampler),
+				},
+			],
 		});
 
 		Self {
-			uniform_bind_group: bind_group,
-			uniform_buffer,
+			bind_group,
+			_sampler: sampler,
+			buffer,
 		}
 	}
 
 	pub fn write_pass_state<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-		pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+		pass.set_bind_group(0, &self.bind_group, &[]);
 	}
 
 	pub fn set_camera_matrix(&self, gfx: &GfxContext, proj: glam::Mat4) {
 		gfx.queue.write_buffer(
-			&self.uniform_buffer,
+			&self.buffer,
 			0,
 			ShaderUniformBuffer { camera: proj }.as_std430().as_bytes(),
 		)
@@ -231,7 +279,7 @@ struct ShaderUniformBuffer {
 #[derive(AsStd430)]
 pub struct VoxelVertex {
 	pub position: glam::Vec3,
-	pub color: glam::Vec3,
+	pub uv: glam::Vec2,
 }
 
 impl VoxelVertex {
@@ -252,25 +300,25 @@ impl VoxelVertex {
 
 		let point_a = Self {
 			position: origin,
-			color: glam::Vec3::new(1., 0., 0.),
+			uv: glam::Vec2::new(0., 0.),
 		}
 		.as_std430();
 
 		let point_b = Self {
 			position: origin + unit_a,
-			color: glam::Vec3::new(0., 1., 0.),
+			uv: glam::Vec2::new(1., 0.),
 		}
 		.as_std430();
 
 		let point_c = Self {
 			position: origin + unit_a + unit_b,
-			color: glam::Vec3::new(0., 1., 0.),
+			uv: glam::Vec2::new(1., 1.),
 		}
 		.as_std430();
 
 		let point_d = Self {
 			position: origin + unit_b,
-			color: glam::Vec3::new(0., 1., 0.),
+			uv: glam::Vec2::new(0., 1.),
 		}
 		.as_std430();
 
