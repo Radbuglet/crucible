@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crucible_core::{
-	debug::userdata::{ErasedUserdataValue, Userdata, UserdataValue},
+	debug::userdata::{BoxedUserdata, ErasedUserdata, Userdata},
 	lang::{
 		loan::downcast_userdata_arc,
 		polyfill::{BuildHasherPoly, OptionPoly},
@@ -12,9 +12,9 @@ use hashbrown::HashMap;
 
 use std::{hash::Hash, sync::Arc};
 
-pub trait ResourceDescriptor: 'static + UserdataValue + Hash + Eq + Clone {
+pub trait ResourceDescriptor: 'static + Userdata + Hash + Eq + Clone {
 	type Context<'a>;
-	type Resource: UserdataValue;
+	type Resource: Userdata;
 
 	fn construct(
 		&self,
@@ -30,14 +30,14 @@ pub trait ResourceDescriptor: 'static + UserdataValue + Hash + Eq + Clone {
 
 #[derive(Debug, Default)]
 pub struct ResourceManager {
-	resources: HashMap<ReifiedDescriptor, Option<Arc<dyn UserdataValue>>>,
+	resources: HashMap<ReifiedDescriptor, Option<Arc<dyn Userdata>>>,
 	// TODO: Implement automatic cleanup
 }
 
 #[derive(Debug)]
 struct ReifiedDescriptor {
 	hash: u64,
-	desc: Userdata,
+	desc: BoxedUserdata,
 }
 
 impl ResourceManager {

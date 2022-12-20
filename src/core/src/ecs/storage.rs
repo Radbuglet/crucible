@@ -11,7 +11,7 @@ use derive_where::derive_where;
 use crate::{
 	debug::{
 		lifetime::{DebugLifetime, Dependent},
-		userdata::{ErasedUserdataValue, Userdata},
+		userdata::{BoxedUserdata, ErasedUserdata},
 	},
 	lang::{polyfill::VecPoly, sync::ExtRefCell},
 	mem::{
@@ -407,7 +407,7 @@ impl<T> CelledStorageView<T> {
 
 // === Userdata === //
 
-impl Storage<Userdata> {
+impl Storage<BoxedUserdata> {
 	pub fn get_downcast<T: 'static>(&self, entity: Entity) -> &T {
 		self[entity].downcast_ref()
 	}
@@ -417,7 +417,7 @@ impl Storage<Userdata> {
 	}
 }
 
-impl CelledStorage<Userdata> {
+impl CelledStorage<BoxedUserdata> {
 	pub fn get_downcast<T: 'static>(&self, entity: Entity) -> &T {
 		self.get(entity).downcast_ref()
 	}
@@ -427,7 +427,7 @@ impl CelledStorage<Userdata> {
 	}
 }
 
-impl CelledStorageView<Userdata> {
+impl CelledStorageView<BoxedUserdata> {
 	pub fn borrow_downcast<T: 'static>(&self, entity: Entity) -> Ref<T> {
 		Ref::map(self.borrow(entity), |comp| comp.downcast_ref())
 	}

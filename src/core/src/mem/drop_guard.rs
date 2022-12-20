@@ -3,6 +3,8 @@ use std::{
 	ops::{Deref, DerefMut},
 };
 
+// === DropGuard === //
+
 #[derive(Debug)]
 pub struct DropGuard<T, F>
 where
@@ -21,7 +23,14 @@ impl<T, F> DropGuard<T, F>
 where
 	F: DropGuardHandler<T>,
 {
-	pub fn new(target: T, handler: F) -> Self {
+	pub fn new(target: T) -> Self
+	where
+		F: Default,
+	{
+		Self::new_with_handler(target, F::default())
+	}
+
+	pub fn new_with_handler(target: T, handler: F) -> Self {
 		Self {
 			inner: ManuallyDrop::new(GuardInner { target, handler }),
 		}
@@ -31,6 +40,12 @@ where
 		let inner = unsafe { ManuallyDrop::take(&mut me.inner) };
 		mem::forget(me);
 		inner.target
+	}
+}
+
+impl<T, F: DropGuardHandler<T> + Default> From<T> for DropGuard<T, F> {
+	fn from(value: T) -> Self {
+		Self::new(value)
 	}
 }
 
@@ -74,5 +89,22 @@ where
 {
 	fn destruct(self, value: T) {
 		(self)(value)
+	}
+}
+
+// === OwnedDrop === //
+
+pub type DropOwnedGuard<T> = DropGuard<T, DropOwnedGuardHandler>;
+
+pub trait DropOwned<T = ()> {
+	fn drop_owned(self, cx: T);
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct DropOwnedGuardHandler;
+
+impl<T: DropOwned> DropGuardHandler<T> for DropOwnedGuardHandler {
+	fn destruct(self, value: T) {
+		value.drop_owned(());
 	}
 }

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use crucible_core::{debug::userdata::Userdata, lang::explicitly_bind::ExplicitlyBind};
+use crucible_core::{debug::userdata::BoxedUserdata, lang::explicitly_bind::ExplicitlyBind};
 use winit::{
 	event::{DeviceEvent, DeviceId, Event, WindowEvent},
 	event_loop::{EventLoop, EventLoopWindowTarget},
@@ -9,7 +9,7 @@ use winit::{
 
 // === MainLoop === //
 
-pub type WinitUserdata = Userdata;
+pub type WinitUserdata = BoxedUserdata;
 
 pub type WinitEventLoop = EventLoop<WinitUserdata>;
 
@@ -149,7 +149,7 @@ pub trait MainLoopHandler: Sized {
 
 	fn on_render(&mut self, cx: (&mut MainLoop, &WinitEventProxy), window_id: WindowId);
 
-	fn on_userdata(&mut self, cx: (&mut MainLoop, &WinitEventProxy), event: Userdata) {
+	fn on_userdata(&mut self, cx: (&mut MainLoop, &WinitEventProxy), event: BoxedUserdata) {
 		let _cx = cx;
 		let _event = event;
 	}

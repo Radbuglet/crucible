@@ -7,9 +7,9 @@ use std::{
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{
-	debug::userdata::{ErasedUserdataValue, UserdataValue},
+	debug::userdata::{ErasedUserdata, Userdata},
 	mem::{
-		drop_guard::{DropGuard, DropGuardHandler},
+		drop_guard::{DropOwned, DropOwnedGuard},
 		ptr::addr_of_ptr,
 	},
 };
@@ -31,7 +31,7 @@ pub unsafe trait Borrower<L> {
 
 // === Mapped === //
 
-pub struct Mapped<A: Lender, B: Borrower<A::Loan>>(DropGuard<MappedInner<A, B>, MappedDropHandler>);
+pub struct Mapped<A: Lender, B: Borrower<A::Loan>>(DropOwnedGuard<MappedInner<A, B>>);
 
 impl<A, B> Mapped<A, B>
 where
@@ -39,14 +39,11 @@ where
 	B: Borrower<A::Loan>,
 {
 	pub unsafe fn new(shark: A::Shark, borrower: B) -> Self {
-		Self(DropGuard::new(
-			MappedInner { shark, borrower },
-			MappedDropHandler,
-		))
+		Self(MappedInner { shark, borrower }.into())
 	}
 
 	pub fn unwrap(me: Self) -> A {
-		DropGuard::defuse(me.0).unwrap()
+		DropOwnedGuard::defuse(me.0).unwrap()
 	}
 }
 
@@ -59,7 +56,7 @@ where
 	type Shark = (B::Shark, A::Shark);
 
 	fn loan(me: Self) -> (Self::Loan, Self::Shark) {
-		let inner = DropGuard::defuse(me.0);
+		let inner = DropOwnedGuard::defuse(me.0);
 
 		let a_shark = inner.shark;
 		let (b_loan, b_shark) = B::loan(inner.borrower);
@@ -173,15 +170,9 @@ where
 	}
 }
 
-struct MappedDropHandler;
-
-impl<A, B> DropGuardHandler<MappedInner<A, B>> for MappedDropHandler
-where
-	A: Lender,
-	B: Borrower<A::Loan>,
-{
-	fn destruct(self, inner: MappedInner<A, B>) {
-		drop(inner.unwrap());
+impl<A: Lender, B: Borrower<A::Loan>> DropOwned for MappedInner<A, B> {
+	fn drop_owned(self, _cx: ()) {
+		drop(self.unwrap());
 	}
 }
 
@@ -422,7 +413,28 @@ unsafe impl<T: ?Sized + 'static> Borrower<LentRef<RwLock<T>>> for BorrowingRwWri
 	}
 }
 
-// === Arc<T> => Arc<U> === //
+// === Box Mapping === //
+
+pub fn map_box<T: ?Sized, U: ?Sized, F>(b: Box<T>, f: F) -> Box<U>
+where
+	F: FnOnce(&mut T) -> &mut U,
+{
+	let original = Box::leak(b);
+	let original_ptr = original as *mut T;
+	let converted = f(original);
+	assert_eq!(addr_of_ptr(original_ptr), addr_of_ptr(converted));
+
+	unsafe {
+		// Safety: `f` gives a proof that it can convert a reference of `&'a mut T` into a reference of
+		// `&'a mut U` lasting for an arbitrary caller-selected lifetime. Additionally, because the
+		// pointer address is the same, we know that we're pointing to a valid `Box`.
+		Box::from_raw(converted)
+	}
+}
+
+pub fn downcast_userdata_box<T: Userdata>(b: Box<dyn Userdata>) -> Box<T> {
+	map_box(b, |val| val.downcast_mut::<T>())
+}
 
 pub fn map_arc<T: ?Sized, U: ?Sized, F>(arc: Arc<T>, f: F) -> Arc<U>
 where
@@ -440,6 +452,6 @@ where
 	}
 }
 
-pub fn downcast_userdata_arc<T: UserdataValue>(arc: Arc<dyn UserdataValue>) -> Arc<T> {
+pub fn downcast_userdata_arc<T: Userdata>(arc: Arc<dyn Userdata>) -> Arc<T> {
 	map_arc(arc, |val| val.downcast_ref::<T>())
 }

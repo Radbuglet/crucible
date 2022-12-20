@@ -1,6 +1,6 @@
 use anyhow::Context;
 use crucible_core::{
-	debug::userdata::Userdata,
+	debug::userdata::BoxedUserdata,
 	ecs::{entity::Archetype, provider::Provider, storage::Storage},
 };
 use wgpu::SurfaceConfiguration;
@@ -45,7 +45,7 @@ struct EngineRoot {
 	viewports: Storage<Viewport>,
 	depth_textures: Storage<FullScreenTexture>,
 	input_managers: Storage<InputManager>,
-	userdata: Storage<Userdata>,
+	userdata: Storage<BoxedUserdata>,
 	update_handlers: Storage<SceneUpdateHandler>,
 	render_handlers: Storage<SceneRenderHandler>,
 }

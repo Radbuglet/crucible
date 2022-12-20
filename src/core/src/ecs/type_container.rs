@@ -6,17 +6,21 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::{
 	debug::{
 		type_id::NamedTypeId,
-		userdata::{ErasedUserdataValue, Userdata, UserdataValue},
+		userdata::{BoxedUserdata, ErasedUserdata, Userdata},
 	},
-	mem::ptr::{sizealign_checked_transmute, PointeeCastExt},
+	lang::loan::downcast_userdata_box,
+	mem::{
+		drop_guard::DropOwned,
+		ptr::{sizealign_checked_transmute, PointeeCastExt},
+	},
 };
 
 use super::provider::{DynProvider, Provider};
 
 #[derive(Debug, Default)]
 pub struct TypeContainer {
-	established: HashMap<NamedTypeId, Userdata>,
-	new: Mutex<HashMap<NamedTypeId, Option<Userdata>>>,
+	established: HashMap<NamedTypeId, BoxedUserdata>,
+	new: Mutex<HashMap<NamedTypeId, Option<BoxedUserdata>>>,
 }
 
 impl TypeContainer {
@@ -28,7 +32,7 @@ impl TypeContainer {
 		let key = NamedTypeId::of::<T>();
 
 		if let Some(established) = self.established.get(&key) {
-			let ptr = &**established as *const dyn UserdataValue as *mut ();
+			let ptr = &**established as *const dyn Userdata as *mut ();
 			return Some(unsafe {
 				// Safety: all components in this map are `Sized`.
 				sizealign_checked_transmute(ptr)
@@ -40,7 +44,7 @@ impl TypeContainer {
 				panic!("Attempted to acquire auto value {key:?} while it was being initialized.")
 			});
 
-			let ptr = &**inner as *const dyn UserdataValue as *mut ();
+			let ptr = &**inner as *const dyn Userdata as *mut ();
 
 			unsafe {
 				// Safety: all components in this map are `Sized`.
@@ -51,7 +55,7 @@ impl TypeContainer {
 
 	pub fn get_or_create<T, F>(&self, f: F) -> &T
 	where
-		T: UserdataValue,
+		T: Userdata,
 		F: FnOnce() -> T,
 	{
 		let key = NamedTypeId::of::<T>();
@@ -86,7 +90,7 @@ impl TypeContainer {
 		inner
 	}
 
-	pub fn lock_ref<T: UserdataValue>(&self) -> RwLockReadGuard<T> {
+	pub fn lock_ref<T: Userdata>(&self) -> RwLockReadGuard<T> {
 		self.get_comp::<RwLock<T>>().try_read().unwrap_or_else(|| {
 			panic!(
 				"failed to acquire component {:?} immutably.",
@@ -95,7 +99,7 @@ impl TypeContainer {
 		})
 	}
 
-	pub fn lock_mut<T: UserdataValue>(&self) -> RwLockWriteGuard<T> {
+	pub fn lock_mut<T: Userdata>(&self) -> RwLockWriteGuard<T> {
 		self.get_comp::<RwLock<T>>().try_write().unwrap_or_else(|| {
 			panic!(
 				"failed to acquire component {:?} mutably.",
@@ -104,7 +108,7 @@ impl TypeContainer {
 		})
 	}
 
-	pub fn lock_ref_or_create<T: UserdataValue, F>(&self, f: F) -> RwLockReadGuard<T>
+	pub fn lock_ref_or_create<T: Userdata, F>(&self, f: F) -> RwLockReadGuard<T>
 	where
 		F: FnOnce() -> T,
 	{
@@ -113,7 +117,7 @@ impl TypeContainer {
 			.unwrap()
 	}
 
-	pub fn lock_mut_or_create<T: UserdataValue, F>(&self, f: F) -> RwLockWriteGuard<T>
+	pub fn lock_mut_or_create<T: Userdata, F>(&self, f: F) -> RwLockWriteGuard<T>
 	where
 		F: FnOnce() -> T,
 	{
@@ -122,9 +126,17 @@ impl TypeContainer {
 			.unwrap()
 	}
 
-	pub fn remove<T: UserdataValue>(&mut self) -> Option<T> {
+	pub fn remove<T: Userdata>(&mut self) -> Option<Box<T>> {
 		self.flush();
-		todo!()
+		self.established
+			.remove(&NamedTypeId::of::<T>())
+			.map(downcast_userdata_box)
+	}
+
+	pub fn remove_and_drop<T: Userdata + DropOwned<C>, C>(&mut self, cx: C) {
+		if let Some(target) = self.remove::<T>() {
+			target.drop_owned(cx);
+		}
 	}
 
 	pub fn flush(&mut self) {

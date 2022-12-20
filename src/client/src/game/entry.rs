@@ -6,7 +6,7 @@ use crucible_common::voxel::{
 	math::{BlockFace, ChunkVec, EntityVec, WorldVec},
 };
 use crucible_core::{
-	debug::{error::ResultExt, userdata::Userdata},
+	debug::{error::ResultExt, userdata::BoxedUserdata},
 	ecs::{
 		entity::{Archetype, Entity},
 		provider::{unpack, DynProvider},
@@ -68,7 +68,7 @@ impl PlayScene {
 	pub fn spawn(
 		(scene_arch, userdatas, update_handlers, render_handlers, gfx, res_mgr): (
 			&mut Archetype,
-			&mut Storage<Userdata>,
+			&mut Storage<BoxedUserdata>,
 			&mut Storage<SceneUpdateHandler>,
 			&mut Storage<SceneRenderHandler>,
 			&GfxContext,
@@ -123,7 +123,7 @@ impl PlayScene {
 		// Extract context
 		unpack!(cx => {
 			gfx = &GfxContext,
-			userdatas = &mut Storage<Userdata>,
+			userdatas = &mut Storage<BoxedUserdata>,
 			viewports = &Storage<Viewport>,
 			input_managers = &Storage<InputManager>,
 		});
@@ -287,7 +287,7 @@ impl PlayScene {
 	fn on_render(cx: &mut DynProvider, me: Entity, event: SceneRenderEvent) {
 		// Extract context
 		unpack!(cx => {
-			userdata = &mut Storage<Userdata>,
+			userdata = &mut Storage<BoxedUserdata>,
 			gfx = &GfxContext,
 			res_mgr = &mut ResourceManager,
 			viewports = &mut Storage<Viewport>,

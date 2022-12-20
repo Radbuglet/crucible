@@ -19,7 +19,7 @@ use crate::lang::{
 };
 
 use super::{
-	drop_guard::{DropGuard, DropGuardHandler},
+	drop_guard::{DropOwned, DropOwnedGuard},
 	ptr::unchecked_unify,
 };
 
@@ -236,14 +236,12 @@ where
 		};
 
 		AutoMut {
-			guard: DropGuard::new(
-				AutoMutInner {
-					policy: &self.policy,
-					table: UnsafeCell::from_mut(map.raw_table()),
-					bucket,
-				},
-				AutoMutDropHandler,
-			),
+			guard: AutoMutInner {
+				policy: &self.policy,
+				table: UnsafeCell::from_mut(map.raw_table()),
+				bucket,
+			}
+			.into(),
 		}
 	}
 
@@ -281,14 +279,12 @@ where
 		let bucket = table.find(hash, |(k2, _)| k2.borrow() == k)?;
 
 		Some(AutoMut {
-			guard: DropGuard::new(
-				AutoMutInner {
-					policy: &self.policy,
-					table: UnsafeCell::from_mut(table),
-					bucket,
-				},
-				AutoMutDropHandler,
-			),
+			guard: AutoMutInner {
+				policy: &self.policy,
+				table: UnsafeCell::from_mut(table),
+				bucket,
+			}
+			.into(),
 		})
 	}
 
@@ -386,14 +382,12 @@ impl<'a, K: 'a, V: 'a, P: ForgetPolicy<V>> Iterator for AutoMapIterMut<'a, K, V,
 		Some((
 			key,
 			AutoMut {
-				guard: DropGuard::new(
-					AutoMutInner {
-						policy: self.policy,
-						table: self.table,
-						bucket,
-					},
-					AutoMutDropHandler,
-				),
+				guard: AutoMutInner {
+					policy: self.policy,
+					table: self.table,
+					bucket,
+				}
+				.into(),
 			},
 		))
 	}
@@ -434,7 +428,7 @@ impl<'a, K: 'a, V: 'a, P: ForgetPolicy<V>> ExactSizeIterator for AutoMapValuesMu
 // === AutoRef === //
 
 pub struct AutoMut<'a, K, V, P: ForgetPolicy<V>> {
-	guard: DropGuard<AutoMutInner<'a, K, V, P>, AutoMutDropHandler>,
+	guard: DropOwnedGuard<AutoMutInner<'a, K, V, P>>,
 }
 
 struct AutoMutInner<'a, K, V, P: ForgetPolicy<V>> {
@@ -443,11 +437,9 @@ struct AutoMutInner<'a, K, V, P: ForgetPolicy<V>> {
 	bucket: Bucket<(K, V)>,
 }
 
-struct AutoMutDropHandler;
-
 impl<'a, K, V, P: ForgetPolicy<V>> AutoMut<'a, K, V, P> {
 	pub fn defuse(me: Self) -> &'a mut V {
-		&mut unsafe { DropGuard::defuse(me.guard).bucket.as_mut() }.1
+		&mut unsafe { DropOwnedGuard::defuse(me.guard).bucket.as_mut() }.1
 	}
 }
 
@@ -465,16 +457,11 @@ impl<K, V, P: ForgetPolicy<V>> DerefMut for AutoMut<'_, K, V, P> {
 	}
 }
 
-impl<'a, K, V, P: ForgetPolicy<V>> DropGuardHandler<AutoMutInner<'a, K, V, P>>
-	for AutoMutDropHandler
-{
-	fn destruct(self, inner: AutoMutInner<'a, K, V, P>) {
-		if !inner
-			.policy
-			.is_alive(unsafe { &mut inner.bucket.as_mut().1 })
-		{
+impl<'a, K, V, P: ForgetPolicy<V>> DropOwned for AutoMutInner<'a, K, V, P> {
+	fn drop_owned(self, _cx: ()) {
+		if !self.policy.is_alive(unsafe { &mut self.bucket.as_mut().1 }) {
 			unsafe {
-				inner.table.get_mut_unchecked().remove(inner.bucket);
+				self.table.get_mut_unchecked().remove(self.bucket);
 			}
 		}
 	}

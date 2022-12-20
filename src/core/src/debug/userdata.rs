@@ -7,9 +7,9 @@ use crate::lang::lifetime::try_transform_mut;
 
 // === Userdata === //
 
-pub type Userdata = Box<dyn UserdataValue>;
+pub type BoxedUserdata = Box<dyn Userdata>;
 
-pub trait UserdataValue: 'static + fmt::Debug + Send + Sync {
+pub trait Userdata: 'static + fmt::Debug + Send + Sync {
 	#[doc(hidden)]
 	fn internal_as_any(&self) -> &(dyn Any + Send + Sync);
 
@@ -20,7 +20,7 @@ pub trait UserdataValue: 'static + fmt::Debug + Send + Sync {
 	fn internal_type_name(&self) -> &'static str;
 }
 
-impl<T: fmt::Debug + Any + Send + Sync> UserdataValue for T {
+impl<T: fmt::Debug + Any + Send + Sync> Userdata for T {
 	fn internal_as_any(&self) -> &(dyn Any + Send + Sync) {
 		self
 	}
@@ -42,7 +42,7 @@ fn unexpected_userdata<T>(ty_name: &str) -> ! {
 	)
 }
 
-pub trait ErasedUserdataValue: UserdataValue {
+pub trait ErasedUserdata: Userdata {
 	fn type_name(&self) -> &'static str {
 		self.internal_type_name()
 	}
@@ -68,4 +68,4 @@ pub trait ErasedUserdataValue: UserdataValue {
 	}
 }
 
-impl ErasedUserdataValue for dyn UserdataValue {}
+impl ErasedUserdata for dyn Userdata {}

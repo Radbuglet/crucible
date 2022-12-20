@@ -5,7 +5,7 @@ use derive_where::derive_where;
 use crate::{
 	debug::{
 		lifetime::{DebugLifetime, Dependent},
-		userdata::UserdataValue,
+		userdata::Userdata,
 	},
 	lang::explicitly_bind::ExplicitlyBind,
 };
@@ -145,7 +145,7 @@ pub struct TaskQueue {
 	events: Vec<Box<dyn Task>>,
 }
 
-trait Task: UserdataValue {
+trait Task: Userdata {
 	fn fire(&mut self, scheduler: &mut TaskQueue, cx: &mut DynProvider);
 }
 
@@ -159,7 +159,7 @@ impl<F: fmt::Debug> fmt::Debug for TaskWrapper<F> {
 
 impl<F> Task for TaskWrapper<F>
 where
-	F: FnOnce(&mut TaskQueue, &mut DynProvider) + UserdataValue,
+	F: FnOnce(&mut TaskQueue, &mut DynProvider) + Userdata,
 {
 	fn fire(&mut self, bus: &mut TaskQueue, cx: &mut DynProvider) {
 		ExplicitlyBind::extract(&mut self.0)(bus, cx);
@@ -169,7 +169,7 @@ where
 impl TaskQueue {
 	pub fn push<F>(&mut self, handler: F)
 	where
-		F: FnOnce(&mut TaskQueue, &mut DynProvider) + UserdataValue,
+		F: FnOnce(&mut TaskQueue, &mut DynProvider) + Userdata,
 	{
 		log::info!("Pushing event {handler:?}.");
 		let handler = Box::new(TaskWrapper(ExplicitlyBind::new(handler)));
