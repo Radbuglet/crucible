@@ -92,7 +92,6 @@ pub struct VolumetricIter<const N: usize> {
 }
 
 impl<const N: usize> VolumetricIter<N> {
-	// TODO: Make bounds inclusive
 	pub const fn new(max: [u32; N]) -> Self {
 		Self {
 			pos: Some([0; N]),

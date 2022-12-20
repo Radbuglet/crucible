@@ -350,7 +350,7 @@ pub trait Dependable: Copy {
 	fn dec_dep(self);
 }
 
-pub trait AnyLifetime: Copy + Dependable {
+pub trait LifetimeLike: Copy + Dependable {
 	fn destroy(self);
 }
 
@@ -366,7 +366,7 @@ impl Dependable for Lifetime {
 	}
 }
 
-impl AnyLifetime for Lifetime {
+impl LifetimeLike for Lifetime {
 	fn destroy(self) {
 		// Name resolution prioritizes inherent method of the same name.
 		self.destroy()
@@ -383,7 +383,7 @@ impl Dependable for DebugLifetime {
 	}
 }
 
-impl AnyLifetime for DebugLifetime {
+impl LifetimeLike for DebugLifetime {
 	fn destroy(self) {
 		// Name resolution prioritizes inherent method of the same name.
 		self.destroy()
@@ -391,9 +391,9 @@ impl AnyLifetime for DebugLifetime {
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct LifetimeOwner<L: AnyLifetime>(pub L);
+pub struct LifetimeOwner<L: LifetimeLike>(pub L);
 
-impl<L: AnyLifetime> Drop for LifetimeOwner<L> {
+impl<L: LifetimeLike> Drop for LifetimeOwner<L> {
 	fn drop(&mut self) {
 		self.0.destroy();
 	}

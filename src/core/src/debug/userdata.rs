@@ -5,8 +5,6 @@ use std::{
 
 use crate::lang::lifetime::try_transform_mut;
 
-// === Userdata === //
-
 pub type BoxedUserdata = Box<dyn Userdata>;
 
 pub trait Userdata: 'static + fmt::Debug + Send + Sync {

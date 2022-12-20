@@ -17,10 +17,14 @@ use super::{
 
 // === Aliases === //
 
-#[derive(Debug, Copy, Clone, Default)]
-pub struct EntityFreedEvent;
+pub type EventHandlerFn<T> = fn(&mut DynProvider, EventQueueIter<T>);
+pub type EventHandlerMap<T> = ArchetypeMap<EventHandlerFn<T>>;
 
-pub type FreeQueue = EventQueue<EntityFreedEvent>;
+#[derive(Debug, Copy, Clone, Default)]
+pub struct EntityDestroyEvent;
+
+pub type DestroyQueue = EventQueue<EntityDestroyEvent>;
+pub type DestroyHandlerMap = EventHandlerMap<EntityDestroyEvent>;
 
 // === EventQueue === //
 
@@ -29,13 +33,6 @@ pub type FreeQueue = EventQueue<EntityFreedEvent>;
 pub struct EventQueue<E> {
 	runs: ArchetypeMap<Vec<Event<E>>>,
 	maybe_recursively_dispatched: bool,
-}
-
-#[derive(Debug, Clone)]
-struct Event<E> {
-	slot: u32,
-	lifetime: Dependent<DebugLifetime>,
-	event: E,
 }
 
 impl<E> EventQueue<E> {
@@ -61,8 +58,8 @@ impl<E> EventQueue<E> {
 		});
 	}
 
-	pub fn flush_in(&mut self, archetype: ArchetypeId) -> EventQueueFlush<E> {
-		EventQueueFlush(
+	pub fn flush_in(&mut self, archetype: ArchetypeId) -> EventQueueIter<E> {
+		EventQueueIter(
 			archetype,
 			self.runs
 				.remove(&archetype)
@@ -98,6 +95,13 @@ impl<E> Drop for EventQueue<E> {
 	}
 }
 
+#[derive(Debug, Clone)]
+struct Event<E> {
+	slot: u32,
+	lifetime: Dependent<DebugLifetime>,
+	event: E,
+}
+
 impl<E> Event<E> {
 	fn into_tuple(self, arch: ArchetypeId) -> (Entity, E) {
 		(
@@ -112,9 +116,9 @@ impl<E> Event<E> {
 }
 
 #[derive(Debug, Clone)]
-pub struct EventQueueFlush<E>(ArchetypeId, vec::IntoIter<Event<E>>);
+pub struct EventQueueIter<E>(ArchetypeId, vec::IntoIter<Event<E>>);
 
-impl<E> Iterator for EventQueueFlush<E> {
+impl<E> Iterator for EventQueueIter<E> {
 	type Item = (Entity, E);
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -130,9 +134,9 @@ impl<E> Iterator for EventQueueFlush<E> {
 	}
 }
 
-impl<E> ExactSizeIterator for EventQueueFlush<E> {}
+impl<E> ExactSizeIterator for EventQueueIter<E> {}
 
-impl<E> DoubleEndedIterator for EventQueueFlush<E> {
+impl<E> DoubleEndedIterator for EventQueueIter<E> {
 	fn next_back(&mut self) -> Option<Self::Item> {
 		self.1.next_back().map(|e| e.into_tuple(self.0))
 	}
