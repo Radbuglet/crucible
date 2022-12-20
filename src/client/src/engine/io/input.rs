@@ -1,5 +1,6 @@
-use std::collections::HashMap;
 use std::hash::Hash;
+
+use hashbrown::HashMap;
 use typed_glam::glam::Vec2;
 use winit::dpi::PhysicalPosition;
 use winit::event::{

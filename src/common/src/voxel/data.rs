@@ -1,13 +1,19 @@
-use std::{collections::HashMap, mem};
+use std::{borrow::Cow, mem};
+
+use hashbrown::HashMap;
 
 use crucible_core::{
+	debug::lifetime::Dependent,
 	ecs::{
 		entity::Entity,
 		provider::{DynProvider, Provider},
 		storage::{CelledStorage, CelledStorageView},
 	},
 	lang::iter::VolumetricIter,
-	mem::c_enum::{CEnum, CEnumMap},
+	mem::{
+		c_enum::{CEnum, CEnumMap},
+		free_list::FreeList,
+	},
 };
 use typed_glam::{
 	ext::VecExt,
@@ -451,5 +457,47 @@ where
 				self.at_relative(cx, WorldVec::new(x as i32, y as i32, z as i32).cast())
 			},
 		)
+	}
+}
+
+// === MaterialRegistry === //
+
+#[derive(Debug, Default)]
+pub struct MaterialRegistry {
+	slots: FreeList<Dependent<Entity>, u16>,
+	id_map: HashMap<Cow<'static, str>, u16>,
+}
+
+impl MaterialRegistry {
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	pub fn register(&mut self, id: impl Into<Cow<'static, str>>, descriptor: Entity) -> u16 {
+		let (_, slot) = self.slots.add(descriptor.into());
+
+		let id = id.into();
+		if let Err(e) = self.id_map.try_insert(id, slot) {
+			log::error!("Registered duplicate material with id {:?}.", e.entry.key());
+		}
+
+		slot
+	}
+
+	pub fn try_resolve_id(&self, id: &str) -> Option<u16> {
+		self.id_map.get(id).copied()
+	}
+
+	pub fn resolve_slot(&self, slot: u16) -> Entity {
+		self.slots.get(slot).get()
+	}
+
+	pub fn unregister(&mut self, id: &str) {
+		let Some(slot) = self.id_map.remove(id) else {
+			log::error!("Attempted to unregister material under non-existent ID {:?}.", id);
+			return;
+		};
+
+		self.slots.remove(slot);
 	}
 }

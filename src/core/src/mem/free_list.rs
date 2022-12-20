@@ -175,41 +175,45 @@ impl<T, H: Handle> FreeList<T, H> {
 
 pub type PureFreeList<T> = FreeList<T, u32>;
 
-impl<T> PureFreeList<T> {
-	pub const fn const_new() -> Self {
-		Self {
-			slots: Vec::new(),
-			free: Vec::new(),
-			state: (),
+macro impl_pure_handle_for($const_new:ident; $($ty:ty),*) {$(
+	impl<T> FreeList<T, $ty> {
+		pub const fn $const_new() -> Self {
+			Self {
+				slots: Vec::new(),
+				free: Vec::new(),
+				state: (),
+			}
 		}
 	}
-}
 
-impl Handle for u32 {
-	type State = ();
-	type Meta = ();
+	impl Handle for $ty {
+		type State = ();
+		type Meta = ();
 
-	fn default_state() -> Self::State {
-		()
+		fn default_state() -> Self::State {
+			()
+		}
+
+		fn slot_occupied(_state: &mut Self::State, slot: usize) -> (Self, Self::Meta) {
+			(
+				<$ty>::try_from(slot).expect("allocated too many handles concurrently"),
+				(),
+			)
+		}
+
+		fn slot_freed(_state: &mut Self::State, _handle: Self, _meta: Self::Meta) {}
+
+		fn validate_handle(_state: &Self::State, _handle: Self, _meta: &Self::Meta) -> bool {
+			true
+		}
+
+		fn slot(&self) -> usize {
+			*self as usize
+		}
 	}
+)*}
 
-	fn slot_occupied(_state: &mut Self::State, slot: usize) -> (Self, Self::Meta) {
-		(
-			u32::try_from(slot).expect("allocated too many handles concurrently"),
-			(),
-		)
-	}
-
-	fn slot_freed(_state: &mut Self::State, _handle: Self, _meta: Self::Meta) {}
-
-	fn validate_handle(_state: &Self::State, _handle: Self, _meta: &Self::Meta) -> bool {
-		true
-	}
-
-	fn slot(&self) -> usize {
-		*self as usize
-	}
-}
+impl_pure_handle_for!(const_new; u32, u16, u8, usize);
 
 // === FreeListHandle === //
 

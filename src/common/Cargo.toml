@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 crucible-core = { path = "../core" }
+hashbrown = "0.13.1"
 log = "0.4.17"
 num-traits = "0.2.15"
 smallvec = "1.9.0"

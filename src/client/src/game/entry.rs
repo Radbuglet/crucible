@@ -1,6 +1,8 @@
 use crucible_common::voxel::{
 	cast::RayCast,
-	data::{BlockState, EntityLocation, Location, VoxelChunkData, VoxelWorldData},
+	data::{
+		BlockState, EntityLocation, Location, MaterialRegistry, VoxelChunkData, VoxelWorldData,
+	},
 	math::{BlockFace, ChunkVec, EntityVec, WorldVec},
 };
 use crucible_core::{
@@ -24,11 +26,8 @@ use winit::{
 
 use crate::{
 	engine::{
-		io::{
-			gfx::GfxContext,
-			input::InputManager,
-			viewport::{FullScreenTexture, Viewport},
-		},
+		gfx::texture::FullScreenTexture,
+		io::{gfx::GfxContext, input::InputManager, viewport::Viewport},
 		resources::ResourceManager,
 		scene::{SceneRenderEvent, SceneRenderHandler, SceneUpdateEvent, SceneUpdateHandler},
 	},
@@ -47,16 +46,19 @@ use super::{
 pub struct PlayScene {
 	// Archetypes
 	arch_chunk: Archetype,
+	arch_block_descriptor: Archetype,
 
 	// Storages
 	chunk_datas: CelledStorage<VoxelChunkData>,
 	chunk_meshes: Storage<VoxelChunkMesh>,
+	block_descriptors: Storage<()>,
 
 	// Resources
 	has_control: bool,
 	free_cam: FreeCamController,
 	world_data: VoxelWorldData,
 	world_mesh: VoxelWorldMesh,
+	block_registry: MaterialRegistry,
 	main_viewport: ExplicitlyBind<Entity>,
 	voxel_uniforms: ExplicitlyBind<VoxelUniforms>,
 	time: f64,

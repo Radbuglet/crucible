@@ -17,11 +17,12 @@ use crate::{
 };
 
 use super::{
+	gfx::texture::FullScreenTexture,
 	io::{
 		gfx::{GfxContext, GfxFeatureNeedsScreen},
 		input::InputManager,
 		main_loop::{MainLoop, MainLoopHandler, WinitEventLoop, WinitEventProxy},
-		viewport::{FullScreenTexture, Viewport, ViewportManager},
+		viewport::{Viewport, ViewportManager},
 	},
 	resources::ResourceManager,
 	scene::{SceneManager, SceneRenderHandler, SceneUpdateHandler},

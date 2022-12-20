@@ -3,6 +3,7 @@ use hashbrown::HashSet;
 use image::Rgba32FImage;
 use typed_glam::glam::UVec2;
 
+#[derive(Debug)]
 pub struct AtlasBuilder {
 	tile_size: UVec2,
 	tile_counts: UVec2,
@@ -40,7 +41,10 @@ impl AtlasBuilder {
 		UVec2::new(self.atlas.width(), self.atlas.height())
 	}
 
-	pub fn push(&mut self, sub: Rgba32FImage) -> UVec2 {
+	pub fn add(&mut self, sub: Rgba32FImage) -> UVec2 {
+		debug_assert_eq!(sub.width(), self.tile_size.x);
+		debug_assert_eq!(sub.height(), self.tile_size.y);
+
 		// Allocate a free tile
 		let free_tile = *self
 			.free_tiles
@@ -59,5 +63,12 @@ impl AtlasBuilder {
 		}
 
 		free_tile
+	}
+
+	pub fn remove(&mut self, sub: UVec2) {
+		debug_assert!(sub.x < self.tile_counts.x);
+		debug_assert!(sub.y < self.tile_counts.y);
+
+		self.free_tiles.insert(sub);
 	}
 }

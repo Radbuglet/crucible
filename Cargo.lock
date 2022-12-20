@@ -524,6 +524,7 @@ name = "crucible-common"
 version = "0.1.0"
 dependencies = [
  "crucible-core",
+ "hashbrown 0.13.1",
  "log",
  "num-traits",
  "smallvec",

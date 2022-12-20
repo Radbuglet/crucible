@@ -5,6 +5,7 @@ use crucible_common::voxel::math::{BlockFace, Sign};
 use typed_glam::glam;
 
 use crate::engine::{
+	gfx::texture::SamplerDesc,
 	io::gfx::GfxContext,
 	resources::{ResourceDescriptor, ResourceManager},
 };
@@ -105,7 +106,7 @@ impl ResourceDescriptor for VoxelPipelineLayoutDesc {
 }
 //
 // // === VoxelRenderingPipeline === //
-//
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct VoxelRenderingPipelineDesc {
 	pub surface_format: wgpu::TextureFormat,
@@ -200,13 +201,13 @@ impl ResourceDescriptor for VoxelRenderingPipelineDesc {
 		res_mgr.keep_alive(&VoxelPipelineLayoutDesc);
 	}
 }
-//
-// // === VoxelUniformManager === //
+
+// // === VoxelUniforms === //
 
 #[derive(Debug)]
 pub struct VoxelUniforms {
+	_sampler_keep_alive: Arc<wgpu::Sampler>,
 	bind_group: wgpu::BindGroup,
-	_sampler: wgpu::Sampler,
 	buffer: wgpu::Buffer,
 }
 
@@ -216,6 +217,7 @@ impl VoxelUniforms {
 		texture: &wgpu::TextureView,
 	) -> Self {
 		let layout = res_mgr.load(&VoxelPipelineLayoutDesc, gfx);
+		let sampler = res_mgr.load(&SamplerDesc::NEAREST_CLAMP_EDGES, (gfx,));
 
 		let buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("uniform buffer"),
@@ -223,10 +225,6 @@ impl VoxelUniforms {
 			size: ShaderUniformBuffer::std430_size_static() as u64,
 			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
 		});
-
-		let sampler = gfx
-			.device
-			.create_sampler(&wgpu::SamplerDescriptor::default());
 
 		let bind_group = gfx.device.create_bind_group(&wgpu::BindGroupDescriptor {
 			label: None,
@@ -253,7 +251,7 @@ impl VoxelUniforms {
 
 		Self {
 			bind_group,
-			_sampler: sampler,
+			_sampler_keep_alive: sampler,
 			buffer,
 		}
 	}
@@ -275,6 +273,8 @@ impl VoxelUniforms {
 struct ShaderUniformBuffer {
 	pub camera: glam::Mat4,
 }
+
+// === VoxelVertex === //
 
 #[derive(AsStd430)]
 pub struct VoxelVertex {

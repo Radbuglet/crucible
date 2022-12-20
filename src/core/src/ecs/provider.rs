@@ -1,10 +1,11 @@
 use std::{
 	any::type_name,
-	collections::HashMap,
 	fmt,
 	marker::PhantomData,
 	ptr::{addr_of, addr_of_mut},
 };
+
+use hashbrown::HashMap;
 
 use crate::{
 	debug::type_id::NamedTypeId,
