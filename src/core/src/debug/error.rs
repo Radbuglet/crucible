@@ -10,6 +10,14 @@ use derive_where::derive_where;
 
 use crate::lang::std_traits::ResultLike;
 
+// === Constants === //
+
+#[cfg(debug_assertions)]
+pub const DEBUG_ASSERTIONS_ENABLED: bool = true;
+
+#[cfg(not(debug_assertions))]
+pub const DEBUG_ASSERTIONS_ENABLED: bool = false;
+
 // === Standard Error Extensions === //
 
 pub trait ErrorFormatExt: Error {

@@ -2,6 +2,8 @@ use std::{borrow::Borrow, cmp::Ordering, fmt, hash, num::NonZeroU64};
 
 use thiserror::Error;
 
+use crate::mem::drop_guard::DropOwned;
+
 use super::{
 	error::ResultExt,
 	label::{DebugLabel, ReifiedDebugLabel},
@@ -76,10 +78,6 @@ mod db {
 
 // === Lifetime === //
 
-#[derive(Debug, Clone, Error)]
-#[error("attempted operation on dangling {0:?}")]
-pub struct DanglingLifetimeError(pub Lifetime);
-
 #[derive(Copy, Clone)]
 pub struct Lifetime {
 	slot: LifetimeSlot,
@@ -102,6 +100,10 @@ impl Lifetime {
 
 	pub fn is_alive(self) -> bool {
 		self.gen == self.slot.0.lock().gen
+	}
+
+	pub fn is_condemned(self) -> bool {
+		!self.is_alive()
 	}
 
 	pub fn try_inc_dep(self) -> Result<(), DanglingLifetimeError> {
@@ -129,6 +131,7 @@ impl Lifetime {
 		let mut slot_guard = self.slot.0.lock();
 
 		if slot_guard.gen != self.gen {
+			// (ignored to reduce spam a bit)
 			return;
 		}
 
@@ -151,7 +154,7 @@ impl Lifetime {
 		// See if we're disconnecting the lifetime from any of its dependencies.
 		if slot_guard.deps > 0 {
 			log::error!(
-				"Disconnected `Lifetime` with name {:?} from {} dependenc{}.",
+				"Disconnected lifetime with name {:?} from {} dependenc{}.",
 				slot_guard.curr_name,
 				slot_guard.deps,
 				if slot_guard.deps > 0 { "ies" } else { "y" }
@@ -172,6 +175,7 @@ impl Lifetime {
 				"A given `Lifetime` was somehow used more than `u64::MAX` times and is being leaked. \
 				 How long-running is this application?"
 			);
+			// (leak the slot)
 		}
 
 		Ok(())
@@ -232,6 +236,10 @@ impl fmt::Display for LifetimeName {
 		f.write_str(self.0.fmt_lifetime_name(&slot_guard))
 	}
 }
+
+#[derive(Debug, Clone, Error)]
+#[error("attempted operation on dangling {0:?}")]
+pub struct DanglingLifetimeError(pub Lifetime);
 
 // === DebugLifetime === //
 
@@ -343,66 +351,76 @@ impl PartialOrd for DebugLifetime {
 	}
 }
 
-// === Wrappers === //
+// === Wrapper traits === //
 
-pub trait Dependable: Copy {
-	fn inc_dep(self);
-	fn dec_dep(self);
-}
-
-pub trait LifetimeLike: Copy + Dependable {
-	fn destroy(self);
-}
-
-impl Dependable for Lifetime {
-	fn inc_dep(self) {
-		// Name resolution prioritizes inherent method of the same name.
-		self.inc_dep();
-	}
-
-	fn dec_dep(self) {
-		// Name resolution prioritizes inherent method of the same name.
-		self.dec_dep();
-	}
+pub trait LifetimeLike {
+	fn is_possibly_alive(&self) -> bool;
+	fn is_condemned(&self) -> bool;
+	fn inc_dep(&self);
+	fn dec_dep(&self);
 }
 
 impl LifetimeLike for Lifetime {
-	fn destroy(self) {
+	fn is_possibly_alive(&self) -> bool {
+		self.is_alive()
+	}
+
+	fn is_condemned(&self) -> bool {
 		// Name resolution prioritizes inherent method of the same name.
-		self.destroy()
+		(*self).is_condemned()
+	}
+
+	fn inc_dep(&self) {
+		// Name resolution prioritizes inherent method of the same name.
+		(*self).inc_dep();
+	}
+
+	fn dec_dep(&self) {
+		// Name resolution prioritizes inherent method of the same name.
+		(*self).dec_dep();
 	}
 }
 
-impl Dependable for DebugLifetime {
-	fn inc_dep(self) {
-		self.inc_dep();
-	}
-
-	fn dec_dep(self) {
-		self.dec_dep();
+impl DropOwned for Lifetime {
+	fn drop_owned(self, _cx: ()) {
+		self.destroy()
 	}
 }
 
 impl LifetimeLike for DebugLifetime {
-	fn destroy(self) {
+	fn is_possibly_alive(&self) -> bool {
 		// Name resolution prioritizes inherent method of the same name.
+		(*self).is_possibly_alive()
+	}
+
+	fn is_condemned(&self) -> bool {
+		// Name resolution prioritizes inherent method of the same name.
+		(*self).is_condemned()
+	}
+
+	fn inc_dep(&self) {
+		// Name resolution prioritizes inherent method of the same name.
+		(*self).inc_dep();
+	}
+
+	fn dec_dep(&self) {
+		// Name resolution prioritizes inherent method of the same name.
+		(*self).dec_dep();
+	}
+}
+
+impl DropOwned for DebugLifetime {
+	fn drop_owned(self, _cx: ()) {
 		self.destroy()
 	}
 }
 
-#[derive(Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct LifetimeOwner<L: LifetimeLike>(pub L);
-
-impl<L: LifetimeLike> Drop for LifetimeOwner<L> {
-	fn drop(&mut self) {
-		self.0.destroy();
-	}
-}
+// === Wrapper Objects === //
 
 #[derive(Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Dependent<L: Dependable>(L);
+pub struct Dependent<L: LifetimeLike + Copy>(L);
 
-impl<L: Dependable> Dependent<L> {
+impl<L: LifetimeLike + Copy> Dependent<L> {
 	pub fn new(lifetime: L) -> Self {
 		lifetime.inc_dep();
 		Self(lifetime)
@@ -419,25 +437,25 @@ impl<L: Dependable> Dependent<L> {
 	}
 }
 
-impl<L: Dependable> Borrow<L> for Dependent<L> {
+impl<L: LifetimeLike + Copy> Borrow<L> for Dependent<L> {
 	fn borrow(&self) -> &L {
 		&self.0
 	}
 }
 
-impl<L: Dependable> Clone for Dependent<L> {
+impl<L: LifetimeLike + Copy> Clone for Dependent<L> {
 	fn clone(&self) -> Self {
 		Self::new(self.get())
 	}
 }
 
-impl<L: Dependable> From<L> for Dependent<L> {
+impl<L: LifetimeLike + Copy> From<L> for Dependent<L> {
 	fn from(value: L) -> Self {
 		Self::new(value)
 	}
 }
 
-impl<L: Dependable> Drop for Dependent<L> {
+impl<L: LifetimeLike + Copy> Drop for Dependent<L> {
 	fn drop(&mut self) {
 		self.0.dec_dep();
 	}

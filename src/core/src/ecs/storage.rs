@@ -10,7 +10,7 @@ use derive_where::derive_where;
 
 use crate::{
 	debug::{
-		lifetime::{DebugLifetime, Dependent},
+		lifetime::{DebugLifetime, Dependent, LifetimeLike},
 		userdata::{BoxedUserdata, ErasedUserdata},
 	},
 	lang::{polyfill::VecPoly, sync::ExtRefCell},
@@ -49,13 +49,19 @@ impl<T> Storage<T> {
 	}
 
 	pub fn get_run(&self, archetype: ArchetypeId) -> Option<&StorageRun<T>> {
-		assert!(archetype.lifetime.is_possibly_alive());
+		if archetype.is_condemned() {
+			log::error!("Attempted to acquire the storage run of the dead archetype {archetype:?}");
+			// (fallthrough)
+		}
 
 		self.archetypes.get(&archetype.id)
 	}
 
 	pub fn get_run_mut(&mut self, archetype: ArchetypeId) -> Option<StorageRunRefMut<T>> {
-		assert!(archetype.lifetime.is_possibly_alive());
+		if archetype.is_condemned() {
+			log::error!("Attempted to acquire the storage run of the dead archetype {archetype:?}");
+			// (fallthrough)
+		}
 
 		self.archetypes.get_mut(&archetype.id).map(StorageRunRefMut)
 	}
@@ -78,7 +84,10 @@ impl<T> Storage<T> {
 	}
 
 	pub fn get_or_create_run(&mut self, archetype: ArchetypeId) -> StorageRunRefMut<T> {
-		assert!(archetype.lifetime.is_possibly_alive());
+		if archetype.is_condemned() {
+			log::error!("Attempted to acquire the storage run of the dead archetype {archetype:?}");
+			// (fallthrough)
+		}
 
 		let run = self
 			.archetypes
@@ -109,7 +118,13 @@ impl<T> Storage<T> {
 	}
 
 	pub fn get(&self, entity: Entity) -> Option<&T> {
-		assert!(entity.lifetime.is_possibly_alive());
+		if entity.is_condemned() {
+			log::error!(
+				"Attempted to fetch a component of type {:?} from the dead entity {entity:?}",
+				type_name::<T>()
+			);
+			// (fallthrough)
+		}
 
 		self.archetypes
 			.get(&entity.arch.id)?
@@ -118,7 +133,13 @@ impl<T> Storage<T> {
 	}
 
 	pub fn get_mut(&mut self, entity: Entity) -> Option<&mut T> {
-		assert!(entity.lifetime.is_possibly_alive());
+		if entity.is_condemned() {
+			log::error!(
+				"Attempted to fetch a component of type {:?} from the dead entity {entity:?}",
+				type_name::<T>()
+			);
+			// (fallthrough)
+		}
 
 		AutoMut::defuse(self.archetypes.get_mut(&entity.arch.id)?)
 			.get_mut(entity.slot)
@@ -171,6 +192,14 @@ impl<T> StorageRun<T> {
 	}
 
 	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
+		if entity.is_condemned() {
+			log::error!(
+				"Attempted to attach a component of type {:?} to the dead entity {entity:?}",
+				type_name::<T>()
+			);
+			// (fallthrough)
+		}
+
 		let slot = self.comps.ensure_slot_with(entity.slot_usize(), || None);
 		let replaced = slot
 			.replace(StorageRunSlot {
@@ -192,14 +221,45 @@ impl<T> StorageRun<T> {
 		removed
 	}
 
-	pub fn get(&self, slot: u32) -> Option<&StorageRunSlot<T>> {
-		self.comps.get(slot as usize).and_then(|opt| opt.as_ref())
+	pub fn get(&self, slot_idx: u32) -> Option<&StorageRunSlot<T>> {
+		let slot = self
+			.comps
+			.get(slot_idx as usize)
+			.and_then(|opt| opt.as_ref());
+
+		if let Some(slot) = slot.filter(|slot| slot.lifetime.get().is_condemned()) {
+			log::error!(
+				"Fetched a storage slot at index {} of type {:?} for the dead entity {:?}",
+				slot_idx,
+				type_name::<T>(),
+				slot.lifetime.get(),
+			);
+			// (fallthrough)
+		}
+
+		slot
 	}
 
-	pub fn get_mut(&mut self, slot: u32) -> Option<&mut StorageRunSlot<T>> {
-		self.comps
-			.get_mut(slot as usize)
-			.and_then(|opt| opt.as_mut())
+	pub fn get_mut(&mut self, slot_idx: u32) -> Option<&mut StorageRunSlot<T>> {
+		let slot = self
+			.comps
+			.get_mut(slot_idx as usize)
+			.and_then(|opt| opt.as_mut());
+
+		if let Some(slot) = slot
+			.as_ref()
+			.filter(|slot| slot.lifetime.get().is_condemned())
+		{
+			log::error!(
+				"Fetched a storage slot at index {} of type {:?} for the dead entity {:?}",
+				slot_idx,
+				type_name::<T>(),
+				slot.lifetime.get(),
+			);
+			// (fallthrough)
+		}
+
+		slot
 	}
 
 	pub fn max_slot(&self) -> u32 {

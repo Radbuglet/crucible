@@ -32,14 +32,18 @@ impl TypeMap {
 			.downcast_ref()
 	}
 
-	pub fn try_get_comp<T: Userdata>(&self) -> Option<&T> {
+	pub fn create<T: Userdata>(&self, value: T) {
+		self.map.create(NamedTypeId::of::<T>(), Box::new(value));
+	}
+
+	pub fn try_get<T: Userdata>(&self) -> Option<&T> {
 		self.map
 			.get(&NamedTypeId::of::<T>())
 			.map(|v| v.downcast_ref())
 	}
 
-	pub fn get_comp<T: Userdata>(&self) -> &T {
-		self.try_get_comp().unwrap_or_else(|| {
+	pub fn get<T: Userdata>(&self) -> &T {
+		self.try_get().unwrap_or_else(|| {
 			panic!(
 				"failed to get component of type {:?} in `TypeMap`.",
 				type_name::<T>()
@@ -48,7 +52,7 @@ impl TypeMap {
 	}
 
 	pub fn lock_ref<T: Userdata>(&self) -> RwLockReadGuard<T> {
-		self.get_comp::<RwLock<T>>().try_read().unwrap_or_else(|| {
+		self.get::<RwLock<T>>().try_read().unwrap_or_else(|| {
 			panic!(
 				"failed to acquire component {:?} immutably.",
 				type_name::<RwLock<T>>()
@@ -57,7 +61,7 @@ impl TypeMap {
 	}
 
 	pub fn lock_mut<T: Userdata>(&self) -> RwLockWriteGuard<T> {
-		self.get_comp::<RwLock<T>>().try_write().unwrap_or_else(|| {
+		self.get::<RwLock<T>>().try_write().unwrap_or_else(|| {
 			panic!(
 				"failed to acquire component {:?} mutably.",
 				type_name::<RwLock<T>>()

@@ -5,10 +5,11 @@ use parking_lot::Mutex;
 
 use crate::{
 	debug::{
+		error::DEBUG_ASSERTIONS_ENABLED,
 		label::{DebugLabel, NO_LABEL},
-		lifetime::{DebugLifetime, Dependable, Dependent, LifetimeOwner},
+		lifetime::{DebugLifetime, Dependent, LifetimeLike},
 	},
-	mem::free_list::PureFreeList,
+	mem::{drop_guard::DropOwnedGuard, free_list::PureFreeList},
 };
 
 // === Handles === //
@@ -19,12 +20,20 @@ pub struct ArchetypeId {
 	pub id: NonZeroU32,
 }
 
-impl Dependable for ArchetypeId {
-	fn inc_dep(self) {
+impl LifetimeLike for ArchetypeId {
+	fn is_possibly_alive(&self) -> bool {
+		self.lifetime.is_possibly_alive()
+	}
+
+	fn is_condemned(&self) -> bool {
+		self.lifetime.is_condemned()
+	}
+
+	fn inc_dep(&self) {
 		self.lifetime.inc_dep();
 	}
 
-	fn dec_dep(self) {
+	fn dec_dep(&self) {
 		self.lifetime.dec_dep();
 	}
 }
@@ -42,12 +51,20 @@ impl Entity {
 	}
 }
 
-impl Dependable for Entity {
-	fn inc_dep(self) {
+impl LifetimeLike for Entity {
+	fn is_possibly_alive(&self) -> bool {
+		self.lifetime.is_possibly_alive()
+	}
+
+	fn is_condemned(&self) -> bool {
+		self.lifetime.is_condemned()
+	}
+
+	fn inc_dep(&self) {
 		self.lifetime.inc_dep();
 	}
 
-	fn dec_dep(self) {
+	fn dec_dep(&self) {
 		self.lifetime.dec_dep();
 	}
 }
@@ -66,8 +83,8 @@ static ARCH_ID_FREE_LIST: Mutex<PureFreeList<()>> = Mutex::new(PureFreeList::con
 #[derive(Debug)]
 pub struct Archetype {
 	id: NonZeroU32,
-	lifetime: LifetimeOwner<DebugLifetime>,
-	slots: PureFreeList<LifetimeOwner<DebugLifetime>>,
+	lifetime: DropOwnedGuard<DebugLifetime>,
+	slots: PureFreeList<DropOwnedGuard<DebugLifetime>>,
 }
 
 impl Archetype {
@@ -81,36 +98,50 @@ impl Archetype {
 		// Construct archetype
 		Self {
 			id,
-			lifetime: LifetimeOwner(DebugLifetime::new(name)),
+			lifetime: DropOwnedGuard::new(DebugLifetime::new(name)),
 			slots: PureFreeList::new(),
 		}
 	}
 
 	pub fn spawn<L: DebugLabel>(&mut self, name: L) -> Entity {
-		let (lifetime, slot) = self.slots.add(LifetimeOwner(DebugLifetime::new(name)));
+		let (lifetime, slot) = self
+			.slots
+			.add(DropOwnedGuard::new(DebugLifetime::new(name)));
 
 		assert_ne!(slot, u32::MAX, "spawned too many entities");
 
 		Entity {
-			lifetime: lifetime.0,
+			lifetime: **lifetime,
 			arch: self.id(),
 			slot,
 		}
 	}
 
 	pub fn despawn(&mut self, entity: Entity) {
-		debug_assert_eq!(entity.arch.id, self.id);
-		assert!(
-			entity.lifetime.is_possibly_alive(),
-			"Attempted to despawn a dead entity."
-		);
+		if DEBUG_ASSERTIONS_ENABLED && entity.arch.id != self.id {
+			log::error!(
+				"Attempted to despawn {:?} from the non-owning archetype {:?}.",
+				entity,
+				self
+			);
+			return;
+		}
+
+		if entity.lifetime.is_condemned() {
+			log::error!(
+				"Attempted to despawn the dead entity {:?} from the archetype {:?}",
+				entity,
+				self
+			);
+			return;
+		}
 
 		let _ = self.slots.remove(entity.slot);
 	}
 
 	pub fn id(&self) -> ArchetypeId {
 		ArchetypeId {
-			lifetime: self.lifetime.0,
+			lifetime: *self.lifetime,
 			id: self.id,
 		}
 	}
@@ -152,9 +183,9 @@ impl Iterator for ArchetypeIter<'_> {
 			let slot = self.slot;
 			self.slot += 1;
 			match slots.get(slot as usize) {
-				Some(Some((lt, _))) => {
+				Some(Some((lifetime, _))) => {
 					break Some(Entity {
-						lifetime: lt.0,
+						lifetime: **lifetime,
 						arch: self.archetype.id(),
 						slot,
 					})
