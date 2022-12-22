@@ -1,9 +1,10 @@
-use crucible_common::voxel::{
-	cast::RayCast,
-	data::{
-		BlockState, EntityLocation, Location, MaterialRegistry, VoxelChunkData, VoxelWorldData,
+use crucible_common::{
+	game::material::{BaseMaterialState, MaterialRegistry},
+	voxel::{
+		coord::{EntityLocation, Location, RayCast},
+		data::{BlockState, VoxelChunkData, VoxelWorldData},
+		math::{BlockFace, ChunkVec, EntityVec, WorldVec},
 	},
-	math::{BlockFace, ChunkVec, EntityVec, WorldVec},
 };
 use crucible_core::{
 	debug::{error::ResultExt, userdata::BoxedUserdata},
@@ -51,7 +52,7 @@ pub struct PlayScene {
 	// Storages
 	chunk_datas: CelledStorage<VoxelChunkData>,
 	chunk_meshes: Storage<VoxelChunkMesh>,
-	block_descriptors: Storage<()>,
+	base_material_descs: Storage<BaseMaterialState>,
 
 	// Resources
 	has_control: bool,

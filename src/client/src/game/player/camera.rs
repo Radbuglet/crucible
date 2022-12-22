@@ -1,7 +1,7 @@
 use std::f32::consts::{PI, TAU};
 
 use crucible_common::voxel::{
-	cast::move_rigid_body,
+	coord::move_rigid_body,
 	data::{VoxelChunkData, VoxelWorldData},
 	math::EntityVec,
 };
