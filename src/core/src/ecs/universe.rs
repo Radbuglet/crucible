@@ -33,11 +33,11 @@ use super::{
 #[derive(Debug, Default)]
 pub struct Universe {
 	archetypes: EventualMap<ArchetypeId, ArchetypeInner>,
-	tags: EventualMap<NonZeroU64, TagInner>,
+	tags: EventualMap<TagId, TagInner>,
 	tag_alloc: AtomicU64,
 	dirty_archetypes: Mutex<HashSet<ArchetypeId>>,
-	task_queue: Mutex<TaskQueue>,
 	resources: TypeMap,
+	task_queue: Mutex<TaskQueue>,
 	destruction_list: Arc<DestructionList>,
 }
 
@@ -45,7 +45,7 @@ pub struct Universe {
 struct ArchetypeInner {
 	archetype: Mutex<Archetype>,
 	meta: TypeMap,
-	tags: Mutex<Vec<NonZeroU64>>,
+	tags: Mutex<HashSet<TagId>>,
 }
 
 #[derive(Debug)]
@@ -117,6 +117,8 @@ impl Universe {
 	pub fn create_tag(&self, name: impl DebugLabel) -> TagHandle {
 		let id = NonZeroU64::new(self.tag_alloc.fetch_add(1, Ordering::Relaxed)).unwrap();
 		let lifetime = DebugLifetime::new(name);
+		let id = TagId { lifetime, id };
+
 		self.tags.create(
 			id,
 			Box::new(TagInner {
@@ -124,25 +126,23 @@ impl Universe {
 				tagged: Default::default(),
 			}),
 		);
+
 		TagHandle {
-			id: TagId { lifetime, id },
+			id,
 			destruction_list: Arc::downgrade(&self.destruction_list),
 		}
 	}
 
 	pub fn tag_archetype(&self, arch: ArchetypeId, tag: TagId) {
-		let did_insert = self.tags[&tag.id]
-			.tagged
-			.lock()
-			.insert(Dependent::new(arch));
+		let did_insert = self.tags[&tag].tagged.lock().insert(Dependent::new(arch));
 
 		if did_insert {
-			self.archetypes[&arch].tags.lock().push(tag.id);
+			self.archetypes[&arch].tags.lock().insert(tag);
 		}
 	}
 
 	pub fn tagged_archetypes(&self, tag: TagId) -> HashSet<ArchetypeId> {
-		self.tags[&tag.id]
+		self.tags[&tag]
 			.tagged
 			.lock()
 			.iter()
@@ -223,7 +223,31 @@ impl Universe {
 			self.archetypes[&archetype].meta.flush();
 		}
 
-		// TODO: Process destruction requests
+		// Flush archetype deletions
+		for arch in mem::replace(&mut *self.destruction_list.archetypes.lock(), Vec::new()) {
+			// Remove archetype from archetype map
+			let arch_info = self.archetypes.remove(&arch).unwrap();
+
+			// Unregister tag dependencies
+			for tag in arch_info.tags.into_inner() {
+				self.tags[&tag].tagged.get_mut().remove(&arch);
+			}
+
+			// (archetype is destroyed on drop)
+		}
+
+		// Flush tag deletions
+		for tag in mem::replace(&mut *self.destruction_list.tags.lock(), Vec::new()) {
+			// Remove tag from tag map
+			let tag_info = self.tags.remove(&tag).unwrap();
+
+			// Unregister archetypal dependencies
+			for arch in tag_info.tagged.into_inner() {
+				self.archetypes[&arch.get()].tags.get_mut().remove(&tag);
+			}
+
+			// (lifetime is killed implicitly on drop)
+		}
 	}
 }
 
