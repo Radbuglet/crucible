@@ -1,9 +1,11 @@
 use std::{any::type_name, fmt, mem, vec};
 
 use derive_where::derive_where;
+use hashbrown::HashMap;
 
 use crate::{
 	debug::{
+		label::{DebugLabel, ReifiedDebugLabel},
 		lifetime::{DebugLifetime, Dependent},
 		userdata::Userdata,
 	},
@@ -14,17 +16,6 @@ use super::{
 	entity::{ArchetypeId, ArchetypeMap, Entity},
 	provider::DynProvider,
 };
-
-// === Aliases === //
-
-pub type EventHandlerFn<T> = fn(&mut DynProvider, EventQueueIter<T>);
-pub type EventHandlerMap<T> = ArchetypeMap<EventHandlerFn<T>>;
-
-#[derive(Debug, Copy, Clone, Default)]
-pub struct EntityDestroyEvent;
-
-pub type DestroyQueue = EventQueue<EntityDestroyEvent>;
-pub type DestroyHandlerMap = EventHandlerMap<EntityDestroyEvent>;
 
 // === EventQueue === //
 
@@ -56,6 +47,12 @@ impl<E> EventQueue<E> {
 			lifetime: Dependent::new(target.lifetime),
 			event,
 		});
+	}
+
+	pub fn flush_all(&mut self) -> impl Iterator<Item = EventQueueIter<E>> {
+		mem::replace(&mut self.runs, HashMap::new())
+			.into_iter()
+			.map(|(arch, events_list)| EventQueueIter(arch.into_inner(), events_list.into_iter()))
 	}
 
 	pub fn flush_in(&mut self, archetype: ArchetypeId) -> EventQueueIter<E> {
@@ -118,6 +115,12 @@ impl<E> Event<E> {
 #[derive(Debug, Clone)]
 pub struct EventQueueIter<E>(ArchetypeId, vec::IntoIter<Event<E>>);
 
+impl<E> EventQueueIter<E> {
+	pub fn arch(&self) -> ArchetypeId {
+		self.0
+	}
+}
+
 impl<E> Iterator for EventQueueIter<E> {
 	type Item = (Entity, E);
 
@@ -146,45 +149,39 @@ impl<E> DoubleEndedIterator for EventQueueIter<E> {
 
 #[derive(Debug, Default)]
 pub struct TaskQueue {
-	events: Vec<Box<dyn Task>>,
-}
-
-trait Task: Userdata {
-	fn fire(&mut self, scheduler: &mut TaskQueue, cx: &mut DynProvider);
-}
-
-struct TaskWrapper<F>(ExplicitlyBind<F>);
-
-impl<F: fmt::Debug> fmt::Debug for TaskWrapper<F> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		fmt::Debug::fmt(&self.0, f)
-	}
-}
-
-impl<F> Task for TaskWrapper<F>
-where
-	F: FnOnce(&mut TaskQueue, &mut DynProvider) + Userdata,
-{
-	fn fire(&mut self, bus: &mut TaskQueue, cx: &mut DynProvider) {
-		ExplicitlyBind::extract(&mut self.0)(bus, cx);
-	}
+	events: Vec<QueuedTask>,
 }
 
 impl TaskQueue {
-	pub fn push<F>(&mut self, handler: F)
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	pub fn push<F>(&mut self, name: impl DebugLabel, handler: F)
 	where
-		F: FnOnce(&mut TaskQueue, &mut DynProvider) + Userdata,
+		F: 'static + FnOnce(&mut TaskQueue, &mut DynProvider) + Send + Sync,
 	{
-		log::info!("Pushing event {handler:?}.");
-		let handler = Box::new(TaskWrapper(ExplicitlyBind::new(handler)));
-		self.events.push(handler);
+		let name = name.reify();
+		log::trace!("Pushing event {name:?}.");
+
+		let handler = Box::new(TaskHandlerWrapper(ExplicitlyBind::new(handler)));
+		let task = QueuedTask { name, handler };
+		self.events.push(task);
+	}
+
+	pub fn has_tasks(&self) -> bool {
+		!self.events.is_empty()
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.events.is_empty()
 	}
 
 	pub fn dispatch(&mut self, cx: &mut DynProvider) {
 		while !self.events.is_empty() {
 			for mut event in mem::replace(&mut self.events, Vec::new()) {
-				log::trace!("Executing event {event:?}.");
-				event.fire(self, cx);
+				log::trace!("Executing event {:?}.", event.name);
+				event.handler.fire(self, cx);
 			}
 		}
 	}
@@ -200,5 +197,32 @@ impl Drop for TaskQueue {
 				self.events
 			);
 		}
+	}
+}
+
+#[derive(Debug)]
+struct QueuedTask {
+	name: ReifiedDebugLabel,
+	handler: Box<dyn TaskHandler>,
+}
+
+trait TaskHandler: Userdata {
+	fn fire(&mut self, scheduler: &mut TaskQueue, cx: &mut DynProvider);
+}
+
+struct TaskHandlerWrapper<F>(ExplicitlyBind<F>);
+
+impl<F> fmt::Debug for TaskHandlerWrapper<F> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("TaskHandlerWrapper").finish_non_exhaustive()
+	}
+}
+
+impl<F> TaskHandler for TaskHandlerWrapper<F>
+where
+	F: 'static + FnOnce(&mut TaskQueue, &mut DynProvider) + Send + Sync,
+{
+	fn fire(&mut self, bus: &mut TaskQueue, cx: &mut DynProvider) {
+		ExplicitlyBind::extract(&mut self.0)(bus, cx);
 	}
 }

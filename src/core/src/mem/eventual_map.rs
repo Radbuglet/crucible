@@ -3,7 +3,7 @@ use std::{
 	collections::hash_map::RandomState,
 	hash::{self, BuildHasher},
 	mem,
-	ops::Index,
+	ops::{Index, IndexMut},
 };
 
 use derive_where::derive_where;
@@ -94,6 +94,15 @@ where
 		inner
 	}
 
+	pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
+	where
+		Q: ?Sized + hash::Hash + Eq,
+		K: Borrow<Q>,
+	{
+		self.flush();
+		self.established.get_mut(key).map(|b| &mut **b)
+	}
+
 	pub fn create(&self, key: K, value: Box<V>) {
 		let mut created = false;
 		self.get_or_create(key, || {
@@ -132,5 +141,17 @@ where
 
 	fn index(&self, key: &'a Q) -> &Self::Output {
 		self.get(key).unwrap()
+	}
+}
+
+impl<'a, K, V, S, Q> IndexMut<&'a Q> for EventualMap<K, V, S>
+where
+	K: hash::Hash + Eq + Copy + Borrow<Q>,
+	V: ?Sized,
+	S: Default + BuildHasher,
+	Q: ?Sized + Eq + hash::Hash,
+{
+	fn index_mut(&mut self, key: &'a Q) -> &mut Self::Output {
+		self.get_mut(key).unwrap()
 	}
 }
