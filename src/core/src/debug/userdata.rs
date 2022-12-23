@@ -1,9 +1,13 @@
 use std::{
 	any::{type_name, Any},
+	borrow::{Borrow, BorrowMut},
 	fmt,
+	ops::{Deref, DerefMut},
 };
 
 use crate::lang::lifetime::try_transform_mut;
+
+// === Userdata === //
 
 pub type BoxedUserdata = Box<dyn Userdata>;
 
@@ -67,3 +71,59 @@ pub trait ErasedUserdata: Userdata {
 }
 
 impl ErasedUserdata for dyn Userdata {}
+
+// === DebugOpaque === //
+
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Default)]
+pub struct DebugOpaque<T: ?Sized> {
+	pub value: T,
+}
+
+impl<T: ?Sized> DebugOpaque<T> {
+	pub const fn new(value: T) -> Self
+	where
+		T: Sized,
+	{
+		Self { value }
+	}
+}
+
+impl<T: ?Sized> Deref for DebugOpaque<T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		&self.value
+	}
+}
+
+impl<T: ?Sized> DerefMut for DebugOpaque<T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.value
+	}
+}
+
+impl<T: ?Sized> fmt::Debug for DebugOpaque<T> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let ty_name = format!("IsolatedBox<{}>", type_name::<T>());
+
+		f.debug_struct(&ty_name).finish_non_exhaustive()
+	}
+}
+
+impl<T> From<T> for DebugOpaque<T> {
+	fn from(value: T) -> Self {
+		Self { value }
+	}
+}
+
+impl<T: ?Sized> Borrow<T> for DebugOpaque<T> {
+	fn borrow(&self) -> &T {
+		&self.value
+	}
+}
+
+impl<T: ?Sized> BorrowMut<T> for DebugOpaque<T> {
+	fn borrow_mut(&mut self) -> &mut T {
+		&mut self.value
+	}
+}

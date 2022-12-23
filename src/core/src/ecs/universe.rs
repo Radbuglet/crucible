@@ -1,7 +1,7 @@
 use std::{
 	any::type_name,
 	borrow::Borrow,
-	fmt, mem,
+	mem,
 	num::NonZeroU64,
 	sync::{
 		atomic::{AtomicU64, Ordering},
@@ -16,7 +16,7 @@ use crate::{
 	debug::{
 		label::DebugLabel,
 		lifetime::{DebugLifetime, Dependent, LifetimeLike},
-		userdata::Userdata,
+		userdata::{DebugOpaque, Userdata},
 	},
 	mem::{drop_guard::DropOwnedGuard, eventual_map::EventualMap, type_map::TypeMap},
 };
@@ -60,6 +60,8 @@ struct DestructionList {
 	tags: Mutex<Vec<TagId>>,
 }
 
+type UniverseEventHandler<E> = DebugOpaque<fn(&Universe, EventQueueIter<E>)>;
+
 impl Universe {
 	pub fn new() -> Self {
 		Self::default()
@@ -99,7 +101,7 @@ impl Universe {
 		id: ArchetypeId,
 		handler: fn(&Universe, EventQueueIter<E>),
 	) {
-		self.add_archetype_meta(id, UniverseEventHandler::from(handler));
+		self.add_archetype_meta(id, DebugOpaque::new(handler));
 	}
 
 	pub fn try_get_archetype_meta<T: Userdata>(&self, id: ArchetypeId) -> Option<&T> {
@@ -189,7 +191,7 @@ impl Universe {
 			move |universe| {
 				for iter in events.flush_all() {
 					let arch = iter.arch();
-					universe.archetype_meta::<UniverseEventHandler<E>>(arch).0(universe, iter);
+					universe.archetype_meta::<UniverseEventHandler<E>>(arch)(universe, iter);
 				}
 			},
 		);
@@ -308,25 +310,6 @@ impl LifetimeLike for TagId {
 		self.lifetime.dec_dep()
 	}
 }
-
-#[derive(Copy, Clone)]
-pub struct UniverseEventHandler<E>(pub fn(&Universe, EventQueueIter<E>));
-
-impl<E> fmt::Debug for UniverseEventHandler<E> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_tuple(format!("UniverseEventHandler<{}>", type_name::<E>()).as_str())
-			.field(&(self.0 as *const ()))
-			.finish()
-	}
-}
-
-impl<E> From<fn(&Universe, EventQueueIter<E>)> for UniverseEventHandler<E> {
-	fn from(ptr: fn(&Universe, EventQueueIter<E>)) -> Self {
-		Self(ptr)
-	}
-}
-
-// === Resources === //
 
 pub trait UniverseResource: Userdata {
 	fn create_resource(universe: &Universe) -> Self;
