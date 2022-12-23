@@ -1,3 +1,5 @@
+use std::cell::{Ref, RefMut};
+
 use crucible_common::voxel::{
 	coord::{EntityLocation, Location, RayCast},
 	data::{BlockState, VoxelChunkData, VoxelWorldData},
@@ -7,7 +9,7 @@ use crucible_core::{
 	debug::{error::ResultExt, userdata::BoxedUserdata},
 	ecs::{
 		entity::{Archetype, Entity},
-		provider::{unpack, DynProvider},
+		provider::{unpack, Provider},
 		storage::CelledStorage,
 		storage::Storage,
 	},
@@ -114,13 +116,13 @@ impl PlayScene {
 		scene
 	}
 
-	fn on_update(cx: &mut DynProvider, me: Entity, _event: SceneUpdateEvent) {
+	fn on_update(cx: &mut Provider, me: Entity, _event: SceneUpdateEvent) {
 		// Extract context
 		unpack!(cx => {
-			gfx = &GfxContext,
-			userdatas = &mut Storage<BoxedUserdata>,
-			viewports = &Storage<Viewport>,
-			input_managers = &Storage<InputManager>,
+			gfx: Ref<GfxContext>,
+			userdatas: RefMut<Storage<BoxedUserdata>>,
+			viewports: Ref<Storage<Viewport>>,
+			input_managers: Ref<Storage<InputManager>>,
 		});
 
 		let me = userdatas.get_downcast_mut::<Self>(me);
@@ -164,6 +166,9 @@ impl PlayScene {
 					let pos = WorldVec::cast_from(pos.floor());
 					let pos = Location::new(&me.world_data, pos);
 
+					// Fill volume
+					let set_state_cx = Provider::new().with(&mut me.arch_chunk);
+
 					for [x, y, z] in VolumetricIter::new([6, 6, 6]) {
 						let [x, y, z] = [x as i32 - 3, y as i32 - 10, z as i32 - 3];
 
@@ -172,7 +177,7 @@ impl PlayScene {
 							WorldVec::new(x, y, z),
 						)
 						.set_state_or_create(
-							(&mut me.world_data, &mut me.chunk_datas, &mut me.arch_chunk),
+							(&mut me.world_data, &mut me.chunk_datas, &set_state_cx),
 							Self::chunk_factory,
 							BlockState {
 								material: 1,
@@ -199,7 +204,11 @@ impl PlayScene {
 						{
 							let mut target = isect.block.at_neighbor(cx, isect.face.invert());
 							target.set_state_or_create(
-								(&mut me.world_data, &mut me.chunk_datas, &mut me.arch_chunk),
+								(
+									&mut me.world_data,
+									&mut me.chunk_datas,
+									&Provider::new().with(&mut me.arch_chunk),
+								),
 								Self::chunk_factory,
 								BlockState {
 									material: 1,
@@ -225,7 +234,11 @@ impl PlayScene {
 							.p_is_some_and(|state| state.material != 0)
 						{
 							isect.block.set_state_or_create(
-								(&mut me.world_data, &mut me.chunk_datas, &mut me.arch_chunk),
+								(
+									&mut me.world_data,
+									&mut me.chunk_datas,
+									&Provider::new().with(&mut me.arch_chunk),
+								),
 								Self::chunk_factory,
 								BlockState::default(),
 							);
@@ -275,18 +288,18 @@ impl PlayScene {
 			}
 		}
 
-		let cx = (gfx, &me.chunk_datas, &mut me.chunk_meshes);
-		me.world_mesh.update_chunks(cx, None);
+		me.world_mesh
+			.update_chunks((&gfx, &me.chunk_datas, &mut me.chunk_meshes), None);
 	}
 
-	fn on_render(cx: &mut DynProvider, me: Entity, event: SceneRenderEvent) {
+	fn on_render(cx: &mut Provider, me: Entity, event: SceneRenderEvent) {
 		// Extract context
 		unpack!(cx => {
-			userdata = &mut Storage<BoxedUserdata>,
-			gfx = &GfxContext,
-			res_mgr = &mut ResourceManager,
-			viewports = &mut Storage<Viewport>,
-			depth_textures = &mut Storage<FullScreenTexture>,
+			gfx: Ref<GfxContext>,
+			userdata: RefMut<Storage<BoxedUserdata>>,
+			res_mgr: RefMut<ResourceManager>,
+			viewports: RefMut<Storage<Viewport>>,
+			depth_textures: RefMut<Storage<FullScreenTexture>>,
 		});
 
 		let me = userdata.get_downcast_mut::<Self>(me);
@@ -296,7 +309,7 @@ impl PlayScene {
 		let viewport = &viewports[*me.main_viewport];
 		let depth_texture = &mut depth_textures[*me.main_viewport];
 		let depth_texture_format = depth_texture.wgpu_descriptor().format;
-		let (_, depth_texture_view) = depth_texture.acquire((gfx, viewport)).unwrap();
+		let (_, depth_texture_view) = depth_texture.acquire((&gfx, viewport)).unwrap();
 
 		// Create encoder
 		let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
@@ -325,7 +338,7 @@ impl PlayScene {
 					is_wireframe: false,
 					back_face_culling: true,
 				},
-				gfx,
+				&gfx,
 			);
 
 			// Begin render pass
@@ -363,7 +376,7 @@ impl PlayScene {
 				let view = me.free_cam.view_matrix();
 				let full = proj * view;
 
-				me.voxel_uniforms.set_camera_matrix(gfx, full);
+				me.voxel_uniforms.set_camera_matrix(&gfx, full);
 			}
 
 			// Render world
@@ -375,9 +388,9 @@ impl PlayScene {
 		gfx.queue.submit([encoder.finish()]);
 	}
 
-	fn chunk_factory(cx: &mut DynProvider, pos: ChunkVec) -> Entity {
+	fn chunk_factory(cx: &mut Provider, pos: ChunkVec) -> Entity {
 		unpack!(cx => {
-			arch_chunk = &mut Archetype,
+			arch_chunk: RefMut<Archetype>,
 		});
 
 		let chunk = arch_chunk.spawn(format_args!("chunk at {pos:?}"));

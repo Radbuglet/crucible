@@ -1,7 +1,7 @@
 use crucible_core::{
 	ecs::{
 		entity::Entity,
-		provider::{DynProvider, Provider},
+		provider::Provider,
 		storage::{CelledStorage, CelledStorageView},
 	},
 	lang::{
@@ -186,12 +186,12 @@ where
 
 	pub fn set_state_or_create(
 		&mut self,
-		(world, chunks, mut extra): (
+		(world, chunks, extra): (
 			&mut VoxelWorldData,
 			&mut CelledStorage<VoxelChunkData>,
-			impl Provider,
+			&Provider,
 		),
-		factory: impl FnOnce(&mut DynProvider, ChunkVec) -> Entity,
+		factory: impl FnOnce(&mut Provider, ChunkVec) -> Entity,
 		state: BlockState,
 	) {
 		// Fetch chunk
@@ -199,7 +199,12 @@ where
 			Some(chunk) => chunk,
 			None => {
 				let pos = WorldVec::cast_from(self.pos).chunk();
-				let chunk = factory(&mut extra.as_dyn(), pos);
+				let chunk = factory(
+					&mut Provider::with_parent(Some(extra))
+						.with(&mut *world)
+						.with(&mut *chunks),
+					pos,
+				);
 				world.add_chunk((chunks,), pos, chunk);
 				chunk
 			}

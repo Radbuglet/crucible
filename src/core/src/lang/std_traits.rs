@@ -1,13 +1,10 @@
 use std::{
 	borrow::{Borrow, BorrowMut},
 	cell::{RefCell, UnsafeCell},
-	num::NonZeroU64,
 	ops::{Index, IndexMut},
 };
 
 use crate::mem::{array::arr_from_iter, c_enum::c_enum, ptr::PointeeCastExt};
-
-use super::marker::PhantomInvariant;
 
 // === OptionLike === //
 
@@ -195,42 +192,3 @@ impl Mutability {
 		}
 	}
 }
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum BorrowState {
-	Mutable,
-	Immutable(NonZeroU64),
-}
-
-impl BorrowState {
-	pub fn mutability(self) -> Mutability {
-		match self {
-			Self::Mutable => Mutability::Mutable,
-			Self::Immutable(_) => Mutability::Immutable,
-		}
-	}
-
-	pub fn as_immutably_reborrowed(self) -> Option<Self> {
-		match self {
-			Self::Mutable => unreachable!(),
-			Self::Immutable(counter) => Some(Self::Immutable(counter.checked_add(1)?)),
-		}
-	}
-
-	pub fn as_decremented(self) -> Option<Self> {
-		match self {
-			Self::Mutable => None,
-			Self::Immutable(counter) => {
-				if let Some(counter) = NonZeroU64::new(counter.get() - 1) {
-					Some(Self::Immutable(counter))
-				} else {
-					None
-				}
-			}
-		}
-	}
-}
-
-pub struct RefMarker<T: ?Sized>(PhantomInvariant<T>);
-
-pub struct MutMarker<T: ?Sized>(PhantomInvariant<T>);

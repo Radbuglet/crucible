@@ -1,15 +1,12 @@
 use std::{
-	any::TypeId,
+	any::{type_name, TypeId},
 	marker::PhantomData,
 	mem::{self, ManuallyDrop, MaybeUninit},
 	ops::{Deref, DerefMut},
 	ptr,
 };
 
-use crate::{
-	debug::type_id::are_probably_equal,
-	lang::macros::{ignore, impl_tuples},
-};
+use crate::lang::macros::{ignore, impl_tuples};
 
 // === Transmute === //
 
@@ -136,6 +133,10 @@ pub fn addr_of_ptr<T: ?Sized>(p: *const T) -> usize {
 }
 
 // === Runtime type unification === //
+
+pub fn are_probably_equal<A: ?Sized, B: ?Sized>() -> bool {
+	type_name::<A>() == type_name::<B>()
+}
 
 pub fn try_runtime_unify<A: 'static, B: 'static>(a: A) -> Option<B> {
 	if TypeId::of::<A>() == TypeId::of::<B>() {

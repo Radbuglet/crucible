@@ -140,18 +140,18 @@ impl EngineRoot {
 
 impl MainLoopHandler for EngineRoot {
 	fn on_update(&mut self, _cx: (&mut MainLoop, &WinitEventProxy)) {
-		let mut cx = (
-			&self.gfx,
-			&mut self.viewport_mgr,
-			&mut self.depth_textures,
-			&mut self.input_managers,
-			&mut self.viewports,
-			&mut self.userdata,
-			&mut self.res_mgr,
-		);
+		let mut cx = Provider::new()
+			.with(&self.gfx)
+			.with(&self.gfx)
+			.with(&mut self.viewport_mgr)
+			.with(&mut self.depth_textures)
+			.with(&mut self.input_managers)
+			.with(&mut self.viewports)
+			.with(&mut self.userdata)
+			.with(&mut self.res_mgr);
 
 		let scene = self.scene_mgr.current();
-		self.update_handlers[scene](&mut cx.as_dyn(), scene, SceneUpdateEvent {});
+		self.update_handlers[scene](&mut cx, scene, SceneUpdateEvent {});
 
 		// Request redraws
 		for (&_window, &viewport) in self.viewport_mgr.window_map() {
@@ -182,16 +182,16 @@ impl MainLoopHandler for EngineRoot {
 
 		// Process render
 		let curr_scene = self.scene_mgr.current();
-		let mut cx = (
-			&mut self.userdata,
-			&self.gfx,
-			&mut self.res_mgr,
-			&mut self.viewports,
-			&mut self.depth_textures,
-			&mut self.input_managers,
-		);
+		let mut cx = Provider::new()
+			.with(&mut self.userdata)
+			.with(&self.gfx)
+			.with(&mut self.res_mgr)
+			.with(&mut self.viewports)
+			.with(&mut self.depth_textures)
+			.with(&mut self.input_managers);
+
 		self.render_handlers[curr_scene](
-			&mut cx.as_dyn(),
+			&mut cx,
 			curr_scene,
 			SceneRenderEvent { frame: &mut frame },
 		);

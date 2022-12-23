@@ -24,7 +24,7 @@ use crate::{
 use super::{
 	entity::{Archetype, ArchetypeId, ArchetypeSet},
 	event::{EventQueue, EventQueueIter, TaskQueue},
-	provider::{DynProvider, Provider},
+	provider::Provider,
 	storage::{CelledStorage, Storage},
 };
 
@@ -180,8 +180,9 @@ impl Universe {
 	{
 		self.task_queue
 			.lock()
-			.push(name, |_tq, cx: &mut DynProvider<'_>| {
-				handler((&*cx).get_comp::<Universe>())
+			.push(name, |_tq, cx: &mut Provider<'_>| {
+				let universe = cx.get::<Universe>();
+				handler(&universe);
 			});
 	}
 
@@ -209,7 +210,7 @@ impl Universe {
 			// Yes, we have two layers of task queue stealing... so what? Replacing vectors isn't
 			// *that* expensive.
 			let mut task_queue = mem::replace(task_queue, TaskQueue::new());
-			task_queue.dispatch(&mut ((&*self).as_dyn()));
+			task_queue.dispatch(&mut Provider::new().with(&mut *self));
 		}
 	}
 

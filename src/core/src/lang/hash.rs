@@ -1,7 +1,5 @@
 use std::hash::{self, BuildHasherDefault};
 
-use crate::debug::type_id::are_probably_equal;
-
 pub type NoOpBuildHasher = BuildHasherDefault<NoOpHasher>;
 
 #[derive(Debug, Clone, Default)]
@@ -25,27 +23,5 @@ impl hash::Hasher for NoOpHasher {
 
 	fn finish(&self) -> u64 {
 		self.0
-	}
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct PreHashed<T> {
-	pub hash: u64,
-	pub value: T,
-}
-
-impl<T: Eq> Eq for PreHashed<T> {}
-
-impl<T: PartialEq> PartialEq for PreHashed<T> {
-	fn eq(&self, other: &Self) -> bool {
-		self.value == other.value
-	}
-}
-
-impl<T> hash::Hash for PreHashed<T> {
-	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		assert!(are_probably_equal::<NoOpHasher, H>());
-
-		state.write_u64(self.hash);
 	}
 }

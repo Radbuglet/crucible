@@ -1,8 +1,4 @@
-use std::{
-	any::{self, type_name, TypeId},
-	borrow::Borrow,
-	fmt, hash,
-};
+use std::{any, borrow::Borrow, fmt, hash};
 
 #[derive(Copy, Clone)]
 pub struct NamedTypeId {
@@ -58,24 +54,20 @@ impl NamedTypeId {
 	}
 }
 
-impl Borrow<TypeId> for NamedTypeId {
-	fn borrow(&self) -> &TypeId {
+impl Borrow<any::TypeId> for NamedTypeId {
+	fn borrow(&self) -> &any::TypeId {
 		&self.id
 	}
 }
 
-impl From<NamedTypeId> for TypeId {
+impl From<NamedTypeId> for any::TypeId {
 	fn from(id: NamedTypeId) -> Self {
 		id.raw()
 	}
 }
 
-impl From<TypeId> for NamedTypeId {
-	fn from(raw: TypeId) -> Self {
+impl From<any::TypeId> for NamedTypeId {
+	fn from(raw: any::TypeId) -> Self {
 		Self::from_raw(raw)
 	}
-}
-
-pub fn are_probably_equal<A: ?Sized, B: ?Sized>() -> bool {
-	type_name::<A>() == type_name::<B>()
 }

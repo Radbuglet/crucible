@@ -1,4 +1,3 @@
-pub mod alias_magic;
 pub mod array;
 pub mod auto_map;
 pub mod c_enum;
@@ -6,8 +5,6 @@ pub mod drop_guard;
 pub mod eventual_map;
 pub mod free_list;
 pub mod inline;
-pub mod layout;
-pub mod linked_list;
 pub mod perfect_map;
 pub mod pool;
 pub mod ptr;

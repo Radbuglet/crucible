@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
 	entity::{ArchetypeId, ArchetypeMap, Entity},
-	provider::DynProvider,
+	provider::Provider,
 };
 
 // === EventQueue === //
@@ -159,7 +159,7 @@ impl TaskQueue {
 
 	pub fn push<F>(&mut self, name: impl DebugLabel, handler: F)
 	where
-		F: 'static + FnOnce(&mut TaskQueue, &mut DynProvider) + Send + Sync,
+		F: 'static + FnOnce(&mut TaskQueue, &mut Provider) + Send + Sync,
 	{
 		let name = name.reify();
 		log::trace!("Pushing event {name:?}.");
@@ -177,7 +177,7 @@ impl TaskQueue {
 		self.events.is_empty()
 	}
 
-	pub fn dispatch(&mut self, cx: &mut DynProvider) {
+	pub fn dispatch(&mut self, cx: &mut Provider) {
 		while !self.events.is_empty() {
 			for mut event in mem::replace(&mut self.events, Vec::new()) {
 				log::trace!("Executing event {:?}.", event.name);
@@ -207,7 +207,7 @@ struct QueuedTask {
 }
 
 trait TaskHandler: Userdata {
-	fn fire(&mut self, scheduler: &mut TaskQueue, cx: &mut DynProvider);
+	fn fire(&mut self, scheduler: &mut TaskQueue, cx: &mut Provider);
 }
 
 struct TaskHandlerWrapper<F>(ExplicitlyBind<F>);
@@ -220,9 +220,9 @@ impl<F> fmt::Debug for TaskHandlerWrapper<F> {
 
 impl<F> TaskHandler for TaskHandlerWrapper<F>
 where
-	F: 'static + FnOnce(&mut TaskQueue, &mut DynProvider) + Send + Sync,
+	F: 'static + FnOnce(&mut TaskQueue, &mut Provider) + Send + Sync,
 {
-	fn fire(&mut self, bus: &mut TaskQueue, cx: &mut DynProvider) {
+	fn fire(&mut self, bus: &mut TaskQueue, cx: &mut Provider) {
 		ExplicitlyBind::extract(&mut self.0)(bus, cx);
 	}
 }

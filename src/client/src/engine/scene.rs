@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
-use crucible_core::ecs::{entity::Entity, provider::DynProvider};
+use crucible_core::ecs::{entity::Entity, provider::Provider};
 
-pub type SceneUpdateHandler = fn(&mut DynProvider, Entity, SceneUpdateEvent);
-pub type SceneRenderHandler = fn(&mut DynProvider, Entity, SceneRenderEvent);
+pub type SceneUpdateHandler = fn(&mut Provider, Entity, SceneUpdateEvent);
+pub type SceneRenderHandler = fn(&mut Provider, Entity, SceneRenderEvent);
 
 #[derive(Debug)]
 pub struct SceneUpdateEvent {}
