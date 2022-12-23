@@ -166,6 +166,10 @@ impl Universe {
 		self.resources.lock_mut_or_create(Default::default)
 	}
 
+	pub fn resource<T: UniverseResource>(&self) -> &T {
+		self.resources.get_or_create(|| T::create_resource(self))
+	}
+
 	// === Event Queue === //
 
 	pub fn queue_task<F>(&self, name: impl DebugLabel, handler: F)
@@ -180,12 +184,15 @@ impl Universe {
 	}
 
 	pub fn queue_event_dispatch<E: Userdata>(&self, mut events: EventQueue<E>) {
-		self.queue_task("EventQueue dispatch", move |universe| {
-			for iter in events.flush_all() {
-				let arch = iter.arch();
-				universe.archetype_meta::<UniverseEventHandler<E>>(arch).0(universe, iter);
-			}
-		});
+		self.queue_task(
+			format_args!("EventQueue<{}> dispatch", type_name::<E>()),
+			move |universe| {
+				for iter in events.flush_all() {
+					let arch = iter.arch();
+					universe.archetype_meta::<UniverseEventHandler<E>>(arch).0(universe, iter);
+				}
+			},
+		);
 	}
 
 	// === Management === //
@@ -317,4 +324,10 @@ impl<E> From<fn(&Universe, EventQueueIter<E>)> for UniverseEventHandler<E> {
 	fn from(ptr: fn(&Universe, EventQueueIter<E>)) -> Self {
 		Self(ptr)
 	}
+}
+
+// === Resources === //
+
+pub trait UniverseResource: Userdata {
+	fn create_resource(universe: &Universe) -> Self;
 }
