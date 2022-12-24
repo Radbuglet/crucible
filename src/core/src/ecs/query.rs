@@ -1,161 +1,132 @@
-use crate::{
-	debug::lifetime::DebugLifetime,
-	lang::{macros::impl_tuples, polyfill::OptionPoly},
-	mem::ptr::PointeeCastExt,
-};
+use crate::lang::macros::impl_tuples;
 
 use super::{
 	entity::{ArchetypeId, Entity},
-	storage::{Storage, StorageRunSlice},
+	storage::{Storage, StorageRunSlot},
 };
+
+use std::{iter, slice};
 
 // === Core === //
 
 pub trait Query {
-	type Iter;
+	type Iters;
 
-	fn query_in(self, id: ArchetypeId) -> Self::Iter;
+	fn query_in(self, id: ArchetypeId) -> QueryIter<Self::Iters>;
 }
 
-pub struct QueryIter<T> {
-	archetype: ArchetypeId,
-	slot: u32,
-	max_slot: u32,
-	parts: T,
-}
+pub trait QueryPart {
+	type Iter: QueryPartIter;
 
-macro impl_query($($para:ident:$field:tt),*) {
-	impl<$($para: IntoQueryPartIter),*> Query for ($($para,)*) {
-		type Iter = QueryIter<($($para::Iter,)*)>;
-
-		fn query_in(self, archetype: ArchetypeId) -> Self::Iter {
-			let mut slot_count = None;
-			let parts = (
-				$({
-					let iter = self.$field.into_iter(archetype);
-					let iter_slot_count = iter.max_slot(archetype);
-					assert!(slot_count.p_is_none_or(|count| count == iter_slot_count));
-					slot_count = Some(iter_slot_count);
-					iter
-				},)*
-			);
-
-			QueryIter {
-				archetype,
-				slot: 0,
-				max_slot: slot_count.unwrap(),
-				parts,
-			}
-		}
-	}
-
-	impl<$($para: QueryPartIter),*> Iterator for QueryIter<($($para,)*)> {
-		type Item = (Entity, $($para::Output),*);
-
-		fn next(&mut self) -> Option<Self::Item> {
-			let slot = self.slot;
-			if slot < self.max_slot {
-				self.slot += 1;
-
-				let res = (
-					// Safety: `slot` is monotonically increasing
-					$(unsafe { self.parts.$field.query_single(self.archetype, slot) },)*
-				);
-
-				let lifetime = (res.0).0;
-				let entity = Entity {
-					lifetime,
-					arch: self.archetype,
-					slot: self.slot,
-				};
-
-				Some(( entity, $((res.$field).1),* ))
-			} else {
-				None
-			}
-		}
-	}
-}
-
-impl_tuples!(impl_query; no_unit);
-
-pub trait IntoQueryPartIter {
-	type Output;
-	type Iter: QueryPartIter<Output = Self::Output>;
-
-	fn into_iter(self, archetype: ArchetypeId) -> Self::Iter;
+	fn make_iter(part: Self, id: ArchetypeId) -> Self::Iter;
 }
 
 pub trait QueryPartIter {
-	type Output;
+	type Value;
 
-	fn max_slot(&self, archetype: ArchetypeId) -> u32;
-
-	unsafe fn query_single(
-		&mut self,
-		archetype: ArchetypeId,
-		slot: u32,
-	) -> (DebugLifetime, Self::Output);
+	fn next(&mut self, id: ArchetypeId) -> Option<Option<(Entity, Self::Value)>>;
 }
 
-// === Storage === //
-
-impl<'a, T> IntoQueryPartIter for &'a Storage<T> {
-	type Output = &'a T;
-	type Iter = &'a StorageRunSlice<T>;
-
-	fn into_iter(self, archetype: ArchetypeId) -> Self::Iter {
-		self.get_run_slice(archetype)
-	}
+#[derive(Debug)]
+pub struct QueryIter<T> {
+	archetype: ArchetypeId,
+	parts: T,
 }
 
-impl<'a, T> QueryPartIter for &'a StorageRunSlice<T> {
-	type Output = &'a T;
+macro impl_query_for($($para:ident:$field:tt),*) {
+	impl<$($para: QueryPart,)*> Query for ($($para,)*) {
+		type Iters = ($($para::Iter,)*);
 
-	fn max_slot(&self, _archetype: ArchetypeId) -> u32 {
-		self.len() as u32
+		fn query_in(self, id: ArchetypeId) -> QueryIter<Self::Iters> {
+			QueryIter {
+				archetype: id,
+				parts: ($(QueryPart::make_iter(self.$field, id),)*),
+			}
+		}
 	}
 
-	unsafe fn query_single(
-		&mut self,
-		_archetype: ArchetypeId,
-		slot: u32,
-	) -> (DebugLifetime, Self::Output) {
-		let slot = self
-			.get(slot as usize)
-			.and_then(|slot| slot.as_ref())
-			.expect("missing component!");
+	impl<$($para: QueryPartIter,)*> Iterator for QueryIter<($($para,)*)> {
+		type Item = (Entity, $($para::Value,)*);
 
-		(slot.lifetime(), slot.value())
-	}
-}
+		fn next(&mut self) -> Option<Self::Item> {
+			#[allow(unused_mut, unused_assignments)]
+			loop {
+				let mut the_entity: Entity;
 
-impl<'a, T> IntoQueryPartIter for &'a mut Storage<T> {
-	type Output = &'a mut T;
-	type Iter = &'a mut StorageRunSlice<T>;
+				let values = (
+					$(match self.parts.$field.next(self.archetype)? {
+						Some((entity, value)) => {
+							the_entity = entity;
+							value
+						},
+						None => continue,
+					},)*
+				);
 
-	fn into_iter(self, archetype: ArchetypeId) -> Self::Iter {
-		self.get_run_slice_mut(archetype)
+				return Some((the_entity, $(values.$field),*));
+			}
+		}
 	}
 }
 
-impl<'a, T> QueryPartIter for &'a mut StorageRunSlice<T> {
-	type Output = &'a mut T;
+impl_tuples!(impl_query_for; no_unit);
 
-	fn max_slot(&self, _archetype: ArchetypeId) -> u32 {
-		self.len() as u32
+// === Storages === //
+
+impl<'a, T> QueryPart for &'a Storage<T> {
+	type Iter = StorageIterRef<'a, T>;
+
+	fn make_iter(part: Self, id: ArchetypeId) -> Self::Iter {
+		StorageIterRef(part.get_run_slice(id).iter().enumerate())
 	}
+}
 
-	unsafe fn query_single(
-		&mut self,
-		_archetype: ArchetypeId,
-		slot: u32,
-	) -> (DebugLifetime, Self::Output) {
-		self.get_mut(slot as usize)
-			.and_then(|slot| slot.as_mut())
-			// FIXME: Use a more standard multi-borrow pattern that doesn't run the risk of causing
-			//  aliasing issues.
-			.map(|slot| (slot.lifetime(), slot.value_mut().prolong_mut()))
-			.expect("missing component!")
+pub struct StorageIterRef<'a, T>(iter::Enumerate<slice::Iter<'a, Option<StorageRunSlot<T>>>>);
+
+impl<'a, T> QueryPartIter for StorageIterRef<'a, T> {
+	type Value = &'a T;
+
+	fn next(&mut self, arch: ArchetypeId) -> Option<Option<(Entity, Self::Value)>> {
+		self.0.next().map(|(slot_idx, sparse_slot)| {
+			sparse_slot.as_ref().map(|slot| {
+				(
+					Entity {
+						lifetime: slot.lifetime(),
+						arch,
+						slot: slot_idx as u32,
+					},
+					slot.value(),
+				)
+			})
+		})
+	}
+}
+
+impl<'a, T> QueryPart for &'a mut Storage<T> {
+	type Iter = StorageIterMut<'a, T>;
+
+	fn make_iter(part: Self, id: ArchetypeId) -> Self::Iter {
+		StorageIterMut(part.get_run_slice_mut(id).iter_mut().enumerate())
+	}
+}
+
+pub struct StorageIterMut<'a, T>(iter::Enumerate<slice::IterMut<'a, Option<StorageRunSlot<T>>>>);
+
+impl<'a, T> QueryPartIter for StorageIterMut<'a, T> {
+	type Value = &'a mut T;
+
+	fn next(&mut self, arch: ArchetypeId) -> Option<Option<(Entity, Self::Value)>> {
+		self.0.next().map(|(slot_idx, sparse_slot)| {
+			sparse_slot.as_mut().map(|slot| {
+				(
+					Entity {
+						lifetime: slot.lifetime(),
+						arch,
+						slot: slot_idx as u32,
+					},
+					slot.value_mut(),
+				)
+			})
+		})
 	}
 }

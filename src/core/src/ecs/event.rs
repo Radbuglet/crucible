@@ -17,6 +17,13 @@ use super::{
 	provider::Provider,
 };
 
+// === Aliases === //
+
+#[derive(Debug, Clone, Default)]
+pub struct EntityDestroyEvent;
+
+pub type DestroyQueue = EventQueue<EntityDestroyEvent>;
+
 // === EventQueue === //
 
 #[derive(Debug, Clone)]

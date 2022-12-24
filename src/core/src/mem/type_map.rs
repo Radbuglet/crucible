@@ -32,8 +32,16 @@ impl TypeMap {
 			.downcast_ref()
 	}
 
-	pub fn create<T: Userdata>(&self, value: T) {
-		self.map.create(NamedTypeId::of::<T>(), Box::new(value));
+	pub fn add<T: Userdata>(&self, value: T) -> &T {
+		self.map
+			.add(NamedTypeId::of::<T>(), Box::new(value))
+			.downcast_ref()
+	}
+
+	pub fn insert<T: Userdata>(&mut self, value: T) -> &mut T {
+		self.map
+			.insert(NamedTypeId::of::<T>(), Box::new(value))
+			.downcast_mut()
 	}
 
 	pub fn try_get<T: Userdata>(&self) -> Option<&T> {

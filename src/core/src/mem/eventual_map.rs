@@ -103,13 +103,18 @@ where
 		self.established.get_mut(key).map(|b| &mut **b)
 	}
 
-	pub fn create(&self, key: K, value: Box<V>) {
+	pub fn add(&self, key: K, value: Box<V>) -> &V {
 		let mut created = false;
-		self.get_or_create(key, || {
+		let value = self.get_or_create(key, || {
 			created = true;
 			value
 		});
 		assert!(created);
+		value
+	}
+
+	pub fn insert(&mut self, key: K, value: Box<V>) -> &mut V {
+		self.established.entry(key).insert(value).into_mut()
 	}
 
 	pub fn remove<Q>(&mut self, key: &Q) -> Option<Box<V>>

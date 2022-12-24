@@ -72,7 +72,7 @@ impl Universe {
 	pub fn create_archetype(&self, name: impl DebugLabel) -> ArchetypeHandle {
 		let archetype = Archetype::new(name);
 		let id = archetype.id();
-		self.archetypes.create(
+		self.archetypes.add(
 			id,
 			Box::new(ArchetypeInner {
 				archetype: Mutex::new(archetype),
@@ -92,7 +92,7 @@ impl Universe {
 	}
 
 	pub fn add_archetype_meta<T: Userdata>(&self, id: ArchetypeId, value: T) {
-		self.archetypes[&id].meta.create(value);
+		self.archetypes[&id].meta.add(value);
 		self.dirty_archetypes.lock().insert(id);
 	}
 
@@ -115,11 +115,11 @@ impl Universe {
 	// === Archetype Tagging === //
 
 	pub fn create_tag(&self, name: impl DebugLabel) -> TagHandle {
-		let id = NonZeroU64::new(self.tag_alloc.fetch_add(1, Ordering::Relaxed)).unwrap();
+		let id = NonZeroU64::new(self.tag_alloc.fetch_add(1, Ordering::Relaxed) + 1).unwrap();
 		let lifetime = DebugLifetime::new(name);
 		let id = TagId { lifetime, id };
 
-		self.tags.create(
+		self.tags.add(
 			id,
 			Box::new(TagInner {
 				_lifetime: DropOwnedGuard::new(lifetime),
@@ -169,7 +169,7 @@ impl Universe {
 	}
 
 	pub fn resource<T: UniverseResource>(&self) -> &T {
-		self.resources.get_or_create(|| T::create_resource(self))
+		self.resources.get_or_create(|| T::create(self))
 	}
 
 	// === Event Queue === //
@@ -337,5 +337,5 @@ impl LifetimeLike for TagId {
 }
 
 pub trait UniverseResource: Userdata {
-	fn create_resource(universe: &Universe) -> Self;
+	fn create(universe: &Universe) -> Self;
 }

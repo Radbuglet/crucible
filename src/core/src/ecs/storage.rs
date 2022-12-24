@@ -22,7 +22,7 @@ use crate::{
 
 use super::{
 	entity::{ArchetypeId, Entity},
-	query::{Query, QueryIter},
+	query::{Query, QueryIter, StorageIterMut, StorageIterRef},
 };
 
 // === Storage === //
@@ -150,14 +150,11 @@ impl<T> Storage<T> {
 		self.archetypes.clear();
 	}
 
-	pub fn query_in_ref(&self, archetype: ArchetypeId) -> QueryIter<(&StorageRunSlice<T>,)> {
+	pub fn query_in_ref(&self, archetype: ArchetypeId) -> QueryIter<(StorageIterRef<T>,)> {
 		(self,).query_in(archetype)
 	}
 
-	pub fn query_in_mut(
-		&mut self,
-		archetype: ArchetypeId,
-	) -> QueryIter<(&mut StorageRunSlice<T>,)> {
+	pub fn query_in_mut(&mut self, archetype: ArchetypeId) -> QueryIter<(StorageIterMut<T>,)> {
 		(self,).query_in(archetype)
 	}
 }
@@ -212,7 +209,7 @@ impl<T> StorageRun<T> {
 	}
 
 	pub fn remove(&mut self, slot: u32) -> Option<T> {
-		let removed = self.comps[slot as usize].take().map(|v| v.value);
+		let removed = self.comps.get_mut(slot as usize)?.take().map(|v| v.value);
 
 		while matches!(self.comps.last(), Some(None)) {
 			self.comps.pop();
