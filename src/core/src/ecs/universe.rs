@@ -1,8 +1,10 @@
 use std::{
 	any::type_name,
 	borrow::Borrow,
+	cell::{Ref, RefMut},
 	mem,
 	num::NonZeroU64,
+	ops::{Deref, DerefMut},
 	sync::{
 		atomic::{AtomicU64, Ordering},
 		Arc, Weak,
@@ -10,7 +12,7 @@ use std::{
 };
 
 use hashbrown::HashSet;
-use parking_lot::{Mutex, MutexGuard, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{
 	debug::{
@@ -18,13 +20,14 @@ use crate::{
 		lifetime::{DebugLifetime, Dependent, LifetimeLike},
 		userdata::{DebugOpaque, Userdata},
 	},
+	lang::loan::{BorrowingRwReadGuard, BorrowingRwWriteGuard, Mapped},
 	mem::{drop_guard::DropOwnedGuard, eventual_map::EventualMap, type_map::TypeMap},
 };
 
 use super::{
 	entity::{Archetype, ArchetypeId, ArchetypeSet},
 	event::{EventQueue, EventQueueIter, TaskQueue},
-	provider::Provider,
+	provider::{Provider, ProviderPack},
 	storage::{CelledStorage, Storage},
 };
 
@@ -152,6 +155,19 @@ impl Universe {
 
 	// === Resource Management === //
 
+	pub fn resources(&self) -> &TypeMap {
+		&self.resources
+	}
+
+	pub fn resource<T: UniverseResource>(&self) -> &T {
+		self.resources.get_or_create(|| T::create(self))
+	}
+
+	pub fn resource_rw<T: UniverseResource>(&self) -> &RwLock<T> {
+		self.resources
+			.get_or_create(|| RwLock::new(T::create(self)))
+	}
+
 	pub fn storage<T: Userdata>(&self) -> RwLockReadGuard<Storage<T>> {
 		self.resources.lock_ref_or_create(Default::default)
 	}
@@ -166,10 +182,6 @@ impl Universe {
 
 	pub fn celled_storage_mut<T: Userdata>(&self) -> RwLockWriteGuard<CelledStorage<T>> {
 		self.resources.lock_mut_or_create(Default::default)
-	}
-
-	pub fn resource<T: UniverseResource>(&self) -> &T {
-		self.resources.get_or_create(|| T::create(self))
 	}
 
 	// === Event Queue === //
@@ -338,4 +350,104 @@ impl LifetimeLike for TagId {
 
 pub trait UniverseResource: Userdata {
 	fn create(universe: &Universe) -> Self;
+}
+
+// === Auto === //
+
+#[derive(Debug)]
+pub struct Res<'a, T>(Ref<'a, T>);
+
+impl<T> Clone for Res<'_, T> {
+	fn clone(&self) -> Self {
+		Self(Ref::clone(&self.0))
+	}
+}
+
+impl<T> Deref for Res<'_, T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl<'a, T: UniverseResource> ProviderPack<'a> for Res<'a, T> {
+	fn get_from_provider(provider: &'a Provider) -> Self {
+		if let Some(value) = provider.try_get::<T>() {
+			return Self(value);
+		}
+
+		Self(Ref::map(provider.get::<Universe>(), |universe| {
+			universe.resource::<T>()
+		}))
+	}
+}
+
+#[derive(Debug)]
+pub enum ResRef<'a, T: 'static> {
+	Local(Ref<'a, T>),
+	Universe(Mapped<Ref<'a, RwLock<T>>, BorrowingRwReadGuard<T>>),
+}
+
+impl<T: 'static> Deref for ResRef<'_, T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		match self {
+			Self::Local(r) => &r,
+			Self::Universe(r) => &r,
+		}
+	}
+}
+
+impl<'a, T: UniverseResource> ProviderPack<'a> for ResRef<'a, T> {
+	fn get_from_provider(provider: &'a Provider) -> Self {
+		if let Some(value) = provider.try_get::<T>() {
+			return Self::Local(value);
+		}
+
+		let res = provider.get::<Universe>();
+		let res = Ref::map(res, |universe| universe.resource_rw());
+
+		Self::Universe(BorrowingRwReadGuard::try_new(res).unwrap())
+	}
+}
+
+#[derive(Debug)]
+pub enum ResMut<'a, T: 'static> {
+	Local(RefMut<'a, T>),
+	Universe(Mapped<Ref<'a, RwLock<T>>, BorrowingRwWriteGuard<T>>),
+}
+
+impl<T: 'static> Deref for ResMut<'_, T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		match self {
+			Self::Local(r) => &r,
+			Self::Universe(r) => &r,
+		}
+	}
+}
+
+impl<T: 'static> DerefMut for ResMut<'_, T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		match self {
+			Self::Local(r) => &mut *r,
+			Self::Universe(r) => &mut *r,
+		}
+	}
+}
+
+impl<'a, T: UniverseResource> ProviderPack<'a> for ResMut<'a, T> {
+	fn get_from_provider(provider: &'a Provider) -> Self {
+		if let Some(value) = provider.try_get_mut::<T>() {
+			return Self::Local(value);
+		}
+
+		let res = provider.get::<Universe>();
+		let res = Ref::map(res, |universe| universe.resource_rw());
+
+		Self::Universe(BorrowingRwWriteGuard::try_new(res).unwrap())
+	}
 }

@@ -1,5 +1,7 @@
 use std::{
+	cell::Ref,
 	fmt, hash,
+	mem::ManuallyDrop,
 	ops::{Deref, DerefMut},
 	sync::Arc,
 };
@@ -326,6 +328,25 @@ impl<T: ?Sized + 'static> Lender for Arc<T> {
 	unsafe fn repay(loan: Self::Loan, _shark: Self::Shark) -> Self {
 		let ptr = LentRef::to_ptr(loan);
 		unsafe { Arc::from_raw(ptr) }
+	}
+}
+
+// === Ref Lender === //
+
+#[derive(Debug)]
+pub struct RefLoanShark<'a, T: ?Sized>(ManuallyDrop<Ref<'a, T>>);
+
+impl<'a, T: ?Sized> Lender for Ref<'a, T> {
+	type Loan = LentRef<T>;
+	type Shark = RefLoanShark<'a, T>;
+
+	fn loan(me: Self) -> (Self::Loan, Self::Shark) {
+		let ptr = unsafe { LentRef::new(&*me) };
+		(ptr, RefLoanShark(ManuallyDrop::new(me)))
+	}
+
+	unsafe fn repay(_loan: Self::Loan, shark: Self::Shark) -> Self {
+		ManuallyDrop::into_inner(shark.0)
 	}
 }
 

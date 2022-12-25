@@ -264,7 +264,12 @@ impl PlayScene {
 					let win_center = PhysicalPosition::new(win_sz.width / 2, win_sz.height / 2);
 					window.set_cursor_position(win_center).log();
 
-					window.set_cursor_grab(CursorGrabMode::Confined).log();
+					let modes = [CursorGrabMode::Confined, CursorGrabMode::Locked];
+					for mode in modes {
+						if window.set_cursor_grab(mode).log().is_some() {
+							break;
+						}
+					}
 
 					// Hide cursor
 					window.set_cursor_visible(false);
