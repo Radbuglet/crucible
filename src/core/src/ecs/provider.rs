@@ -142,22 +142,30 @@ impl<'a, T: ?Sized + 'static> ProviderPack<'a> for RefMut<'a, T> {
 	}
 }
 
-#[allow(unused)] // Unused in macro
+#[allow(unused)] // Used in macro
 use crate::lang::macros::ignore;
 
-pub macro unpack(
-	$src:expr => {
-		$($name:ident: $ty:ty),*
+pub macro unpack {
+	($src:expr => {
+		$($name:ident: $(~$anno_tilde:ident)? $(@$anno_amp:ident)? $ty:ty),*
 		$(,)?
-	}
-)  {
-	#[allow(unused_mut)]
-	let ($(mut $name,)*): ($($ty,)*) = {
-		let src = &$src;
+	}) => {
+		#[allow(unused_mut)]
+		let ($(mut $name,)*): ($(
+			unpack!(internal_decode_type $(~$anno_tilde)? $(@$anno_amp)? $ty),
+		)*) = {
+			let src = &$src;
 
-		($({
-			ignore!($name);
-			ProviderPack::get_from_provider(src)
-		},)*)
-	};
+			($({
+				ignore!($name);
+				ProviderPack::get_from_provider(src)
+			},)*)
+		};
+	},
+	(internal_decode_type $ty:ty) => { $ty },
+	(internal_decode_type ~ref $ty:ty) => { ::std::cell::Ref<$ty> },
+	(internal_decode_type ~mut $ty:ty) => { ::std::cell::RefMut<$ty> },
+	(internal_decode_type @ref $ty:ty) => { $crate::ecs::universe::ResRef<$ty> },
+	(internal_decode_type @mut $ty:ty) => { $crate::ecs::universe::ResMut<$ty> },
+
 }

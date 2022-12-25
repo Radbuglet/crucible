@@ -1,5 +1,3 @@
-use std::cell::{Ref, RefMut};
-
 use crucible_common::voxel::{
 	coord::{EntityLocation, Location, RayCast},
 	data::{BlockState, VoxelChunkData, VoxelWorldData},
@@ -119,10 +117,10 @@ impl PlayScene {
 	fn on_update(cx: &mut Provider, me: Entity, _event: SceneUpdateEvent) {
 		// Extract context
 		unpack!(cx => {
-			gfx: Ref<GfxContext>,
-			userdatas: RefMut<Storage<BoxedUserdata>>,
-			viewports: Ref<Storage<Viewport>>,
-			input_managers: Ref<Storage<InputManager>>,
+			gfx: ~ref GfxContext,
+			userdatas: ~mut Storage<BoxedUserdata>,
+			viewports: ~ref Storage<Viewport>,
+			input_managers: ~ref Storage<InputManager>,
 		});
 
 		let me = userdatas.get_downcast_mut::<Self>(me);
@@ -300,11 +298,11 @@ impl PlayScene {
 	fn on_render(cx: &mut Provider, me: Entity, event: SceneRenderEvent) {
 		// Extract context
 		unpack!(cx => {
-			gfx: Ref<GfxContext>,
-			userdata: RefMut<Storage<BoxedUserdata>>,
-			res_mgr: RefMut<ResourceManager>,
-			viewports: RefMut<Storage<Viewport>>,
-			depth_textures: RefMut<Storage<FullScreenTexture>>,
+			gfx: ~ref GfxContext,
+			userdata: ~mut Storage<BoxedUserdata>,
+			res_mgr: ~mut ResourceManager,
+			viewports: ~mut Storage<Viewport>,
+			depth_textures: ~mut Storage<FullScreenTexture>,
 		});
 
 		let me = userdata.get_downcast_mut::<Self>(me);
@@ -395,7 +393,7 @@ impl PlayScene {
 
 	fn chunk_factory(cx: &mut Provider, pos: ChunkVec) -> Entity {
 		unpack!(cx => {
-			arch_chunk: RefMut<Archetype>,
+			arch_chunk: ~mut Archetype,
 		});
 
 		let chunk = arch_chunk.spawn(format_args!("chunk at {pos:?}"));
