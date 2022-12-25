@@ -169,19 +169,19 @@ impl Universe {
 	}
 
 	pub fn storage<T: Userdata>(&self) -> RwLockReadGuard<Storage<T>> {
-		self.resources.lock_ref_or_create(Default::default)
+		self.resource_rw().try_read().unwrap()
 	}
 
 	pub fn storage_mut<T: Userdata>(&self) -> RwLockWriteGuard<Storage<T>> {
-		self.resources.lock_mut_or_create(Default::default)
+		self.resource_rw().try_write().unwrap()
 	}
 
 	pub fn celled_storage<T: Userdata>(&self) -> RwLockReadGuard<CelledStorage<T>> {
-		self.resources.lock_ref_or_create(Default::default)
+		self.resource_rw().try_read().unwrap()
 	}
 
 	pub fn celled_storage_mut<T: Userdata>(&self) -> RwLockWriteGuard<CelledStorage<T>> {
-		self.resources.lock_mut_or_create(Default::default)
+		self.resource_rw().try_write().unwrap()
 	}
 
 	// === Event Queue === //
@@ -348,11 +348,16 @@ impl LifetimeLike for TagId {
 	}
 }
 
+// === Resources === //
+
+pub type ResStorageMut<'a, T> = ResMut<'a, Storage<T>>;
+pub type ResStorageRef<'a, T> = ResRef<'a, Storage<T>>;
+pub type ResCelledStorageMut<'a, T> = ResMut<'a, CelledStorage<T>>;
+pub type ResCelledStorageRef<'a, T> = ResRef<'a, CelledStorage<T>>;
+
 pub trait UniverseResource: Userdata {
 	fn create(universe: &Universe) -> Self;
 }
-
-// === Auto === //
 
 #[derive(Debug)]
 pub struct Res<'a, T>(Ref<'a, T>);

@@ -11,7 +11,7 @@ use derive_where::derive_where;
 use crate::{
 	debug::{
 		lifetime::{DebugLifetime, Dependent, LifetimeLike},
-		userdata::{BoxedUserdata, ErasedUserdata},
+		userdata::{BoxedUserdata, ErasedUserdata, Userdata},
 	},
 	lang::{polyfill::VecPoly, sync::ExtRefCell},
 	mem::{
@@ -23,6 +23,7 @@ use crate::{
 use super::{
 	entity::{ArchetypeId, Entity},
 	query::{Query, QueryIter, StorageIterMut, StorageIterRef},
+	universe::{Universe, UniverseResource},
 };
 
 // === Storage === //
@@ -320,6 +321,12 @@ impl<T> StorageRunSlot<T> {
 	}
 }
 
+impl<T: Userdata> UniverseResource for Storage<T> {
+	fn create(_universe: &Universe) -> Self {
+		Default::default()
+	}
+}
+
 // === Celled Storage === //
 
 #[derive(Debug)]
@@ -459,6 +466,12 @@ impl<T> CelledStorageView<T> {
 
 	pub fn clear(&mut self) {
 		self.inner.clear();
+	}
+}
+
+impl<T: Userdata> UniverseResource for CelledStorage<T> {
+	fn create(_universe: &Universe) -> Self {
+		Default::default()
 	}
 }
 
