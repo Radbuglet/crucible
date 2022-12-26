@@ -188,20 +188,17 @@ impl Universe {
 
 	pub fn queue_task<F>(&self, name: impl DebugLabel, handler: F)
 	where
-		F: 'static + Send + Sync + FnOnce(&Universe),
+		F: 'static + Send + Sync + FnOnce(&Provider<'_>, &Universe),
 	{
-		self.task_queue
-			.lock()
-			.push(name, |_tq, cx: &mut Provider<'_>| {
-				let universe = cx.get::<Universe>();
-				handler(&universe);
-			});
+		self.task_queue.lock().push(name, |_tq, cx: &Provider<'_>| {
+			handler(cx, &cx.get::<Universe>());
+		});
 	}
 
 	pub fn queue_event_dispatch<E: Userdata>(&self, mut events: EventQueue<E>) {
 		self.queue_task(
 			format_args!("EventQueue<{}> dispatch", type_name::<E>()),
-			move |universe| {
+			move |_, universe| {
 				for iter in events.flush_all() {
 					let arch = iter.arch();
 					universe.archetype_meta::<UniverseEventHandler<E>>(arch)(universe, iter);
@@ -222,7 +219,7 @@ impl Universe {
 			// Yes, we have two layers of task queue stealing... so what? Replacing vectors isn't
 			// *that* expensive.
 			let mut task_queue = mem::replace(task_queue, TaskQueue::new());
-			task_queue.dispatch(&mut Provider::new().with(&mut *self));
+			task_queue.dispatch(&Provider::new().with(&mut *self));
 		}
 	}
 

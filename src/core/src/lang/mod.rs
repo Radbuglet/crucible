@@ -1,3 +1,4 @@
+pub mod decompose;
 pub mod explicitly_bind;
 pub mod hash;
 pub mod iter;

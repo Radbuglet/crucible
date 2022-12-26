@@ -191,7 +191,7 @@ where
 			&mut CelledStorage<VoxelChunkData>,
 			&Provider,
 		),
-		factory: impl FnOnce(&mut Provider, ChunkVec) -> Entity,
+		factory: impl FnOnce(&Provider, ChunkVec) -> Entity,
 		state: BlockState,
 	) {
 		// Fetch chunk
@@ -200,7 +200,7 @@ where
 			None => {
 				let pos = WorldVec::cast_from(self.pos).chunk();
 				let chunk = factory(
-					&mut Provider::with_parent(Some(extra))
+					&Provider::with_parent(Some(extra))
 						.with(&mut *world)
 						.with(&mut *chunks),
 					pos,

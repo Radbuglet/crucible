@@ -4,7 +4,10 @@ use crucible_common::voxel::{
 	math::{BlockFace, ChunkVec, EntityVec, WorldVec},
 };
 use crucible_core::{
-	debug::{error::ResultExt, userdata::BoxedUserdata},
+	debug::{
+		error::ResultExt,
+		userdata::{BoxedUserdata, DebugOpaque},
+	},
 	ecs::{
 		entity::{Archetype, Entity},
 		provider::{unpack, Provider},
@@ -108,13 +111,13 @@ impl PlayScene {
 		let scene = scene_arch.spawn("main scene");
 
 		userdatas.add(scene, scene_state);
-		update_handlers.add(scene, Self::on_update);
-		render_handlers.add(scene, Self::on_render);
+		update_handlers.add(scene, DebugOpaque::new(Self::on_update));
+		render_handlers.add(scene, DebugOpaque::new(Self::on_render));
 
 		scene
 	}
 
-	fn on_update(cx: &mut Provider, me: Entity, _event: SceneUpdateEvent) {
+	fn on_update(cx: &Provider, me: Entity, _event: SceneUpdateEvent) {
 		// Extract context
 		unpack!(cx => {
 			gfx: ~ref GfxContext,
@@ -295,7 +298,7 @@ impl PlayScene {
 			.update_chunks((&gfx, &me.chunk_datas, &mut me.chunk_meshes), None);
 	}
 
-	fn on_render(cx: &mut Provider, me: Entity, event: SceneRenderEvent) {
+	fn on_render(cx: &Provider, me: Entity, event: SceneRenderEvent) {
 		// Extract context
 		unpack!(cx => {
 			gfx: ~ref GfxContext,
@@ -391,7 +394,7 @@ impl PlayScene {
 		gfx.queue.submit([encoder.finish()]);
 	}
 
-	fn chunk_factory(cx: &mut Provider, pos: ChunkVec) -> Entity {
+	fn chunk_factory(cx: &Provider, pos: ChunkVec) -> Entity {
 		unpack!(cx => {
 			arch_chunk: ~mut Archetype,
 		});

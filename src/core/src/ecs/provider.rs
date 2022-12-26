@@ -7,7 +7,7 @@ use std::{
 
 use hashbrown::HashMap;
 
-use crate::{debug::type_id::NamedTypeId, mem::inline::MaybeBoxedCopy};
+use crate::{debug::type_id::NamedTypeId, lang::macros::impl_tuples, mem::inline::MaybeBoxedCopy};
 
 #[derive(Default)]
 pub struct Provider<'r> {
@@ -101,6 +101,10 @@ impl<'r> Provider<'r> {
 			.unwrap_or_else(|| self.comp_not_found::<T>())
 	}
 
+	pub fn pack<'a, T: ProviderPack<'a>>(&'a self) -> T {
+		T::get_from_provider(self)
+	}
+
 	fn comp_not_found<T: ?Sized + 'static>(&self) -> ! {
 		panic!(
 			"Could not find component of type {:?} in provider.\nTypes provided: {:?}",
@@ -142,6 +146,19 @@ impl<'a, T: ?Sized + 'static> ProviderPack<'a> for RefMut<'a, T> {
 	}
 }
 
+macro impl_provider_pack($($para:ident:$field:tt),*) {
+	impl<'a, $($para: ProviderPack<'a>,)*> ProviderPack<'a> for ($($para,)*) {
+		fn get_from_provider(provider: &'a Provider) -> Self {
+			($({
+				ignore!($para);
+				ProviderPack::get_from_provider(provider)
+			},)*)
+		}
+	}
+}
+
+impl_tuples!(impl_provider_pack; no_unit);
+
 #[allow(unused)] // Used in macro
 use crate::lang::macros::ignore;
 
@@ -165,7 +182,7 @@ pub macro unpack {
 	(internal_decode_type $ty:ty) => { $ty },
 	(internal_decode_type ~ref $ty:ty) => { ::std::cell::Ref<$ty> },
 	(internal_decode_type ~mut $ty:ty) => { ::std::cell::RefMut<$ty> },
+	(internal_decode_type @res $ty:ty) => { $crate::ecs::universe::Res<$ty> },
 	(internal_decode_type @ref $ty:ty) => { $crate::ecs::universe::ResRef<$ty> },
 	(internal_decode_type @mut $ty:ty) => { $crate::ecs::universe::ResMut<$ty> },
-
 }
