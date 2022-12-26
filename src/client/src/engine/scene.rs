@@ -1,8 +1,14 @@
 #![allow(dead_code)]
 
 use crucible_core::{
-	debug::userdata::DebugOpaque,
-	ecs::{entity::Entity, provider::Provider},
+	debug::userdata::{BoxedUserdata, DebugOpaque},
+	ecs::{
+		entity::{ArchetypeId, Entity},
+		event::{EntityDestroyEvent, EventQueueIter},
+		provider::{unpack, Provider},
+		storage::Storage,
+		universe::{ArchetypeHandle, Universe, UniverseResource},
+	},
 };
 
 // === SceneManager === //
@@ -40,4 +46,64 @@ pub struct SceneUpdateEvent {}
 #[derive(Debug)]
 pub struct SceneRenderEvent<'a> {
 	pub frame: &'a mut wgpu::SurfaceTexture,
+}
+
+// === SceneArch === //
+
+#[derive(Debug)]
+pub struct SceneArch(ArchetypeHandle);
+
+impl UniverseResource for SceneArch {
+	fn create(universe: &Universe) -> Self {
+		let arch = universe.create_archetype("SceneArch");
+		universe.add_archetype_handler(arch.id(), Self::on_destroy);
+
+		Self(arch)
+	}
+}
+
+impl SceneArch {
+	pub fn id(&self) -> ArchetypeId {
+		self.0.id()
+	}
+
+	pub fn spawn(
+		&self,
+		cx: &Provider,
+		scene_userdata: BoxedUserdata,
+		update_handler: SceneUpdateHandler,
+		render_handler: SceneRenderHandler,
+	) -> Entity {
+		unpack!(cx => {
+			universe: ~ref Universe,
+			scene_userdatas: @mut Storage<BoxedUserdata>,
+			update_handlers: @mut Storage<SceneUpdateHandler>,
+			render_handlers: @mut Storage<SceneRenderHandler>,
+		});
+
+		let scene = universe.archetype(self.id()).spawn("scene");
+		scene_userdatas.add(scene, scene_userdata);
+		update_handlers.add(scene, update_handler);
+		render_handlers.add(scene, render_handler);
+
+		scene
+	}
+
+	fn on_destroy(cx: &Provider, universe: &Universe, events: EventQueueIter<EntityDestroyEvent>) {
+		unpack!(cx => {
+			scene_userdatas: @mut Storage<BoxedUserdata>,
+			update_handlers: @mut Storage<SceneUpdateHandler>,
+			render_handlers: @mut Storage<SceneRenderHandler>,
+		});
+
+		let arch_id = events.arch();
+		let mut arch = universe.archetype(arch_id);
+
+		for (target, _) in events {
+			scene_userdatas.remove(target);
+			update_handlers.remove(target);
+			render_handlers.remove(target);
+			arch.despawn(target);
+		}
+	}
 }

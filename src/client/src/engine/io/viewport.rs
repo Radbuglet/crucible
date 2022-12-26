@@ -1,5 +1,11 @@
 use crucible_core::{
-	ecs::{entity::Entity, storage::Storage},
+	ecs::{
+		entity::{ArchetypeId, Entity},
+		event::{EntityDestroyEvent, EventQueueIter},
+		provider::{unpack, Provider},
+		storage::Storage,
+		universe::{ArchetypeHandle, Universe, UniverseResource},
+	},
 	lang::explicitly_bind::ExplicitlyBind,
 };
 use hashbrown::HashMap;
@@ -7,7 +13,9 @@ use thiserror::Error;
 use typed_glam::glam::UVec2;
 use winit::window::{Window, WindowId};
 
-use super::gfx::GfxContext;
+use crate::engine::gfx::texture::FullScreenTexture;
+
+use super::{gfx::GfxContext, input::InputManager};
 
 pub const FALLBACK_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 
@@ -269,3 +277,60 @@ impl Drop for Viewport {
 #[derive(Debug, Copy, Clone, Error)]
 #[error("out of device memory")]
 pub struct OutOfDeviceMemoryError;
+
+// === ViewportArch === //
+
+#[derive(Debug)]
+pub struct ViewportArch(ArchetypeHandle);
+
+impl UniverseResource for ViewportArch {
+	fn create(universe: &Universe) -> Self {
+		let arch = universe.create_archetype("ViewportArch");
+		universe.add_archetype_handler(arch.id(), Self::on_destroy);
+
+		Self(arch)
+	}
+}
+
+impl ViewportArch {
+	pub fn id(&self) -> ArchetypeId {
+		self.0.id()
+	}
+
+	pub fn spawn(&self, cx: &Provider, viewport: Viewport) -> Entity {
+		unpack!(cx => {
+			universe: ~ref Universe,
+			viewports: @mut Storage<Viewport>,
+			depth_textures: @mut Storage<FullScreenTexture>,
+			input_managers: @mut Storage<InputManager>,
+		});
+
+		let entity = universe.archetype(self.id()).spawn("viewport");
+		viewports.add(entity, viewport);
+		depth_textures.add(
+			entity,
+			FullScreenTexture::new(
+				"depth texture",
+				wgpu::TextureFormat::Depth32Float,
+				wgpu::TextureUsages::RENDER_ATTACHMENT,
+			),
+		);
+		input_managers.add(entity, InputManager::default());
+
+		entity
+	}
+
+	fn on_destroy(cx: &Provider, universe: &Universe, events: EventQueueIter<EntityDestroyEvent>) {
+		unpack!(cx => {
+			viewports: @mut Storage<Viewport>,
+		});
+
+		let arch_id = events.arch();
+		let mut arch = universe.archetype(arch_id);
+
+		for (target, _) in events {
+			viewports.remove(target);
+			arch.despawn(target);
+		}
+	}
+}

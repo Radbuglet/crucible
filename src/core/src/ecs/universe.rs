@@ -63,7 +63,7 @@ struct DestructionList {
 	tags: Mutex<Vec<TagId>>,
 }
 
-type UniverseEventHandler<E> = DebugOpaque<fn(&Universe, EventQueueIter<E>)>;
+type UniverseEventHandler<E> = DebugOpaque<fn(&Provider, &Universe, EventQueueIter<E>)>;
 
 impl Universe {
 	pub fn new() -> Self {
@@ -102,9 +102,9 @@ impl Universe {
 	pub fn add_archetype_handler<E: Userdata>(
 		&self,
 		id: ArchetypeId,
-		handler: fn(&Universe, EventQueueIter<E>),
+		handler: fn(&Provider, &Universe, EventQueueIter<E>),
 	) {
-		self.add_archetype_meta(id, DebugOpaque::new(handler));
+		self.add_archetype_meta::<UniverseEventHandler<E>>(id, DebugOpaque::new(handler));
 	}
 
 	pub fn try_get_archetype_meta<T: Userdata>(&self, id: ArchetypeId) -> Option<&T> {
@@ -198,10 +198,12 @@ impl Universe {
 	pub fn queue_event_dispatch<E: Userdata>(&self, mut events: EventQueue<E>) {
 		self.queue_task(
 			format_args!("EventQueue<{}> dispatch", type_name::<E>()),
-			move |_, universe| {
+			move |provider, universe| {
 				for iter in events.flush_all() {
 					let arch = iter.arch();
-					universe.archetype_meta::<UniverseEventHandler<E>>(arch)(universe, iter);
+					universe.archetype_meta::<UniverseEventHandler<E>>(arch)(
+						provider, universe, iter,
+					);
 				}
 			},
 		);
