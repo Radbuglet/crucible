@@ -168,17 +168,15 @@ pub macro unpack {
 		$(,)?
 	}) => {
 		#[allow(unused_mut)]
-		let ($(mut $name,)*): ($(
-			unpack!(internal_decode_type $(~$anno_tilde)? $(@$anno_amp)? $ty),
-		)*) = {
-			let src = &$src;
-
-			($({
-				ignore!($name);
-				ProviderPack::get_from_provider(src)
-			},)*)
-		};
+		let ($(mut $name,)*) = unpack!($src => ($($(~$anno_tilde)? $(@$anno_amp)? $ty,)*));
 	},
+	($src:expr => (
+		$($(~$anno_tilde:ident)? $(@$anno_amp:ident)? $ty:ty),*
+		$(,)?
+	)) => {{
+		let src = &$src;
+		($(<unpack!(internal_decode_type $(~$anno_tilde)? $(@$anno_amp)? $ty) as ProviderPack>::get_from_provider(src),)*)
+	}},
 	(internal_decode_type $ty:ty) => { $ty },
 	(internal_decode_type ~ref $ty:ty) => { ::std::cell::Ref<$ty> },
 	(internal_decode_type ~mut $ty:ty) => { ::std::cell::RefMut<$ty> },

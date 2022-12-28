@@ -1,4 +1,3 @@
-pub mod decompose;
 pub mod explicitly_bind;
 pub mod hash;
 pub mod iter;
@@ -9,3 +8,4 @@ pub mod marker;
 pub mod polyfill;
 pub mod std_traits;
 pub mod sync;
+pub use compost::decompose;

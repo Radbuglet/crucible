@@ -311,6 +311,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 
 [[package]]
+name = "compost"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "868c533a953c02c6d56caf3d027001c3104460f07cf6b80cc1376229caababdf"
+
+[[package]]
 name = "core-foundation"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -537,6 +543,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
+ "compost",
  "criterion",
  "derive-where",
  "fastrand",

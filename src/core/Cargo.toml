@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.66"
 bytemuck = { version = "1.12.3", features = ["derive"] }
+compost = "0.1.1"
 derive-where = "1.0.0"
 fastrand = "1.8.0"
 hashbrown = { version = "0.13.1", features = ["raw"] }
