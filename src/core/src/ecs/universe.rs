@@ -1,6 +1,6 @@
 use std::{
 	any::type_name,
-	borrow::Borrow,
+	borrow::{Borrow, BorrowMut},
 	cell::{Ref, RefMut},
 	mem,
 	num::NonZeroU64,
@@ -387,6 +387,12 @@ impl<'a, T: UniverseResource> ProviderPack<'a> for Res<'a, T> {
 	}
 }
 
+impl<T> Borrow<T> for Res<'_, T> {
+	fn borrow(&self) -> &T {
+		&self
+	}
+}
+
 #[derive(Debug)]
 pub enum ResRef<'a, T: 'static> {
 	Local(Ref<'a, T>),
@@ -414,6 +420,12 @@ impl<'a, T: UniverseResource> ProviderPack<'a> for ResRef<'a, T> {
 		let res = Ref::map(res, |universe| universe.resource_rw());
 
 		Self::Universe(BorrowingRwReadGuard::try_new(res).unwrap())
+	}
+}
+
+impl<T> Borrow<T> for ResRef<'_, T> {
+	fn borrow(&self) -> &T {
+		&self
 	}
 }
 
@@ -453,5 +465,17 @@ impl<'a, T: UniverseResource> ProviderPack<'a> for ResMut<'a, T> {
 		let res = Ref::map(res, |universe| universe.resource_rw());
 
 		Self::Universe(BorrowingRwWriteGuard::try_new(res).unwrap())
+	}
+}
+
+impl<T> Borrow<T> for ResMut<'_, T> {
+	fn borrow(&self) -> &T {
+		&self
+	}
+}
+
+impl<T> BorrowMut<T> for ResMut<'_, T> {
+	fn borrow_mut(&mut self) -> &mut T {
+		&mut *self
 	}
 }

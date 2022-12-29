@@ -30,6 +30,7 @@ use super::{
 
 // === EngineRoot === //
 
+#[derive(Debug)]
 struct EngineRoot {
 	// Services
 	gfx: GfxContext,

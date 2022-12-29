@@ -297,14 +297,16 @@ impl ViewportArch {
 		self.0.id()
 	}
 
-	pub fn spawn(&self, cx: &Provider, viewport: Viewport) -> Entity {
-		unpack!(cx => {
-			universe: ~ref Universe,
-			viewports: @mut Storage<Viewport>,
-			depth_textures: @mut Storage<FullScreenTexture>,
-			input_managers: @mut Storage<InputManager>,
-		});
-
+	pub fn spawn(
+		&self,
+		(universe, viewports, depth_textures, input_managers): (
+			&Universe,
+			&mut Storage<Viewport>,
+			&mut Storage<FullScreenTexture>,
+			&mut Storage<InputManager>,
+		),
+		viewport: Viewport,
+	) -> Entity {
 		let entity = universe.archetype(self.id()).spawn("viewport");
 		viewports.add(entity, viewport);
 		depth_textures.add(

@@ -69,18 +69,16 @@ impl SceneArch {
 
 	pub fn spawn(
 		&self,
-		cx: &Provider,
+		(universe, scene_userdatas, update_handlers, render_handlers): (
+			&Universe,
+			&mut Storage<BoxedUserdata>,
+			&mut Storage<SceneUpdateHandler>,
+			&mut Storage<SceneRenderHandler>,
+		),
 		scene_userdata: BoxedUserdata,
 		update_handler: SceneUpdateHandler,
 		render_handler: SceneRenderHandler,
 	) -> Entity {
-		unpack!(cx => {
-			universe: ~ref Universe,
-			scene_userdatas: @mut Storage<BoxedUserdata>,
-			update_handlers: @mut Storage<SceneUpdateHandler>,
-			render_handlers: @mut Storage<SceneRenderHandler>,
-		});
-
 		let scene = universe.archetype(self.id()).spawn("scene");
 		scene_userdatas.add(scene, scene_userdata);
 		update_handlers.add(scene, update_handler);
