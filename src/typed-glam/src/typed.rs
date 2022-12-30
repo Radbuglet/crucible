@@ -886,39 +886,42 @@ where
 }
 
 // Overload derivations
-macro derive_bin_ops(
-	$(
+macro_rules! derive_bin_ops {
+	($(
 		$trait:ident, $fn:ident
 		$(, $trait_assign:ident, $fn_assign:ident)?
 		$(for $extra_trait:ident)?
 	);*
 	$(;)?
-) {$(
-	impl<B, F, R> ops::$trait<R> for TypedVector<F>
-	where
-		B: NumericVector $(+ $extra_trait)?,
-		F: ?Sized + VecFlavor<Backing = B> + FlavorCastFrom<R>,
-	{
-		type Output = Self;
+	) => {
+		$(
+			impl<B, F, R> ops::$trait<R> for TypedVector<F>
+			where
+				B: NumericVector $(+ $extra_trait)?,
+				F: ?Sized + VecFlavor<Backing = B> + FlavorCastFrom<R>,
+			{
+				type Output = Self;
 
-		fn $fn(self, rhs: R) -> Self::Output {
-			self.map_glam(|lhs| ops::$trait::$fn(lhs, F::cast_from(rhs).to_glam()))
-		}
-	}
-
-	$(
-		impl<F, R> ops::$trait_assign<R> for TypedVector<F>
-		where
-			// N.B. Yes, these trait bounds are wrong. Luckily, additional bounds
-			// are never used with the assign variant so we're *fine* for now.
-			F: ?Sized + VecFlavor + FlavorCastFrom<R>,
-		{
-			fn $fn_assign(&mut self, rhs: R) {
-				ops::$trait_assign::$fn_assign(self.as_glam_mut(), F::cast_from(rhs).to_glam());
+				fn $fn(self, rhs: R) -> Self::Output {
+					self.map_glam(|lhs| ops::$trait::$fn(lhs, F::cast_from(rhs).to_glam()))
+				}
 			}
-		}
-	)?
-)*}
+
+			$(
+				impl<F, R> ops::$trait_assign<R> for TypedVector<F>
+				where
+					// N.B. Yes, these trait bounds are wrong. Luckily, additional bounds
+					// are never used with the assign variant so we're *fine* for now.
+					F: ?Sized + VecFlavor + FlavorCastFrom<R>,
+				{
+					fn $fn_assign(&mut self, rhs: R) {
+						ops::$trait_assign::$fn_assign(self.as_glam_mut(), F::cast_from(rhs).to_glam());
+					}
+				}
+			)?
+		)*
+	};
+}
 
 derive_bin_ops!(
 	// NumericVector
