@@ -9,10 +9,11 @@ use crucible_core::{
 		userdata::{BoxedUserdata, DebugOpaque},
 	},
 	ecs::{
-		context::{unpack, Provider},
+		context::{decompose, unpack, Provider},
 		entity::{Archetype, Entity},
 		storage::CelledStorage,
 		storage::Storage,
+		universe::Universe,
 	},
 	lang::{explicitly_bind::ExplicitlyBind, iter::VolumetricIter, polyfill::OptionPoly},
 	mem::c_enum::CEnum,
@@ -30,7 +31,9 @@ use crate::{
 		gfx::texture::FullScreenTexture,
 		io::{gfx::GfxContext, input::InputManager, viewport::Viewport},
 		resources::ResourceManager,
-		scene::{SceneRenderEvent, SceneRenderHandler, SceneUpdateEvent, SceneUpdateHandler},
+		scene::{
+			SceneArch, SceneRenderEvent, SceneRenderHandler, SceneUpdateEvent, SceneUpdateHandler,
+		},
 	},
 	game::{player::camera::FreeCamInputs, voxel::pipeline::VoxelRenderingPipelineDesc},
 };
@@ -64,16 +67,23 @@ pub struct PlayScene {
 
 impl PlayScene {
 	pub fn spawn(
-		(scene_arch, userdatas, update_handlers, render_handlers, gfx, res_mgr): (
-			&mut Archetype,
+		mut cx: (
+			&Universe,
+			&GfxContext,
+			&SceneArch,
 			&mut Storage<BoxedUserdata>,
 			&mut Storage<SceneUpdateHandler>,
 			&mut Storage<SceneRenderHandler>,
-			&GfxContext,
 			&mut ResourceManager,
 		),
 		main_viewport: Entity,
 	) -> Entity {
+		decompose!(cx => cx & {
+			gfx: &GfxContext,
+			res_mgr: &mut ResourceManager,
+			scene_arch: &SceneArch,
+		});
+
 		// Create block texture
 		let block_image = image::load_from_memory(include_bytes!(
 			"./voxel/textures/placeholder_material_1.png"
@@ -108,22 +118,21 @@ impl PlayScene {
 		);
 
 		// Create scene entity
-		let scene = scene_arch.spawn("main scene");
-
-		userdatas.add(scene, scene_state);
-		update_handlers.add(scene, DebugOpaque::new(Self::on_update));
-		render_handlers.add(scene, DebugOpaque::new(Self::on_render));
-
-		scene
+		scene_arch.spawn(
+			decompose!(cx),
+			scene_state,
+			DebugOpaque::new(Self::on_update),
+			DebugOpaque::new(Self::on_render),
+		)
 	}
 
 	fn on_update(cx: &Provider, me: Entity, _event: SceneUpdateEvent) {
 		// Extract context
 		unpack!(cx => {
 			gfx = &GfxContext,
-			mut userdatas = &mut Storage<BoxedUserdata>,
-			viewports = &Storage<Viewport>,
-			input_managers = &Storage<InputManager>,
+			mut userdatas = @mut Storage<BoxedUserdata>,
+			viewports = @ref Storage<Viewport>,
+			input_managers = @ref Storage<InputManager>,
 		});
 
 		let me = userdatas.get_downcast_mut::<Self>(me);
@@ -300,13 +309,15 @@ impl PlayScene {
 
 	fn on_render(cx: &Provider, me: Entity, event: SceneRenderEvent) {
 		// Extract context
-		let gfx = cx.get::<GfxContext>();
-		let mut userdata = cx.get_mut::<Storage<BoxedUserdata>>();
-		let mut res_mgr = cx.get_mut::<ResourceManager>();
-		let viewports = cx.get::<Storage<Viewport>>();
-		let mut depth_textures = cx.get_mut::<Storage<FullScreenTexture>>();
+		unpack!(cx => {
+			gfx = &GfxContext,
+			mut res_mgr = &mut ResourceManager,
+			mut scene_userdatas = @mut Storage<BoxedUserdata>,
+			mut depth_textures = @mut Storage<FullScreenTexture>,
+			viewports = @ref Storage<Viewport>,
+		});
 
-		let me = userdata.get_downcast_mut::<Self>(me);
+		let me = scene_userdatas.get_downcast_mut::<Self>(me);
 		let frame = event.frame;
 
 		// Acquire viewport and depth texture

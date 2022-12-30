@@ -133,11 +133,16 @@ impl<'r> Provider<'r> {
 
 pub trait ProviderEntries<'a> {
 	fn add_to_provider(self, provider: &mut Provider<'a>);
+	fn add_to_provider_ref(&'a mut self, provider: &mut Provider<'a>);
 }
 
 impl<'a: 'b, 'b, T: ?Sized + 'static> ProviderEntries<'b> for &'a T {
 	fn add_to_provider(self, provider: &mut Provider<'b>) {
 		provider.add_ref(self)
+	}
+
+	fn add_to_provider_ref(&'b mut self, provider: &mut Provider<'b>) {
+		provider.add_ref(*self)
 	}
 }
 
@@ -145,9 +150,27 @@ impl<'a: 'b, 'b, T: ?Sized + 'static> ProviderEntries<'b> for &'a mut T {
 	fn add_to_provider(self, provider: &mut Provider<'b>) {
 		provider.add_mut(self)
 	}
+
+	fn add_to_provider_ref(&'b mut self, provider: &mut Provider<'b>) {
+		provider.add_mut(*self)
+	}
 }
 
-// TODO: Insert from tuple/rest tuple
+macro impl_provider_entries($($para:ident:$field:tt),*) {
+	impl<'a, $($para: 'a + ProviderEntries<'a>),*> ProviderEntries<'a> for ($(&'a mut $para,)*) {
+		#[allow(unused)]
+		fn add_to_provider(self, provider: &mut Provider<'a>) {
+			$(self.$field.add_to_provider_ref(&mut *provider);)*
+		}
+
+		#[allow(unused)]
+		fn add_to_provider_ref(&'a mut self, provider: &mut Provider<'a>) {
+			$(self.$field.add_to_provider_ref(&mut *provider);)*
+		}
+	}
+}
+
+impl_tuples!(impl_provider_entries);
 
 // === `unpack!` traits === //
 
@@ -226,7 +249,7 @@ pub macro unpack {
 		let src = $src;
 
 		// Acquire guards
-		$guard = ($(<$ty as UnpackTarget<'_, '_, _>>::acquire_guard(src),)*);
+		$guard = ($(<$ty as UnpackTarget<_>>::acquire_guard(src),)*);
 
 		// Acquire references
 		<PhantomData::<($($ty,)*)> as UnpackTargetTuple<_, _>>::acquire_refs(src, &mut $guard)
@@ -271,18 +294,29 @@ pub macro unpack {
 	},
 
 	// Public interface (w/o guards)
+	($src:expr => (
+		$(
+			$(@$mode:ident)? $ty:ty
+		),*
+		$(,)?
+	)) => {
+		unpack!(__raw $src => (
+			$(unpack!(__decode_ty [ $(@$mode)? $ty ])),*
+		))
+	},
 	($src:expr => {
 		$(
 			$name:pat = $(@$mode:ident)? $ty:ty
 		),*
 		$(,)?
 	}) => {
-		let ($($name,)*) = unpack!(__raw $src => (
-			$(unpack!(__decode_ty [ $(@$mode)? $ty ])),*
+		let ($($name,)*) = unpack!($src => (
+			$( $(@$mode)? $ty ),*
 		));
 	},
 }
 
-// === Regular unpacking === //
+// === Tuple context passing === //
 
 pub use compost::decompose;
+pub use tuples::{CombinConcat, CombinRight};

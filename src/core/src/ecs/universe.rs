@@ -355,7 +355,7 @@ pub trait UniverseResource: Userdata {
 }
 
 impl<'guard: 'borrow, 'borrow> UnpackTarget<'guard, 'borrow, Universe> for &'borrow Universe {
-	type Guard = &'borrow Universe;
+	type Guard = &'guard Universe;
 	type Reference = &'borrow Universe;
 
 	fn acquire_guard(src: &'guard Universe) -> Self::Guard {
@@ -374,7 +374,7 @@ pub struct RwResourceFromProviderMarker<T>(PhantomInvariant<T>);
 impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow, Universe>
 	for ResourceFromProviderMarker<&'borrow T>
 {
-	type Guard = &'borrow T;
+	type Guard = &'guard T;
 	type Reference = &'borrow T;
 
 	fn acquire_guard(src: &'guard Universe) -> Self::Guard {
@@ -389,7 +389,7 @@ impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow
 impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow, Universe>
 	for RwResourceFromProviderMarker<&'borrow T>
 {
-	type Guard = RwLockReadGuard<'borrow, T>;
+	type Guard = RwLockReadGuard<'guard, T>;
 	type Reference = &'borrow T;
 
 	fn acquire_guard(src: &'guard Universe) -> Self::Guard {
@@ -404,7 +404,7 @@ impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow
 impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow, Universe>
 	for RwResourceFromProviderMarker<&'borrow mut T>
 {
-	type Guard = RwLockWriteGuard<'borrow, T>;
+	type Guard = RwLockWriteGuard<'guard, T>;
 	type Reference = &'borrow mut T;
 
 	fn acquire_guard(src: &'guard Universe) -> Self::Guard {

@@ -1,7 +1,11 @@
 use anyhow::Context;
 use crucible_core::{
 	debug::userdata::BoxedUserdata,
-	ecs::{context::Provider, entity::Archetype, storage::Storage},
+	ecs::{
+		context::{decompose, unpack, CombinConcat, Provider},
+		storage::Storage,
+		universe::Universe,
+	},
 };
 use wgpu::SurfaceConfiguration;
 use winit::{
@@ -22,37 +26,40 @@ use super::{
 		gfx::{GfxContext, GfxFeatureNeedsScreen},
 		input::InputManager,
 		main_loop::{MainLoop, MainLoopHandler, WinitEventLoop, WinitEventProxy},
-		viewport::{Viewport, ViewportManager},
+		viewport::{Viewport, ViewportArch, ViewportManager},
 	},
 	resources::ResourceManager,
-	scene::{SceneManager, SceneRenderHandler, SceneUpdateHandler},
+	scene::{SceneArch, SceneManager, SceneRenderHandler, SceneUpdateHandler},
 };
 
 // === EngineRoot === //
 
 #[derive(Debug)]
 struct EngineRoot {
-	// Services
+	universe: Universe,
 	gfx: GfxContext,
 	res_mgr: ResourceManager,
 	viewport_mgr: ViewportManager,
 	scene_mgr: SceneManager,
-
-	// Archetypes
-	_viewport_arch: Archetype,
-	scene_arch: Archetype,
-
-	// Storages
-	viewports: Storage<Viewport>,
-	depth_textures: Storage<FullScreenTexture>,
-	input_managers: Storage<InputManager>,
-	userdata: Storage<BoxedUserdata>,
-	update_handlers: Storage<SceneUpdateHandler>,
-	render_handlers: Storage<SceneRenderHandler>,
 }
 
 impl EngineRoot {
-	async fn new() -> anyhow::Result<(WinitEventLoop, Self)> {
+	fn new() -> anyhow::Result<(WinitEventLoop, Self)> {
+		// Create universe and acquire context
+		let universe = Universe::new();
+		let mut guard;
+		let mut cx = unpack!(&universe => guard & (
+			&Universe,
+			@res ViewportArch,
+			@res SceneArch,
+			@mut Storage<Viewport>,
+			@mut Storage<InputManager>,
+			@mut Storage<FullScreenTexture>,
+			@mut Storage<BoxedUserdata>,
+			@mut Storage<SceneUpdateHandler>,
+			@mut Storage<SceneRenderHandler>,
+		));
+
 		// Create main window
 		let event_loop = EventLoopBuilder::with_user_event().build();
 		let main_window = WindowBuilder::new()
@@ -64,114 +71,106 @@ impl EngineRoot {
 
 		// Create graphics subsystem
 		let (gfx, _compat, main_surface) =
-			GfxContext::init(&main_window, &mut GfxFeatureNeedsScreen)
-				.await
+			futures::executor::block_on(GfxContext::init(&main_window, &mut GfxFeatureNeedsScreen))
 				.context("failed to create graphics context")?;
 
 		// Create main viewport
 		let mut viewport_mgr = ViewportManager::default();
-		let mut viewport_arch = Archetype::default();
-		let mut viewports = Storage::new();
-		let mut depth_textures = Storage::new();
-		let mut input_managers = Storage::new();
+		let main_viewport = {
+			decompose!(cx => cx & { viewport_arch: &ViewportArch });
+			viewport_arch.spawn(
+				decompose!(cx),
+				Viewport::new(
+					(&gfx,),
+					main_window,
+					Some(main_surface),
+					SurfaceConfiguration {
+						alpha_mode: wgpu::CompositeAlphaMode::Auto,
+						format: wgpu::TextureFormat::Bgra8UnormSrgb,
+						present_mode: wgpu::PresentMode::Fifo,
+						usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+						width: 0,
+						height: 0,
+					},
+				),
+			)
+		};
 
-		let main_viewport = viewport_arch.spawn("main viewport");
-		viewports.add(
-			main_viewport,
-			Viewport::new(
-				(&gfx,),
-				main_window,
-				Some(main_surface),
-				SurfaceConfiguration {
-					alpha_mode: wgpu::CompositeAlphaMode::Auto,
-					format: wgpu::TextureFormat::Bgra8UnormSrgb,
-					present_mode: wgpu::PresentMode::Fifo,
-					usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-					width: 0,
-					height: 0,
-				},
-			),
-		);
-		depth_textures.add(
-			main_viewport,
-			FullScreenTexture::new(
-				"depth texture",
-				wgpu::TextureFormat::Depth32Float,
-				wgpu::TextureUsages::RENDER_ATTACHMENT,
-			),
-		);
-		input_managers.add(main_viewport, InputManager::default());
+		decompose!(cx => { viewports: &Storage<Viewport> });
+		viewport_mgr.register((viewports,), main_viewport);
 
-		viewport_mgr.register((&viewports,), main_viewport);
-
-		// Create scene manager
+		// Create other services
 		let scene_mgr = SceneManager::default();
-		let scene_arch = Archetype::default();
-		let userdata = Storage::new();
-		let update_handlers = Storage::new();
-		let render_handlers = Storage::new();
-
-		// Create resource manager
 		let res_mgr = ResourceManager::default();
+
+		// Construct `EngineRoot`
+		drop(guard);
 
 		Ok((
 			event_loop,
 			Self {
-				// Services
+				universe,
 				gfx,
 				res_mgr,
 				viewport_mgr,
 				scene_mgr,
-
-				// Archetypes
-				_viewport_arch: viewport_arch,
-				scene_arch,
-
-				// Storages
-				viewports,
-				depth_textures,
-				input_managers,
-				userdata,
-				update_handlers,
-				render_handlers,
 			},
 		))
 	}
 }
 
 impl MainLoopHandler for EngineRoot {
-	fn on_update(&mut self, _cx: (&mut MainLoop, &WinitEventProxy)) {
-		let mut cx = Provider::new()
-			.with(&self.gfx)
-			.with(&self.gfx)
-			.with(&mut self.viewport_mgr)
-			.with(&mut self.depth_textures)
-			.with(&mut self.input_managers)
-			.with(&mut self.viewports)
-			.with(&mut self.userdata)
-			.with(&mut self.res_mgr);
+	fn on_update(&mut self, (main_loop, proxy): (&mut MainLoop, &WinitEventProxy)) {
+		// Update current scene
+		unpack!(&self.universe => {
+			update_handlers = @ref Storage<SceneUpdateHandler>,
+		});
 
 		let scene = self.scene_mgr.current();
-		self.update_handlers[scene](&mut cx, scene, SceneUpdateEvent {});
+		update_handlers[scene](
+			&Provider::new_with(&self.universe)
+				.with(&self.gfx)
+				.with(&mut self.res_mgr)
+				.with(main_loop)
+				.with(proxy),
+			scene,
+			SceneUpdateEvent {},
+		);
 
 		// Request redraws
+		unpack!(&self.universe => {
+			viewports = @ref Storage<Viewport>,
+			mut input_managers = @mut Storage<InputManager>,
+		});
+
 		for (&_window, &viewport) in self.viewport_mgr.window_map() {
-			self.viewports[viewport].window().request_redraw();
+			viewports[viewport].window().request_redraw();
 		}
 
 		// Clear input queue
 		for (_, &viewport) in self.viewport_mgr.window_map() {
-			self.input_managers[viewport].end_tick();
+			input_managers[viewport].end_tick();
 		}
 	}
 
-	fn on_render(&mut self, _cx: (&mut MainLoop, &WinitEventProxy), window_id: WindowId) {
+	fn on_render(
+		&mut self,
+		(main_loop, proxy): (&mut MainLoop, &WinitEventProxy),
+		window_id: WindowId,
+	) {
+		// Acquire context
+		unpack!(&self.universe => {
+			mut viewports = @mut Storage<Viewport>,
+			render_handlers = @ref Storage<SceneRenderHandler>,
+		});
+
+		// Acquire viewport
 		let Some(viewport) = self.viewport_mgr.get_viewport(window_id) else {
 			return;
 		};
 
 		// Acquire frame
-		let viewport_data = &mut self.viewports[viewport];
+		let viewport_data = &mut viewports[viewport];
 		let Ok(surface) = viewport_data.present((&self.gfx,)) else {
 			log::error!("Failed to render to {viewport:?}");
 			return;
@@ -183,19 +182,14 @@ impl MainLoopHandler for EngineRoot {
 
 		// Process render
 		let curr_scene = self.scene_mgr.current();
-		let mut cx = Provider::new()
-			.with(&mut self.userdata)
+		let cx = Provider::new_with(&self.universe)
 			.with(&self.gfx)
 			.with(&mut self.res_mgr)
-			.with(&mut self.viewports)
-			.with(&mut self.depth_textures)
-			.with(&mut self.input_managers);
+			.with(&mut *viewports)
+			.with(main_loop)
+			.with(proxy);
 
-		self.render_handlers[curr_scene](
-			&mut cx,
-			curr_scene,
-			SceneRenderEvent { frame: &mut frame },
-		);
+		render_handlers[curr_scene](&cx, curr_scene, SceneRenderEvent { frame: &mut frame });
 
 		frame.present();
 	}
@@ -206,12 +200,16 @@ impl MainLoopHandler for EngineRoot {
 		window_id: WindowId,
 		event: WindowEvent,
 	) {
+		unpack!(&self.universe => {
+			mut input_managers = @mut Storage<InputManager>,
+		});
+
 		let Some(viewport) = self.viewport_mgr.get_viewport(window_id) else {
 			log::warn!("Unknown viewport with window ID {window_id:?}");
 			return;
 		};
 
-		self.input_managers[viewport].handle_window_event(&event);
+		input_managers[viewport].handle_window_event(&event);
 
 		if let WindowEvent::CloseRequested = &event {
 			main_loop.exit();
@@ -220,50 +218,55 @@ impl MainLoopHandler for EngineRoot {
 
 	fn on_device_input(
 		&mut self,
-		_cx: (&mut MainLoop, &WinitEventProxy),
+		(_main_loop, _proxy): (&mut MainLoop, &WinitEventProxy),
 		device_id: DeviceId,
 		event: DeviceEvent,
 	) {
+		unpack!(&self.universe => {
+			mut input_managers = @mut Storage<InputManager>,
+		});
+
 		for &viewport in self.viewport_mgr.window_map().values() {
-			self.input_managers[viewport].handle_device_event(device_id, &event);
+			input_managers[viewport].handle_device_event(device_id, &event);
 		}
 	}
 }
 
 // === Main === //
 
-pub async fn main_inner() -> anyhow::Result<()> {
+pub fn main_inner() -> anyhow::Result<()> {
 	// Construct engine root
-	let (event_loop, mut root) = EngineRoot::new().await?;
+	let (event_loop, mut root) = EngineRoot::new()?;
 
 	// Setup initial scene
 	let scene_mgr = &mut root.scene_mgr;
-	let main_viewport = root
-		.viewport_mgr
-		.window_map()
-		.values()
-		.copied()
-		.next()
-		.unwrap();
+	let &main_viewport = root.viewport_mgr.window_map().values().next().unwrap();
 
-	let scene = PlayScene::spawn(
-		(
-			&mut root.scene_arch,
-			&mut root.userdata,
-			&mut root.update_handlers,
-			&mut root.render_handlers,
-			&root.gfx,
-			&mut root.res_mgr,
-		),
-		main_viewport,
-	);
+	let scene = {
+		let mut guard;
+		let mut cx = unpack!(&root.universe => guard & (
+			&Universe,
+			@res SceneArch,
+			@mut Storage<BoxedUserdata>,
+			@mut Storage<SceneUpdateHandler>,
+			@mut Storage<SceneRenderHandler>,
+		))
+		.concat((&root.gfx, &mut root.res_mgr));
+
+		PlayScene::spawn(decompose!(cx), main_viewport)
+	};
 
 	scene_mgr.set_initial(scene);
 
 	// Make all viewports visible
-	let viewports = &mut root.viewports;
-	for &viewport in root.viewport_mgr.window_map().values() {
-		viewports[viewport].window().set_visible(true);
+	{
+		unpack!(&root.universe => {
+			viewports = @ref Storage<Viewport>,
+		});
+
+		for &viewport in root.viewport_mgr.window_map().values() {
+			viewports[viewport].window().set_visible(true);
+		}
 	}
 
 	// Run event loop

@@ -443,6 +443,7 @@ dependencies = [
  "log",
  "parking_lot",
  "thiserror",
+ "tuples",
 ]
 
 [[package]]
@@ -1891,6 +1892,12 @@ checksum = "8d82e1a7758622a465f8cee077614c73484dac5b836c02ff6a40d5d1010324d7"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "tuples"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "446791a5e330a0dc5939f32eba8704c39b39e6f308740e666e4217bf4f50c3f0"
 
 [[package]]
 name = "typed-glam"
