@@ -1,8 +1,8 @@
 use crucible_core::{
 	ecs::{
+		context::unpack,
 		entity::{ArchetypeId, Entity},
 		event::{EntityDestroyEvent, EventQueueIter},
-		provider::Provider,
 		storage::Storage,
 		universe::{ArchetypeHandle, Universe, UniverseResource},
 	},
@@ -322,8 +322,10 @@ impl ViewportArch {
 		entity
 	}
 
-	fn on_destroy(_cx: &Provider, universe: &Universe, events: EventQueueIter<EntityDestroyEvent>) {
-		let mut viewports = universe.storage_mut::<Viewport>();
+	fn on_destroy(universe: &Universe, events: EventQueueIter<EntityDestroyEvent>) {
+		unpack!(universe => {
+			mut viewports = @mut Storage<Viewport>,
+		});
 
 		let arch_id = events.arch();
 		let mut arch = universe.archetype(arch_id);

@@ -13,8 +13,8 @@ use crate::{
 };
 
 use super::{
+	context::Provider,
 	entity::{ArchetypeId, ArchetypeMap, Entity},
-	provider::Provider,
 };
 
 // === Aliases === //

@@ -9,8 +9,8 @@ use crucible_core::{
 		userdata::{BoxedUserdata, DebugOpaque},
 	},
 	ecs::{
+		context::{unpack, Provider},
 		entity::{Archetype, Entity},
-		provider::Provider,
 		storage::CelledStorage,
 		storage::Storage,
 	},
@@ -119,10 +119,12 @@ impl PlayScene {
 
 	fn on_update(cx: &Provider, me: Entity, _event: SceneUpdateEvent) {
 		// Extract context
-		let gfx = cx.get::<GfxContext>();
-		let mut userdatas = cx.get_mut::<Storage<BoxedUserdata>>();
-		let viewports = cx.get::<Storage<Viewport>>();
-		let input_managers = cx.get::<Storage<InputManager>>();
+		unpack!(cx => {
+			gfx = &GfxContext,
+			mut userdatas = &mut Storage<BoxedUserdata>,
+			viewports = &Storage<Viewport>,
+			input_managers = &Storage<InputManager>,
+		});
 
 		let me = userdatas.get_downcast_mut::<Self>(me);
 
@@ -391,7 +393,9 @@ impl PlayScene {
 	}
 
 	fn chunk_factory(cx: &Provider, pos: ChunkVec) -> Entity {
-		let mut arch_chunk = cx.get_mut::<Archetype>();
+		unpack!(cx => {
+			mut arch_chunk = &mut Archetype,
+		});
 
 		let chunk = arch_chunk.spawn(format_args!("chunk at {pos:?}"));
 		log::info!("Spawning chunk at {pos:?}");

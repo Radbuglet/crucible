@@ -1,7 +1,7 @@
 use crucible_core::{
 	ecs::{
+		context::Provider,
 		entity::Entity,
-		provider::Provider,
 		storage::{CelledStorage, CelledStorageView},
 	},
 	lang::{

@@ -1,4 +1,5 @@
 use std::{
+	any::type_name,
 	borrow::{Borrow, BorrowMut},
 	cell::{Ref, RefMut},
 	mem,
@@ -7,7 +8,7 @@ use std::{
 	sync::{
 		atomic::{AtomicU64, Ordering},
 		Arc, Weak,
-	}, any::type_name,
+	},
 };
 
 use hashbrown::HashSet;
@@ -27,9 +28,9 @@ use crate::{
 };
 
 use super::{
+	context::{Provider, UnpackTarget},
 	entity::{Archetype, ArchetypeId, ArchetypeSet},
 	event::{EventQueue, EventQueueIter, TaskQueue},
-	provider::{Provider, UnpackTarget},
 	storage::{CelledStorage, Storage},
 };
 
@@ -65,7 +66,7 @@ struct DestructionList {
 	tags: Mutex<Vec<TagId>>,
 }
 
-type UniverseEventHandler<E> = DebugOpaque<fn(&Provider, &Universe, EventQueueIter<E>)>;
+type UniverseEventHandler<E> = DebugOpaque<fn(&Universe, EventQueueIter<E>)>;
 
 impl Universe {
 	pub fn new() -> Self {
@@ -104,7 +105,7 @@ impl Universe {
 	pub fn add_archetype_handler<E: Userdata>(
 		&self,
 		id: ArchetypeId,
-		handler: fn(&Provider, &Universe, EventQueueIter<E>),
+		handler: fn(&Universe, EventQueueIter<E>),
 	) {
 		self.add_archetype_meta::<UniverseEventHandler<E>>(id, DebugOpaque::new(handler));
 	}
@@ -190,22 +191,20 @@ impl Universe {
 
 	pub fn queue_task<F>(&self, name: impl DebugLabel, handler: F)
 	where
-		F: 'static + Send + Sync + FnOnce(&Provider<'_>, &Universe),
+		F: 'static + Send + Sync + FnOnce(&Universe),
 	{
 		self.task_queue.lock().push(name, |_tq, cx: &Provider<'_>| {
-			handler(cx, &cx.get::<Universe>());
+			handler(&cx.get::<Universe>());
 		});
 	}
 
 	pub fn queue_event_dispatch<E: Userdata>(&self, mut events: EventQueue<E>) {
 		self.queue_task(
 			format_args!("EventQueue<{}> dispatch", type_name::<E>()),
-			move |provider, universe| {
+			move |universe| {
 				for iter in events.flush_all() {
 					let arch = iter.arch();
-					universe.archetype_meta::<UniverseEventHandler<E>>(arch)(
-						provider, universe, iter,
-					);
+					universe.archetype_meta::<UniverseEventHandler<E>>(arch)(universe, iter);
 				}
 			},
 		);
@@ -355,14 +354,25 @@ pub trait UniverseResource: Userdata {
 	fn create(universe: &Universe) -> Self;
 }
 
-pub struct ResourceFromProviderMarker<'a, T>(PhantomInvariant<&'a T>);
+impl<'guard: 'borrow, 'borrow> UnpackTarget<'guard, 'borrow, Universe> for &'borrow Universe {
+	type Guard = &'borrow Universe;
+	type Reference = &'borrow Universe;
 
-pub struct ResourceFromProviderMarkerRef<'a, T>(PhantomInvariant<&'a T>);
+	fn acquire_guard(src: &'guard Universe) -> Self::Guard {
+		src
+	}
 
-pub struct ResourceFromProviderMarkerMut<'a, T>(PhantomInvariant<&'a mut T>);
+	fn acquire_ref(guard: &'borrow mut Self::Guard) -> Self::Reference {
+		guard
+	}
+}
+
+pub struct ResourceFromProviderMarker<T>(PhantomInvariant<T>);
+
+pub struct RwResourceFromProviderMarker<T>(PhantomInvariant<T>);
 
 impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow, Universe>
-	for ResourceFromProviderMarker<'borrow, T>
+	for ResourceFromProviderMarker<&'borrow T>
 {
 	type Guard = &'borrow T;
 	type Reference = &'borrow T;
@@ -377,7 +387,7 @@ impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow
 }
 
 impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow, Universe>
-	for ResourceFromProviderMarkerRef<'borrow, T>
+	for RwResourceFromProviderMarker<&'borrow T>
 {
 	type Guard = RwLockReadGuard<'borrow, T>;
 	type Reference = &'borrow T;
@@ -392,7 +402,7 @@ impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow
 }
 
 impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow, Universe>
-	for ResourceFromProviderMarkerMut<'borrow, T>
+	for RwResourceFromProviderMarker<&'borrow mut T>
 {
 	type Guard = RwLockWriteGuard<'borrow, T>;
 	type Reference = &'borrow mut T;
@@ -409,7 +419,7 @@ impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow
 // === Resource dependency injection in `Provider` === //
 
 impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
-	UnpackTarget<'guard, 'borrow, Provider<'provider>> for ResourceFromProviderMarker<'borrow, T>
+	UnpackTarget<'guard, 'borrow, Provider<'provider>> for ResourceFromProviderMarker<&'borrow T>
 {
 	type Guard = ProviderResourceGuard<'guard, T>;
 	type Reference = &'borrow T;
@@ -430,7 +440,7 @@ impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
 }
 
 impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
-	UnpackTarget<'guard, 'borrow, Provider<'provider>> for ResourceFromProviderMarkerRef<'borrow, T>
+	UnpackTarget<'guard, 'borrow, Provider<'provider>> for RwResourceFromProviderMarker<&'borrow T>
 {
 	type Guard = ProviderResourceRefGuard<'guard, T>;
 	type Reference = &'borrow T;
@@ -452,7 +462,8 @@ impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
 }
 
 impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
-	UnpackTarget<'guard, 'borrow, Provider<'provider>> for ResourceFromProviderMarkerMut<'borrow, T>
+	UnpackTarget<'guard, 'borrow, Provider<'provider>>
+	for RwResourceFromProviderMarker<&'borrow mut T>
 {
 	type Guard = ProviderResourceMutGuard<'guard, T>;
 	type Reference = &'borrow mut T;

@@ -1,7 +1,7 @@
 use anyhow::Context;
 use crucible_core::{
 	debug::userdata::BoxedUserdata,
-	ecs::{entity::Archetype, provider::Provider, storage::Storage},
+	ecs::{context::Provider, entity::Archetype, storage::Storage},
 };
 use wgpu::SurfaceConfiguration;
 use winit::{

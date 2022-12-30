@@ -214,18 +214,75 @@ macro impl_guard_tuples_as_refs($($para:ident:$field:tt),*) {
 impl_tuples!(impl_guard_tuples_as_refs);
 
 #[allow(unused_imports)] // (used by the macro)
-use crate::lang::macros::ignore;
+pub use crate::ecs::universe::{ResourceFromProviderMarker, RwResourceFromProviderMarker};
 
-pub macro unpack($src:expr => $guard:ident & (
-	$($ty:ty),*
-	$(,)?
-)) {{
-	// Solidify reference
-	let src = &$src;
+pub macro unpack {
+	// Raw variants
+	(__raw $src:expr => $guard:ident & (
+		$($ty:ty),*
+		$(,)?
+	)) => {{
+		// Solidify reference
+		let src = $src;
 
-	// Acquire guards
-	$guard = ($(<$ty as UnpackTarget<'_, '_, _>>::acquire_guard(src),)*);
+		// Acquire guards
+		$guard = ($(<$ty as UnpackTarget<'_, '_, _>>::acquire_guard(src),)*);
 
-	// Acquire references
-	<PhantomData::<($($ty,)*)> as UnpackTargetTuple<_, _>>::acquire_refs(src, &mut $guard)
-}}
+		// Acquire references
+		<PhantomData::<($($ty,)*)> as UnpackTargetTuple<_, _>>::acquire_refs(src, &mut $guard)
+	}},
+	(__raw $src:expr => (
+		$($ty:ty),*
+		$(,)?
+	)) => {{
+		// Solidify reference
+		let src = $src;
+
+		// Acquire guards
+		($(<$ty as UnpackTarget<'_, '_, _>>::acquire_guard(src),)*)
+	}},
+
+	// Type decoding
+	(__decode_ty [@res $ty:ty]) => { ResourceFromProviderMarker<&$ty> },
+	(__decode_ty [@ref $ty:ty]) => { RwResourceFromProviderMarker<&$ty> },
+	(__decode_ty [@mut $ty:ty]) => { RwResourceFromProviderMarker<&mut $ty> },
+	(__decode_ty [$ty:ty]) => { $ty },
+
+	// Public interface (w/ guards)
+	($src:expr => $guard:ident & (
+		$(
+			$(@$mode:ident)? $ty:ty
+		),*
+		$(,)?
+	)) => {
+		unpack!(__raw $src => $guard & (
+			$(unpack!(__decode_ty [ $(@$mode)? $ty ])),*
+		))
+	},
+	($src:expr => $guard:ident & {
+		$(
+			$name:ident: $(@$mode:ident)? $ty:ty
+		),*
+		$(,)?
+	}) => {
+		let ($($name,)*) = unpack!($src => $guard & (
+			$($(@$mode)? $ty),*
+		));
+	},
+
+	// Public interface (w/o guards)
+	($src:expr => {
+		$(
+			$name:pat = $(@$mode:ident)? $ty:ty
+		),*
+		$(,)?
+	}) => {
+		let ($($name,)*) = unpack!(__raw $src => (
+			$(unpack!(__decode_ty [ $(@$mode)? $ty ])),*
+		));
+	},
+}
+
+// === Regular unpacking === //
+
+pub use compost::decompose;
