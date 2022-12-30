@@ -367,12 +367,12 @@ impl<'guard: 'borrow, 'borrow> UnpackTarget<'guard, 'borrow, Universe> for &'bor
 	}
 }
 
-pub struct ResourceFromProviderMarker<T>(PhantomInvariant<T>);
+pub struct Res<T>(PhantomInvariant<T>);
 
-pub struct RwResourceFromProviderMarker<T>(PhantomInvariant<T>);
+pub struct ResRw<T>(PhantomInvariant<T>);
 
 impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow, Universe>
-	for ResourceFromProviderMarker<&'borrow T>
+	for Res<&'borrow T>
 {
 	type Guard = &'guard T;
 	type Reference = &'borrow T;
@@ -387,7 +387,7 @@ impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow
 }
 
 impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow, Universe>
-	for RwResourceFromProviderMarker<&'borrow T>
+	for ResRw<&'borrow T>
 {
 	type Guard = RwLockReadGuard<'guard, T>;
 	type Reference = &'borrow T;
@@ -402,7 +402,7 @@ impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow
 }
 
 impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow, Universe>
-	for RwResourceFromProviderMarker<&'borrow mut T>
+	for ResRw<&'borrow mut T>
 {
 	type Guard = RwLockWriteGuard<'guard, T>;
 	type Reference = &'borrow mut T;
@@ -419,7 +419,7 @@ impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow
 // === Resource dependency injection in `Provider` === //
 
 impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
-	UnpackTarget<'guard, 'borrow, Provider<'provider>> for ResourceFromProviderMarker<&'borrow T>
+	UnpackTarget<'guard, 'borrow, Provider<'provider>> for Res<&'borrow T>
 {
 	type Guard = ProviderResourceGuard<'guard, T>;
 	type Reference = &'borrow T;
@@ -440,7 +440,7 @@ impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
 }
 
 impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
-	UnpackTarget<'guard, 'borrow, Provider<'provider>> for RwResourceFromProviderMarker<&'borrow T>
+	UnpackTarget<'guard, 'borrow, Provider<'provider>> for ResRw<&'borrow T>
 {
 	type Guard = ProviderResourceRefGuard<'guard, T>;
 	type Reference = &'borrow T;
@@ -462,8 +462,7 @@ impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
 }
 
 impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
-	UnpackTarget<'guard, 'borrow, Provider<'provider>>
-	for RwResourceFromProviderMarker<&'borrow mut T>
+	UnpackTarget<'guard, 'borrow, Provider<'provider>> for ResRw<&'borrow mut T>
 {
 	type Guard = ProviderResourceMutGuard<'guard, T>;
 	type Reference = &'borrow mut T;

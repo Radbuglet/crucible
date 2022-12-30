@@ -156,18 +156,20 @@ impl<'a: 'b, 'b, T: ?Sized + 'static> ProviderEntries<'b> for &'a mut T {
 	}
 }
 
-macro impl_provider_entries($($para:ident:$field:tt),*) {
-	impl<'a, $($para: 'a + ProviderEntries<'a>),*> ProviderEntries<'a> for ($(&'a mut $para,)*) {
-		#[allow(unused)]
-		fn add_to_provider(self, provider: &mut Provider<'a>) {
-			$(self.$field.add_to_provider_ref(&mut *provider);)*
-		}
+macro_rules! impl_provider_entries {
+	($($para:ident:$field:tt),*) => {
+		impl<'a, $($para: 'a + ProviderEntries<'a>),*> ProviderEntries<'a> for ($(&'a mut $para,)*) {
+			#[allow(unused)]
+			fn add_to_provider(self, provider: &mut Provider<'a>) {
+				$(self.$field.add_to_provider_ref(&mut *provider);)*
+			}
 
-		#[allow(unused)]
-		fn add_to_provider_ref(&'a mut self, provider: &mut Provider<'a>) {
-			$(self.$field.add_to_provider_ref(&mut *provider);)*
+			#[allow(unused)]
+			fn add_to_provider_ref(&'a mut self, provider: &mut Provider<'a>) {
+				$(self.$field.add_to_provider_ref(&mut *provider);)*
+			}
 		}
-	}
+	};
 }
 
 impl_tuples!(impl_provider_entries);
@@ -214,34 +216,41 @@ impl<'provider, 'guard: 'borrow, 'borrow, T: ?Sized + Userdata>
 
 // === `unpack!` macro === //
 
-pub trait UnpackTargetTuple<'guard: 'borrow, 'borrow, P: ?Sized, I> {
-	type Output;
+#[doc(hidden)]
+pub mod macro_internal {
+	use super::*;
 
-	fn acquire_refs(_dummy_provider: &P, input: &'borrow mut I) -> Self::Output;
-}
+	pub trait UnpackTargetTuple<'guard: 'borrow, 'borrow, P: ?Sized, I> {
+		type Output;
 
-macro impl_guard_tuples_as_refs($($para:ident:$field:tt),*) {
-	impl<'guard: 'borrow, 'borrow, P: ?Sized, $($para: UnpackTarget<'guard, 'borrow, P>),*>
-		UnpackTargetTuple<'guard, 'borrow, P, ($($para::Guard,)*)>
-		for PhantomData<($($para,)*)>
-	{
-		type Output = ($($para::Reference,)*);
-
-		#[allow(unused)]
-		fn acquire_refs(_dummy_provider: &P, guards: &'borrow mut ($($para::Guard,)*)) -> Self::Output {
-			($($para::acquire_ref(&mut guards.$field),)*)
-		}
+		fn acquire_refs(_dummy_provider: &P, input: &'borrow mut I) -> Self::Output;
 	}
+
+	macro_rules! impl_guard_tuples_as_refs {
+		($($para:ident:$field:tt),*) => {
+			impl<'guard: 'borrow, 'borrow, P: ?Sized, $($para: UnpackTarget<'guard, 'borrow, P>),*>
+				UnpackTargetTuple<'guard, 'borrow, P, ($($para::Guard,)*)>
+				for PhantomData<($($para,)*)>
+			{
+				type Output = ($($para::Reference,)*);
+
+				#[allow(unused)]
+				fn acquire_refs(_dummy_provider: &P, guards: &'borrow mut ($($para::Guard,)*)) -> Self::Output {
+					($($para::acquire_ref(&mut guards.$field),)*)
+				}
+			}
+		};
+	}
+
+	impl_tuples!(impl_guard_tuples_as_refs);
+
+	pub use std::marker::PhantomData;
 }
 
-impl_tuples!(impl_guard_tuples_as_refs);
-
-#[allow(unused_imports)] // (used by the macro)
-pub use crate::ecs::universe::{ResourceFromProviderMarker, RwResourceFromProviderMarker};
-
-pub macro unpack {
-	// Raw variants
-	(__raw $src:expr => $guard:ident & (
+#[macro_export]
+macro_rules! unpack {
+	// Guarded tuple unpack
+	($src:expr => $guard:ident & (
 		$($ty:ty),*
 		$(,)?
 	)) => {{
@@ -249,72 +258,51 @@ pub macro unpack {
 		let src = $src;
 
 		// Acquire guards
-		$guard = ($(<$ty as UnpackTarget<_>>::acquire_guard(src),)*);
+		$guard = ($(<$ty as $crate::ecs::context::UnpackTarget<_>>::acquire_guard(src),)*);
 
 		// Acquire references
-		<PhantomData::<($($ty,)*)> as UnpackTargetTuple<_, _>>::acquire_refs(src, &mut $guard)
-	}},
-	(__raw $src:expr => (
+		<
+			$crate::ecs::context::macro_internal::PhantomData::<($($ty,)*)> as
+			$crate::ecs::context::macro_internal::UnpackTargetTuple<_, _>
+		>::acquire_refs(src, &mut $guard)
+	}};
+
+	// Unguarded tuple unpack
+	($src:expr => (
 		$($ty:ty),*
 		$(,)?
 	)) => {{
-		// Solidify reference
 		let src = $src;
+		($(<$ty as $crate::ecs::context::UnpackTarget<_>>::acquire_guard(src),)*)
+	}};
 
-		// Acquire guards
-		($(<$ty as UnpackTarget<'_, '_, _>>::acquire_guard(src),)*)
-	}},
-
-	// Type decoding
-	(__decode_ty [@res $ty:ty]) => { ResourceFromProviderMarker<&$ty> },
-	(__decode_ty [@ref $ty:ty]) => { RwResourceFromProviderMarker<&$ty> },
-	(__decode_ty [@mut $ty:ty]) => { RwResourceFromProviderMarker<&mut $ty> },
-	(__decode_ty [$ty:ty]) => { $ty },
-
-	// Public interface (w/ guards)
-	($src:expr => $guard:ident & (
-		$(
-			$(@$mode:ident)? $ty:ty
-		),*
-		$(,)?
-	)) => {
-		unpack!(__raw $src => $guard & (
-			$(unpack!(__decode_ty [ $(@$mode)? $ty ])),*
-		))
-	},
-	($src:expr => $guard:ident & {
-		$(
-			$name:ident: $(@$mode:ident)? $ty:ty
-		),*
-		$(,)?
-	}) => {
-		let ($($name,)*) = unpack!($src => $guard & (
-			$($(@$mode)? $ty),*
-		));
-	},
-
-	// Public interface (w/o guards)
-	($src:expr => (
-		$(
-			$(@$mode:ident)? $ty:ty
-		),*
-		$(,)?
-	)) => {
-		unpack!(__raw $src => (
-			$(unpack!(__decode_ty [ $(@$mode)? $ty ])),*
-		))
-	},
+	// Guarded struct unpack
 	($src:expr => {
 		$(
-			$name:pat = $(@$mode:ident)? $ty:ty
+			$name:ident: $ty:ty
 		),*
 		$(,)?
 	}) => {
-		let ($($name,)*) = unpack!($src => (
-			$( $(@$mode)? $ty ),*
+		let mut guard;
+		let ($($name,)*) = $crate::unpack!($src => guard & (
+			$($ty),*
 		));
-	},
+	};
+
+	// Unguarded struct unpack
+	($src:expr => {
+		$(
+			$name:pat = $ty:ty
+		),*
+		$(,)?
+	}) => {
+		let ($($name,)*) = $crate::unpack!($src => (
+			$($ty),*
+		));
+	};
 }
+
+pub use unpack;
 
 // === Tuple context passing === //
 

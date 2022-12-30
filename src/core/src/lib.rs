@@ -1,5 +1,3 @@
-#![feature(decl_macro)]
-
 pub mod debug;
 pub mod ecs;
 pub mod lang;

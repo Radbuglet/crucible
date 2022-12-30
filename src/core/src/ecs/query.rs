@@ -33,40 +33,42 @@ pub struct QueryIter<T> {
 	parts: T,
 }
 
-macro impl_query_for($($para:ident:$field:tt),*) {
-	impl<$($para: QueryPart,)*> Query for ($($para,)*) {
-		type Iters = ($($para::Iter,)*);
+macro_rules! impl_query_for {
+	($($para:ident:$field:tt),*) => {
+		impl<$($para: QueryPart,)*> Query for ($($para,)*) {
+			type Iters = ($($para::Iter,)*);
 
-		fn query_in(self, id: ArchetypeId) -> QueryIter<Self::Iters> {
-			QueryIter {
-				archetype: id,
-				parts: ($(QueryPart::make_iter(self.$field, id),)*),
+			fn query_in(self, id: ArchetypeId) -> QueryIter<Self::Iters> {
+				QueryIter {
+					archetype: id,
+					parts: ($(QueryPart::make_iter(self.$field, id),)*),
+				}
 			}
 		}
-	}
 
-	impl<$($para: QueryPartIter,)*> Iterator for QueryIter<($($para,)*)> {
-		type Item = (Entity, $($para::Value,)*);
+		impl<$($para: QueryPartIter,)*> Iterator for QueryIter<($($para,)*)> {
+			type Item = (Entity, $($para::Value,)*);
 
-		fn next(&mut self) -> Option<Self::Item> {
-			#[allow(unused_mut, unused_assignments)]
-			loop {
-				let mut the_entity: Entity;
+			fn next(&mut self) -> Option<Self::Item> {
+				#[allow(unused_mut, unused_assignments)]
+				loop {
+					let mut the_entity: Entity;
 
-				let values = (
-					$(match self.parts.$field.next(self.archetype)? {
-						Some((entity, value)) => {
-							the_entity = entity;
-							value
-						},
-						None => continue,
-					},)*
-				);
+					let values = (
+						$(match self.parts.$field.next(self.archetype)? {
+							Some((entity, value)) => {
+								the_entity = entity;
+								value
+							},
+							None => continue,
+						},)*
+					);
 
-				return Some((the_entity, $(values.$field),*));
+					return Some((the_entity, $(values.$field),*));
+				}
 			}
 		}
-	}
+	};
 }
 
 impl_tuples!(impl_query_for; no_unit);

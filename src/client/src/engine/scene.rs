@@ -7,7 +7,7 @@ use crucible_core::{
 		entity::{ArchetypeId, Entity},
 		event::{EntityDestroyEvent, EventQueueIter},
 		storage::Storage,
-		universe::{ArchetypeHandle, Universe, UniverseResource},
+		universe::{ArchetypeHandle, Universe, UniverseResource, ResRw},
 	},
 };
 
@@ -89,9 +89,9 @@ impl SceneArch {
 
 	fn on_destroy(universe: &Universe, events: EventQueueIter<EntityDestroyEvent>) {
 		unpack!(universe => {
-			mut scene_userdatas = @mut Storage<BoxedUserdata>,
-			mut update_handlers = @mut Storage<SceneUpdateHandler>,
-			mut render_handlers = @mut Storage<SceneRenderHandler>,
+			scene_userdatas: ResRw<&mut Storage<BoxedUserdata>>,
+			update_handlers: ResRw<&mut Storage<SceneUpdateHandler>>,
+			render_handlers: ResRw<&mut Storage<SceneRenderHandler>>,
 		});
 
 		let arch_id = events.arch();

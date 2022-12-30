@@ -1,11 +1,12 @@
-pub macro impl_tuples {
+#[macro_export]
+macro_rules! impl_tuples {
 	// === impl_tuples_with === //
 	(
 		$target:path : []
 		$(| [
 			$({$($pre:tt)*})*
 		])?
-	) => { /* terminal recursion case */ },
+	) => { /* terminal recursion case */ };
 	(
 		$target:path : [
 			{$($next:tt)*}
@@ -20,7 +21,7 @@ pub macro impl_tuples {
 			$($($($pre)*,)*)?
 			$($next)*
 		);
-		impl_tuples!(
+		$crate::impl_tuples!(
 			$target : [
 				$($rest)*
 			] | [
@@ -28,11 +29,11 @@ pub macro impl_tuples {
 				{$($next)*}
 			]
 		);
-	},
+	};
 
 	// === impl_tuples === //
 	($target:path; no_unit) => {
-		impl_tuples!(
+		$crate::impl_tuples!(
 			$target : [
 				{A: 0}
 				{B: 1}
@@ -49,15 +50,23 @@ pub macro impl_tuples {
 				{M: 12}
 			]
 		);
-	},
+	};
 	($target:path) => {
 		$target!();
-		impl_tuples!($target; no_unit);
-	},
+		$crate::impl_tuples!($target; no_unit);
+	};
 }
 
-pub macro ignore($($ignored:tt)*) {}
-
-pub macro prefer_left({$($chosen:tt)*} $({$($_ignored:tt)*})*) {
-	$($chosen)*
+#[macro_export]
+macro_rules! ignored {
+	($($ignored:tt)*) => {};
 }
+
+#[macro_export]
+macro_rules! prefer_left {
+	({$($chosen:tt)*} $({$($ignored:tt)*})*) => {$($chosen)*};
+}
+
+pub use ignored;
+pub use impl_tuples;
+pub use prefer_left;

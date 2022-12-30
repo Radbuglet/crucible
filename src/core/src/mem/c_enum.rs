@@ -22,35 +22,45 @@ pub trait CEnum: 'static + Sized + fmt::Debug + Copy + hash::Hash + Eq + Ord {
 	}
 }
 
-pub macro c_enum($(
-    $(#[$attr_meta:meta])*
-    $vis:vis enum $name:ident {
-        $(
-			$(#[$field_meta:meta])*
-			$field:ident
-		),*
-        $(,)?
-    }
-)*) {$(
-    $(#[$attr_meta])*
-    #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-    $vis enum $name {
-        $(
-			$(#[$field_meta])*
-			$field
-		),*
-    }
+#[doc(hidden)]
+pub mod macro_internal {
+	pub use core::primitive::usize;
+}
 
-    impl CEnum for $name {
-        const VARIANTS: &'static [Self] = &[
-            $(Self::$field),*
-        ];
+#[macro_export]
+macro_rules! c_enum {
+	($(
+		$(#[$attr_meta:meta])*
+		$vis:vis enum $name:ident {
+			$(
+				$(#[$field_meta:meta])*
+				$field:ident
+			),*
+			$(,)?
+		}
+	)*) => {$(
+		$(#[$attr_meta])*
+		#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+		$vis enum $name {
+			$(
+				$(#[$field_meta])*
+				$field
+			),*
+		}
 
-        fn index(self) -> usize {
-            self as usize
-        }
-    }
-)*}
+		impl $crate::mem::c_enum::CEnum for $name {
+			const VARIANTS: &'static [Self] = &[
+				$(Self::$field),*
+			];
+
+			fn index(self) -> $crate::mem::c_enum::macro_internal::usize {
+				self as $crate::mem::c_enum::macro_internal::usize
+			}
+		}
+	)*};
+}
+
+pub use c_enum;
 
 // === `CEnumMap` === //
 

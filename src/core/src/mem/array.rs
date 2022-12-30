@@ -30,7 +30,7 @@ pub const unsafe fn assume_init_array<T, const N: usize>(arr: [MaybeUninit<T>; N
 // === Array constructors === //
 
 #[doc(hidden)]
-pub mod macro_internals {
+pub mod macro_internal {
 	use super::*;
 	pub use std::mem::MaybeUninit;
 
@@ -71,18 +71,17 @@ pub mod macro_internals {
 	}
 }
 
-pub macro arr {
+#[macro_export]
+macro_rules! arr {
 	($ctor:expr; $size:expr) => {{
-		arr![_ignored => $ctor; $size]
-	}},
+		$crate::arr![_ignored => $ctor; $size]
+	}};
 	($index:ident => $ctor:expr; $size:expr) => {{
-		use macro_internals::*;
-
 		// N.B. const expressions do not inherit the `unsafe` scope from their surroundings.
-		let mut arr = unsafe { MacroArrayBuilder::<_, { $size }>::new() };
+		let mut arr = unsafe { $crate::mem::array::macro_internal::MacroArrayBuilder::<_, { $size }>::new() };
 
 		while arr.init_count < arr.len {
-			arr.array[arr.init_count] = MaybeUninit::new({
+			arr.array[arr.init_count] = $crate::mem::array::macro_internal::MaybeUninit::new({
 				let $index = arr.init_count;
 				$ctor
 			});
@@ -90,8 +89,10 @@ pub macro arr {
 		}
 
 		unsafe { arr.unwrap() }
-	}},
+	}};
 }
+
+pub use arr;
 
 pub fn arr_from_iter<T, I: IntoIterator<Item = T>, const N: usize>(iter: I) -> [T; N] {
 	let mut iter = iter.into_iter();
