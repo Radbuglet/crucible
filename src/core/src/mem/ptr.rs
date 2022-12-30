@@ -1,12 +1,9 @@
 use std::{
 	any::{type_name, TypeId},
 	marker::PhantomData,
-	mem::{self, ManuallyDrop, MaybeUninit},
+	mem::{self, ManuallyDrop},
 	ops::{Deref, DerefMut},
-	ptr,
 };
-
-use crate::lang::macros::{ignore, impl_tuples};
 
 // === Transmute === //
 
@@ -182,37 +179,6 @@ pub unsafe fn unchecked_unify<A, B>(a: A) -> B {
 	assert!(are_probably_equal::<A, B>());
 	sizealign_checked_transmute(a)
 }
-
-// === Offset-of === //
-
-pub unsafe trait OffsetOfReprC {
-	type OffsetArray: AsRef<[usize]>;
-
-	fn offsets() -> Self::OffsetArray;
-}
-
-macro impl_tup_offsets($($para:ident:$field:tt),*) {
-	unsafe impl<$($para,)*> OffsetOfReprC for ($($para,)*) {
-		type OffsetArray = [usize; 0 $(+ {
-			ignore!($para);
-			1
-		})*];
-
-		#[allow(unused)]  // For empty tuples.
-		fn offsets() -> Self::OffsetArray {
-			let tup = MaybeUninit::<Self>::uninit();
-			let tup_base = tup.as_ptr();
-
-			[$(
-				unsafe {
-					ptr::addr_of!((*tup_base).$field) as usize - tup_base as usize
-				}
-			),*]
-		}
-	}
-}
-
-impl_tuples!(impl_tup_offsets);
 
 // === Type Erasure === //
 

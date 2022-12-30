@@ -7,7 +7,13 @@ use std::{
 
 use hashbrown::HashMap;
 
-use crate::{debug::type_id::NamedTypeId, lang::macros::impl_tuples, mem::inline::MaybeBoxedCopy};
+use crate::{
+	debug::{type_id::NamedTypeId, userdata::Userdata},
+	lang::macros::impl_tuples,
+	mem::inline::MaybeBoxedCopy,
+};
+
+// === Core === //
 
 #[derive(Default)]
 pub struct Provider<'r> {
@@ -21,6 +27,10 @@ impl<'r> Provider<'r> {
 		Self::default()
 	}
 
+	pub fn new_with<T: ProviderEntries<'r>>(entries: T) -> Self {
+		Self::new().with(entries)
+	}
+
 	pub fn with_parent(parent: Option<&'r Provider<'r>>) -> Self {
 		Self {
 			_ty: PhantomData,
@@ -29,13 +39,15 @@ impl<'r> Provider<'r> {
 		}
 	}
 
-	pub fn parent(&self) -> Option<&'r Provider<'r>> {
-		self.parent
+	pub fn new_with_parent_and_comps<T: ProviderEntries<'r>>(
+		parent: Option<&'r Provider<'r>>,
+		entries: T,
+	) -> Self {
+		Self::with_parent(parent).with(entries)
 	}
 
-	pub fn with<T: ProviderRef<'r>>(mut self, item: T) -> Self {
-		item.add_to_provider(&mut self);
-		self
+	pub fn parent(&self) -> Option<&'r Provider<'r>> {
+		self.parent
 	}
 
 	pub fn add_ref<T: ?Sized + 'static>(&mut self, value: &'r T) {
@@ -101,10 +113,6 @@ impl<'r> Provider<'r> {
 			.unwrap_or_else(|| self.comp_not_found::<T>())
 	}
 
-	pub fn pack<'a, T: ProviderPack<'a>>(&'a self) -> T {
-		T::get_from_provider(self)
-	}
-
 	fn comp_not_found<T: ?Sized + 'static>(&self) -> ! {
 		panic!(
 			"Could not find component of type {:?} in provider.\nTypes provided: {:?}",
@@ -114,73 +122,110 @@ impl<'r> Provider<'r> {
 	}
 }
 
-pub trait ProviderRef<'a> {
+// === Insertion helpers === //
+
+impl<'r> Provider<'r> {
+	pub fn with<T: ProviderEntries<'r>>(mut self, item: T) -> Self {
+		item.add_to_provider(&mut self);
+		self
+	}
+}
+
+pub trait ProviderEntries<'a> {
 	fn add_to_provider(self, provider: &mut Provider<'a>);
 }
 
-impl<'a: 'b, 'b, T: ?Sized + 'static> ProviderRef<'b> for &'a T {
+impl<'a: 'b, 'b, T: ?Sized + 'static> ProviderEntries<'b> for &'a T {
 	fn add_to_provider(self, provider: &mut Provider<'b>) {
 		provider.add_ref(self)
 	}
 }
 
-impl<'a: 'b, 'b, T: ?Sized + 'static> ProviderRef<'b> for &'a mut T {
+impl<'a: 'b, 'b, T: ?Sized + 'static> ProviderEntries<'b> for &'a mut T {
 	fn add_to_provider(self, provider: &mut Provider<'b>) {
 		provider.add_mut(self)
 	}
 }
 
-pub trait ProviderPack<'a> {
-	fn get_from_provider(provider: &'a Provider) -> Self;
+// TODO: Insert from tuple/rest tuple
+
+// === `unpack!` traits === //
+
+pub trait UnpackTarget<'guard: 'borrow, 'borrow, P: ?Sized> {
+	type Guard;
+	type Reference;
+
+	fn acquire_guard(src: &'guard P) -> Self::Guard;
+	fn acquire_ref(guard: &'borrow mut Self::Guard) -> Self::Reference;
 }
 
-impl<'a, T: ?Sized + 'static> ProviderPack<'a> for Ref<'a, T> {
-	fn get_from_provider(provider: &'a Provider) -> Self {
-		provider.get()
+impl<'provider, 'guard: 'borrow, 'borrow, T: ?Sized + Userdata>
+	UnpackTarget<'guard, 'borrow, Provider<'provider>> for &'borrow T
+{
+	type Guard = Ref<'guard, T>;
+	type Reference = Self;
+
+	fn acquire_guard(src: &'guard Provider) -> Self::Guard {
+		src.get()
+	}
+
+	fn acquire_ref(guard: &'borrow mut Self::Guard) -> Self::Reference {
+		&*guard
 	}
 }
 
-impl<'a, T: ?Sized + 'static> ProviderPack<'a> for RefMut<'a, T> {
-	fn get_from_provider(provider: &'a Provider) -> Self {
-		provider.get_mut()
+impl<'provider, 'guard: 'borrow, 'borrow, T: ?Sized + Userdata>
+	UnpackTarget<'guard, 'borrow, Provider<'provider>> for &'borrow mut T
+{
+	type Guard = RefMut<'guard, T>;
+	type Reference = Self;
+
+	fn acquire_guard(src: &'guard Provider) -> Self::Guard {
+		src.get_mut()
+	}
+
+	fn acquire_ref(guard: &'borrow mut Self::Guard) -> Self::Reference {
+		&mut *guard
 	}
 }
 
-macro impl_provider_pack($($para:ident:$field:tt),*) {
-	impl<'a, $($para: ProviderPack<'a>,)*> ProviderPack<'a> for ($($para,)*) {
-		fn get_from_provider(provider: &'a Provider) -> Self {
-			($({
-				ignore!($para);
-				ProviderPack::get_from_provider(provider)
-			},)*)
+// === `unpack!` macro === //
+
+pub trait UnpackTargetTuple<'guard: 'borrow, 'borrow, P: ?Sized, I> {
+	type Output;
+
+	fn acquire_refs(_dummy_provider: &P, input: &'borrow mut I) -> Self::Output;
+}
+
+macro impl_guard_tuples_as_refs($($para:ident:$field:tt),*) {
+	impl<'guard: 'borrow, 'borrow, P: ?Sized, $($para: UnpackTarget<'guard, 'borrow, P>),*>
+		UnpackTargetTuple<'guard, 'borrow, P, ($($para::Guard,)*)>
+		for PhantomData<($($para,)*)>
+	{
+		type Output = ($($para::Reference,)*);
+
+		#[allow(unused)]
+		fn acquire_refs(_dummy_provider: &P, guards: &'borrow mut ($($para::Guard,)*)) -> Self::Output {
+			($($para::acquire_ref(&mut guards.$field),)*)
 		}
 	}
 }
 
-impl_tuples!(impl_provider_pack; no_unit);
+impl_tuples!(impl_guard_tuples_as_refs);
 
-#[allow(unused)] // Used in macro
+#[allow(unused_imports)] // (used by the macro)
 use crate::lang::macros::ignore;
 
-pub macro unpack {
-	($src:expr => {
-		$($name:ident: $(~$anno_tilde:ident)? $(@$anno_amp:ident)? $ty:ty),*
-		$(,)?
-	}) => {
-		#[allow(unused_mut)]
-		let ($(mut $name,)*) = unpack!($src => ($($(~$anno_tilde)? $(@$anno_amp)? $ty,)*));
-	},
-	($src:expr => (
-		$($(~$anno_tilde:ident)? $(@$anno_amp:ident)? $ty:ty),*
-		$(,)?
-	)) => {{
-		let src = &$src;
-		($(<unpack!(internal_decode_type $(~$anno_tilde)? $(@$anno_amp)? $ty) as ProviderPack>::get_from_provider(src),)*)
-	}},
-	(internal_decode_type $ty:ty) => { $ty },
-	(internal_decode_type ~ref $ty:ty) => { ::std::cell::Ref<$ty> },
-	(internal_decode_type ~mut $ty:ty) => { ::std::cell::RefMut<$ty> },
-	(internal_decode_type @res $ty:ty) => { $crate::ecs::universe::Res<$ty> },
-	(internal_decode_type @ref $ty:ty) => { $crate::ecs::universe::ResRef<$ty> },
-	(internal_decode_type @mut $ty:ty) => { $crate::ecs::universe::ResMut<$ty> },
-}
+pub macro unpack($src:expr => $guard:ident & (
+	$($ty:ty),*
+	$(,)?
+)) {{
+	// Solidify reference
+	let src = &$src;
+
+	// Acquire guards
+	$guard = ($(<$ty as UnpackTarget<'_, '_, _>>::acquire_guard(src),)*);
+
+	// Acquire references
+	<PhantomData::<($($ty,)*)> as UnpackTargetTuple<_, _>>::acquire_refs(src, &mut $guard)
+}}

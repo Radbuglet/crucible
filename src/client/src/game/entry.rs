@@ -10,7 +10,7 @@ use crucible_core::{
 	},
 	ecs::{
 		entity::{Archetype, Entity},
-		provider::{unpack, Provider},
+		provider::Provider,
 		storage::CelledStorage,
 		storage::Storage,
 	},
@@ -119,12 +119,10 @@ impl PlayScene {
 
 	fn on_update(cx: &Provider, me: Entity, _event: SceneUpdateEvent) {
 		// Extract context
-		unpack!(cx => {
-			gfx: ~ref GfxContext,
-			userdatas: ~mut Storage<BoxedUserdata>,
-			viewports: ~ref Storage<Viewport>,
-			input_managers: ~ref Storage<InputManager>,
-		});
+		let gfx = cx.get::<GfxContext>();
+		let mut userdatas = cx.get_mut::<Storage<BoxedUserdata>>();
+		let viewports = cx.get::<Storage<Viewport>>();
+		let input_managers = cx.get::<Storage<InputManager>>();
 
 		let me = userdatas.get_downcast_mut::<Self>(me);
 
@@ -300,13 +298,11 @@ impl PlayScene {
 
 	fn on_render(cx: &Provider, me: Entity, event: SceneRenderEvent) {
 		// Extract context
-		unpack!(cx => {
-			gfx: ~ref GfxContext,
-			userdata: ~mut Storage<BoxedUserdata>,
-			res_mgr: ~mut ResourceManager,
-			viewports: ~mut Storage<Viewport>,
-			depth_textures: ~mut Storage<FullScreenTexture>,
-		});
+		let gfx = cx.get::<GfxContext>();
+		let mut userdata = cx.get_mut::<Storage<BoxedUserdata>>();
+		let mut res_mgr = cx.get_mut::<ResourceManager>();
+		let viewports = cx.get::<Storage<Viewport>>();
+		let mut depth_textures = cx.get_mut::<Storage<FullScreenTexture>>();
 
 		let me = userdata.get_downcast_mut::<Self>(me);
 		let frame = event.frame;
@@ -395,9 +391,7 @@ impl PlayScene {
 	}
 
 	fn chunk_factory(cx: &Provider, pos: ChunkVec) -> Entity {
-		unpack!(cx => {
-			arch_chunk: ~mut Archetype,
-		});
+		let mut arch_chunk = cx.get_mut::<Archetype>();
 
 		let chunk = arch_chunk.spawn(format_args!("chunk at {pos:?}"));
 		log::info!("Spawning chunk at {pos:?}");
