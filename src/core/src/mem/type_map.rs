@@ -111,5 +111,3 @@ impl TypeMap {
 		self.map.flush();
 	}
 }
-
-// TODO: Implement `Provider`

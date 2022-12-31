@@ -190,7 +190,7 @@ impl Iterator for ArchetypeIter<'_> {
 						slot,
 					})
 				}
-				Some(None) => {}
+				Some(None) => { /* fallthrough */ }
 				None => break None,
 			}
 		}

@@ -10,6 +10,7 @@ use derive_where::derive_where;
 
 use crate::{
 	debug::{
+		error::DEBUG_ASSERTIONS_ENABLED,
 		lifetime::{DebugLifetime, Dependent, LifetimeLike},
 		userdata::{BoxedUserdata, ErasedUserdata, Userdata},
 	},
@@ -51,7 +52,7 @@ impl<T> Storage<T> {
 
 	pub fn get_run(&self, archetype: ArchetypeId) -> Option<&StorageRun<T>> {
 		if archetype.is_condemned() {
-			log::error!("Attempted to acquire the storage run of the dead archetype {archetype:?}");
+			log::error!("Acquired the storage run of the dead archetype {archetype:?}.");
 			// (fallthrough)
 		}
 
@@ -60,7 +61,7 @@ impl<T> Storage<T> {
 
 	pub fn get_run_mut(&mut self, archetype: ArchetypeId) -> Option<StorageRunRefMut<T>> {
 		if archetype.is_condemned() {
-			log::error!("Attempted to acquire the storage run of the dead archetype {archetype:?}");
+			log::error!("Acquired the storage run of the dead archetype {archetype:?}.");
 			// (fallthrough)
 		}
 
@@ -86,7 +87,7 @@ impl<T> Storage<T> {
 
 	pub fn get_or_create_run(&mut self, archetype: ArchetypeId) -> StorageRunRefMut<T> {
 		if archetype.is_condemned() {
-			log::error!("Attempted to acquire the storage run of the dead archetype {archetype:?}");
+			log::error!("Acquired the storage run of the dead archetype {archetype:?}");
 			// (fallthrough)
 		}
 
@@ -97,31 +98,70 @@ impl<T> Storage<T> {
 		StorageRunRefMut(run)
 	}
 
-	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
-		self.get_or_create_run(entity.arch)
+	pub fn insert(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
+		self.get_or_create_run(entity.arch) // warns on dead archetype
 			.defuse_auto_removal()
-			.add(entity, value)
+			.insert(entity, value) // warns on dead entity
 	}
 
-	pub fn remove(&mut self, entity: Entity) -> Option<T> {
+	pub fn add(&mut self, entity: Entity, value: T) -> &mut T {
+		let run = self.get_or_create_run(entity.arch).defuse_auto_removal();
+
+		if DEBUG_ASSERTIONS_ENABLED && run.get(entity.slot).is_some() {
+			log::warn!(
+				"`.add`'ed a component of type {} to an entity {:?} that already had the component. \
+			     Use `.insert` instead if you wish to replace pre-existing components silently.",
+				type_name::<T>(),
+				entity,
+			);
+			// (fallthrough)
+		}
+
+		run.insert(entity, value).1
+	}
+
+	pub fn try_remove(&mut self, entity: Entity) -> Option<T> {
+		if entity.is_condemned() {
+			log::error!(
+				"Removed a component of type {} from the already-dead entity {:?}. \
+				 Please remove all components from an entity *before* destroying them to avoid UAF bugs.",
+				type_name::<T>(),
+				entity,
+			);
+			// (fallthrough)
+		}
+
 		self.archetypes
 			.get_mut(&entity.arch.id)?
 			.remove(entity.slot)
 	}
 
-	pub fn remove_many<I>(&mut self, entities: I)
+	pub fn try_remove_many<I>(&mut self, entities: I)
 	where
 		I: IntoIterator<Item = Entity>,
 	{
 		for entity in entities {
-			self.remove(entity);
+			self.try_remove(entity);
+		}
+	}
+
+	pub fn remove(&mut self, entity: Entity) {
+		let res = self.try_remove(entity);
+		if DEBUG_ASSERTIONS_ENABLED && res.is_none() {
+			log::warn!(
+				"Removed a component of type {} from entity {:?}, which didn't have that component. \
+				 Use `.try_remove` instead if you wish to ignore removals from entities without the component.",
+				type_name::<T>(),
+				entity,
+			);
+			// (fallthrough)
 		}
 	}
 
 	pub fn get(&self, entity: Entity) -> Option<&T> {
 		if entity.is_condemned() {
 			log::error!(
-				"Attempted to fetch a component of type {:?} from the dead entity {entity:?}",
+				"Fetched component of type {} from the dead entity {entity:?}.",
 				type_name::<T>()
 			);
 			// (fallthrough)
@@ -136,7 +176,7 @@ impl<T> Storage<T> {
 	pub fn get_mut(&mut self, entity: Entity) -> Option<&mut T> {
 		if entity.is_condemned() {
 			log::error!(
-				"Attempted to fetch a component of type {:?} from the dead entity {entity:?}",
+				"Fetched component of type {} from the dead entity {entity:?}.",
 				type_name::<T>()
 			);
 			// (fallthrough)
@@ -189,7 +229,7 @@ impl<T> StorageRun<T> {
 		Self { comps: Vec::new() }
 	}
 
-	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
+	pub fn insert(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
 		if entity.is_condemned() {
 			log::error!(
 				"Attempted to attach a component of type {:?} to the dead entity {entity:?}",
@@ -344,20 +384,20 @@ impl<T> CelledStorage<T> {
 	}
 
 	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
-		let (replaced, current) = self.inner.add(entity, ExtRefCell::new(value));
+		let (replaced, current) = self.inner.insert(entity, ExtRefCell::new(value));
 
 		(replaced.map(ExtRefCell::into_inner), current)
 	}
 
 	pub fn remove(&mut self, entity: Entity) -> Option<T> {
-		self.inner.remove(entity).map(ExtRefCell::into_inner)
+		self.inner.try_remove(entity).map(ExtRefCell::into_inner)
 	}
 
 	pub fn remove_many<I>(&mut self, entities: I)
 	where
 		I: IntoIterator<Item = Entity>,
 	{
-		self.inner.remove_many(entities);
+		self.inner.try_remove_many(entities);
 	}
 
 	pub fn try_get(&self, entity: Entity) -> Option<&T> {
@@ -413,20 +453,20 @@ pub struct CelledStorageView<T> {
 
 impl<T> CelledStorageView<T> {
 	pub fn add(&mut self, entity: Entity, value: T) -> (Option<T>, &mut T) {
-		let (replaced, current) = self.inner.add(entity, RefCell::new(value));
+		let (replaced, current) = self.inner.insert(entity, RefCell::new(value));
 
 		(replaced.map(RefCell::into_inner), current.get_mut())
 	}
 
 	pub fn remove(&mut self, entity: Entity) -> Option<T> {
-		self.inner.remove(entity).map(RefCell::into_inner)
+		self.inner.try_remove(entity).map(RefCell::into_inner)
 	}
 
 	pub fn remove_many<I>(&mut self, entities: I)
 	where
 		I: IntoIterator<Item = Entity>,
 	{
-		self.inner.remove_many(entities);
+		self.inner.try_remove_many(entities);
 	}
 
 	pub fn try_get_cell(&self, entity: Entity) -> Option<&RefCell<T>> {

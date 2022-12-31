@@ -46,7 +46,7 @@ impl MaterialRegistry {
 		(base_states,): (&mut Storage<BaseMaterialState>,),
 		target: Entity,
 	) {
-		let BaseMaterialState { id, slot } = base_states.remove(target).unwrap();
+		let BaseMaterialState { id, slot } = base_states.try_remove(target).unwrap();
 		self.id_map.remove(&id);
 		self.slots.remove(slot);
 	}
