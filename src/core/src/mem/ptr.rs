@@ -125,6 +125,20 @@ impl<P: ?Sized> PointeeCastExt for P {
 	}
 }
 
+pub trait HeapPointerExt {
+	type Pointee: ?Sized;
+
+	unsafe fn prolong_heap_ref<'a>(&self) -> &'a Self::Pointee;
+}
+
+impl<T: ?Sized> HeapPointerExt for Box<T> {
+	type Pointee = T;
+
+	unsafe fn prolong_heap_ref<'a>(&self) -> &'a Self::Pointee {
+		(&**self).prolong()
+	}
+}
+
 pub fn addr_of_ptr<T: ?Sized>(p: *const T) -> usize {
 	p.cast::<()>() as usize
 }

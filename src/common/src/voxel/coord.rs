@@ -200,7 +200,7 @@ where
 			None => {
 				let pos = WorldVec::cast_from(self.pos).chunk();
 				let chunk = factory(
-					&Provider::with_parent(Some(extra))
+					&Provider::new_with_parent(Some(extra))
 						.with(&mut *world)
 						.with(&mut *chunks),
 					pos,

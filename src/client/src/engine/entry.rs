@@ -17,7 +17,7 @@ use winit::{
 
 use crate::{
 	engine::scene::{SceneRenderEvent, SceneUpdateEvent},
-	game::entry::PlayScene,
+	game::entry::PlaySceneState,
 };
 
 use super::{
@@ -253,7 +253,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 		))
 		.concat((&root.gfx, &mut root.res_mgr));
 
-		PlayScene::spawn(decompose!(cx), main_viewport)
+		PlaySceneState::spawn(decompose!(cx), main_viewport)
 	};
 
 	scene_mgr.set_initial(scene);

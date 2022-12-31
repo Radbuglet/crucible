@@ -10,10 +10,10 @@ use crucible_core::{
 	},
 	ecs::{
 		context::{decompose, unpack, Provider},
-		entity::{Archetype, Entity},
+		entity::{ArchetypeId, Entity},
 		storage::CelledStorage,
 		storage::Storage,
-		universe::{ResRw, Universe},
+		universe::{ArchetypeHandle, Res, ResRw, Universe, UniverseResource},
 	},
 	lang::{explicitly_bind::ExplicitlyBind, iter::VolumetricIter, polyfill::OptionPoly},
 	mem::c_enum::CEnum,
@@ -46,16 +46,10 @@ use super::{
 	},
 };
 
+// === PlaySceneState === //
+
 #[derive(Debug, Default)]
-pub struct PlayScene {
-	// Archetypes
-	arch_chunk: Archetype,
-
-	// Storages
-	chunk_datas: CelledStorage<VoxelChunkData>,
-	chunk_meshes: Storage<VoxelChunkMesh>,
-
-	// Resources
+pub struct PlaySceneState {
 	has_control: bool,
 	free_cam: FreeCamController,
 	world_data: VoxelWorldData,
@@ -65,7 +59,7 @@ pub struct PlayScene {
 	time: f64,
 }
 
-impl PlayScene {
+impl PlaySceneState {
 	pub fn spawn(
 		mut cx: (
 			&Universe,
@@ -126,13 +120,16 @@ impl PlayScene {
 		)
 	}
 
-	fn on_update(cx: &Provider, me: Entity, _event: SceneUpdateEvent) {
+	fn on_update(dyn_cx: &Provider, me: Entity, _event: SceneUpdateEvent) {
 		// Extract context
-		unpack!(cx => {
+		unpack!(dyn_cx => {
 			gfx: &GfxContext,
+			chunk_arch: Res<&ChunkArchetype>,
 			userdatas: ResRw<&mut Storage<BoxedUserdata>>,
 			viewports: ResRw<&Storage<Viewport>>,
 			input_managers: ResRw<&Storage<InputManager>>,
+			chunk_datas: ResRw<&mut CelledStorage<VoxelChunkData>>,
+			chunk_meshes: ResRw<&mut Storage<VoxelChunkMesh>>,
 		});
 
 		let me = userdatas.get_downcast_mut::<Self>(me);
@@ -158,7 +155,7 @@ impl PlayScene {
 				me.free_cam.handle_mouse_move(input_mgr.mouse_delta());
 
 				me.free_cam.process(
-					(&me.world_data, &*me.chunk_datas.as_celled_view()),
+					(&me.world_data, &*chunk_datas.as_celled_view()),
 					FreeCamInputs {
 						up: input_mgr.key(VirtualKeyCode::E).state(),
 						down: input_mgr.key(VirtualKeyCode::Q).state(),
@@ -177,17 +174,17 @@ impl PlayScene {
 					let pos = Location::new(&me.world_data, pos);
 
 					// Fill volume
-					let set_state_cx = Provider::new().with(&mut me.arch_chunk);
+					let set_state_cx = Provider::new_with_parent(Some(dyn_cx)).with(chunk_arch);
 
 					for [x, y, z] in VolumetricIter::new([6, 6, 6]) {
 						let [x, y, z] = [x as i32 - 3, y as i32 - 10, z as i32 - 3];
 
 						pos.at_relative(
-							(&me.world_data, me.chunk_datas.as_celled_view()),
+							(&me.world_data, chunk_datas.as_celled_view()),
 							WorldVec::new(x, y, z),
 						)
 						.set_state_or_create(
-							(&mut me.world_data, &mut me.chunk_datas, &set_state_cx),
+							(&mut me.world_data, chunk_datas, &set_state_cx),
 							Self::chunk_factory,
 							BlockState {
 								material: 1,
@@ -204,7 +201,7 @@ impl PlayScene {
 						EntityVec::from_glam(me.free_cam.facing().as_dvec3()),
 					);
 
-					let cx = (&me.world_data, &*me.chunk_datas.as_celled_view());
+					let cx = (&me.world_data, &*chunk_datas.as_celled_view());
 
 					for mut isect in ray.step_for(cx, 6.) {
 						if isect
@@ -216,8 +213,8 @@ impl PlayScene {
 							target.set_state_or_create(
 								(
 									&mut me.world_data,
-									&mut me.chunk_datas,
-									&Provider::new().with(&mut me.arch_chunk),
+									chunk_datas,
+									&Provider::new().with(chunk_arch),
 								),
 								Self::chunk_factory,
 								BlockState {
@@ -235,7 +232,7 @@ impl PlayScene {
 						EntityVec::from_glam(me.free_cam.facing().as_dvec3()),
 					);
 
-					let cx = (&me.world_data, &*me.chunk_datas.as_celled_view());
+					let cx = (&me.world_data, &*chunk_datas.as_celled_view());
 
 					for mut isect in ray.step_for(cx, 6.) {
 						if isect
@@ -246,8 +243,8 @@ impl PlayScene {
 							isect.block.set_state_or_create(
 								(
 									&mut me.world_data,
-									&mut me.chunk_datas,
-									&Provider::new().with(&mut me.arch_chunk),
+									chunk_datas,
+									&Provider::new().with(chunk_arch),
 								),
 								Self::chunk_factory,
 								BlockState::default(),
@@ -288,23 +285,23 @@ impl PlayScene {
 		}
 
 		// Update chunk meshes
-		for chunk in me.world_data.flush_flagged((&mut me.chunk_datas,)) {
-			me.world_mesh.flag_chunk((&mut me.chunk_meshes,), chunk);
+		for chunk in me.world_data.flush_flagged((chunk_datas,)) {
+			me.world_mesh.flag_chunk((chunk_meshes,), chunk);
 
 			// TODO: Make this more conservative
-			let chunk_data = me.chunk_datas.get(chunk);
+			let chunk_data = chunk_datas.get(chunk);
 
 			for face in BlockFace::variants() {
 				let Some(neighbor) = chunk_data.neighbor(face) else {
 					continue;
 				};
 
-				me.world_mesh.flag_chunk((&mut me.chunk_meshes,), neighbor);
+				me.world_mesh.flag_chunk((chunk_meshes,), neighbor);
 			}
 		}
 
 		me.world_mesh
-			.update_chunks((&gfx, &me.chunk_datas, &mut me.chunk_meshes), None);
+			.update_chunks((&gfx, chunk_datas, chunk_meshes), None);
 	}
 
 	fn on_render(cx: &Provider, me: Entity, event: SceneRenderEvent) {
@@ -315,6 +312,7 @@ impl PlayScene {
 			scene_userdatas: ResRw<&mut Storage<BoxedUserdata>>,
 			depth_textures: ResRw<&mut Storage<FullScreenTexture>>,
 			viewports: ResRw<&Storage<Viewport>>,
+			chunk_meshes: ResRw<&mut Storage<VoxelChunkMesh>>,
 		});
 
 		let me = scene_userdatas.get_downcast_mut::<Self>(me);
@@ -396,7 +394,7 @@ impl PlayScene {
 
 			// Render world
 			me.world_mesh
-				.render_chunks((&me.chunk_meshes, &me.voxel_uniforms), &mut pass);
+				.render_chunks((&chunk_meshes, &me.voxel_uniforms), &mut pass);
 		}
 
 		// Submit work
@@ -405,11 +403,37 @@ impl PlayScene {
 
 	fn chunk_factory(cx: &Provider, pos: ChunkVec) -> Entity {
 		unpack!(cx => {
-			arch_chunk: &mut Archetype,
+			universe: &Universe,
+			arch_chunk: Res<&ChunkArchetype>,
 		});
 
-		let chunk = arch_chunk.spawn(format_args!("chunk at {pos:?}"));
+		let chunk = arch_chunk.spawn((universe,), pos);
 		log::info!("Spawning chunk at {pos:?}");
 		chunk
+	}
+}
+
+// === ChunkArchetype === //
+
+#[derive(Debug)]
+pub struct ChunkArchetype(ArchetypeHandle);
+
+impl UniverseResource for ChunkArchetype {
+	fn create(universe: &Universe) -> Self {
+		let arch = universe.create_archetype("chunk archetype");
+
+		Self(arch)
+	}
+}
+
+impl ChunkArchetype {
+	pub fn id(&self) -> ArchetypeId {
+		self.0.id()
+	}
+
+	pub fn spawn(&self, (universe,): (&Universe,), pos: ChunkVec) -> Entity {
+		universe
+			.archetype(self.id())
+			.spawn(format_args!("chunk at {pos:?}"))
 	}
 }

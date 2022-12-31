@@ -4,19 +4,26 @@ use std::{
 	hash::{self, BuildHasher},
 	mem,
 	ops::{Index, IndexMut},
+	sync::Once,
 };
 
 use derive_where::derive_where;
 use hashbrown::HashMap;
 use parking_lot::Mutex;
 
-use super::ptr::PointeeCastExt;
+use super::ptr::HeapPointerExt;
 
 #[derive(Debug)]
 #[derive_where(Default; S: Default)]
 pub struct EventualMap<K, V: ?Sized, S = RandomState> {
 	established: HashMap<K, Box<V>, S>,
-	new: Mutex<HashMap<K, Option<Box<V>>, S>>,
+	nursery: Mutex<HashMap<K, NurseryCell<V>, S>>,
+}
+
+#[derive(Debug)]
+struct NurseryCell<V: ?Sized> {
+	once: Box<Once>,
+	value: Option<Box<V>>,
 }
 
 impl<K, V: ?Sized> EventualMap<K, V> {
@@ -31,8 +38,6 @@ where
 	V: ?Sized,
 	S: Default + BuildHasher,
 {
-	// TODO: Implement `raw_get`
-
 	pub fn get<Q>(&self, key: &Q) -> Option<&V>
 	where
 		Q: ?Sized + hash::Hash + Eq,
@@ -42,19 +47,13 @@ where
 			return Some(&established);
 		}
 
-		self.new.lock().get(key).map(|inner| {
-			let inner = inner.as_ref().unwrap_or_else(|| {
-				panic!("Attempted to acquire auto value while it was being initialized.");
-			});
+		let nursery_map = self.nursery.lock();
+		let value = nursery_map.get(key)?.value.as_ref()?;
 
-			let inner = &**inner;
-
-			unsafe {
-				// Safety: the box is not going to be destroyed until the next mutating call to
-				// `EventualMap` and, barring `Provider::get_raw`—which has special semantics—this box
-				// is exterior mutably w.r.t. the container.
-				inner.prolong()
-			}
+		Some(unsafe {
+			// Safety: the box is not going to be destroyed until the next mutating call to
+			// `EventualMap` and this box exhibits exterior mutability w.r.t. the container.
+			value.prolong_heap_ref()
 		})
 	}
 
@@ -67,31 +66,70 @@ where
 			return &established;
 		}
 
-		// Otherwise, see if it's a new component and acquire it from there.
-		if let Some(established) = self.new.lock().entry(key).or_insert(None) {
-			let inner = &**established;
-			return unsafe {
-				// Safety: the box is not going to be destroyed until the next mutating call to
-				// `EventualMap` and, barring `Provider::get_raw`—which has special semantics—this box
-				// is exterior mutably w.r.t. the container.
-				inner.prolong()
-			};
+		// Otherwise, see if it's a component in the nursery and acquire it from there.
+		let mut nursery_map = self.nursery.lock();
+
+		match nursery_map.entry(key).or_insert_with(|| NurseryCell {
+			once: Box::new(Once::new()),
+			value: None,
+		}) {
+			NurseryCell {
+				value: Some(value), ..
+			} => {
+				// The value was already initialized so let's return it.
+				unsafe {
+					// Safety: the box is not going to be destroyed until the next mutating call to
+					// `EventualMap` and this box exhibits exterior mutability w.r.t. the container.
+					value.prolong_heap_ref()
+				}
+			}
+			NurseryCell { once, .. } => {
+				// If it was in neither the established map, nor the nursery, it must be actively
+				// initializing or in need of initialization. We handle non-racy initialization using
+				// the boxed `Once` instance.
+				//
+				// However, we must release the `nursery_map` mutex during initialization lest recursive calls
+				// to `get_or_create` deadlock, hence this lifetime prolongation.
+				let once = unsafe {
+					// Safety: same exact logic as above.
+					once.prolong_heap_ref()
+				};
+
+				drop(nursery_map);
+
+				// Call the initialization routine or wait for an existing invocation to finish.
+				//
+				// Note that, even if we're the thread that inserted the value into the map, we may
+				// not be the one actually invoking the method. This is because of the `nursery_map`
+				// mutex guard has been dropped so someone may have already observed our added entry
+				// and taken it upon themselves to initialize the cell instead of us.
+				let mut value_to_return = None;
+				once.call_once(|| {
+					// Oh good, nothing is locked right now so there's no chance of deadlock.
+					let value = f();
+
+					// Now, insert the value into the mutex...
+					value_to_return = Some(unsafe {
+						// Safety: same exact logic as above.
+						value.prolong_heap_ref()
+					});
+					self.nursery.lock().get_mut(&key).unwrap().value = Some(value);
+				});
+
+				// This was either just initialized in `call_once` or
+				value_to_return.unwrap_or_else(|| unsafe {
+					// Safety: same exact logic as above.
+					self.nursery
+						.lock()
+						.get_mut(&key)
+						.unwrap()
+						.value
+						.as_ref()
+						.unwrap()
+						.prolong_heap_ref()
+				})
+			}
 		}
-
-		// If both checks failed, create the value...
-		let value = f();
-		let inner = unsafe {
-			// Safety: the box is not going to be destroyed until the next mutating call to
-			// `EventualMap` and, barring `Provider::get_raw`—which has special semantics—this box
-			// is exterior mutably w.r.t. the container.
-			(&*value).prolong()
-		};
-
-		// ...and put it in the new map.
-		// N.B. because we're transferring control to user code, we have to reborrow this lock.
-		self.new.lock().insert(key, Some(value));
-
-		inner
 	}
 
 	pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
@@ -128,9 +166,9 @@ where
 
 	pub fn flush(&mut self) {
 		self.established.extend(
-			mem::replace(self.new.get_mut(), HashMap::default())
+			mem::replace(self.nursery.get_mut(), HashMap::default())
 				.into_iter()
-				.map(|(k, v)| (k, v.unwrap())),
+				.map(|(k, v)| (k, v.value.unwrap())),
 		)
 	}
 }

@@ -31,7 +31,7 @@ impl<'r> Provider<'r> {
 		Self::new().with(entries)
 	}
 
-	pub fn with_parent(parent: Option<&'r Provider<'r>>) -> Self {
+	pub fn new_with_parent(parent: Option<&'r Provider<'r>>) -> Self {
 		Self {
 			_ty: PhantomData,
 			parent,
@@ -43,7 +43,7 @@ impl<'r> Provider<'r> {
 		parent: Option<&'r Provider<'r>>,
 		entries: T,
 	) -> Self {
-		Self::with_parent(parent).with(entries)
+		Self::new_with_parent(parent).with(entries)
 	}
 
 	pub fn parent(&self) -> Option<&'r Provider<'r>> {
@@ -158,10 +158,10 @@ impl<'a: 'b, 'b, T: ?Sized + 'static> ProviderEntries<'b> for &'a mut T {
 
 macro_rules! impl_provider_entries {
 	($($para:ident:$field:tt),*) => {
-		impl<'a, $($para: 'a + ProviderEntries<'a>),*> ProviderEntries<'a> for ($(&'a mut $para,)*) {
+		impl<'a, $($para: 'a + ProviderEntries<'a>),*> ProviderEntries<'a> for ($($para,)*) {
 			#[allow(unused)]
 			fn add_to_provider(self, provider: &mut Provider<'a>) {
-				$(self.$field.add_to_provider_ref(&mut *provider);)*
+				$(self.$field.add_to_provider(&mut *provider);)*
 			}
 
 			#[allow(unused)]
@@ -220,6 +220,10 @@ impl<'provider, 'guard: 'borrow, 'borrow, T: ?Sized + Userdata>
 pub mod macro_internal {
 	use super::*;
 
+	// === `unpack!` stuff === //
+
+	pub use std::marker::PhantomData;
+
 	pub trait UnpackTargetTuple<'guard: 'borrow, 'borrow, P: ?Sized, I> {
 		type Output;
 
@@ -244,7 +248,30 @@ pub mod macro_internal {
 
 	impl_tuples!(impl_guard_tuples_as_refs);
 
-	pub use std::marker::PhantomData;
+	// === `provider_from_tuple!` macro === //
+
+	pub struct ProviderFromDecomposedTuple<T>(pub T);
+
+	macro_rules! impl_provider_entries {
+		($($para:ident:$field:tt),*) => {
+			impl<'a, $($para: 'a + ProviderEntries<'a>),*>
+				ProviderEntries<'a> for
+				ProviderFromDecomposedTuple<($(&'a mut $para,)*)>
+			{
+				#[allow(unused)]
+				fn add_to_provider(self, provider: &mut Provider<'a>) {
+					$(self.0.$field.add_to_provider_ref(&mut *provider);)*
+				}
+
+				#[allow(unused)]
+				fn add_to_provider_ref(&'a mut self, provider: &mut Provider<'a>) {
+					$(self.0.$field.add_to_provider_ref(&mut *provider);)*
+				}
+			}
+		};
+	}
+
+	impl_tuples!(impl_provider_entries);
 }
 
 #[macro_export]
@@ -284,7 +311,7 @@ macro_rules! unpack {
 		$(,)?
 	}) => {
 		let mut guard;
-		let ($($name,)*) = $crate::unpack!($src => guard & (
+		let ($($name,)*) = $crate::ecs::context::unpack!($src => guard & (
 			$($ty),*
 		));
 	};
@@ -296,13 +323,32 @@ macro_rules! unpack {
 		),*
 		$(,)?
 	}) => {
-		let ($($name,)*) = $crate::unpack!($src => (
+		let ($($name,)*) = $crate::ecs::context::unpack!($src => (
 			$($ty),*
 		));
 	};
 }
 
-pub use unpack;
+#[macro_export]
+macro_rules! provider_from_tuple {
+	($parent:expr, $expr:expr) => {
+		$crate::ecs::context::Provider::new_with_parent_and_comps(
+			$parent,
+			$crate::ecs::context::macro_internal::ProviderFromDecomposedTuple(
+				$crate::ecs::context::decompose!($expr => (&mut ...))
+			)
+		)
+	};
+	($expr:expr) => {
+		$crate::ecs::context::Provider::new_with(
+			$crate::ecs::context::macro_internal::ProviderFromDecomposedTuple(
+				$crate::ecs::context::decompose!($expr => (&mut ...))
+			)
+		)
+	};
+}
+
+pub use {provider_from_tuple, unpack};
 
 // === Tuple context passing === //
 
