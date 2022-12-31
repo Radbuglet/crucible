@@ -1,7 +1,6 @@
 use std::{fmt, hash, marker::PhantomData, ops::Index, ops::IndexMut};
 
-use super::array::boxed_arr_from_fn;
-use crate::lang::marker::PhantomInvariant;
+use crate::lang::{marker::PhantomInvariant, std_traits::ArrayLike};
 
 // === `ExposesVariants` === //
 
@@ -10,6 +9,12 @@ pub type VariantIter<T> = std::iter::Copied<std::slice::Iter<'static, T>>;
 pub trait CEnum: 'static + Sized + fmt::Debug + Copy + hash::Hash + Eq + Ord {
 	const COUNT: usize = Self::VARIANTS.len();
 	const VARIANTS: &'static [Self];
+
+	type Array<T>: ArrayLike<Elem = T>;
+
+	fn new_array<T, F>(gen: F) -> Self::Array<T>
+	where
+		F: FnMut(usize) -> T;
 
 	fn index(self) -> usize;
 
@@ -53,6 +58,16 @@ macro_rules! c_enum {
 				$(Self::$field),*
 			];
 
+			type Array<T> = [T; Self::COUNT];
+
+			fn new_array<T, F>(mut gen: F) -> Self::Array<T>
+			where
+				F: ::std::ops::FnMut(usize) -> T,
+			{
+				$crate::arr![i => gen(i); Self::COUNT]
+			}
+
+
 			fn index(self) -> $crate::mem::c_enum::macro_internal::usize {
 				self as $crate::mem::c_enum::macro_internal::usize
 			}
@@ -67,35 +82,32 @@ pub use c_enum;
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct CEnumMap<K: CEnum, V> {
 	_ty: PhantomInvariant<K>,
-	// TODO: Use a statically sized array once generic consts stabilize
-	map: Box<[V]>,
+	map: K::Array<V>,
 }
 
 impl<K: CEnum, V: Default> Default for CEnumMap<K, V> {
 	fn default() -> Self {
 		Self {
 			_ty: Default::default(),
-			map: boxed_arr_from_fn(Default::default, K::COUNT),
+			map: K::new_array(|_| V::default()),
 		}
 	}
 }
 
 impl<K: CEnum, V> CEnumMap<K, V> {
-	pub fn new<const N: usize>(values: [V; N]) -> Self {
-		assert_eq!(values.len(), K::COUNT);
-
+	pub fn new(values: K::Array<V>) -> Self {
 		Self {
 			_ty: PhantomData,
-			map: Box::new(values),
+			map: values,
 		}
 	}
 
 	pub fn iter(&self) -> impl Iterator<Item = (K, &V)> + '_ {
-		K::variants().zip(self.map.iter())
+		K::variants().zip(self.map.as_slice().iter())
 	}
 
 	pub fn iter_mut(&mut self) -> impl Iterator<Item = (K, &mut V)> + '_ {
-		K::variants().zip(self.map.iter_mut())
+		K::variants().zip(self.map.as_slice_mut().iter_mut())
 	}
 
 	pub fn values(&self) -> impl Iterator<Item = &V> + '_ {
