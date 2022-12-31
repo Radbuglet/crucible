@@ -166,9 +166,8 @@ impl Universe {
 		self.resources.get_or_create(|| T::create(self))
 	}
 
-	pub fn resource_rw<T: UniverseResource>(&self) -> &RwLock<T> {
-		self.resources
-			.get_or_create(|| RwLock::new(T::create(self)))
+	pub fn resource_rw<T: UniverseResourceRw>(&self) -> &RwLock<T> {
+		self.resource()
 	}
 
 	pub fn storage<T: Userdata>(&self) -> RwLockReadGuard<Storage<T>> {
@@ -354,6 +353,16 @@ pub trait UniverseResource: Userdata {
 	fn create(universe: &Universe) -> Self;
 }
 
+pub trait UniverseResourceRw: Userdata {
+	fn create(universe: &Universe) -> Self;
+}
+
+impl<T: UniverseResourceRw> UniverseResource for RwLock<T> {
+	fn create(universe: &Universe) -> Self {
+		RwLock::new(T::create(universe))
+	}
+}
+
 impl<'guard: 'borrow, 'borrow> UnpackTarget<'guard, 'borrow, Universe> for &'borrow Universe {
 	type Guard = &'guard Universe;
 	type Reference = &'borrow Universe;
@@ -386,7 +395,7 @@ impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow
 	}
 }
 
-impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow, Universe>
+impl<'guard: 'borrow, 'borrow, T: UniverseResourceRw> UnpackTarget<'guard, 'borrow, Universe>
 	for ResRw<&'borrow T>
 {
 	type Guard = RwLockReadGuard<'guard, T>;
@@ -401,7 +410,7 @@ impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow
 	}
 }
 
-impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow, Universe>
+impl<'guard: 'borrow, 'borrow, T: UniverseResourceRw> UnpackTarget<'guard, 'borrow, Universe>
 	for ResRw<&'borrow mut T>
 {
 	type Guard = RwLockWriteGuard<'guard, T>;
@@ -439,7 +448,7 @@ impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
 	}
 }
 
-impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
+impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResourceRw>
 	UnpackTarget<'guard, 'borrow, Provider<'provider>> for ResRw<&'borrow T>
 {
 	type Guard = ProviderResourceRefGuard<'guard, T>;
@@ -461,7 +470,7 @@ impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
 	}
 }
 
-impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
+impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResourceRw>
 	UnpackTarget<'guard, 'borrow, Provider<'provider>> for ResRw<&'borrow mut T>
 {
 	type Guard = ProviderResourceMutGuard<'guard, T>;

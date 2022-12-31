@@ -7,7 +7,7 @@ use crucible_core::{
 		entity::{ArchetypeId, Entity},
 		event::{EntityDestroyEvent, EventQueueIter},
 		storage::Storage,
-		universe::{ArchetypeHandle, Universe, UniverseResource, ResRw},
+		universe::{ArchetypeHandle, ResRw, Universe, UniverseResource},
 	},
 };
 
