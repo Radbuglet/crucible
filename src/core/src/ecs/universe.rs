@@ -2,7 +2,7 @@ use std::{
 	any::type_name,
 	borrow::{Borrow, BorrowMut},
 	cell::{Ref, RefMut},
-	mem,
+	fmt, mem,
 	num::NonZeroU64,
 	ops::{Deref, DerefMut},
 	sync::{
@@ -16,7 +16,7 @@ use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{
 	debug::{
-		label::DebugLabel,
+		label::{DebugLabel, ReifiedDebugLabel},
 		lifetime::{DebugLifetime, Dependent, LifetimeLike},
 		userdata::{DebugOpaque, Userdata},
 	},
@@ -43,7 +43,7 @@ pub struct Universe {
 	tag_alloc: AtomicU64,
 	dirty_archetypes: Mutex<HashSet<ArchetypeId>>,
 	resources: TypeMap,
-	task_queue: Mutex<TaskQueue>,
+	task_queue: Mutex<TaskQueue<UniverseTask>>,
 	destruction_list: Arc<DestructionList>,
 }
 
@@ -66,7 +66,20 @@ struct DestructionList {
 	tags: Mutex<Vec<TagId>>,
 }
 
-type UniverseEventHandler<E> = DebugOpaque<fn(&Universe, EventQueueIter<E>)>;
+struct UniverseTask {
+	name: ReifiedDebugLabel,
+	handler: Box<dyn FnMut(&mut Universe) + Send + Sync>,
+}
+
+impl fmt::Debug for UniverseTask {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("UniverseTask")
+			.field("name", &self.name)
+			.finish_non_exhaustive()
+	}
+}
+
+type UniverseEventHandler<E> = DebugOpaque<fn(&mut Universe, EventQueueIter<E>)>;
 
 impl Universe {
 	pub fn new() -> Self {
@@ -105,7 +118,7 @@ impl Universe {
 	pub fn add_archetype_handler<E: Userdata>(
 		&self,
 		id: ArchetypeId,
-		handler: fn(&Universe, EventQueueIter<E>),
+		handler: fn(&mut Universe, EventQueueIter<E>),
 	) {
 		self.add_archetype_meta::<UniverseEventHandler<E>>(id, DebugOpaque::new(handler));
 	}
@@ -190,10 +203,13 @@ impl Universe {
 
 	pub fn queue_task<F>(&self, name: impl DebugLabel, handler: F)
 	where
-		F: 'static + Send + Sync + FnOnce(&Universe),
+		F: 'static + Send + Sync + FnOnce(&mut Universe),
 	{
-		self.task_queue.lock().push(name, |_tq, cx: &Provider<'_>| {
-			handler(&cx.get::<Universe>());
+		let mut handler = Some(handler);
+
+		self.task_queue.lock().push(UniverseTask {
+			name: name.reify(),
+			handler: Box::new(move |universe| (handler.take().unwrap())(universe)),
 		});
 	}
 
@@ -203,7 +219,8 @@ impl Universe {
 			move |universe| {
 				for iter in events.flush_all() {
 					let arch = iter.arch();
-					universe.archetype_meta::<UniverseEventHandler<E>>(arch)(universe, iter);
+					let handler = *universe.archetype_meta::<UniverseEventHandler<E>>(arch);
+					handler(universe, iter);
 				}
 			},
 		);
@@ -212,17 +229,12 @@ impl Universe {
 	// === Management === //
 
 	pub fn dispatch_tasks(&mut self) {
-		loop {
-			let task_queue = self.task_queue.get_mut();
-			if task_queue.is_empty() {
-				break;
-			}
-
-			// Yes, we have two layers of task queue stealing... so what? Replacing vectors isn't
-			// *that* expensive.
-			let mut task_queue = mem::replace(task_queue, TaskQueue::new());
-			task_queue.dispatch(&Provider::new().with(&mut *self));
+		while let Some(mut task) = self.task_queue.get_mut().next_task() {
+			log::trace!("Executing universe task {:?}", task.name);
+			(task.handler)(self);
 		}
+
+		self.task_queue.get_mut().clear_capacities();
 	}
 
 	pub fn flush(&mut self) {

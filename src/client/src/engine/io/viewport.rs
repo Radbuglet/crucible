@@ -322,8 +322,8 @@ impl ViewportArch {
 		entity
 	}
 
-	fn on_destroy(universe: &Universe, events: EventQueueIter<EntityDestroyEvent>) {
-		unpack!(universe => {
+	fn on_destroy(universe: &mut Universe, events: EventQueueIter<EntityDestroyEvent>) {
+		unpack!(&*universe => {
 			viewports: ResRw<&mut Storage<Viewport>>,
 		});
 

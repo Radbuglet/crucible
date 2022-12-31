@@ -87,8 +87,8 @@ impl SceneArch {
 		scene
 	}
 
-	fn on_destroy(universe: &Universe, events: EventQueueIter<EntityDestroyEvent>) {
-		unpack!(universe => {
+	fn on_destroy(universe: &mut Universe, events: EventQueueIter<EntityDestroyEvent>) {
+		unpack!(&*universe => {
 			scene_userdatas: ResRw<&mut Storage<BoxedUserdata>>,
 			update_handlers: ResRw<&mut Storage<SceneUpdateHandler>>,
 			render_handlers: ResRw<&mut Storage<SceneRenderHandler>>,

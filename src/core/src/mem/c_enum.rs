@@ -24,7 +24,7 @@ pub trait CEnum: 'static + Sized + fmt::Debug + Copy + hash::Hash + Eq + Ord {
 
 #[doc(hidden)]
 pub mod macro_internal {
-	pub use core::primitive::usize;
+	pub use std::primitive::usize;
 }
 
 #[macro_export]
