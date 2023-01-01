@@ -79,7 +79,7 @@ impl SceneArch {
 		update_handler: SceneUpdateHandler,
 		render_handler: SceneRenderHandler,
 	) -> Entity {
-		let scene = universe.archetype(self.id()).spawn("scene");
+		let scene = universe.archetype_by_id(self.id()).spawn("scene");
 		scene_userdatas.add(scene, scene_userdata);
 		update_handlers.add(scene, update_handler);
 		render_handlers.add(scene, render_handler);
@@ -95,7 +95,7 @@ impl SceneArch {
 		});
 
 		let arch_id = events.arch();
-		let mut arch = universe.archetype(arch_id);
+		let mut arch = universe.archetype_by_id(arch_id);
 
 		for (target, _) in events {
 			scene_userdatas.remove(target);

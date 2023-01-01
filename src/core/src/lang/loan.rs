@@ -436,6 +436,7 @@ unsafe impl<T: ?Sized + 'static> Borrower<LentRef<RwLock<T>>> for BorrowingRwWri
 
 // === Box Mapping === //
 
+// FIXME: Unsound
 pub fn map_box<T: ?Sized, U: ?Sized, F>(b: Box<T>, f: F) -> Box<U>
 where
 	F: FnOnce(&mut T) -> &mut U,
@@ -457,6 +458,7 @@ pub fn downcast_userdata_box<T: Userdata>(b: Box<dyn Userdata>) -> Box<T> {
 	map_box(b, |val| val.downcast_mut::<T>())
 }
 
+// FIXME: Unsound
 pub fn map_arc<T: ?Sized, U: ?Sized, F>(arc: Arc<T>, f: F) -> Arc<U>
 where
 	F: FnOnce(&T) -> &U,

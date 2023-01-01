@@ -433,7 +433,7 @@ impl ChunkArchetype {
 
 	pub fn spawn(&self, (universe,): (&Universe,), pos: ChunkVec) -> Entity {
 		universe
-			.archetype(self.id())
+			.archetype_by_id(self.id())
 			.spawn(format_args!("chunk at {pos:?}"))
 	}
 }

@@ -307,7 +307,7 @@ impl ViewportArch {
 		),
 		viewport: Viewport,
 	) -> Entity {
-		let entity = universe.archetype(self.id()).spawn("viewport");
+		let entity = universe.archetype_by_id(self.id()).spawn("viewport");
 		viewports.add(entity, viewport);
 		depth_textures.add(
 			entity,
@@ -328,7 +328,7 @@ impl ViewportArch {
 		});
 
 		let arch_id = events.arch();
-		let mut arch = universe.archetype(arch_id);
+		let mut arch = universe.archetype_by_id(arch_id);
 
 		for (target, _) in events {
 			viewports.remove(target);

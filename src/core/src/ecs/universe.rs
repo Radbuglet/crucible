@@ -2,7 +2,9 @@ use std::{
 	any::type_name,
 	borrow::{Borrow, BorrowMut},
 	cell::{Ref, RefMut},
-	fmt, mem,
+	fmt,
+	marker::PhantomData,
+	mem::{self, transmute},
 	num::NonZeroU64,
 	ops::{Deref, DerefMut},
 	sync::{
@@ -11,6 +13,7 @@ use std::{
 	},
 };
 
+use derive_where::derive_where;
 use hashbrown::HashSet;
 use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -24,7 +27,10 @@ use crate::{
 		loan::{BorrowingRwReadGuard, BorrowingRwWriteGuard, Mapped},
 		marker::PhantomInvariant,
 	},
-	mem::{drop_guard::DropOwnedGuard, eventual_map::EventualMap, type_map::TypeMap},
+	mem::{
+		drop_guard::DropOwnedGuard, eventual_map::EventualMap, ptr::PointeeCastExt,
+		type_map::TypeMap,
+	},
 };
 
 use super::{
@@ -49,7 +55,7 @@ pub struct Universe {
 
 #[derive(Debug)]
 struct ArchetypeInner {
-	archetype: Mutex<Archetype>,
+	archetype: Mutex<Archetype<()>>,
 	meta: TypeMap,
 	tags: Mutex<HashSet<TagId>>,
 }
@@ -88,7 +94,7 @@ impl Universe {
 
 	// === Archetype Management === //
 
-	pub fn create_archetype(&self, name: impl DebugLabel) -> ArchetypeHandle {
+	pub fn create_archetype<M: ?Sized>(&self, name: impl DebugLabel) -> ArchetypeHandle<M> {
 		let archetype = Archetype::new(name);
 		let id = archetype.id();
 		self.archetypes.add(
@@ -101,12 +107,13 @@ impl Universe {
 		);
 
 		ArchetypeHandle {
+			_ty: PhantomData,
 			id,
 			destruction_list: Arc::downgrade(&self.destruction_list),
 		}
 	}
 
-	pub fn archetype(&self, id: ArchetypeId) -> MutexGuard<Archetype> {
+	pub fn archetype_by_id(&self, id: ArchetypeId) -> MutexGuard<Archetype> {
 		self.archetypes[&id].archetype.lock()
 	}
 
@@ -277,25 +284,48 @@ impl Universe {
 
 // === Handles === //
 
-#[derive(Debug)]
-pub struct ArchetypeHandle {
+#[derive_where(Debug)]
+#[repr(C)]
+pub struct ArchetypeHandle<M: ?Sized = ()> {
+	_ty: PhantomInvariant<M>,
 	id: ArchetypeId,
 	destruction_list: Weak<DestructionList>,
 }
 
-impl ArchetypeHandle {
+impl<M: ?Sized> ArchetypeHandle<M> {
 	pub fn id(&self) -> ArchetypeId {
 		self.id
 	}
+
+	pub fn with_marker<N: ?Sized>(self) -> ArchetypeHandle<N> {
+		unsafe {
+			// Safety: This struct is `repr(C)` and `N` is only ever used in a `PhantomData`.
+			transmute(self)
+		}
+	}
+
+	pub fn with_marker_ref<N: ?Sized>(&self) -> &ArchetypeHandle<N> {
+		unsafe {
+			// Safety: This struct is `repr(C)` and `N` is only ever used in a `PhantomData`.
+			self.transmute_pointee_ref()
+		}
+	}
+
+	pub fn with_marker_mut<N: ?Sized>(&mut self) -> &mut ArchetypeHandle<N> {
+		unsafe {
+			// Safety: This struct is `repr(C)` and `N` is only ever used in a `PhantomData`.
+			self.transmute_pointee_mut()
+		}
+	}
 }
 
-impl Borrow<ArchetypeId> for ArchetypeHandle {
+impl<M: ?Sized> Borrow<ArchetypeId> for ArchetypeHandle<M> {
 	fn borrow(&self) -> &ArchetypeId {
 		&self.id
 	}
 }
 
-impl Drop for ArchetypeHandle {
+impl<M: ?Sized> Drop for ArchetypeHandle<M> {
 	fn drop(&mut self) {
 		let Some(dtor_list) = self.destruction_list.upgrade() else {
 			log::error!("Failed to destroy ArchetypeHandle for {:?}: owning universe was destroyed.", self.id);

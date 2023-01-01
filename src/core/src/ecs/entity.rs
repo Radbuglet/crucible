@@ -1,5 +1,6 @@
+use derive_where::derive_where;
 use hashbrown::{HashMap, HashSet};
-use std::num::NonZeroU32;
+use std::{marker::PhantomData, mem::transmute, num::NonZeroU32};
 
 use parking_lot::Mutex;
 
@@ -9,7 +10,8 @@ use crate::{
 		label::{DebugLabel, NO_LABEL},
 		lifetime::{DebugLifetime, Dependent, LifetimeLike},
 	},
-	mem::{drop_guard::DropOwnedGuard, free_list::PureFreeList},
+	lang::marker::PhantomInvariant,
+	mem::{drop_guard::DropOwnedGuard, free_list::PureFreeList, ptr::PointeeCastExt},
 };
 
 // === Handles === //
@@ -80,14 +82,16 @@ pub type ArchetypeSet = HashSet<Dependent<ArchetypeId>>;
 
 static ARCH_ID_FREE_LIST: Mutex<PureFreeList<()>> = Mutex::new(PureFreeList::const_new());
 
-#[derive(Debug)]
-pub struct Archetype {
-	id: NonZeroU32,
+#[derive_where(Debug)]
+#[repr(C)]
+pub struct Archetype<M: ?Sized = ()> {
+	_ty: PhantomInvariant<M>,
 	lifetime: DropOwnedGuard<DebugLifetime>,
 	slots: PureFreeList<DropOwnedGuard<DebugLifetime>>,
+	id: NonZeroU32,
 }
 
-impl Archetype {
+impl<M: ?Sized> Archetype<M> {
 	pub fn new<L: DebugLabel>(name: L) -> Self {
 		// Generate archetype ID
 		let mut free_arch_ids = ARCH_ID_FREE_LIST.lock();
@@ -97,6 +101,7 @@ impl Archetype {
 
 		// Construct archetype
 		Self {
+			_ty: PhantomData,
 			id,
 			lifetime: DropOwnedGuard::new(DebugLifetime::new(name)),
 			slots: PureFreeList::new(),
@@ -148,19 +153,40 @@ impl Archetype {
 
 	pub fn entities(&self) -> ArchetypeIter {
 		ArchetypeIter {
-			archetype: self,
+			archetype: self.with_marker_ref(),
 			slot: 0,
+		}
+	}
+
+	pub fn with_marker<N: ?Sized>(self) -> Archetype<N> {
+		unsafe {
+			// Safety: This struct is `repr(C)` and `N` is only ever used in a `PhantomData`.
+			transmute(self)
+		}
+	}
+
+	pub fn with_marker_ref<N: ?Sized>(&self) -> &Archetype<N> {
+		unsafe {
+			// Safety: This struct is `repr(C)` and `N` is only ever used in a `PhantomData`.
+			self.transmute_pointee_ref()
+		}
+	}
+
+	pub fn with_marker_mut<N: ?Sized>(&mut self) -> &mut Archetype<N> {
+		unsafe {
+			// Safety: This struct is `repr(C)` and `N` is only ever used in a `PhantomData`.
+			self.transmute_pointee_mut()
 		}
 	}
 }
 
-impl Default for Archetype {
+impl<M: ?Sized> Default for Archetype<M> {
 	fn default() -> Self {
 		Self::new(NO_LABEL)
 	}
 }
 
-impl Drop for Archetype {
+impl<M: ?Sized> Drop for Archetype<M> {
 	fn drop(&mut self) {
 		let mut free_arch_ids = ARCH_ID_FREE_LIST.lock();
 		free_arch_ids.remove(self.id.get() - 1);
@@ -197,7 +223,7 @@ impl Iterator for ArchetypeIter<'_> {
 	}
 }
 
-impl<'a> IntoIterator for &'a Archetype {
+impl<'a, M: ?Sized> IntoIterator for &'a Archetype<M> {
 	type Item = Entity;
 	type IntoIter = ArchetypeIter<'a>;
 

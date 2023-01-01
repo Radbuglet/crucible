@@ -103,7 +103,7 @@ impl VoxelWorldMesh {
 				None
 			};
 
-			meshes.add(
+			meshes.insert(
 				chunk,
 				VoxelChunkMesh {
 					still_dirty: false,
