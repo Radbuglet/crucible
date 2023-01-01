@@ -24,7 +24,7 @@ use crate::{
 		userdata::{DebugOpaque, Userdata},
 	},
 	lang::{
-		loan::{BorrowingRwReadGuard, BorrowingRwWriteGuard, Mapped},
+		loan::{BorrowingMutexGuard, BorrowingRwReadGuard, BorrowingRwWriteGuard, Mapped},
 		marker::PhantomInvariant,
 	},
 	mem::{
@@ -113,8 +113,8 @@ impl Universe {
 		}
 	}
 
-	pub fn archetype_by_id(&self, id: ArchetypeId) -> MutexGuard<Archetype> {
-		self.archetypes[&id].archetype.lock()
+	pub fn archetype_by_id(&self, id: ArchetypeId) -> &Mutex<Archetype> {
+		&self.archetypes[&id].archetype
 	}
 
 	pub fn add_archetype_meta<T: Userdata>(&self, id: ArchetypeId, value: T) {
@@ -182,12 +182,17 @@ impl Universe {
 		&self.resources
 	}
 
-	pub fn resource<T: UniverseResource>(&self) -> &T {
+	pub fn resource<T: BuildableResource>(&self) -> &T {
 		self.resources.get_or_create(|| T::create(self))
 	}
 
-	pub fn resource_rw<T: UniverseResourceRw>(&self) -> &RwLock<T> {
+	pub fn resource_rw<T: BuildableResourceRw>(&self) -> &RwLock<T> {
 		self.resource()
+	}
+
+	pub fn archetype<T: ?Sized + BuildableArchetype>(&self) -> &Mutex<Archetype<()>> {
+		let id = self.resource::<UniverseArchetypeResource<T>>().id();
+		self.archetype_by_id(id)
 	}
 
 	pub fn storage<T: Userdata>(&self) -> RwLockReadGuard<Storage<T>> {
@@ -389,21 +394,50 @@ impl LifetimeLike for TagId {
 	}
 }
 
-// === Resources === //
+// === Resource traits === //
 
-pub trait UniverseResource: Userdata {
+pub trait BuildableResource: Userdata {
 	fn create(universe: &Universe) -> Self;
 }
 
-pub trait UniverseResourceRw: Userdata {
+pub trait BuildableResourceRw: Userdata {
 	fn create(universe: &Universe) -> Self;
 }
 
-impl<T: UniverseResourceRw> UniverseResource for RwLock<T> {
+impl<T: BuildableResourceRw> BuildableResource for RwLock<T> {
 	fn create(universe: &Universe) -> Self {
 		RwLock::new(T::create(universe))
 	}
 }
+
+pub trait BuildableArchetype: 'static {
+	fn create(universe: &Universe) -> ArchetypeHandle<Self> {
+		universe.create_archetype(type_name::<Self>())
+	}
+}
+
+#[derive_where(Debug)]
+pub struct UniverseArchetypeResource<T: ?Sized>(pub ArchetypeHandle<T>);
+
+impl<T: ?Sized + BuildableArchetype> BuildableResource for UniverseArchetypeResource<T> {
+	fn create(universe: &Universe) -> Self {
+		Self(T::create(universe))
+	}
+}
+
+impl<T: ?Sized> UniverseArchetypeResource<T> {
+	pub fn id(&self) -> ArchetypeId {
+		self.0.id()
+	}
+}
+
+// === Resource dependency injection in `Provider` === //
+
+pub struct Res<T>(PhantomInvariant<T>);
+
+pub struct ResRw<T>(PhantomInvariant<T>);
+
+pub struct ResArch<T: ?Sized>(PhantomInvariant<T>);
 
 impl<'guard: 'borrow, 'borrow> UnpackTarget<'guard, 'borrow, Universe> for &'borrow Universe {
 	type Guard = &'guard Universe;
@@ -418,11 +452,7 @@ impl<'guard: 'borrow, 'borrow> UnpackTarget<'guard, 'borrow, Universe> for &'bor
 	}
 }
 
-pub struct Res<T>(PhantomInvariant<T>);
-
-pub struct ResRw<T>(PhantomInvariant<T>);
-
-impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow, Universe>
+impl<'guard: 'borrow, 'borrow, T: BuildableResource> UnpackTarget<'guard, 'borrow, Universe>
 	for Res<&'borrow T>
 {
 	type Guard = &'guard T;
@@ -437,7 +467,7 @@ impl<'guard: 'borrow, 'borrow, T: UniverseResource> UnpackTarget<'guard, 'borrow
 	}
 }
 
-impl<'guard: 'borrow, 'borrow, T: UniverseResourceRw> UnpackTarget<'guard, 'borrow, Universe>
+impl<'guard: 'borrow, 'borrow, T: BuildableResourceRw> UnpackTarget<'guard, 'borrow, Universe>
 	for ResRw<&'borrow T>
 {
 	type Guard = RwLockReadGuard<'guard, T>;
@@ -452,7 +482,7 @@ impl<'guard: 'borrow, 'borrow, T: UniverseResourceRw> UnpackTarget<'guard, 'borr
 	}
 }
 
-impl<'guard: 'borrow, 'borrow, T: UniverseResourceRw> UnpackTarget<'guard, 'borrow, Universe>
+impl<'guard: 'borrow, 'borrow, T: BuildableResourceRw> UnpackTarget<'guard, 'borrow, Universe>
 	for ResRw<&'borrow mut T>
 {
 	type Guard = RwLockWriteGuard<'guard, T>;
@@ -467,9 +497,22 @@ impl<'guard: 'borrow, 'borrow, T: UniverseResourceRw> UnpackTarget<'guard, 'borr
 	}
 }
 
-// === Resource dependency injection in `Provider` === //
+impl<'guard: 'borrow, 'borrow, T: ?Sized + BuildableArchetype>
+	UnpackTarget<'guard, 'borrow, Universe> for ResArch<T>
+{
+	type Guard = MutexGuard<'guard, Archetype>;
+	type Reference = &'borrow mut Archetype<T>;
 
-impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
+	fn acquire_guard(src: &'guard Universe) -> Self::Guard {
+		src.archetype::<T>().try_lock().unwrap()
+	}
+
+	fn acquire_ref(guard: &'borrow mut Self::Guard) -> Self::Reference {
+		guard.with_marker_mut()
+	}
+}
+
+impl<'provider, 'guard: 'borrow, 'borrow, T: BuildableResource>
 	UnpackTarget<'guard, 'borrow, Provider<'provider>> for Res<&'borrow T>
 {
 	type Guard = ProviderResourceGuard<'guard, T>;
@@ -490,7 +533,7 @@ impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResource>
 	}
 }
 
-impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResourceRw>
+impl<'provider, 'guard: 'borrow, 'borrow, T: BuildableResourceRw>
 	UnpackTarget<'guard, 'borrow, Provider<'provider>> for ResRw<&'borrow T>
 {
 	type Guard = ProviderResourceRefGuard<'guard, T>;
@@ -512,7 +555,7 @@ impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResourceRw>
 	}
 }
 
-impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResourceRw>
+impl<'provider, 'guard: 'borrow, 'borrow, T: BuildableResourceRw>
 	UnpackTarget<'guard, 'borrow, Provider<'provider>> for ResRw<&'borrow mut T>
 {
 	type Guard = ProviderResourceMutGuard<'guard, T>;
@@ -531,6 +574,28 @@ impl<'provider, 'guard: 'borrow, 'borrow, T: UniverseResourceRw>
 
 	fn acquire_ref(guard: &'borrow mut Self::Guard) -> Self::Reference {
 		&mut *guard
+	}
+}
+
+impl<'provider, 'guard: 'borrow, 'borrow, T: ?Sized + BuildableArchetype>
+	UnpackTarget<'guard, 'borrow, Provider<'provider>> for ResArch<T>
+{
+	type Guard = ProviderResourceArchGuard<'guard, T>;
+	type Reference = &'borrow mut Archetype<T>;
+
+	fn acquire_guard(src: &'guard Provider<'provider>) -> Self::Guard {
+		if let Some(value) = src.try_get_mut::<Archetype<T>>() {
+			return ProviderResourceArchGuard::Local(value);
+		}
+
+		let res = src.get::<Universe>();
+		let res = Ref::map(res, |universe| universe.archetype::<T>());
+
+		ProviderResourceArchGuard::Universe(BorrowingMutexGuard::try_new(res).unwrap())
+	}
+
+	fn acquire_ref(guard: &'borrow mut Self::Guard) -> Self::Reference {
+		guard.with_marker_mut()
 	}
 }
 
@@ -614,6 +679,44 @@ impl<T> Borrow<T> for ProviderResourceMutGuard<'_, T> {
 
 impl<T> BorrowMut<T> for ProviderResourceMutGuard<'_, T> {
 	fn borrow_mut(&mut self) -> &mut T {
+		&mut *self
+	}
+}
+
+#[derive(Debug)]
+pub enum ProviderResourceArchGuard<'a, T: ?Sized + 'static> {
+	Local(RefMut<'a, Archetype<T>>),
+	Universe(Mapped<Ref<'a, Mutex<Archetype>>, BorrowingMutexGuard<Archetype>>),
+}
+
+impl<T: ?Sized> Deref for ProviderResourceArchGuard<'_, T> {
+	type Target = Archetype<T>;
+
+	fn deref(&self) -> &Self::Target {
+		match self {
+			Self::Local(r) => &r,
+			Self::Universe(r) => r.with_marker_ref(),
+		}
+	}
+}
+
+impl<T: ?Sized> DerefMut for ProviderResourceArchGuard<'_, T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		match self {
+			Self::Local(r) => &mut *r,
+			Self::Universe(r) => r.with_marker_mut(),
+		}
+	}
+}
+
+impl<T: ?Sized> Borrow<Archetype<T>> for ProviderResourceArchGuard<'_, T> {
+	fn borrow(&self) -> &Archetype<T> {
+		&self
+	}
+}
+
+impl<T: ?Sized> BorrowMut<Archetype<T>> for ProviderResourceArchGuard<'_, T> {
+	fn borrow_mut(&mut self) -> &mut Archetype<T> {
 		&mut *self
 	}
 }

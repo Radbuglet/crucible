@@ -4,7 +4,7 @@ use crucible_core::{
 		entity::{ArchetypeId, Entity},
 		event::{EntityDestroyEvent, EventQueueIter},
 		storage::Storage,
-		universe::{ArchetypeHandle, ResRw, Universe, UniverseResource},
+		universe::{ArchetypeHandle, BuildableResource, ResRw, Universe},
 	},
 	lang::explicitly_bind::ExplicitlyBind,
 };
@@ -283,7 +283,7 @@ pub struct OutOfDeviceMemoryError;
 #[derive(Debug)]
 pub struct ViewportArch(ArchetypeHandle);
 
-impl UniverseResource for ViewportArch {
+impl BuildableResource for ViewportArch {
 	fn create(universe: &Universe) -> Self {
 		let arch = universe.create_archetype("ViewportArch");
 		universe.add_archetype_handler(arch.id(), Self::on_destroy);
@@ -307,7 +307,7 @@ impl ViewportArch {
 		),
 		viewport: Viewport,
 	) -> Entity {
-		let entity = universe.archetype_by_id(self.id()).spawn("viewport");
+		let entity = universe.archetype_by_id(self.id()).lock().spawn("viewport");
 		viewports.add(entity, viewport);
 		depth_textures.add(
 			entity,
@@ -328,7 +328,7 @@ impl ViewportArch {
 		});
 
 		let arch_id = events.arch();
-		let mut arch = universe.archetype_by_id(arch_id);
+		let mut arch = universe.archetype_by_id(arch_id).lock();
 
 		for (target, _) in events {
 			viewports.remove(target);

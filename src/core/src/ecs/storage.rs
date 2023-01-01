@@ -24,7 +24,7 @@ use crate::{
 use super::{
 	entity::{ArchetypeId, Entity},
 	query::{Query, QueryIter, StorageIterMut, StorageIterRef},
-	universe::{Universe, UniverseResourceRw},
+	universe::{BuildableResourceRw, Universe},
 };
 
 // === Storage === //
@@ -361,7 +361,7 @@ impl<T> StorageRunSlot<T> {
 	}
 }
 
-impl<T: Userdata> UniverseResourceRw for Storage<T> {
+impl<T: Userdata> BuildableResourceRw for Storage<T> {
 	fn create(_universe: &Universe) -> Self {
 		Default::default()
 	}
@@ -509,7 +509,7 @@ impl<T> CelledStorageView<T> {
 	}
 }
 
-impl<T: Userdata> UniverseResourceRw for CelledStorage<T> {
+impl<T: Userdata> BuildableResourceRw for CelledStorage<T> {
 	fn create(_universe: &Universe) -> Self {
 		Default::default()
 	}

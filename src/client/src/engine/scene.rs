@@ -7,7 +7,7 @@ use crucible_core::{
 		entity::{ArchetypeId, Entity},
 		event::{EntityDestroyEvent, EventQueueIter},
 		storage::Storage,
-		universe::{ArchetypeHandle, ResRw, Universe, UniverseResource},
+		universe::{ArchetypeHandle, BuildableResource, ResRw, Universe},
 	},
 };
 
@@ -53,7 +53,7 @@ pub struct SceneRenderEvent<'a> {
 #[derive(Debug)]
 pub struct SceneArch(ArchetypeHandle);
 
-impl UniverseResource for SceneArch {
+impl BuildableResource for SceneArch {
 	fn create(universe: &Universe) -> Self {
 		let arch = universe.create_archetype("SceneArch");
 		universe.add_archetype_handler(arch.id(), Self::on_destroy);
@@ -79,7 +79,7 @@ impl SceneArch {
 		update_handler: SceneUpdateHandler,
 		render_handler: SceneRenderHandler,
 	) -> Entity {
-		let scene = universe.archetype_by_id(self.id()).spawn("scene");
+		let scene = universe.archetype_by_id(self.id()).lock().spawn("scene");
 		scene_userdatas.add(scene, scene_userdata);
 		update_handlers.add(scene, update_handler);
 		render_handlers.add(scene, render_handler);
@@ -95,7 +95,7 @@ impl SceneArch {
 		});
 
 		let arch_id = events.arch();
-		let mut arch = universe.archetype_by_id(arch_id);
+		let mut arch = universe.archetype_by_id(arch_id).lock();
 
 		for (target, _) in events {
 			scene_userdatas.remove(target);

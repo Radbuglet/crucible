@@ -6,7 +6,7 @@ use std::{
 	sync::Arc,
 };
 
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{
 	debug::userdata::{ErasedUserdata, Userdata},
@@ -428,6 +428,51 @@ impl<T: ?Sized + 'static> DerefMut for BorrowingRwWriteGuard<T> {
 unsafe impl<T: ?Sized + 'static> Borrower<LentRef<RwLock<T>>> for BorrowingRwWriteGuard<T> {
 	fn drop_and_repay(self) -> LentRef<RwLock<T>> {
 		let loan = RwLockWriteGuard::rwlock(&self.0) as *const _;
+		drop(self);
+
+		unsafe { LentRef::new(loan) }
+	}
+}
+
+// === BorrowingMutexGuard === //
+
+#[derive(Debug)]
+pub struct BorrowingMutexGuard<T: ?Sized + 'static>(MutexGuard<'static, T>);
+
+impl<T: ?Sized + 'static> BorrowingMutexGuard<T> {
+	pub fn try_new<L>(lender: L) -> Result<Mapped<L, Self>, L>
+	where
+		L: Lender<Loan = LentRef<Mutex<T>>>,
+	{
+		let (loan, shark) = L::loan(lender);
+		let lock = unsafe { &*LentRef::as_ptr(&loan) };
+
+		let Some(guard) = lock.try_lock() else {
+			return Err(unsafe { L::repay(loan, shark) });
+		};
+		drop(loan); // `Loan` converted into a `guard`.
+
+		Ok(unsafe { Mapped::new(shark, Self(guard)) })
+	}
+}
+
+impl<T: ?Sized + 'static> Deref for BorrowingMutexGuard<T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl<T: ?Sized + 'static> DerefMut for BorrowingMutexGuard<T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0
+	}
+}
+
+unsafe impl<T: ?Sized + 'static> Borrower<LentRef<Mutex<T>>> for BorrowingMutexGuard<T> {
+	fn drop_and_repay(self) -> LentRef<Mutex<T>> {
+		let loan = MutexGuard::mutex(&self.0) as *const _;
 		drop(self);
 
 		unsafe { LentRef::new(loan) }

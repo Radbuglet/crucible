@@ -13,7 +13,7 @@ use crucible_core::{
 		entity::{ArchetypeId, Entity},
 		storage::CelledStorage,
 		storage::Storage,
-		universe::{ArchetypeHandle, Res, ResRw, Universe, UniverseResource},
+		universe::{ArchetypeHandle, BuildableResource, Res, ResRw, Universe},
 	},
 	lang::{explicitly_bind::ExplicitlyBind, iter::VolumetricIter, polyfill::OptionPoly},
 	mem::c_enum::CEnum,
@@ -419,7 +419,7 @@ impl PlaySceneState {
 #[derive(Debug)]
 pub struct ChunkArchetype(ArchetypeHandle);
 
-impl UniverseResource for ChunkArchetype {
+impl BuildableResource for ChunkArchetype {
 	fn create(universe: &Universe) -> Self {
 		let arch = universe.create_archetype("chunk archetype");
 
@@ -435,6 +435,7 @@ impl ChunkArchetype {
 	pub fn spawn(&self, (universe,): (&Universe,), pos: ChunkVec) -> Entity {
 		universe
 			.archetype_by_id(self.id())
+			.lock()
 			.spawn(format_args!("chunk at {pos:?}"))
 	}
 }
