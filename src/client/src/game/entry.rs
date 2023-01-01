@@ -214,7 +214,7 @@ impl PlaySceneState {
 								(
 									&mut me.world_data,
 									chunk_datas,
-									&Provider::new().with(chunk_arch),
+									&Provider::new_with_parent(Some(dyn_cx)).with(chunk_arch),
 								),
 								Self::chunk_factory,
 								BlockState {
@@ -244,7 +244,7 @@ impl PlaySceneState {
 								(
 									&mut me.world_data,
 									chunk_datas,
-									&Provider::new().with(chunk_arch),
+									&Provider::new_with_parent(Some(dyn_cx)).with(chunk_arch),
 								),
 								Self::chunk_factory,
 								BlockState::default(),
@@ -402,6 +402,7 @@ impl PlaySceneState {
 	}
 
 	fn chunk_factory(cx: &Provider, pos: ChunkVec) -> Entity {
+		dbg!(cx);
 		unpack!(cx => {
 			universe: &Universe,
 			arch_chunk: Res<&ChunkArchetype>,

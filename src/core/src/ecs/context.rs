@@ -1,6 +1,7 @@
 use std::{
 	any,
 	cell::{Ref, RefCell, RefMut},
+	fmt,
 	marker::PhantomData,
 	mem,
 };
@@ -20,6 +21,15 @@ pub struct Provider<'r> {
 	_ty: PhantomData<&'r dyn any::Any>,
 	parent: Option<&'r Provider<'r>>,
 	values: HashMap<NamedTypeId, (MaybeBoxedCopy<(usize, usize)>, RefCell<()>)>,
+}
+
+impl<'r> fmt::Debug for Provider<'r> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Provider")
+			.field("parent", &self.parent)
+			.field("keys", &self.values.keys().copied().collect::<Vec<_>>())
+			.finish_non_exhaustive()
+	}
 }
 
 impl<'r> Provider<'r> {
@@ -115,9 +125,9 @@ impl<'r> Provider<'r> {
 
 	fn comp_not_found<T: ?Sized + 'static>(&self) -> ! {
 		panic!(
-			"Could not find component of type {:?} in provider.\nTypes provided: {:?}",
+			"Could not find component of type {:?} in provider {:?}",
 			NamedTypeId::of::<T>(),
-			self.values.keys().copied().collect::<Vec<_>>(),
+			self,
 		);
 	}
 }
