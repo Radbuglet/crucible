@@ -5,7 +5,7 @@ use crucible_core::{
 		context::{decompose, unpack, CombinConcat, Provider},
 		entity::Archetype,
 		storage::Storage,
-		universe::{ResArch, ResRw, Universe},
+		universe::Universe,
 	},
 };
 use wgpu::SurfaceConfiguration;
@@ -51,14 +51,14 @@ impl EngineRoot {
 		let mut guard;
 		let mut cx = unpack!(&universe => guard & (
 			&Universe,
-			ResArch<ViewportBundle>,
-			ResArch<SceneBundle>,
-			ResRw<&mut Storage<Viewport>>,
-			ResRw<&mut Storage<InputManager>>,
-			ResRw<&mut Storage<FullScreenTexture>>,
-			ResRw<&mut Storage<BoxedUserdata>>,
-			ResRw<&mut Storage<SceneUpdateHandler>>,
-			ResRw<&mut Storage<SceneRenderHandler>>,
+			@arch ViewportBundle,
+			@arch SceneBundle,
+			@mut Storage<Viewport>,
+			@mut Storage<InputManager>,
+			@mut Storage<FullScreenTexture>,
+			@mut Storage<BoxedUserdata>,
+			@mut Storage<SceneUpdateHandler>,
+			@mut Storage<SceneRenderHandler>,
 		));
 
 		// Create main window
@@ -125,7 +125,7 @@ impl MainLoopHandler for EngineRoot {
 	fn on_update(&mut self, (main_loop, proxy): (&mut MainLoop, &WinitEventProxy)) {
 		// Update current scene
 		unpack!(&self.universe => {
-			update_handlers: ResRw<&Storage<SceneUpdateHandler>>,
+			update_handlers: @ref Storage<SceneUpdateHandler>,
 		});
 
 		let scene = self.scene_mgr.current();
@@ -141,8 +141,8 @@ impl MainLoopHandler for EngineRoot {
 
 		// Request redraws
 		unpack!(&self.universe => {
-			viewports: ResRw<&Storage<Viewport>>,
-			input_managers: ResRw<&mut Storage<InputManager>>,
+			viewports: @ref Storage<Viewport>,
+			input_managers: @mut Storage<InputManager>,
 		});
 
 		for (&_window, &viewport) in self.viewport_mgr.window_map() {
@@ -162,8 +162,8 @@ impl MainLoopHandler for EngineRoot {
 	) {
 		// Acquire context
 		unpack!(&self.universe => {
-			viewports: ResRw<&mut Storage<Viewport>>,
-			render_handlers: ResRw<&Storage<SceneRenderHandler>>,
+			viewports: @mut Storage<Viewport>,
+			render_handlers: @ref Storage<SceneRenderHandler>,
 		});
 
 		// Acquire viewport
@@ -203,7 +203,7 @@ impl MainLoopHandler for EngineRoot {
 		event: WindowEvent,
 	) {
 		unpack!(&self.universe => {
-			input_managers: ResRw<&mut Storage<InputManager>>,
+			input_managers: @mut Storage<InputManager>,
 		});
 
 		let Some(viewport) = self.viewport_mgr.get_viewport(window_id) else {
@@ -225,7 +225,7 @@ impl MainLoopHandler for EngineRoot {
 		event: DeviceEvent,
 	) {
 		unpack!(&self.universe => {
-			input_managers: ResRw<&mut Storage<InputManager>>,
+			input_managers: @mut Storage<InputManager>,
 		});
 
 		for &viewport in self.viewport_mgr.window_map().values() {
@@ -248,10 +248,10 @@ pub fn main_inner() -> anyhow::Result<()> {
 		let mut guard;
 		let mut cx = unpack!(&root.universe => guard & (
 			&Universe,
-			ResArch<SceneBundle>,
-			ResRw<&mut Storage<BoxedUserdata>>,
-			ResRw<&mut Storage<SceneUpdateHandler>>,
-			ResRw<&mut Storage<SceneRenderHandler>>,
+			@arch SceneBundle,
+			@mut Storage<BoxedUserdata>,
+			@mut Storage<SceneUpdateHandler>,
+			@mut Storage<SceneRenderHandler>,
 		))
 		.concat((&root.gfx, &mut root.res_mgr));
 
@@ -263,7 +263,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 	// Make all viewports visible
 	{
 		unpack!(&root.universe => {
-			viewports: ResRw<&Storage<Viewport>>,
+			viewports: @ref Storage<Viewport>,
 		});
 
 		for &viewport in root.viewport_mgr.window_map().values() {

@@ -14,7 +14,7 @@ use crucible_core::{
 		entity::{Archetype, Entity},
 		storage::CelledStorage,
 		storage::Storage,
-		universe::{ArchetypeHandle, BuildableArchetypeBundle, ResArch, ResRw, Universe},
+		universe::{ArchetypeHandle, BuildableArchetypeBundle, Universe},
 	},
 	lang::{explicitly_bind::ExplicitlyBind, iter::VolumetricIter, polyfill::OptionPoly},
 	mem::c_enum::CEnum,
@@ -128,12 +128,12 @@ impl PlaySceneState {
 		// Extract context
 		unpack!(dyn_cx => {
 			gfx: &GfxContext,
-			chunk_arch: ResArch<ChunkBundle>,
-			userdatas: ResRw<&mut Storage<BoxedUserdata>>,
-			viewports: ResRw<&Storage<Viewport>>,
-			input_managers: ResRw<&Storage<InputManager>>,
-			chunk_datas: ResRw<&mut CelledStorage<VoxelChunkData>>,
-			chunk_meshes: ResRw<&mut Storage<VoxelChunkMesh>>,
+			chunk_arch: @arch ChunkBundle,
+			userdatas: @mut Storage<BoxedUserdata>,
+			viewports: @ref Storage<Viewport>,
+			input_managers: @ref Storage<InputManager>,
+			chunk_datas: @mut CelledStorage<VoxelChunkData>,
+			chunk_meshes: @mut Storage<VoxelChunkMesh>,
 		});
 
 		let me = userdatas.get_downcast_mut::<Self>(me);
@@ -314,10 +314,10 @@ impl PlaySceneState {
 		unpack!(cx => {
 			gfx: &GfxContext,
 			res_mgr: &mut ResourceManager,
-			scene_userdatas: ResRw<&mut Storage<BoxedUserdata>>,
-			depth_textures: ResRw<&mut Storage<FullScreenTexture>>,
-			viewports: ResRw<&Storage<Viewport>>,
-			chunk_meshes: ResRw<&mut Storage<VoxelChunkMesh>>,
+			scene_userdatas: @mut Storage<BoxedUserdata>,
+			depth_textures: @mut Storage<FullScreenTexture>,
+			viewports: @ref Storage<Viewport>,
+			chunk_meshes: @mut Storage<VoxelChunkMesh>,
 		});
 
 		let me = scene_userdatas.get_downcast_mut::<Self>(me);
@@ -408,7 +408,7 @@ impl PlaySceneState {
 
 	fn chunk_factory(cx: &Provider, pos: ChunkVec) -> Entity {
 		unpack!(cx => {
-			arch_chunk: ResArch<ChunkBundle>,
+			arch_chunk: @arch ChunkBundle,
 		});
 
 		log::info!("Spawning chunk at {pos:?}");

@@ -8,7 +8,7 @@ use crucible_core::{
 		entity::Entity,
 		event::{EntityDestroyEvent, EventQueueIter},
 		storage::Storage,
-		universe::{ArchetypeHandle, BuildableArchetypeBundle, ResRw, Universe},
+		universe::{ArchetypeHandle, BuildableArchetypeBundle, Universe},
 	},
 };
 
@@ -73,9 +73,9 @@ impl SceneBundle {
 	fn on_destroy(universe: &mut Universe, events: EventQueueIter<EntityDestroyEvent>) {
 		let mut guard;
 		let mut cx = unpack!(&*universe => guard & (
-			ResRw<&mut Storage<BoxedUserdata>>,
-			ResRw<&mut Storage<SceneUpdateHandler>>,
-			ResRw<&mut Storage<SceneRenderHandler>>,
+			@mut Storage<BoxedUserdata>,
+			@mut Storage<SceneUpdateHandler>,
+			@mut Storage<SceneRenderHandler>,
 		));
 
 		let arch_id = events.arch();

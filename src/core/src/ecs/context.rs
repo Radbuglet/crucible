@@ -237,19 +237,19 @@ pub mod macro_internal {
 	pub trait UnpackTargetTuple<'guard: 'borrow, 'borrow, P: ?Sized, I> {
 		type Output;
 
-		fn acquire_refs(_dummy_provider: &P, input: &'borrow mut I) -> Self::Output;
+		fn acquire_refs(self, _dummy_provider: &P, input: &'borrow mut I) -> Self::Output;
 	}
 
 	macro_rules! impl_guard_tuples_as_refs {
 		($($para:ident:$field:tt),*) => {
 			impl<'guard: 'borrow, 'borrow, P: ?Sized, $($para: UnpackTarget<'guard, 'borrow, P>),*>
 				UnpackTargetTuple<'guard, 'borrow, P, ($($para::Guard,)*)>
-				for PhantomData<($($para,)*)>
+				for ($(PhantomData<$para>,)*)
 			{
 				type Output = ($($para::Reference,)*);
 
 				#[allow(unused)]
-				fn acquire_refs(_dummy_provider: &P, guards: &'borrow mut ($($para::Guard,)*)) -> Self::Output {
+				fn acquire_refs(self, _dummy_provider: &P, guards: &'borrow mut ($($para::Guard,)*)) -> Self::Output {
 					($($para::acquire_ref(&mut guards.$field),)*)
 				}
 			}
@@ -257,6 +257,49 @@ pub mod macro_internal {
 	}
 
 	impl_tuples!(impl_guard_tuples_as_refs);
+
+	// TODO: It may look like we could take these two expression macros and combine them into one
+	// type macro, which would be nice, but rust-analyzer doesn't seem to support type macros correctly
+	// so this is the easiest way to preserve IDE completions while implementing this feature.
+	#[macro_export]
+	macro_rules! unpack_internal_ty_acquire_guard {
+		($src:expr, @arch $ty:ty) => {
+			<$crate::ecs::universe::ResArch<$ty> as $crate::ecs::context::UnpackTarget<_>>::acquire_guard($src)
+		};
+		($src:expr, @res $ty:ty) => {
+			<$crate::ecs::universe::Res<&$ty> as $crate::ecs::context::UnpackTarget<_>>::acquire_guard($src)
+		};
+		($src:expr, @mut $ty:ty) => {
+			<$crate::ecs::universe::ResRw<&mut $ty> as $crate::ecs::context::UnpackTarget<_>>::acquire_guard($src)
+		};
+		($src:expr, @ref $ty:ty) => {
+			<$crate::ecs::universe::ResRw<&$ty> as $crate::ecs::context::UnpackTarget<_>>::acquire_guard($src)
+		};
+		($src:expr, $ty:ty) => {
+			<$ty as $crate::ecs::context::UnpackTarget<_>>::acquire_guard($src)
+		};
+	}
+
+	#[macro_export]
+	macro_rules! unpack_internal_ty_phantom_data {
+		(@arch $ty:ty) => {
+			$crate::ecs::context::macro_internal::PhantomData::<$crate::ecs::universe::ResArch<$ty>>
+		};
+		(@res $ty:ty) => {
+			$crate::ecs::context::macro_internal::PhantomData::<$crate::ecs::universe::Res<&$ty>>
+		};
+		(@mut $ty:ty) => {
+			$crate::ecs::context::macro_internal::PhantomData::<
+				$crate::ecs::universe::ResRw<&mut $ty>,
+			>
+		};
+		(@ref $ty:ty) => {
+			$crate::ecs::context::macro_internal::PhantomData::<$crate::ecs::universe::ResRw<&$ty>>
+		};
+		($ty:ty) => {
+			$crate::ecs::context::macro_internal::PhantomData::<$ty>
+		};
+	}
 
 	// === `provider_from_tuple!` macro === //
 
@@ -288,53 +331,58 @@ pub mod macro_internal {
 macro_rules! unpack {
 	// Guarded tuple unpack
 	($src:expr => $guard:ident & (
-		$($ty:ty),*
+		$(
+			$(@$anno:ident)? $ty:ty
+		),*
 		$(,)?
 	)) => {{
 		// Solidify reference
 		let src = $src;
 
 		// Acquire guards
-		$guard = ($(<$ty as $crate::ecs::context::UnpackTarget<_>>::acquire_guard(src),)*);
+		$guard = ($( $crate::unpack_internal_ty_acquire_guard!(src, $(@$anno)? $ty) ,)*);
 
 		// Acquire references
-		<
-			$crate::ecs::context::macro_internal::PhantomData::<($($ty,)*)> as
-			$crate::ecs::context::macro_internal::UnpackTargetTuple<_, _>
-		>::acquire_refs(src, &mut $guard)
+		$crate::ecs::context::macro_internal::UnpackTargetTuple::acquire_refs(
+			($($crate::unpack_internal_ty_phantom_data!($(@$anno)? $ty),)*),
+			src,
+			&mut $guard,
+		)
 	}};
 
 	// Unguarded tuple unpack
 	($src:expr => (
-		$($ty:ty),*
+		$(
+			$(@$anno:ident)? $ty:ty
+		),*
 		$(,)?
 	)) => {{
 		let src = $src;
-		($(<$ty as $crate::ecs::context::UnpackTarget<_>>::acquire_guard(src),)*)
+		($( $crate::unpack_internal_ty_acquire_guard!(src, $(@$anno)? $ty) ,)*)
 	}};
 
 	// Guarded struct unpack
 	($src:expr => {
 		$(
-			$name:ident: $ty:ty
+			$name:ident: $(@$anno:ident)? $ty:ty
 		),*
 		$(,)?
 	}) => {
 		let mut guard;
 		let ($($name,)*) = $crate::ecs::context::unpack!($src => guard & (
-			$($ty),*
+			$($(@$anno)? $ty),*
 		));
 	};
 
 	// Unguarded struct unpack
 	($src:expr => {
 		$(
-			$name:pat = $ty:ty
+			$name:pat = $(@$anno:ident)? $ty:ty
 		),*
 		$(,)?
 	}) => {
 		let ($($name,)*) = $crate::ecs::context::unpack!($src => (
-			$($ty),*
+			$($(@$anno)? $ty),*
 		));
 	};
 }

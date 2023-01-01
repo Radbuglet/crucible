@@ -5,7 +5,7 @@ use crucible_core::{
 		entity::Entity,
 		event::{EntityDestroyEvent, EventQueueIter},
 		storage::Storage,
-		universe::{ArchetypeHandle, BuildableArchetypeBundle, ResRw, Universe},
+		universe::{ArchetypeHandle, BuildableArchetypeBundle, Universe},
 	},
 	lang::explicitly_bind::ExplicitlyBind,
 };
@@ -315,9 +315,9 @@ impl ViewportBundle {
 	fn on_destroy(universe: &mut Universe, events: EventQueueIter<EntityDestroyEvent>) {
 		let mut guard;
 		let mut cx = unpack!(&*universe => guard & (
-			ResRw<&mut Storage<Viewport>>,
-			ResRw<&mut Storage<InputManager>>,
-			ResRw<&mut Storage<FullScreenTexture>>,
+			@mut Storage<Viewport>,
+			@mut Storage<InputManager>,
+			@mut Storage<FullScreenTexture>,
 		));
 
 		let arch_id = events.arch();
