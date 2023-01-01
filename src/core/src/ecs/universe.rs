@@ -190,7 +190,7 @@ impl Universe {
 		self.resource()
 	}
 
-	pub fn archetype<T: ?Sized + BuildableArchetype>(&self) -> &Mutex<Archetype<()>> {
+	pub fn archetype<T: ?Sized + BuildableArchetypeBundle>(&self) -> &Mutex<Archetype<()>> {
 		let id = self.resource::<UniverseArchetypeResource<T>>().id();
 		self.archetype_by_id(id)
 	}
@@ -302,21 +302,21 @@ impl<M: ?Sized> ArchetypeHandle<M> {
 		self.id
 	}
 
-	pub fn with_marker<N: ?Sized>(self) -> ArchetypeHandle<N> {
+	pub fn cast_marker<N: ?Sized>(self) -> ArchetypeHandle<N> {
 		unsafe {
 			// Safety: This struct is `repr(C)` and `N` is only ever used in a `PhantomData`.
 			transmute(self)
 		}
 	}
 
-	pub fn with_marker_ref<N: ?Sized>(&self) -> &ArchetypeHandle<N> {
+	pub fn cast_marker_ref<N: ?Sized>(&self) -> &ArchetypeHandle<N> {
 		unsafe {
 			// Safety: This struct is `repr(C)` and `N` is only ever used in a `PhantomData`.
 			self.transmute_pointee_ref()
 		}
 	}
 
-	pub fn with_marker_mut<N: ?Sized>(&mut self) -> &mut ArchetypeHandle<N> {
+	pub fn cast_marker_mut<N: ?Sized>(&mut self) -> &mut ArchetypeHandle<N> {
 		unsafe {
 			// Safety: This struct is `repr(C)` and `N` is only ever used in a `PhantomData`.
 			self.transmute_pointee_mut()
@@ -410,8 +410,8 @@ impl<T: BuildableResourceRw> BuildableResource for RwLock<T> {
 	}
 }
 
-pub trait BuildableArchetype: 'static {
-	fn create(universe: &Universe) -> ArchetypeHandle<Self> {
+pub trait BuildableArchetypeBundle: 'static {
+	fn create_archetype(universe: &Universe) -> ArchetypeHandle<Self> {
 		universe.create_archetype(type_name::<Self>())
 	}
 }
@@ -419,9 +419,9 @@ pub trait BuildableArchetype: 'static {
 #[derive_where(Debug)]
 pub struct UniverseArchetypeResource<T: ?Sized>(pub ArchetypeHandle<T>);
 
-impl<T: ?Sized + BuildableArchetype> BuildableResource for UniverseArchetypeResource<T> {
+impl<T: ?Sized + BuildableArchetypeBundle> BuildableResource for UniverseArchetypeResource<T> {
 	fn create(universe: &Universe) -> Self {
-		Self(T::create(universe))
+		Self(T::create_archetype(universe))
 	}
 }
 
@@ -497,7 +497,7 @@ impl<'guard: 'borrow, 'borrow, T: BuildableResourceRw> UnpackTarget<'guard, 'bor
 	}
 }
 
-impl<'guard: 'borrow, 'borrow, T: ?Sized + BuildableArchetype>
+impl<'guard: 'borrow, 'borrow, T: ?Sized + BuildableArchetypeBundle>
 	UnpackTarget<'guard, 'borrow, Universe> for ResArch<T>
 {
 	type Guard = MutexGuard<'guard, Archetype>;
@@ -508,7 +508,7 @@ impl<'guard: 'borrow, 'borrow, T: ?Sized + BuildableArchetype>
 	}
 
 	fn acquire_ref(guard: &'borrow mut Self::Guard) -> Self::Reference {
-		guard.with_marker_mut()
+		guard.cast_marker_mut()
 	}
 }
 
@@ -577,7 +577,7 @@ impl<'provider, 'guard: 'borrow, 'borrow, T: BuildableResourceRw>
 	}
 }
 
-impl<'provider, 'guard: 'borrow, 'borrow, T: ?Sized + BuildableArchetype>
+impl<'provider, 'guard: 'borrow, 'borrow, T: ?Sized + BuildableArchetypeBundle>
 	UnpackTarget<'guard, 'borrow, Provider<'provider>> for ResArch<T>
 {
 	type Guard = ProviderResourceArchGuard<'guard, T>;
@@ -595,7 +595,7 @@ impl<'provider, 'guard: 'borrow, 'borrow, T: ?Sized + BuildableArchetype>
 	}
 
 	fn acquire_ref(guard: &'borrow mut Self::Guard) -> Self::Reference {
-		guard.with_marker_mut()
+		guard.cast_marker_mut()
 	}
 }
 
@@ -695,7 +695,7 @@ impl<T: ?Sized> Deref for ProviderResourceArchGuard<'_, T> {
 	fn deref(&self) -> &Self::Target {
 		match self {
 			Self::Local(r) => &r,
-			Self::Universe(r) => r.with_marker_ref(),
+			Self::Universe(r) => r.cast_marker_ref(),
 		}
 	}
 }
@@ -704,7 +704,7 @@ impl<T: ?Sized> DerefMut for ProviderResourceArchGuard<'_, T> {
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		match self {
 			Self::Local(r) => &mut *r,
-			Self::Universe(r) => r.with_marker_mut(),
+			Self::Universe(r) => r.cast_marker_mut(),
 		}
 	}
 }

@@ -3,8 +3,9 @@ use crucible_core::{
 	debug::userdata::BoxedUserdata,
 	ecs::{
 		context::{decompose, unpack, CombinConcat, Provider},
+		entity::Archetype,
 		storage::Storage,
-		universe::{Res, ResRw, Universe},
+		universe::{ResArch, ResRw, Universe},
 	},
 };
 use wgpu::SurfaceConfiguration;
@@ -26,10 +27,10 @@ use super::{
 		gfx::{GfxContext, GfxFeatureNeedsScreen},
 		input::InputManager,
 		main_loop::{MainLoop, MainLoopHandler, WinitEventLoop, WinitEventProxy},
-		viewport::{Viewport, ViewportArch, ViewportManager},
+		viewport::{Viewport, ViewportBundle, ViewportManager},
 	},
 	resources::ResourceManager,
-	scene::{SceneArch, SceneManager, SceneRenderHandler, SceneUpdateHandler},
+	scene::{SceneBundle, SceneManager, SceneRenderHandler, SceneUpdateHandler},
 };
 
 // === EngineRoot === //
@@ -50,8 +51,8 @@ impl EngineRoot {
 		let mut guard;
 		let mut cx = unpack!(&universe => guard & (
 			&Universe,
-			Res<&ViewportArch>,
-			Res<&SceneArch>,
+			ResArch<ViewportBundle>,
+			ResArch<SceneBundle>,
 			ResRw<&mut Storage<Viewport>>,
 			ResRw<&mut Storage<InputManager>>,
 			ResRw<&mut Storage<FullScreenTexture>>,
@@ -77,10 +78,11 @@ impl EngineRoot {
 		// Create main viewport
 		let mut viewport_mgr = ViewportManager::default();
 		let main_viewport = {
-			decompose!(cx => cx & { viewport_arch: &ViewportArch });
-			viewport_arch.spawn(
+			decompose!(cx => cx & { viewport_arch: &mut Archetype<ViewportBundle> });
+			viewport_arch.spawn_with(
 				decompose!(cx),
-				Viewport::new(
+				"my viewport",
+				ViewportBundle::new(Viewport::new(
 					(&gfx,),
 					main_window,
 					Some(main_surface),
@@ -92,7 +94,7 @@ impl EngineRoot {
 						width: 0,
 						height: 0,
 					},
-				),
+				)),
 			)
 		};
 
@@ -246,7 +248,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 		let mut guard;
 		let mut cx = unpack!(&root.universe => guard & (
 			&Universe,
-			Res<&SceneArch>,
+			ResArch<SceneBundle>,
 			ResRw<&mut Storage<BoxedUserdata>>,
 			ResRw<&mut Storage<SceneUpdateHandler>>,
 			ResRw<&mut Storage<SceneRenderHandler>>,

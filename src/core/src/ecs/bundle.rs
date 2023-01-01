@@ -1,6 +1,11 @@
 use super::entity::Entity;
 
-pub trait Bundle {
+#[doc(hidden)]
+pub mod macro_internal {
+	pub use std::option::Option;
+}
+
+pub trait Bundle: Sized {
 	type Context<'a>;
 
 	fn attach(self, cx: Self::Context<'_>, target: Entity);

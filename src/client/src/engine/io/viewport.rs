@@ -1,10 +1,11 @@
 use crucible_core::{
 	ecs::{
-		context::unpack,
-		entity::{ArchetypeId, Entity},
+		bundle::{bundle, Bundle},
+		context::{decompose, unpack},
+		entity::Entity,
 		event::{EntityDestroyEvent, EventQueueIter},
 		storage::Storage,
-		universe::{ArchetypeHandle, BuildableResource, ResRw, Universe},
+		universe::{ArchetypeHandle, BuildableArchetypeBundle, ResRw, Universe},
 	},
 	lang::explicitly_bind::ExplicitlyBind,
 };
@@ -278,60 +279,61 @@ impl Drop for Viewport {
 #[error("out of device memory")]
 pub struct OutOfDeviceMemoryError;
 
-// === ViewportArch === //
+// === ViewportBundle === //
 
-#[derive(Debug)]
-pub struct ViewportArch(ArchetypeHandle);
-
-impl BuildableResource for ViewportArch {
-	fn create(universe: &Universe) -> Self {
-		let arch = universe.create_archetype("ViewportArch");
-		universe.add_archetype_handler(arch.id(), Self::on_destroy);
-
-		Self(arch)
+bundle! {
+	#[derive(Debug)]
+	pub struct ViewportBundle {
+		pub viewport: Viewport,
+		pub input_manager: InputManager,
+		pub depth_texture: FullScreenTexture,
 	}
 }
 
-impl ViewportArch {
-	pub fn id(&self) -> ArchetypeId {
-		self.0.id()
-	}
+impl BuildableArchetypeBundle for ViewportBundle {
+	fn create_archetype(universe: &Universe) -> ArchetypeHandle<Self> {
+		let arch = universe.create_archetype("ViewportArch");
+		universe.add_archetype_handler(arch.id(), Self::on_destroy);
 
-	pub fn spawn(
-		&self,
-		(universe, viewports, depth_textures, input_managers): (
-			&Universe,
-			&mut Storage<Viewport>,
-			&mut Storage<FullScreenTexture>,
-			&mut Storage<InputManager>,
-		),
-		viewport: Viewport,
-	) -> Entity {
-		let entity = universe.archetype_by_id(self.id()).lock().spawn("viewport");
-		viewports.add(entity, viewport);
-		depth_textures.add(
-			entity,
-			FullScreenTexture::new(
+		arch
+	}
+}
+
+impl ViewportBundle {
+	pub fn new(viewport: Viewport) -> Self {
+		Self {
+			viewport,
+			input_manager: Default::default(),
+			depth_texture: FullScreenTexture::new(
 				"depth texture",
 				wgpu::TextureFormat::Depth32Float,
 				wgpu::TextureUsages::RENDER_ATTACHMENT,
 			),
-		);
-		input_managers.add(entity, InputManager::default());
-
-		entity
+		}
 	}
 
 	fn on_destroy(universe: &mut Universe, events: EventQueueIter<EntityDestroyEvent>) {
-		unpack!(&*universe => {
-			viewports: ResRw<&mut Storage<Viewport>>,
-		});
+		let mut guard;
+		let mut cx = unpack!(&*universe => guard & (
+			ResRw<&mut Storage<Viewport>>,
+			ResRw<&mut Storage<InputManager>>,
+			ResRw<&mut Storage<FullScreenTexture>>,
+		));
 
 		let arch_id = events.arch();
 		let mut arch = universe.archetype_by_id(arch_id).lock();
 
 		for (target, _) in events {
-			viewports.remove(target);
+			let Self {
+				viewport,
+				depth_texture,
+				input_manager,
+			} = Self::detach(decompose!(cx), target);
+
+			drop(input_manager);
+			drop(depth_texture);
+			drop(viewport);
+
 			arch.despawn(target);
 		}
 	}

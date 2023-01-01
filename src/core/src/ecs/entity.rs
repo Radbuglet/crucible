@@ -14,6 +14,8 @@ use crate::{
 	mem::{drop_guard::DropOwnedGuard, free_list::PureFreeList, ptr::PointeeCastExt},
 };
 
+use super::bundle::Bundle;
+
 // === Handles === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -122,6 +124,15 @@ impl<M: ?Sized> Archetype<M> {
 		}
 	}
 
+	pub fn spawn_with<L: DebugLabel>(&mut self, cx: M::Context<'_>, name: L, bundle: M) -> Entity
+	where
+		M: Bundle,
+	{
+		let target = self.spawn(name);
+		bundle.attach(cx, target);
+		target
+	}
+
 	pub fn despawn(&mut self, entity: Entity) {
 		if DEBUG_ASSERTIONS_ENABLED && entity.arch.id != self.id {
 			log::error!(
@@ -144,6 +155,15 @@ impl<M: ?Sized> Archetype<M> {
 		let _ = self.slots.remove(entity.slot);
 	}
 
+	pub fn despawn_and_extract(&mut self, cx: M::Context<'_>, entity: Entity) -> M
+	where
+		M: Bundle,
+	{
+		let bundle = M::detach(cx, entity);
+		self.despawn(entity);
+		bundle
+	}
+
 	pub fn id(&self) -> ArchetypeId {
 		ArchetypeId {
 			lifetime: *self.lifetime,
@@ -153,26 +173,26 @@ impl<M: ?Sized> Archetype<M> {
 
 	pub fn entities(&self) -> ArchetypeIter {
 		ArchetypeIter {
-			archetype: self.with_marker_ref(),
+			archetype: self.cast_marker_ref(),
 			slot: 0,
 		}
 	}
 
-	pub fn with_marker<N: ?Sized>(self) -> Archetype<N> {
+	pub fn cast_marker<N: ?Sized>(self) -> Archetype<N> {
 		unsafe {
 			// Safety: This struct is `repr(C)` and `N` is only ever used in a `PhantomData`.
 			transmute(self)
 		}
 	}
 
-	pub fn with_marker_ref<N: ?Sized>(&self) -> &Archetype<N> {
+	pub fn cast_marker_ref<N: ?Sized>(&self) -> &Archetype<N> {
 		unsafe {
 			// Safety: This struct is `repr(C)` and `N` is only ever used in a `PhantomData`.
 			self.transmute_pointee_ref()
 		}
 	}
 
-	pub fn with_marker_mut<N: ?Sized>(&mut self) -> &mut Archetype<N> {
+	pub fn cast_marker_mut<N: ?Sized>(&mut self) -> &mut Archetype<N> {
 		unsafe {
 			// Safety: This struct is `repr(C)` and `N` is only ever used in a `PhantomData`.
 			self.transmute_pointee_mut()

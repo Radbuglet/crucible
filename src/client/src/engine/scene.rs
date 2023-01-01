@@ -3,11 +3,12 @@
 use crucible_core::{
 	debug::userdata::{BoxedUserdata, DebugOpaque},
 	ecs::{
-		context::{unpack, Provider},
-		entity::{ArchetypeId, Entity},
+		bundle::{bundle, Bundle},
+		context::{decompose, unpack, Provider},
+		entity::Entity,
 		event::{EntityDestroyEvent, EventQueueIter},
 		storage::Storage,
-		universe::{ArchetypeHandle, BuildableResource, ResRw, Universe},
+		universe::{ArchetypeHandle, BuildableArchetypeBundle, ResRw, Universe},
 	},
 };
 
@@ -50,57 +51,40 @@ pub struct SceneRenderEvent<'a> {
 
 // === SceneArch === //
 
-#[derive(Debug)]
-pub struct SceneArch(ArchetypeHandle);
-
-impl BuildableResource for SceneArch {
-	fn create(universe: &Universe) -> Self {
-		let arch = universe.create_archetype("SceneArch");
-		universe.add_archetype_handler(arch.id(), Self::on_destroy);
-
-		Self(arch)
+bundle! {
+	#[derive(Debug)]
+	pub struct SceneBundle {
+		pub userdata: BoxedUserdata,
+		pub update_handler: SceneUpdateHandler,
+		pub render_handler: SceneRenderHandler,
 	}
 }
 
-impl SceneArch {
-	pub fn id(&self) -> ArchetypeId {
-		self.0.id()
+impl BuildableArchetypeBundle for SceneBundle {
+	fn create_archetype(universe: &Universe) -> ArchetypeHandle<Self> {
+		let arch = universe.create_archetype("SceneArch");
+		universe.add_archetype_handler(arch.id(), Self::on_destroy);
+
+		arch
 	}
+}
 
-	pub fn spawn(
-		&self,
-		(universe, scene_userdatas, update_handlers, render_handlers): (
-			&Universe,
-			&mut Storage<BoxedUserdata>,
-			&mut Storage<SceneUpdateHandler>,
-			&mut Storage<SceneRenderHandler>,
-		),
-		scene_userdata: BoxedUserdata,
-		update_handler: SceneUpdateHandler,
-		render_handler: SceneRenderHandler,
-	) -> Entity {
-		let scene = universe.archetype_by_id(self.id()).lock().spawn("scene");
-		scene_userdatas.add(scene, scene_userdata);
-		update_handlers.add(scene, update_handler);
-		render_handlers.add(scene, render_handler);
-
-		scene
-	}
-
+impl SceneBundle {
 	fn on_destroy(universe: &mut Universe, events: EventQueueIter<EntityDestroyEvent>) {
-		unpack!(&*universe => {
-			scene_userdatas: ResRw<&mut Storage<BoxedUserdata>>,
-			update_handlers: ResRw<&mut Storage<SceneUpdateHandler>>,
-			render_handlers: ResRw<&mut Storage<SceneRenderHandler>>,
-		});
+		let mut guard;
+		let mut cx = unpack!(&*universe => guard & (
+			ResRw<&mut Storage<BoxedUserdata>>,
+			ResRw<&mut Storage<SceneUpdateHandler>>,
+			ResRw<&mut Storage<SceneRenderHandler>>,
+		));
 
 		let arch_id = events.arch();
 		let mut arch = universe.archetype_by_id(arch_id).lock();
 
 		for (target, _) in events {
-			scene_userdatas.remove(target);
-			update_handlers.remove(target);
-			render_handlers.remove(target);
+			let state = SceneBundle::detach(decompose!(cx), target);
+			drop(state);
+
 			arch.despawn(target);
 		}
 	}

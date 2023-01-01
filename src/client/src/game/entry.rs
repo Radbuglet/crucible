@@ -9,11 +9,12 @@ use crucible_core::{
 		userdata::{BoxedUserdata, DebugOpaque},
 	},
 	ecs::{
+		bundle::bundle,
 		context::{decompose, unpack, Provider},
-		entity::{ArchetypeId, Entity},
+		entity::{Archetype, Entity},
 		storage::CelledStorage,
 		storage::Storage,
-		universe::{ArchetypeHandle, BuildableResource, Res, ResRw, Universe},
+		universe::{ArchetypeHandle, BuildableArchetypeBundle, ResArch, ResRw, Universe},
 	},
 	lang::{explicitly_bind::ExplicitlyBind, iter::VolumetricIter, polyfill::OptionPoly},
 	mem::c_enum::CEnum,
@@ -32,7 +33,7 @@ use crate::{
 		io::{gfx::GfxContext, input::InputManager, viewport::Viewport},
 		resources::ResourceManager,
 		scene::{
-			SceneArch, SceneRenderEvent, SceneRenderHandler, SceneUpdateEvent, SceneUpdateHandler,
+			SceneBundle, SceneRenderEvent, SceneRenderHandler, SceneUpdateEvent, SceneUpdateHandler,
 		},
 	},
 	game::{player::camera::FreeCamInputs, voxel::pipeline::VoxelRenderingPipelineDesc},
@@ -64,7 +65,7 @@ impl PlaySceneState {
 		mut cx: (
 			&Universe,
 			&GfxContext,
-			&SceneArch,
+			&mut Archetype<SceneBundle>,
 			&mut Storage<BoxedUserdata>,
 			&mut Storage<SceneUpdateHandler>,
 			&mut Storage<SceneRenderHandler>,
@@ -75,7 +76,7 @@ impl PlaySceneState {
 		decompose!(cx => cx & {
 			gfx: &GfxContext,
 			res_mgr: &mut ResourceManager,
-			scene_arch: &SceneArch,
+			scene_arch: &mut Archetype<SceneBundle>,
 		});
 
 		// Create block texture
@@ -112,11 +113,14 @@ impl PlaySceneState {
 		);
 
 		// Create scene entity
-		scene_arch.spawn(
+		scene_arch.spawn_with(
 			decompose!(cx),
-			scene_state,
-			DebugOpaque::new(Self::on_update),
-			DebugOpaque::new(Self::on_render),
+			"my scene",
+			SceneBundle {
+				userdata: scene_state,
+				update_handler: DebugOpaque::new(Self::on_update),
+				render_handler: DebugOpaque::new(Self::on_render),
+			},
 		)
 	}
 
@@ -124,7 +128,7 @@ impl PlaySceneState {
 		// Extract context
 		unpack!(dyn_cx => {
 			gfx: &GfxContext,
-			chunk_arch: Res<&ChunkArchetype>,
+			chunk_arch: ResArch<ChunkBundle>,
 			userdatas: ResRw<&mut Storage<BoxedUserdata>>,
 			viewports: ResRw<&Storage<Viewport>>,
 			input_managers: ResRw<&Storage<InputManager>>,
@@ -174,7 +178,8 @@ impl PlaySceneState {
 					let pos = Location::new(&me.world_data, pos);
 
 					// Fill volume
-					let set_state_cx = Provider::new_with_parent(Some(dyn_cx)).with(chunk_arch);
+					let set_state_cx =
+						Provider::new_with_parent(Some(dyn_cx)).with(&mut *chunk_arch);
 
 					for [x, y, z] in VolumetricIter::new([6, 6, 6]) {
 						let [x, y, z] = [x as i32 - 3, y as i32 - 10, z as i32 - 3];
@@ -214,7 +219,7 @@ impl PlaySceneState {
 								(
 									&mut me.world_data,
 									chunk_datas,
-									&Provider::new_with_parent(Some(dyn_cx)).with(chunk_arch),
+									&Provider::new_with_parent(Some(dyn_cx)).with(&mut *chunk_arch),
 								),
 								Self::chunk_factory,
 								BlockState {
@@ -402,40 +407,27 @@ impl PlaySceneState {
 	}
 
 	fn chunk_factory(cx: &Provider, pos: ChunkVec) -> Entity {
-		dbg!(cx);
 		unpack!(cx => {
-			universe: &Universe,
-			arch_chunk: Res<&ChunkArchetype>,
+			arch_chunk: ResArch<ChunkBundle>,
 		});
 
-		let chunk = arch_chunk.spawn((universe,), pos);
 		log::info!("Spawning chunk at {pos:?}");
-		chunk
+		arch_chunk.spawn(format_args!("chunk at {pos:?}"))
 	}
 }
 
-// === ChunkArchetype === //
+// === ChunkBundle === //
 
-#[derive(Debug)]
-pub struct ChunkArchetype(ArchetypeHandle);
-
-impl BuildableResource for ChunkArchetype {
-	fn create(universe: &Universe) -> Self {
-		let arch = universe.create_archetype("chunk archetype");
-
-		Self(arch)
+bundle! {
+	#[derive(Debug)]
+	pub struct ChunkBundle {
+		pub data: VoxelChunkData,
+		pub mesh: VoxelChunkMesh,
 	}
 }
 
-impl ChunkArchetype {
-	pub fn id(&self) -> ArchetypeId {
-		self.0.id()
-	}
-
-	pub fn spawn(&self, (universe,): (&Universe,), pos: ChunkVec) -> Entity {
-		universe
-			.archetype_by_id(self.id())
-			.lock()
-			.spawn(format_args!("chunk at {pos:?}"))
+impl BuildableArchetypeBundle for ChunkBundle {
+	fn create_archetype(universe: &Universe) -> ArchetypeHandle<Self> {
+		universe.create_archetype("ChunkBundle")
 	}
 }
