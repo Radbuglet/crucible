@@ -1,11 +1,8 @@
 use std::mem;
 
+use crucible_core::mem::c_enum::{CEnum, CEnumMap};
+use geode::{Entity, Storage};
 use hashbrown::HashMap;
-
-use crucible_core::{
-	ecs::{entity::Entity, storage::CelledStorage},
-	mem::c_enum::{CEnum, CEnumMap},
-};
 
 use super::math::{BlockFace, BlockVec, BlockVecExt, ChunkVec, CHUNK_VOLUME};
 
@@ -20,27 +17,19 @@ pub struct VoxelWorldData {
 impl VoxelWorldData {
 	pub fn add_chunk(
 		&mut self,
-		(chunks,): (&mut CelledStorage<VoxelChunkData>,),
+		(chunks,): (&mut Storage<VoxelChunkData>,),
 		pos: ChunkVec,
 		chunk: Entity,
 	) {
 		debug_assert!(!self.pos_map.contains_key(&pos));
 
-		// Create chunk
-		chunks.add(
-			chunk,
-			VoxelChunkData {
-				pos,
-				flagged: None,
-				neighbors: CEnumMap::default(),
-				data: [0; CHUNK_VOLUME as usize],
-			},
-		);
-		self.pos_map.insert(pos, chunk);
-
 		// Link to neighbors
-		let data = chunks.as_celled_view();
-		let mut chunk_data = data.borrow_mut(chunk);
+		let mut chunk_data = VoxelChunkData {
+			pos,
+			flagged: None,
+			neighbors: CEnumMap::default(),
+			data: Box::new([0; CHUNK_VOLUME as usize]),
+		};
 
 		for face in BlockFace::variants() {
 			let n_pos = pos + face.unit();
@@ -48,34 +37,30 @@ impl VoxelWorldData {
 				Some(ent) => *ent,
 				None => continue,
 			};
-			let mut n_data = data.borrow_mut(n_ent);
 
 			chunk_data.neighbors[face] = Some(n_ent);
-			n_data.neighbors[face.invert()] = Some(chunk);
+			chunks[n_ent].neighbors[face.invert()] = Some(chunk);
 		}
+
+		// Create chunk
+		self.pos_map.insert(pos, chunk);
+		chunks.insert(chunk, chunk_data);
 	}
 
 	pub fn get_chunk(&self, pos: ChunkVec) -> Option<Entity> {
 		self.pos_map.get(&pos).copied()
 	}
 
-	pub fn remove_chunk(
-		&mut self,
-		(chunks,): (&mut CelledStorage<VoxelChunkData>,),
-		pos: ChunkVec,
-	) {
+	pub fn remove_chunk(&mut self, (chunks,): (&mut Storage<VoxelChunkData>,), pos: ChunkVec) {
 		let chunk = self.pos_map.remove(&pos).unwrap();
-		let chunk_data = chunks.remove(chunk).unwrap();
+		let chunk_data = chunks.try_remove(chunk).unwrap();
 
 		// Unlink neighbors
-		for (face, n_ent) in chunk_data.neighbors.iter() {
-			let n_ent = match n_ent {
-				Some(ent) => *ent,
-				None => continue,
+		for (face, &neighbor) in chunk_data.neighbors.iter() {
+			let Some(neighbor) = neighbor else {
+				continue;
 			};
-			let n_data = chunks.get_mut(n_ent);
-
-			n_data.neighbors[face.invert()] = None;
+			chunks[neighbor].neighbors[face.invert()] = None;
 		}
 
 		// Remove from dirty queue
@@ -83,8 +68,7 @@ impl VoxelWorldData {
 			self.flagged.swap_remove(flagged_idx);
 
 			if let Some(moved) = self.flagged.get(flagged_idx).copied() {
-				let moved_data = chunks.get_mut(moved);
-				moved_data.flagged = Some(flagged_idx);
+				chunks[moved].flagged = Some(flagged_idx);
 			}
 		}
 	}
@@ -96,14 +80,11 @@ impl VoxelWorldData {
 		}
 	}
 
-	pub fn flush_flagged(
-		&mut self,
-		(chunks,): (&mut CelledStorage<VoxelChunkData>,),
-	) -> Vec<Entity> {
+	pub fn flush_flagged(&mut self, (chunks,): (&mut Storage<VoxelChunkData>,)) -> Vec<Entity> {
 		let flagged = mem::replace(&mut self.flagged, Vec::new());
 
 		for &flagged in &flagged {
-			chunks.get_mut(flagged).flagged = None;
+			chunks[flagged].flagged = None;
 		}
 
 		flagged
@@ -115,7 +96,7 @@ pub struct VoxelChunkData {
 	pos: ChunkVec,
 	flagged: Option<usize>,
 	neighbors: CEnumMap<BlockFace, Option<Entity>>,
-	data: [u32; CHUNK_VOLUME as usize],
+	data: Box<[u32; CHUNK_VOLUME as usize]>,
 }
 
 impl VoxelChunkData {
@@ -133,7 +114,8 @@ impl VoxelChunkData {
 
 	pub fn set_block_state(
 		&mut self,
-		(&me, world): (&Entity, &mut VoxelWorldData),
+		(world,): (&mut VoxelWorldData,),
+		me: Entity,
 		pos: BlockVec,
 		state: BlockState,
 	) {

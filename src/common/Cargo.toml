@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 crucible-core = { path = "../core" }
+geode = { git = "https://github.com/Radbuglet/geode.git", rev = "25657298ea05a379ddea1e206abf48cb765830c0" }
 hashbrown = "0.13.1"
 log = "0.4.17"
 num-traits = "0.2.15"

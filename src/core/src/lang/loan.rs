@@ -1,12 +1,8 @@
 use std::{
-	cell::Ref,
 	fmt, hash,
-	mem::ManuallyDrop,
 	ops::{Deref, DerefMut},
 	sync::Arc,
 };
-
-use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{
 	debug::userdata::{ErasedUserdata, Userdata},
@@ -312,177 +308,9 @@ impl<T: ?Sized + hash::Hash> hash::Hash for LentMut<T> {
 	}
 }
 
-// === Arc Lender === //
-
-impl<T: ?Sized + 'static> Lender for Arc<T> {
-	type Loan = LentRef<T>;
-	type Shark = ();
-
-	fn loan(me: Self) -> (Self::Loan, Self::Shark) {
-		let loan = Arc::into_raw(me);
-		let loan = unsafe { LentRef::new(loan) };
-
-		(loan, ())
-	}
-
-	unsafe fn repay(loan: Self::Loan, _shark: Self::Shark) -> Self {
-		let ptr = LentRef::to_ptr(loan);
-		unsafe { Arc::from_raw(ptr) }
-	}
-}
-
-// === Ref Lender === //
-
-#[derive(Debug)]
-pub struct RefLoanShark<'a, T: ?Sized>(ManuallyDrop<Ref<'a, T>>);
-
-impl<'a, T: ?Sized> Lender for Ref<'a, T> {
-	type Loan = LentRef<T>;
-	type Shark = RefLoanShark<'a, T>;
-
-	fn loan(me: Self) -> (Self::Loan, Self::Shark) {
-		let ptr = unsafe { LentRef::new(&*me) };
-		(ptr, RefLoanShark(ManuallyDrop::new(me)))
-	}
-
-	unsafe fn repay(_loan: Self::Loan, shark: Self::Shark) -> Self {
-		ManuallyDrop::into_inner(shark.0)
-	}
-}
-
-// === BorrowingRwReadGuard === //
-
-#[derive(Debug)]
-pub struct BorrowingRwReadGuard<T: ?Sized + 'static>(RwLockReadGuard<'static, T>);
-
-impl<T: ?Sized + 'static> BorrowingRwReadGuard<T> {
-	pub fn try_new<L>(lender: L) -> Result<Mapped<L, Self>, L>
-	where
-		L: Lender<Loan = LentRef<RwLock<T>>>,
-	{
-		let (loan, shark) = L::loan(lender);
-		let lock = unsafe { &*LentRef::as_ptr(&loan) };
-
-		let Some(guard) = lock.try_read() else {
-			return Err(unsafe { L::repay(loan, shark) });
-		};
-		drop(loan); // `Loan` converted into a `guard`.
-
-		Ok(unsafe { Mapped::new(shark, Self(guard)) })
-	}
-}
-
-impl<T: ?Sized + 'static> Deref for BorrowingRwReadGuard<T> {
-	type Target = T;
-
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-unsafe impl<T: ?Sized + 'static> Borrower<LentRef<RwLock<T>>> for BorrowingRwReadGuard<T> {
-	fn drop_and_repay(self) -> LentRef<RwLock<T>> {
-		let loan = RwLockReadGuard::rwlock(&self.0) as *const _;
-		drop(self);
-
-		unsafe { LentRef::new(loan) }
-	}
-}
-
-// === BorrowingRwWriteGuard === //
-
-#[derive(Debug)]
-pub struct BorrowingRwWriteGuard<T: ?Sized + 'static>(RwLockWriteGuard<'static, T>);
-
-impl<T: ?Sized + 'static> BorrowingRwWriteGuard<T> {
-	pub fn try_new<L>(lender: L) -> Result<Mapped<L, Self>, L>
-	where
-		L: Lender<Loan = LentRef<RwLock<T>>>,
-	{
-		let (loan, shark) = L::loan(lender);
-		let lock = unsafe { &*LentRef::as_ptr(&loan) };
-
-		let Some(guard) = lock.try_write() else {
-			return Err(unsafe { L::repay(loan, shark) });
-		};
-		drop(loan); // `Loan` converted into a `guard`.
-
-		Ok(unsafe { Mapped::new(shark, Self(guard)) })
-	}
-}
-
-impl<T: ?Sized + 'static> Deref for BorrowingRwWriteGuard<T> {
-	type Target = T;
-
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl<T: ?Sized + 'static> DerefMut for BorrowingRwWriteGuard<T> {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.0
-	}
-}
-
-unsafe impl<T: ?Sized + 'static> Borrower<LentRef<RwLock<T>>> for BorrowingRwWriteGuard<T> {
-	fn drop_and_repay(self) -> LentRef<RwLock<T>> {
-		let loan = RwLockWriteGuard::rwlock(&self.0) as *const _;
-		drop(self);
-
-		unsafe { LentRef::new(loan) }
-	}
-}
-
-// === BorrowingMutexGuard === //
-
-#[derive(Debug)]
-pub struct BorrowingMutexGuard<T: ?Sized + 'static>(MutexGuard<'static, T>);
-
-impl<T: ?Sized + 'static> BorrowingMutexGuard<T> {
-	pub fn try_new<L>(lender: L) -> Result<Mapped<L, Self>, L>
-	where
-		L: Lender<Loan = LentRef<Mutex<T>>>,
-	{
-		let (loan, shark) = L::loan(lender);
-		let lock = unsafe { &*LentRef::as_ptr(&loan) };
-
-		let Some(guard) = lock.try_lock() else {
-			return Err(unsafe { L::repay(loan, shark) });
-		};
-		drop(loan); // `Loan` converted into a `guard`.
-
-		Ok(unsafe { Mapped::new(shark, Self(guard)) })
-	}
-}
-
-impl<T: ?Sized + 'static> Deref for BorrowingMutexGuard<T> {
-	type Target = T;
-
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl<T: ?Sized + 'static> DerefMut for BorrowingMutexGuard<T> {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.0
-	}
-}
-
-unsafe impl<T: ?Sized + 'static> Borrower<LentRef<Mutex<T>>> for BorrowingMutexGuard<T> {
-	fn drop_and_repay(self) -> LentRef<Mutex<T>> {
-		let loan = MutexGuard::mutex(&self.0) as *const _;
-		drop(self);
-
-		unsafe { LentRef::new(loan) }
-	}
-}
-
 // === Box Mapping === //
 
-// FIXME: Unsound
-pub fn map_box<T: ?Sized, U: ?Sized, F>(b: Box<T>, f: F) -> Box<U>
+pub unsafe fn map_box<T: ?Sized, U: ?Sized, F>(b: Box<T>, f: F) -> Box<U>
 where
 	F: FnOnce(&mut T) -> &mut U,
 {
@@ -491,20 +319,19 @@ where
 	let converted = f(original);
 	assert_eq!(addr_of_ptr(original_ptr), addr_of_ptr(converted));
 
-	unsafe {
-		// Safety: `f` gives a proof that it can convert a reference of `&'a mut T` into a reference of
-		// `&'a mut U` lasting for an arbitrary caller-selected lifetime. Additionally, because the
-		// pointer address is the same, we know that we're pointing to a valid `Box`.
-		Box::from_raw(converted)
-	}
+	// Safety: `f` gives a proof that it can convert a reference of `&'a mut T` into a reference of
+	// `&'a mut U` lasting for an arbitrary caller-selected lifetime. Additionally, because the
+	// pointer address is the same, we know that we're pointing to a valid `Box`.
+	//
+	// TODO: Document last necessary safety guarantee once drop rules are clarified.
+	Box::from_raw(converted)
 }
 
 pub fn downcast_userdata_box<T: Userdata>(b: Box<dyn Userdata>) -> Box<T> {
-	map_box(b, |val| val.downcast_mut::<T>())
+	unsafe { map_box(b, |val| val.downcast_mut::<T>()) }
 }
 
-// FIXME: Unsound
-pub fn map_arc<T: ?Sized, U: ?Sized, F>(arc: Arc<T>, f: F) -> Arc<U>
+pub unsafe fn map_arc<T: ?Sized, U: ?Sized, F>(arc: Arc<T>, f: F) -> Arc<U>
 where
 	F: FnOnce(&T) -> &U,
 {
@@ -512,14 +339,14 @@ where
 	let converted = f(unsafe { &*ptr }) as *const U;
 	assert_eq!(addr_of_ptr(ptr), addr_of_ptr(converted));
 
-	unsafe {
-		// Safety: `f` gives a proof that it can convert a reference of `&'a T` into a reference of
-		// `&'a U`. Additionally, because the pointer address is the same, we know that we're pointing
-		// to a valid `Arc`.
-		Arc::from_raw(converted)
-	}
+	// Safety: `f` gives a proof that it can convert a reference of `&'a T` into a reference of
+	// `&'a U`. Additionally, because the pointer address is the same, we know that we're pointing
+	// to a valid `Arc`.
+	//
+	// TODO: Document last necessary safety guarantee once drop rules are clarified.
+	Arc::from_raw(converted)
 }
 
 pub fn downcast_userdata_arc<T: Userdata>(arc: Arc<dyn Userdata>) -> Arc<T> {
-	map_arc(arc, |val| val.downcast_ref::<T>())
+	unsafe { map_arc(arc, |val| val.downcast_ref::<T>()) }
 }

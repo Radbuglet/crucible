@@ -1,14 +1,5 @@
-use crucible_core::{
-	ecs::{
-		bundle::{bundle, Bundle},
-		context::{decompose, unpack},
-		entity::Entity,
-		event::{EntityDestroyEvent, EventQueueIter},
-		storage::Storage,
-		universe::{ArchetypeHandle, BuildableArchetypeBundle, Universe},
-	},
-	lang::explicitly_bind::ExplicitlyBind,
-};
+use crucible_core::lang::explicitly_bind::ExplicitlyBind;
+use geode::prelude::*;
 use hashbrown::HashMap;
 use thiserror::Error;
 use typed_glam::glam::UVec2;
@@ -293,7 +284,7 @@ bundle! {
 impl BuildableArchetypeBundle for ViewportBundle {
 	fn create_archetype(universe: &Universe) -> ArchetypeHandle<Self> {
 		let arch = universe.create_archetype("ViewportArch");
-		universe.add_archetype_handler(arch.id(), Self::on_destroy);
+		universe.add_archetype_queue_handler(arch.id(), Self::on_destroy);
 
 		arch
 	}
@@ -312,7 +303,7 @@ impl ViewportBundle {
 		}
 	}
 
-	fn on_destroy(universe: &mut Universe, events: EventQueueIter<EntityDestroyEvent>) {
+	fn on_destroy(universe: &Universe, events: EventQueueIter<EntityDestroyEvent>) {
 		let mut guard;
 		let mut cx = unpack!(&*universe => guard & (
 			@mut Storage<Viewport>,

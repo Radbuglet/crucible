@@ -7,15 +7,8 @@ use crucible_common::voxel::{
 	data::VoxelChunkData,
 	math::{BlockFace, BlockVec, BlockVecExt, WorldVec, WorldVecExt},
 };
-use crucible_core::{
-	debug::lifetime::Dependent,
-	ecs::{
-		entity::Entity,
-		storage::{CelledStorage, Storage},
-	},
-	lang::polyfill::OptionPoly,
-	mem::c_enum::CEnum,
-};
+use crucible_core::{lang::polyfill::OptionPoly, mem::c_enum::CEnum};
+use geode::{Dependent, Entity, Storage};
 use wgpu::util::DeviceExt;
 
 use crate::engine::io::gfx::GfxContext;
@@ -44,7 +37,7 @@ impl VoxelWorldMesh {
 		&mut self,
 		(gfx, datas, meshes): (
 			&GfxContext,
-			&CelledStorage<VoxelChunkData>,
+			&Storage<VoxelChunkData>,
 			&mut Storage<VoxelChunkMesh>,
 		),
 		time_limit: Option<Duration>,
@@ -54,7 +47,7 @@ impl VoxelWorldMesh {
 		while let Some(chunk_lt) = self.dirty_queue.pop() {
 			// Acquire dependencies
 			let chunk = chunk_lt.get();
-			let chunk_data = datas.get(chunk);
+			let chunk_data = &datas[chunk];
 
 			// Mesh chunk
 			let mut vertices = Vec::new();
@@ -74,8 +67,7 @@ impl VoxelWorldMesh {
 						chunk_data.block_state(neighbor_block).material != 0
 					} else {
 						chunk_data.neighbor(face).p_is_some_and(|neighbor| {
-							let neighbor_data = datas.get(neighbor);
-							neighbor_data.block_state(neighbor_block.wrap()).material != 0
+							datas[neighbor].block_state(neighbor_block.wrap()).material != 0
 						})
 					};
 

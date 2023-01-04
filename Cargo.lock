@@ -82,6 +82,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "atom"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9ff149ed9780025acfdb36862d35b28856bb693ceb451259a7164442f22fdc3"
+
+[[package]]
 name = "autocfg"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -408,6 +414,7 @@ dependencies = [
  "env_logger",
  "fastrand",
  "futures",
+ "geode",
  "hashbrown 0.13.1",
  "image",
  "log",
@@ -423,6 +430,7 @@ name = "crucible-common"
 version = "0.1.0"
 dependencies = [
  "crucible-core",
+ "geode",
  "hashbrown 0.13.1",
  "log",
  "num-traits",
@@ -436,14 +444,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
- "compost",
  "derive-where",
  "fastrand",
- "hashbrown 0.13.1",
  "log",
- "parking_lot",
- "thiserror",
- "tuples",
 ]
 
 [[package]]
@@ -816,6 +819,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "geode"
+version = "0.1.0"
+source = "git+https://github.com/Radbuglet/geode.git?rev=25657298ea05a379ddea1e206abf48cb765830c0#25657298ea05a379ddea1e206abf48cb765830c0"
+dependencies = [
+ "compost",
+ "derive-where",
+ "fastrand",
+ "fnv",
+ "hibitset",
+ "log",
+ "parking_lot",
+ "tuples",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -948,6 +966,16 @@ name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
+
+[[package]]
+name = "hibitset"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93a1bb8316a44459a7d14253c4d28dd7395cbd23cc04a68c46e851b8e46d64b1"
+dependencies = [
+ "atom",
+ "rayon",
+]
 
 [[package]]
 name = "humantime"

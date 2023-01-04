@@ -6,19 +6,12 @@ use crucible_common::voxel::{
 use crucible_core::{
 	debug::{
 		error::ResultExt,
-		userdata::{BoxedUserdata, DebugOpaque},
-	},
-	ecs::{
-		bundle::bundle,
-		context::{decompose, unpack, Provider},
-		entity::{Archetype, Entity},
-		storage::CelledStorage,
-		storage::Storage,
-		universe::{ArchetypeHandle, BuildableArchetypeBundle, Universe},
+		userdata::{BoxedUserdata, DebugOpaque, ErasedUserdata},
 	},
 	lang::{explicitly_bind::ExplicitlyBind, iter::VolumetricIter, polyfill::OptionPoly},
 	mem::c_enum::CEnum,
 };
+use geode::prelude::*;
 use typed_glam::glam::Mat4;
 use wgpu::util::DeviceExt;
 use winit::{
@@ -132,11 +125,11 @@ impl PlaySceneState {
 			userdatas: @mut Storage<BoxedUserdata>,
 			viewports: @ref Storage<Viewport>,
 			input_managers: @ref Storage<InputManager>,
-			chunk_datas: @mut CelledStorage<VoxelChunkData>,
+			chunk_datas: @mut Storage<VoxelChunkData>,
 			chunk_meshes: @mut Storage<VoxelChunkMesh>,
 		});
 
-		let me = userdatas.get_downcast_mut::<Self>(me);
+		let me = userdatas[me].downcast_mut::<Self>();
 
 		// Update timer
 		me.time += 0.1;
@@ -159,7 +152,7 @@ impl PlaySceneState {
 				me.free_cam.handle_mouse_move(input_mgr.mouse_delta());
 
 				me.free_cam.process(
-					(&me.world_data, &*chunk_datas.as_celled_view()),
+					(&me.world_data, &chunk_datas),
 					FreeCamInputs {
 						up: input_mgr.key(VirtualKeyCode::E).state(),
 						down: input_mgr.key(VirtualKeyCode::Q).state(),
@@ -179,24 +172,22 @@ impl PlaySceneState {
 
 					// Fill volume
 					let set_state_cx =
-						Provider::new_with_parent(Some(dyn_cx)).with(&mut *chunk_arch);
+						Provider::new_with_parent_and_comps(dyn_cx, (&mut *chunk_arch,));
 
 					for [x, y, z] in VolumetricIter::new([6, 6, 6]) {
 						let [x, y, z] = [x as i32 - 3, y as i32 - 10, z as i32 - 3];
 
-						pos.at_relative(
-							(&me.world_data, chunk_datas.as_celled_view()),
-							WorldVec::new(x, y, z),
-						)
-						.set_state_or_create(
-							(&mut me.world_data, chunk_datas, &set_state_cx),
-							Self::chunk_factory,
-							BlockState {
-								material: 1,
-								variant: 0,
-								light_level: 255,
-							},
-						);
+						pos.at_relative((&me.world_data, chunk_datas), WorldVec::new(x, y, z))
+							.set_state_or_create(
+								(&mut me.world_data, chunk_datas),
+								&set_state_cx,
+								Self::chunk_factory,
+								BlockState {
+									material: 1,
+									variant: 0,
+									light_level: 255,
+								},
+							);
 					}
 				}
 
@@ -206,7 +197,7 @@ impl PlaySceneState {
 						EntityVec::from_glam(me.free_cam.facing().as_dvec3()),
 					);
 
-					let cx = (&me.world_data, &*chunk_datas.as_celled_view());
+					let cx = (&me.world_data, &*chunk_datas);
 
 					for mut isect in ray.step_for(cx, 6.) {
 						if isect
@@ -216,11 +207,8 @@ impl PlaySceneState {
 						{
 							let mut target = isect.block.at_neighbor(cx, isect.face.invert());
 							target.set_state_or_create(
-								(
-									&mut me.world_data,
-									chunk_datas,
-									&Provider::new_with_parent(Some(dyn_cx)).with(&mut *chunk_arch),
-								),
+								(&mut me.world_data, chunk_datas),
+								&Provider::new_with_parent_and_comps(dyn_cx, (&mut *chunk_arch,)),
 								Self::chunk_factory,
 								BlockState {
 									material: 1,
@@ -237,7 +225,7 @@ impl PlaySceneState {
 						EntityVec::from_glam(me.free_cam.facing().as_dvec3()),
 					);
 
-					let cx = (&me.world_data, &*chunk_datas.as_celled_view());
+					let cx = (&me.world_data, &*chunk_datas);
 
 					for mut isect in ray.step_for(cx, 6.) {
 						if isect
@@ -246,11 +234,8 @@ impl PlaySceneState {
 							.p_is_some_and(|state| state.material != 0)
 						{
 							isect.block.set_state_or_create(
-								(
-									&mut me.world_data,
-									chunk_datas,
-									&Provider::new_with_parent(Some(dyn_cx)).with(chunk_arch),
-								),
+								(&mut me.world_data, chunk_datas),
+								&Provider::new_with_parent_and_comps(dyn_cx, (&mut *chunk_arch,)),
 								Self::chunk_factory,
 								BlockState::default(),
 							);
@@ -294,7 +279,7 @@ impl PlaySceneState {
 			me.world_mesh.flag_chunk((chunk_meshes,), chunk);
 
 			// TODO: Make this more conservative
-			let chunk_data = chunk_datas.get(chunk);
+			let chunk_data = &chunk_datas[chunk];
 
 			for face in BlockFace::variants() {
 				let Some(neighbor) = chunk_data.neighbor(face) else {
@@ -320,7 +305,7 @@ impl PlaySceneState {
 			chunk_meshes: @mut Storage<VoxelChunkMesh>,
 		});
 
-		let me = scene_userdatas.get_downcast_mut::<Self>(me);
+		let me = scene_userdatas[me].downcast_mut::<Self>();
 		let frame = event.frame;
 
 		// Acquire viewport and depth texture
@@ -411,8 +396,9 @@ impl PlaySceneState {
 			arch_chunk: @arch ChunkBundle,
 		});
 
-		log::info!("Spawning chunk at {pos:?}");
-		arch_chunk.spawn(format_args!("chunk at {pos:?}"))
+		let chunk = arch_chunk.spawn(format_args!("chunk at {pos:?}"));
+		log::info!("Spawning chunk at {pos:?}: {chunk:?}");
+		chunk
 	}
 }
 

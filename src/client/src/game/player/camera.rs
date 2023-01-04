@@ -5,7 +5,7 @@ use crucible_common::voxel::{
 	data::{VoxelChunkData, VoxelWorldData},
 	math::EntityVec,
 };
-use crucible_core::ecs::storage::CelledStorageView;
+use geode::Storage;
 use typed_glam::glam::{Mat4, Vec2, Vec3};
 
 #[derive(Debug, Clone, Default)]
@@ -74,7 +74,7 @@ impl FreeCamController {
 
 	pub fn process(
 		&mut self,
-		cx: (&VoxelWorldData, &CelledStorageView<VoxelChunkData>),
+		cx: (&VoxelWorldData, &Storage<VoxelChunkData>),
 		actions: FreeCamInputs,
 	) {
 		// Update velocity

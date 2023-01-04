@@ -1,13 +1,6 @@
 use anyhow::Context;
-use crucible_core::{
-	debug::userdata::BoxedUserdata,
-	ecs::{
-		context::{decompose, unpack, CombinConcat, Provider},
-		entity::Archetype,
-		storage::Storage,
-		universe::Universe,
-	},
-};
+use crucible_core::debug::userdata::BoxedUserdata;
+use geode::prelude::*;
 use wgpu::SurfaceConfiguration;
 use winit::{
 	dpi::LogicalSize,
@@ -130,11 +123,10 @@ impl MainLoopHandler for EngineRoot {
 
 		let scene = self.scene_mgr.current();
 		update_handlers[scene](
-			&Provider::new_with(&self.universe)
-				.with(&self.gfx)
-				.with(&mut self.res_mgr)
-				.with(main_loop)
-				.with(proxy),
+			&Provider::new_with(
+				&self.universe,
+				(&self.gfx, &mut self.res_mgr, main_loop, proxy),
+			),
 			scene,
 			SceneUpdateEvent {},
 		);
@@ -184,13 +176,16 @@ impl MainLoopHandler for EngineRoot {
 
 		// Process render
 		let curr_scene = self.scene_mgr.current();
-		let cx = Provider::new_with(&self.universe)
-			.with(&self.gfx)
-			.with(&mut self.res_mgr)
-			.with(&mut *viewports)
-			.with(main_loop)
-			.with(proxy);
-
+		let cx = Provider::new_with(
+			&self.universe,
+			(
+				&self.gfx,
+				&mut self.res_mgr,
+				&mut *viewports,
+				main_loop,
+				proxy,
+			),
+		);
 		render_handlers[curr_scene](&cx, curr_scene, SceneRenderEvent { frame: &mut frame });
 
 		frame.present();

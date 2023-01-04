@@ -1,16 +1,7 @@
 #![allow(dead_code)]
 
-use crucible_core::{
-	debug::userdata::{BoxedUserdata, DebugOpaque},
-	ecs::{
-		bundle::{bundle, Bundle},
-		context::{decompose, unpack, Provider},
-		entity::Entity,
-		event::{EntityDestroyEvent, EventQueueIter},
-		storage::Storage,
-		universe::{ArchetypeHandle, BuildableArchetypeBundle, Universe},
-	},
-};
+use crucible_core::debug::userdata::{BoxedUserdata, DebugOpaque};
+use geode::prelude::*;
 
 // === SceneManager === //
 
@@ -63,14 +54,14 @@ bundle! {
 impl BuildableArchetypeBundle for SceneBundle {
 	fn create_archetype(universe: &Universe) -> ArchetypeHandle<Self> {
 		let arch = universe.create_archetype("SceneArch");
-		universe.add_archetype_handler(arch.id(), Self::on_destroy);
+		universe.add_archetype_queue_handler(arch.id(), Self::on_destroy);
 
 		arch
 	}
 }
 
 impl SceneBundle {
-	fn on_destroy(universe: &mut Universe, events: EventQueueIter<EntityDestroyEvent>) {
+	fn on_destroy(universe: &Universe, events: EventQueueIter<EntityDestroyEvent>) {
 		let mut guard;
 		let mut cx = unpack!(&*universe => guard & (
 			@mut Storage<BoxedUserdata>,
