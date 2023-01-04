@@ -1,5 +1,5 @@
 use crate::traits::{DimClass, NumericVector};
-use crucible_core::lang::std_traits::ArrayLike;
+use crucible_util::lang::std_traits::ArrayLike;
 
 pub trait VecExt: NumericVector {
 	fn dim() -> usize {

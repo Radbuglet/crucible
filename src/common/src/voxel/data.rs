@@ -1,6 +1,6 @@
 use std::mem;
 
-use crucible_core::mem::c_enum::{CEnum, CEnumMap};
+use crucible_util::mem::c_enum::{CEnum, CEnumMap};
 use geode::{Entity, Storage};
 use hashbrown::HashMap;
 

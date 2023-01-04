@@ -3,7 +3,7 @@ use crucible_common::voxel::{
 	data::{BlockState, VoxelChunkData, VoxelWorldData},
 	math::{BlockFace, ChunkVec, EntityVec, WorldVec},
 };
-use crucible_core::{
+use crucible_util::{
 	debug::{
 		error::ResultExt,
 		userdata::{BoxedUserdata, DebugOpaque, ErasedUserdata},
@@ -22,9 +22,9 @@ use winit::{
 
 use crate::{
 	engine::{
+		assets::AssetManager,
 		gfx::texture::FullScreenTexture,
 		io::{gfx::GfxContext, input::InputManager, viewport::Viewport},
-		resources::ResourceManager,
 		scene::{
 			SceneBundle, SceneRenderEvent, SceneRenderHandler, SceneUpdateEvent, SceneUpdateHandler,
 		},
@@ -62,13 +62,13 @@ impl PlaySceneState {
 			&mut Storage<BoxedUserdata>,
 			&mut Storage<SceneUpdateHandler>,
 			&mut Storage<SceneRenderHandler>,
-			&mut ResourceManager,
+			&mut AssetManager,
 		),
 		main_viewport: Entity,
 	) -> Entity {
 		decompose!(cx => cx & {
 			gfx: &GfxContext,
-			res_mgr: &mut ResourceManager,
+			asset_mgr: &mut AssetManager,
 			scene_arch: &mut Archetype<SceneBundle>,
 		});
 
@@ -102,7 +102,7 @@ impl PlaySceneState {
 		ExplicitlyBind::bind(&mut scene_state.main_viewport, main_viewport);
 		ExplicitlyBind::bind(
 			&mut scene_state.voxel_uniforms,
-			VoxelUniforms::new((gfx, res_mgr), &block_texture_view),
+			VoxelUniforms::new((gfx, asset_mgr), &block_texture_view),
 		);
 
 		// Create scene entity
@@ -298,7 +298,7 @@ impl PlaySceneState {
 		// Extract context
 		unpack!(cx => {
 			gfx: &GfxContext,
-			res_mgr: &mut ResourceManager,
+			asset_mgr: &mut AssetManager,
 			scene_userdatas: @mut Storage<BoxedUserdata>,
 			depth_textures: @mut Storage<FullScreenTexture>,
 			viewports: @ref Storage<Viewport>,
@@ -334,7 +334,7 @@ impl PlaySceneState {
 
 		// Encode rendering commands
 		{
-			let pipeline = res_mgr.load(
+			let pipeline = asset_mgr.load(
 				&VoxelRenderingPipelineDesc {
 					surface_format: viewport.curr_config().format,
 					depth_format: depth_texture_format,

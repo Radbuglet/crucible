@@ -4,12 +4,12 @@ use std::{
 	sync::Arc,
 };
 
-use geode::debug::label::{ReifiedDebugLabel, DebugLabel};
+use geode::debug::label::{DebugLabel, ReifiedDebugLabel};
 use typed_glam::glam::UVec2;
 
 use crate::engine::{
+	assets::{AssetDescriptor, AssetManager},
 	io::{gfx::GfxContext, viewport::Viewport},
-	resources::{ResourceDescriptor, ResourceManager},
 };
 
 // === FullScreenTexture === //
@@ -153,15 +153,15 @@ impl Default for SamplerDesc {
 	}
 }
 
-impl ResourceDescriptor for SamplerDesc {
+impl AssetDescriptor for SamplerDesc {
 	type Context<'a> = (&'a GfxContext,);
-	type Resource = wgpu::Sampler;
+	type Asset = wgpu::Sampler;
 
 	fn construct(
 		&self,
-		_res_mgr: &mut ResourceManager,
+		_asset_mgr: &mut AssetManager,
 		(gfx,): Self::Context<'_>,
-	) -> Arc<Self::Resource> {
+	) -> Arc<Self::Asset> {
 		gfx.device
 			.create_sampler(&wgpu::SamplerDescriptor {
 				label: self.label.as_ref().map(Borrow::borrow),

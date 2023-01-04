@@ -5,9 +5,9 @@ use crucible_common::voxel::math::{BlockFace, Sign};
 use typed_glam::glam;
 
 use crate::engine::{
+	assets::{AssetDescriptor, AssetManager},
 	gfx::texture::SamplerDesc,
 	io::gfx::GfxContext,
-	resources::{ResourceDescriptor, ResourceManager},
 };
 
 // === OpaqueBlockShader === //
@@ -15,15 +15,11 @@ use crate::engine::{
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct OpaqueBlockShaderDesc;
 
-impl ResourceDescriptor for OpaqueBlockShaderDesc {
+impl AssetDescriptor for OpaqueBlockShaderDesc {
 	type Context<'a> = &'a GfxContext;
-	type Resource = wgpu::ShaderModule;
+	type Asset = wgpu::ShaderModule;
 
-	fn construct(
-		&self,
-		_res_mgr: &mut ResourceManager,
-		gfx: Self::Context<'_>,
-	) -> Arc<Self::Resource> {
+	fn construct(&self, _asset_mgr: &mut AssetManager, gfx: Self::Context<'_>) -> Arc<Self::Asset> {
 		Arc::new(
 			gfx.device
 				.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -47,15 +43,11 @@ pub struct VoxelPipelineLayout {
 	pub pipeline_layout: wgpu::PipelineLayout,
 }
 
-impl ResourceDescriptor for VoxelPipelineLayoutDesc {
+impl AssetDescriptor for VoxelPipelineLayoutDesc {
 	type Context<'a> = &'a GfxContext;
-	type Resource = VoxelPipelineLayout;
+	type Asset = VoxelPipelineLayout;
 
-	fn construct(
-		&self,
-		_res_mgr: &mut ResourceManager,
-		gfx: Self::Context<'_>,
-	) -> Arc<Self::Resource> {
+	fn construct(&self, _asset_mgr: &mut AssetManager, gfx: Self::Context<'_>) -> Arc<Self::Asset> {
 		let uniform_group_layout =
 			gfx.device
 				.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -115,17 +107,13 @@ pub struct VoxelRenderingPipelineDesc {
 	pub back_face_culling: bool,
 }
 
-impl ResourceDescriptor for VoxelRenderingPipelineDesc {
+impl AssetDescriptor for VoxelRenderingPipelineDesc {
 	type Context<'a> = &'a GfxContext;
-	type Resource = wgpu::RenderPipeline;
+	type Asset = wgpu::RenderPipeline;
 
-	fn construct(
-		&self,
-		res_mgr: &mut ResourceManager,
-		gfx: Self::Context<'_>,
-	) -> Arc<Self::Resource> {
-		let shader = res_mgr.load(&OpaqueBlockShaderDesc, gfx);
-		let layout = res_mgr.load(&VoxelPipelineLayoutDesc, gfx);
+	fn construct(&self, asset_mgr: &mut AssetManager, gfx: Self::Context<'_>) -> Arc<Self::Asset> {
+		let shader = asset_mgr.load(&OpaqueBlockShaderDesc, gfx);
+		let layout = asset_mgr.load(&VoxelPipelineLayoutDesc, gfx);
 
 		let pipeline = gfx
 			.device
@@ -196,9 +184,9 @@ impl ResourceDescriptor for VoxelRenderingPipelineDesc {
 		Arc::new(pipeline)
 	}
 
-	fn keep_alive(&self, res_mgr: &mut ResourceManager) {
-		res_mgr.keep_alive(&OpaqueBlockShaderDesc);
-		res_mgr.keep_alive(&VoxelPipelineLayoutDesc);
+	fn keep_alive(&self, asset_mgr: &mut AssetManager) {
+		asset_mgr.keep_alive(&OpaqueBlockShaderDesc);
+		asset_mgr.keep_alive(&VoxelPipelineLayoutDesc);
 	}
 }
 
@@ -213,11 +201,11 @@ pub struct VoxelUniforms {
 
 impl VoxelUniforms {
 	pub fn new(
-		(gfx, res_mgr): (&GfxContext, &mut ResourceManager),
+		(gfx, asset_mgr): (&GfxContext, &mut AssetManager),
 		texture: &wgpu::TextureView,
 	) -> Self {
-		let layout = res_mgr.load(&VoxelPipelineLayoutDesc, gfx);
-		let sampler = res_mgr.load(&SamplerDesc::NEAREST_CLAMP_EDGES, (gfx,));
+		let layout = asset_mgr.load(&VoxelPipelineLayoutDesc, gfx);
+		let sampler = asset_mgr.load(&SamplerDesc::NEAREST_CLAMP_EDGES, (gfx,));
 
 		let buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("uniform buffer"),

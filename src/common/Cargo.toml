@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-crucible-core = { path = "../core" }
-geode = { git = "https://github.com/Radbuglet/geode.git", rev = "25657298ea05a379ddea1e206abf48cb765830c0" }
+crucible-util = { path = "../util" }
+geode = { git = "https://github.com/Radbuglet/geode.git", rev = "fb9e0e5b4711ad6df4364cbef90bfac799280d00" }
 hashbrown = "0.13.1"
 log = "0.4.17"
 num-traits = "0.2.15"

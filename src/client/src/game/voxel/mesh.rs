@@ -7,7 +7,7 @@ use crucible_common::voxel::{
 	data::VoxelChunkData,
 	math::{BlockFace, BlockVec, BlockVecExt, WorldVec, WorldVecExt},
 };
-use crucible_core::{lang::polyfill::OptionPoly, mem::c_enum::CEnum};
+use crucible_util::{lang::polyfill::OptionPoly, mem::c_enum::CEnum};
 use geode::{Dependent, Entity, Storage};
 use wgpu::util::DeviceExt;
 

@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crucible_core::mem::free_list::FreeList;
+use crucible_util::mem::free_list::FreeList;
 use geode::{Dependent, Entity, Storage};
 use hashbrown::HashMap;
 

@@ -1,4 +1,4 @@
-use crucible_core::lang::iter::VolumetricIter;
+use crucible_util::lang::iter::VolumetricIter;
 use hashbrown::HashSet;
 use image::Rgba32FImage;
 use typed_glam::glam::UVec2;

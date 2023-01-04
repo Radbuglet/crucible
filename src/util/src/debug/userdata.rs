@@ -104,7 +104,7 @@ impl<T: ?Sized> DerefMut for DebugOpaque<T> {
 
 impl<T: ?Sized> fmt::Debug for DebugOpaque<T> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let ty_name = format!("IsolatedBox<{}>", type_name::<T>());
+		let ty_name = format!("DebugOpaque<{}>", type_name::<T>());
 
 		f.debug_struct(&ty_name).finish_non_exhaustive()
 	}

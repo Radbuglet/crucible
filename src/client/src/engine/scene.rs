@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crucible_core::debug::userdata::{BoxedUserdata, DebugOpaque};
+use crucible_util::debug::userdata::{BoxedUserdata, DebugOpaque};
 use geode::prelude::*;
 
 // === SceneManager === //

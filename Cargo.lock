@@ -410,7 +410,7 @@ dependencies = [
  "bytemuck",
  "crevice",
  "crucible-common",
- "crucible-core",
+ "crucible-util",
  "env_logger",
  "fastrand",
  "futures",
@@ -429,7 +429,7 @@ dependencies = [
 name = "crucible-common"
 version = "0.1.0"
 dependencies = [
- "crucible-core",
+ "crucible-util",
  "geode",
  "hashbrown 0.13.1",
  "log",
@@ -439,13 +439,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "crucible-core"
+name = "crucible-util"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
  "derive-where",
- "fastrand",
  "log",
 ]
 
@@ -821,7 +820,7 @@ dependencies = [
 [[package]]
 name = "geode"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/geode.git?rev=25657298ea05a379ddea1e206abf48cb765830c0#25657298ea05a379ddea1e206abf48cb765830c0"
+source = "git+https://github.com/Radbuglet/geode.git?rev=fb9e0e5b4711ad6df4364cbef90bfac799280d00#fb9e0e5b4711ad6df4364cbef90bfac799280d00"
 dependencies = [
  "compost",
  "derive-where",
@@ -1116,12 +1115,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libm"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "348108ab3fba42ec82ff6e9564fc4ca0247bdccdc68dd8af9764bbc79c3c8ffb"
-
-[[package]]
 name = "linux-raw-sys"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1385,7 +1378,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "578ede34cf02f8924ab9447f50c28075b4d3e5b269972345e7e0372b38c6cdcd"
 dependencies = [
  "autocfg",
- "libm",
 ]
 
 [[package]]
@@ -1735,15 +1727,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sfc-test"
-version = "0.1.0"
-dependencies = [
- "fastrand",
- "space-time",
- "typed-glam",
-]
-
-[[package]]
 name = "slab"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1784,16 +1767,6 @@ dependencies = [
  "wayland-client",
  "wayland-cursor",
  "wayland-protocols",
-]
-
-[[package]]
-name = "space-time"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a4ccef939f051015437f4b4a2936893d6b0bbb34aa7674436b95568c416e824"
-dependencies = [
- "num-integer",
- "num-traits",
 ]
 
 [[package]]
@@ -1932,7 +1905,7 @@ name = "typed-glam"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "crucible-core",
+ "crucible-util",
  "glam",
  "num-traits",
 ]

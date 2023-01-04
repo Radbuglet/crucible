@@ -1,5 +1,5 @@
 use anyhow::Context;
-use crucible_core::debug::userdata::BoxedUserdata;
+use crucible_util::debug::userdata::BoxedUserdata;
 use geode::prelude::*;
 use wgpu::SurfaceConfiguration;
 use winit::{
@@ -15,6 +15,7 @@ use crate::{
 };
 
 use super::{
+	assets::AssetManager,
 	gfx::texture::FullScreenTexture,
 	io::{
 		gfx::{GfxContext, GfxFeatureNeedsScreen},
@@ -22,7 +23,6 @@ use super::{
 		main_loop::{MainLoop, MainLoopHandler, WinitEventLoop, WinitEventProxy},
 		viewport::{Viewport, ViewportBundle, ViewportManager},
 	},
-	resources::ResourceManager,
 	scene::{SceneBundle, SceneManager, SceneRenderHandler, SceneUpdateHandler},
 };
 
@@ -32,7 +32,7 @@ use super::{
 struct EngineRoot {
 	universe: Universe,
 	gfx: GfxContext,
-	res_mgr: ResourceManager,
+	asset_mgr: AssetManager,
 	viewport_mgr: ViewportManager,
 	scene_mgr: SceneManager,
 }
@@ -96,7 +96,7 @@ impl EngineRoot {
 
 		// Create other services
 		let scene_mgr = SceneManager::default();
-		let res_mgr = ResourceManager::default();
+		let asset_mgr = AssetManager::default();
 
 		// Construct `EngineRoot`
 		drop(guard);
@@ -106,7 +106,7 @@ impl EngineRoot {
 			Self {
 				universe,
 				gfx,
-				res_mgr,
+				asset_mgr,
 				viewport_mgr,
 				scene_mgr,
 			},
@@ -125,7 +125,7 @@ impl MainLoopHandler for EngineRoot {
 		update_handlers[scene](
 			&Provider::new_with(
 				&self.universe,
-				(&self.gfx, &mut self.res_mgr, main_loop, proxy),
+				(&self.gfx, &mut self.asset_mgr, main_loop, proxy),
 			),
 			scene,
 			SceneUpdateEvent {},
@@ -180,7 +180,7 @@ impl MainLoopHandler for EngineRoot {
 			&self.universe,
 			(
 				&self.gfx,
-				&mut self.res_mgr,
+				&mut self.asset_mgr,
 				&mut *viewports,
 				main_loop,
 				proxy,
@@ -248,7 +248,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			@mut Storage<SceneUpdateHandler>,
 			@mut Storage<SceneRenderHandler>,
 		))
-		.concat((&root.gfx, &mut root.res_mgr));
+		.concat((&root.gfx, &mut root.asset_mgr));
 
 		PlaySceneState::spawn(decompose!(cx), main_viewport)
 	};

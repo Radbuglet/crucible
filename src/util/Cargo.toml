@@ -1,5 +1,5 @@
 [package]
-name = "crucible-core"
+name = "crucible-util"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,5 +7,4 @@ edition = "2021"
 anyhow = "1.0.66"
 bytemuck = { version = "1.12.3", features = ["derive"] }
 derive-where = "1.0.0"
-fastrand = "1.8.0"
 log = "0.4.17"

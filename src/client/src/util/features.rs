@@ -1,4 +1,4 @@
-use crucible_core::lang::polyfill::{AnyRange, BoundPoly, RangePoly};
+use crucible_util::lang::polyfill::{AnyRange, BoundPoly, RangePoly};
 use std::collections::Bound;
 use std::fmt::{Debug, Display};
 

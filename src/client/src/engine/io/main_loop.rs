@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use crucible_core::{debug::userdata::BoxedUserdata, lang::explicitly_bind::ExplicitlyBind};
+use crucible_util::{debug::userdata::BoxedUserdata, lang::explicitly_bind::ExplicitlyBind};
 use winit::{
 	event::{DeviceEvent, DeviceId, Event, WindowEvent},
 	event_loop::{EventLoop, EventLoopWindowTarget},

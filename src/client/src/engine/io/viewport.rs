@@ -1,4 +1,4 @@
-use crucible_core::lang::explicitly_bind::ExplicitlyBind;
+use crucible_util::lang::explicitly_bind::ExplicitlyBind;
 use geode::prelude::*;
 use hashbrown::HashMap;
 use thiserror::Error;
