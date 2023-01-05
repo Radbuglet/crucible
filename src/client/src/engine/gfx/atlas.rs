@@ -1,17 +1,21 @@
+use std::num::NonZeroU32;
+
 use crucible_util::lang::iter::VolumetricIter;
 use hashbrown::HashSet;
-use image::Rgba32FImage;
+use image::{imageops, Rgba32FImage};
 use typed_glam::glam::{UVec2, Vec2};
 
+use crate::engine::io::gfx::GfxContext;
+
 #[derive(Debug)]
-pub struct AtlasBuilder {
+pub struct AtlasTexture {
 	tile_size: UVec2,
 	tile_counts: UVec2,
 	free_tiles: HashSet<UVec2>,
 	atlas: Rgba32FImage,
 }
 
-impl AtlasBuilder {
+impl AtlasTexture {
 	pub fn new(tile_size: UVec2, tile_counts: UVec2) -> Self {
 		let image_size = tile_size * tile_counts;
 
@@ -41,7 +45,23 @@ impl AtlasBuilder {
 		UVec2::new(self.atlas.width(), self.atlas.height())
 	}
 
-	pub fn add(&mut self, sub: Rgba32FImage) -> UVec2 {
+	pub fn free_tile_count(&self) -> usize {
+		self.free_tiles.len()
+	}
+
+	pub fn max_tile_count(&self) -> usize {
+		(self.tile_counts.x * self.tile_counts.y) as usize
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.free_tile_count() == self.max_tile_count()
+	}
+
+	pub fn is_full(&self) -> bool {
+		self.free_tile_count() == 0
+	}
+
+	pub fn add(&mut self, sub: &Rgba32FImage) -> UVec2 {
 		debug_assert_eq!(sub.width(), self.tile_size.x);
 		debug_assert_eq!(sub.height(), self.tile_size.y);
 
@@ -56,11 +76,12 @@ impl AtlasBuilder {
 
 		// Write to the free tile
 		let offset = free_tile * self.tile_size;
-
-		// TODO: Check performance of blitting routine
-		for [x, y] in VolumetricIter::new([sub.width() - 1, sub.height() - 1]) {
-			*self.atlas.get_pixel_mut(x + offset.x, y + offset.y) = *sub.get_pixel(x, y);
-		}
+		imageops::replace(
+			&mut self.atlas,
+			sub,
+			i64::from(offset.x),
+			i64::from(offset.y),
+		);
 
 		free_tile
 	}
@@ -77,5 +98,58 @@ impl AtlasBuilder {
 		let origin = tile.as_vec2() / tile_counts;
 		let size = 1. / tile_counts;
 		(origin, size)
+	}
+}
+
+#[derive(Debug)]
+pub struct AtlasTextureGfx {
+	pub texture: wgpu::Texture,
+	pub view: wgpu::TextureView,
+	pub tex_dim: UVec2,
+}
+
+impl AtlasTextureGfx {
+	pub fn new(gfx: &GfxContext, atlas: &AtlasTexture, label: Option<&str>) -> Self {
+		let tex_dim: UVec2 = atlas.texture().dimensions().into();
+		let texture = gfx.device.create_texture(&wgpu::TextureDescriptor {
+			label,
+			size: wgpu::Extent3d {
+				width: tex_dim.x,
+				height: tex_dim.y,
+				depth_or_array_layers: 1,
+			},
+			mip_level_count: 1,
+			sample_count: 1,
+			dimension: wgpu::TextureDimension::D2,
+			format: wgpu::TextureFormat::Rgba32Float,
+			usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+		});
+		let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+		Self {
+			texture,
+			view,
+			tex_dim,
+		}
+	}
+
+	pub fn update(&mut self, gfx: &GfxContext, atlas: &AtlasTexture) {
+		let dim: UVec2 = atlas.texture().dimensions().into();
+		debug_assert_eq!(dim, self.tex_dim);
+
+		gfx.queue.write_texture(
+			self.texture.as_image_copy(),
+			bytemuck::cast_slice(atlas.texture()),
+			wgpu::ImageDataLayout {
+				offset: 0,
+				bytes_per_row: Some(NonZeroU32::new(dim.x * 4 * 4).unwrap()),
+				rows_per_image: None,
+			},
+			wgpu::Extent3d {
+				width: atlas.texture().width(),
+				height: atlas.texture().height(),
+				depth_or_array_layers: 1,
+			},
+		)
 	}
 }

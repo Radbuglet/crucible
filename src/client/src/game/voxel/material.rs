@@ -1,24 +1,24 @@
-use crucible_common::game::material::BaseMaterialState;
+use crucible_common::game::material::MaterialStateBase;
 use geode::{bundle, BuildableArchetypeBundle};
 use typed_glam::glam::UVec2;
 
 bundle! {
 	#[derive(Debug)]
 	pub struct InvisibleBlockDescriptorBundle {
-		pub base: BaseMaterialState,
+		pub base: MaterialStateBase,
 	}
 
 	#[derive(Debug)]
-	pub struct BasicBlockDescriptorBundle {
-		pub base: BaseMaterialState,
-		pub visual: BlockDescriptorVisualState,
+	pub struct BasicMaterialDescriptorBundle {
+		pub base: MaterialStateBase,
+		pub visual: MaterialStateVisualBlock,
 	}
 }
 
 impl BuildableArchetypeBundle for InvisibleBlockDescriptorBundle {}
-impl BuildableArchetypeBundle for BasicBlockDescriptorBundle {}
+impl BuildableArchetypeBundle for BasicMaterialDescriptorBundle {}
 
 #[derive(Debug)]
-pub struct BlockDescriptorVisualState {
+pub struct MaterialStateVisualBlock {
 	pub atlas_tile: UVec2,
 }

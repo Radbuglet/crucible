@@ -1,5 +1,5 @@
 use anyhow::Context;
-use crucible_common::game::material::BaseMaterialState;
+use crucible_common::game::material::MaterialStateBase;
 use crucible_util::debug::userdata::BoxedUserdata;
 use geode::prelude::*;
 use wgpu::SurfaceConfiguration;
@@ -15,7 +15,7 @@ use crate::{
 	game::{
 		entry::PlaySceneState,
 		voxel::material::{
-			BasicBlockDescriptorBundle, BlockDescriptorVisualState, InvisibleBlockDescriptorBundle,
+			BasicMaterialDescriptorBundle, InvisibleBlockDescriptorBundle, MaterialStateVisualBlock,
 		},
 	},
 };
@@ -246,6 +246,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 	let &main_viewport = root.viewport_mgr.window_map().values().next().unwrap();
 
 	let scene = {
+		// Acquire context
 		let mut guard;
 		let mut cx = unpack!(&root.universe => guard & (
 			&Universe,
@@ -254,13 +255,22 @@ pub fn main_inner() -> anyhow::Result<()> {
 			@mut Storage<SceneUpdateHandler>,
 			@mut Storage<SceneRenderHandler>,
 			@arch InvisibleBlockDescriptorBundle,
-			@arch BasicBlockDescriptorBundle,
-			@mut Storage<BaseMaterialState>,
-			@mut Storage<BlockDescriptorVisualState>,
+			@arch BasicMaterialDescriptorBundle,
+			@mut Storage<MaterialStateBase>,
+			@mut Storage<MaterialStateVisualBlock>,
 		))
 		.concat((&root.gfx, &mut root.asset_mgr));
 
-		PlaySceneState::spawn(decompose!(cx), main_viewport)
+		// Create scene
+		let mut scene = PlaySceneState::new(decompose!(cx), main_viewport);
+
+		// Load assets
+		scene.create_default_materials(decompose!(cx));
+		scene.upload_atlases(decompose!(cx));
+
+		// Construct entity
+		decompose!(cx => cx & { scene_bundle: &mut Archetype<SceneBundle> });
+		scene_bundle.spawn_with(decompose!(cx), "play scene", scene.make_bundle())
 	};
 
 	scene_mgr.set_initial(scene);

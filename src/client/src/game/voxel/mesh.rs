@@ -14,10 +14,10 @@ use crucible_util::{lang::polyfill::OptionPoly, mem::c_enum::CEnum};
 use geode::{Dependent, Entity, Storage};
 use wgpu::util::DeviceExt;
 
-use crate::engine::{gfx::atlas::AtlasBuilder, io::gfx::GfxContext};
+use crate::engine::{gfx::atlas::AtlasTexture, io::gfx::GfxContext};
 
 use super::{
-	material::BlockDescriptorVisualState,
+	material::MaterialStateVisualBlock,
 	pipeline::{VoxelUniforms, VoxelVertex},
 };
 
@@ -43,11 +43,11 @@ impl VoxelWorldMesh {
 		&mut self,
 		(gfx, atlas, registry, datas, meshes, descriptor_visual_states): (
 			&GfxContext,
-			&AtlasBuilder,
+			&AtlasTexture,
 			&MaterialRegistry,
 			&Storage<VoxelChunkData>,
 			&mut Storage<VoxelChunkMesh>,
-			&Storage<BlockDescriptorVisualState>,
+			&Storage<MaterialStateVisualBlock>,
 		),
 		time_limit: Option<Duration>,
 	) {

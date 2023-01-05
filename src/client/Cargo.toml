@@ -19,5 +19,5 @@ log = "0.4.17"
 once_cell = "1.13.0"
 thiserror = "1.0.31"
 typed-glam = { path = "../typed-glam" }
-wgpu = "0.14.0"
+wgpu = "0.14.2"
 winit = "0.27.5"

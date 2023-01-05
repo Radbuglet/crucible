@@ -73,7 +73,7 @@ impl VoxelWorldData {
 		}
 	}
 
-	pub fn flag_chunk(&mut self, (&chunk, chunk_data): (&Entity, &mut VoxelChunkData)) {
+	pub fn flag_chunk(&mut self, (chunk_data,): (&mut VoxelChunkData,), chunk: Entity) {
 		if chunk_data.flagged.is_none() {
 			chunk_data.flagged = Some(self.flagged.len());
 			self.flagged.push(chunk);
@@ -81,7 +81,7 @@ impl VoxelWorldData {
 	}
 
 	pub fn flush_flagged(&mut self, (chunks,): (&mut Storage<VoxelChunkData>,)) -> Vec<Entity> {
-		let flagged = mem::replace(&mut self.flagged, Vec::new());
+		let flagged = mem::take(&mut self.flagged);
 
 		for &flagged in &flagged {
 			chunks[flagged].flagged = None;
@@ -124,7 +124,7 @@ impl VoxelChunkData {
 
 		if *old != new {
 			*old = new;
-			world.flag_chunk((&me, self));
+			world.flag_chunk((self,), me);
 		}
 	}
 }

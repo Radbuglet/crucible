@@ -6,7 +6,7 @@ use typed_glam::glam::{self, Vec2};
 
 use crate::engine::{
 	assets::{AssetDescriptor, AssetManager},
-	gfx::texture::SamplerDesc,
+	gfx::texture::SamplerAssetDescriptor,
 	io::gfx::GfxContext,
 };
 
@@ -205,7 +205,7 @@ impl VoxelUniforms {
 		texture: &wgpu::TextureView,
 	) -> Self {
 		let layout = asset_mgr.load(&VoxelPipelineLayoutDesc, gfx);
-		let sampler = asset_mgr.load(&SamplerDesc::NEAREST_CLAMP_EDGES, (gfx,));
+		let sampler = asset_mgr.load(&SamplerAssetDescriptor::NEAREST_CLAMP_EDGES, (gfx,));
 
 		let buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("uniform buffer"),

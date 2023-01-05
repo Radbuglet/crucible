@@ -11,13 +11,9 @@ pub struct MaterialRegistry {
 }
 
 impl MaterialRegistry {
-	pub fn new() -> Self {
-		Self::default()
-	}
-
 	pub fn register(
 		&mut self,
-		(base_states,): (&mut Storage<BaseMaterialState>,),
+		(base_states,): (&mut Storage<MaterialStateBase>,),
 		id: impl Into<Cow<'static, str>>,
 		descriptor: Entity,
 	) -> u16 {
@@ -33,17 +29,23 @@ impl MaterialRegistry {
 		}
 
 		// Attach `BaseMaterialState`
-		base_states.insert(descriptor, BaseMaterialState { id: Some(id_clone), slot });
+		base_states.insert(
+			descriptor,
+			MaterialStateBase {
+				id: Some(id_clone),
+				slot,
+			},
+		);
 
 		slot
 	}
 
 	pub fn unregister(
 		&mut self,
-		(base_states,): (&mut Storage<BaseMaterialState>,),
+		(base_states,): (&mut Storage<MaterialStateBase>,),
 		target: Entity,
 	) {
-		let BaseMaterialState { id, slot } = base_states.try_remove(target).unwrap();
+		let MaterialStateBase { id, slot } = base_states.try_remove(target).unwrap();
 		self.id_map.remove(&id.unwrap());
 		self.slots.remove(slot);
 	}
@@ -58,12 +60,12 @@ impl MaterialRegistry {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct BaseMaterialState {
+pub struct MaterialStateBase {
 	id: Option<Cow<'static, str>>,
 	slot: u16,
 }
 
-impl BaseMaterialState {
+impl MaterialStateBase {
 	pub fn id(&self) -> &str {
 		self.id.as_ref().unwrap()
 	}

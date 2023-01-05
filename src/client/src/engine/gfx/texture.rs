@@ -119,7 +119,7 @@ impl FullScreenTexture {
 // === SamplerDesc === //
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct SamplerDesc {
+pub struct SamplerAssetDescriptor {
 	pub label: ReifiedDebugLabel,
 	pub address_mode_u: wgpu::AddressMode,
 	pub address_mode_v: wgpu::AddressMode,
@@ -132,7 +132,7 @@ pub struct SamplerDesc {
 	pub border_color: Option<wgpu::SamplerBorderColor>,
 }
 
-impl SamplerDesc {
+impl SamplerAssetDescriptor {
 	pub const NEAREST_CLAMP_EDGES: Self = Self {
 		label: Some(Cow::Borrowed("nearest clamp edges")),
 		address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -147,13 +147,13 @@ impl SamplerDesc {
 	};
 }
 
-impl Default for SamplerDesc {
+impl Default for SamplerAssetDescriptor {
 	fn default() -> Self {
 		Self::NEAREST_CLAMP_EDGES
 	}
 }
 
-impl AssetDescriptor for SamplerDesc {
+impl AssetDescriptor for SamplerAssetDescriptor {
 	type Context<'a> = (&'a GfxContext,);
 	type Asset = wgpu::Sampler;
 
