@@ -33,7 +33,7 @@ impl MaterialRegistry {
 		}
 
 		// Attach `BaseMaterialState`
-		base_states.add(descriptor, BaseMaterialState { id: id_clone, slot });
+		base_states.insert(descriptor, BaseMaterialState { id: Some(id_clone), slot });
 
 		slot
 	}
@@ -44,7 +44,7 @@ impl MaterialRegistry {
 		target: Entity,
 	) {
 		let BaseMaterialState { id, slot } = base_states.try_remove(target).unwrap();
-		self.id_map.remove(&id);
+		self.id_map.remove(&id.unwrap());
 		self.slots.remove(slot);
 	}
 
@@ -57,15 +57,15 @@ impl MaterialRegistry {
 	}
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BaseMaterialState {
-	id: Cow<'static, str>,
+	id: Option<Cow<'static, str>>,
 	slot: u16,
 }
 
 impl BaseMaterialState {
 	pub fn id(&self) -> &str {
-		&self.id
+		self.id.as_ref().unwrap()
 	}
 
 	pub fn slot(&self) -> u16 {

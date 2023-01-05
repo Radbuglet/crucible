@@ -1,7 +1,7 @@
 use crucible_util::lang::iter::VolumetricIter;
 use hashbrown::HashSet;
 use image::Rgba32FImage;
-use typed_glam::glam::UVec2;
+use typed_glam::glam::{UVec2, Vec2};
 
 #[derive(Debug)]
 pub struct AtlasBuilder {
@@ -18,14 +18,14 @@ impl AtlasBuilder {
 		Self {
 			tile_size,
 			tile_counts,
-			free_tiles: VolumetricIter::new(tile_counts.to_array())
+			free_tiles: VolumetricIter::new((tile_counts - UVec2::ONE).to_array())
 				.map(UVec2::from_array)
 				.collect::<HashSet<_>>(),
 			atlas: Rgba32FImage::new(image_size.x, image_size.y),
 		}
 	}
 
-	pub fn atlas(&self) -> &Rgba32FImage {
+	pub fn texture(&self) -> &Rgba32FImage {
 		&self.atlas
 	}
 
@@ -58,7 +58,7 @@ impl AtlasBuilder {
 		let offset = free_tile * self.tile_size;
 
 		// TODO: Check performance of blitting routine
-		for [x, y] in VolumetricIter::new([sub.width(), sub.height()]) {
+		for [x, y] in VolumetricIter::new([sub.width() - 1, sub.height() - 1]) {
 			*self.atlas.get_pixel_mut(x + offset.x, y + offset.y) = *sub.get_pixel(x, y);
 		}
 
@@ -70,5 +70,12 @@ impl AtlasBuilder {
 		debug_assert!(sub.y < self.tile_counts.y);
 
 		self.free_tiles.insert(sub);
+	}
+
+	pub fn decode_uv_bounds(&self, tile: UVec2) -> (Vec2, Vec2) {
+		let tile_counts = self.tile_counts.as_vec2();
+		let origin = tile.as_vec2() / tile_counts;
+		let size = 1. / tile_counts;
+		(origin, size)
 	}
 }

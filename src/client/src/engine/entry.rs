@@ -1,4 +1,5 @@
 use anyhow::Context;
+use crucible_common::game::material::BaseMaterialState;
 use crucible_util::debug::userdata::BoxedUserdata;
 use geode::prelude::*;
 use wgpu::SurfaceConfiguration;
@@ -11,7 +12,12 @@ use winit::{
 
 use crate::{
 	engine::scene::{SceneRenderEvent, SceneUpdateEvent},
-	game::entry::PlaySceneState,
+	game::{
+		entry::PlaySceneState,
+		voxel::material::{
+			BasicBlockDescriptorBundle, BlockDescriptorVisualState, InvisibleBlockDescriptorBundle,
+		},
+	},
 };
 
 use super::{
@@ -247,6 +253,10 @@ pub fn main_inner() -> anyhow::Result<()> {
 			@mut Storage<BoxedUserdata>,
 			@mut Storage<SceneUpdateHandler>,
 			@mut Storage<SceneRenderHandler>,
+			@arch InvisibleBlockDescriptorBundle,
+			@arch BasicBlockDescriptorBundle,
+			@mut Storage<BaseMaterialState>,
+			@mut Storage<BlockDescriptorVisualState>,
 		))
 		.concat((&root.gfx, &mut root.asset_mgr));
 

@@ -2,7 +2,7 @@ use std::{borrow::Cow, sync::Arc};
 
 use crevice::std430::AsStd430;
 use crucible_common::voxel::math::{BlockFace, Sign};
-use typed_glam::glam;
+use typed_glam::glam::{self, Vec2};
 
 use crate::engine::{
 	assets::{AssetDescriptor, AssetManager},
@@ -275,6 +275,7 @@ impl VoxelVertex {
 		target: &mut Vec<<Self as AsStd430>::Output>,
 		mut origin: glam::Vec3,
 		face: BlockFace,
+		(uv_origin, uv_size): (Vec2, Vec2),
 	) {
 		let (unit_a, unit_b) = face.ortho();
 		let (unit_a, unit_b) = (
@@ -288,25 +289,25 @@ impl VoxelVertex {
 
 		let point_a = Self {
 			position: origin,
-			uv: glam::Vec2::new(0., 0.),
+			uv: uv_origin + uv_size * glam::Vec2::new(0., 0.),
 		}
 		.as_std430();
 
 		let point_b = Self {
 			position: origin + unit_a,
-			uv: glam::Vec2::new(1., 0.),
+			uv: uv_origin + uv_size * glam::Vec2::new(1., 0.),
 		}
 		.as_std430();
 
 		let point_c = Self {
 			position: origin + unit_a + unit_b,
-			uv: glam::Vec2::new(1., 1.),
+			uv: uv_origin + uv_size * glam::Vec2::new(1., 1.),
 		}
 		.as_std430();
 
 		let point_d = Self {
 			position: origin + unit_b,
-			uv: glam::Vec2::new(0., 1.),
+			uv: uv_origin + uv_size * glam::Vec2::new(0., 1.),
 		}
 		.as_std430();
 

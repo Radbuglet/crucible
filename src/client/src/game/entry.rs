@@ -1,7 +1,10 @@
-use crucible_common::voxel::{
-	coord::{EntityLocation, Location, RayCast},
-	data::{BlockState, VoxelChunkData, VoxelWorldData},
-	math::{BlockFace, ChunkVec, EntityVec, WorldVec},
+use crucible_common::{
+	game::material::{BaseMaterialState, MaterialRegistry},
+	voxel::{
+		coord::{EntityLocation, Location, RayCast},
+		data::{BlockState, VoxelChunkData, VoxelWorldData},
+		math::{BlockFace, ChunkVec, EntityVec, WorldVec},
+	},
 };
 use crucible_util::{
 	debug::{
@@ -12,7 +15,7 @@ use crucible_util::{
 	mem::c_enum::CEnum,
 };
 use geode::prelude::*;
-use typed_glam::glam::Mat4;
+use typed_glam::glam::{Mat4, UVec2};
 use wgpu::util::DeviceExt;
 use winit::{
 	dpi::PhysicalPosition,
@@ -23,7 +26,7 @@ use winit::{
 use crate::{
 	engine::{
 		assets::AssetManager,
-		gfx::texture::FullScreenTexture,
+		gfx::{atlas::AtlasBuilder, texture::FullScreenTexture},
 		io::{gfx::GfxContext, input::InputManager, viewport::Viewport},
 		scene::{
 			SceneBundle, SceneRenderEvent, SceneRenderHandler, SceneUpdateEvent, SceneUpdateHandler,
@@ -35,6 +38,9 @@ use crate::{
 use super::{
 	player::camera::FreeCamController,
 	voxel::{
+		material::{
+			BasicBlockDescriptorBundle, BlockDescriptorVisualState, InvisibleBlockDescriptorBundle,
+		},
 		mesh::{VoxelChunkMesh, VoxelWorldMesh},
 		pipeline::VoxelUniforms,
 	},
@@ -44,13 +50,21 @@ use super::{
 
 #[derive(Debug, Default)]
 pub struct PlaySceneState {
+	// Camera controller
 	has_control: bool,
 	free_cam: FreeCamController,
+
+	// World state
 	world_data: VoxelWorldData,
 	world_mesh: VoxelWorldMesh,
-	main_viewport: ExplicitlyBind<Entity>,
 	voxel_uniforms: ExplicitlyBind<VoxelUniforms>,
-	time: f64,
+	main_viewport: ExplicitlyBind<Entity>,
+
+	// Block registry
+	block_registry: MaterialRegistry,
+	block_atlas: ExplicitlyBind<AtlasBuilder>,
+	materials: Vec<Entity>,
+	selected_material_idx: usize,
 }
 
 impl PlaySceneState {
@@ -62,48 +76,118 @@ impl PlaySceneState {
 			&mut Storage<BoxedUserdata>,
 			&mut Storage<SceneUpdateHandler>,
 			&mut Storage<SceneRenderHandler>,
+			&mut Storage<BaseMaterialState>,
+			&mut Storage<BlockDescriptorVisualState>,
+			&mut Archetype<InvisibleBlockDescriptorBundle>,
+			&mut Archetype<BasicBlockDescriptorBundle>,
 			&mut AssetManager,
 		),
 		main_viewport: Entity,
 	) -> Entity {
+		// Acquire context
 		decompose!(cx => cx & {
 			gfx: &GfxContext,
 			asset_mgr: &mut AssetManager,
 			scene_arch: &mut Archetype<SceneBundle>,
+			invisible_material_bundle: &mut Archetype<InvisibleBlockDescriptorBundle>,
+			material_bundle: &mut Archetype<BasicBlockDescriptorBundle>,
 		});
-
-		// Create block texture
-		let block_image = image::load_from_memory(include_bytes!(
-			"./voxel/textures/placeholder_material_1.png"
-		))
-		.unwrap();
-
-		let block_texture = gfx.device.create_texture_with_data(
-			&gfx.queue,
-			&wgpu::TextureDescriptor {
-				label: Some("block :)"),
-				size: wgpu::Extent3d {
-					width: block_image.width(),
-					height: block_image.height(),
-					depth_or_array_layers: 1,
-				},
-				mip_level_count: 1,
-				sample_count: 1,
-				dimension: wgpu::TextureDimension::D2,
-				format: wgpu::TextureFormat::Rgba32Float,
-				usage: wgpu::TextureUsages::TEXTURE_BINDING,
-			},
-			bytemuck::cast_slice(&block_image.into_rgba32f()),
-		);
-		let block_texture_view = block_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
 		// Create scene state
 		let mut scene_state = Box::new(Self::default());
 		ExplicitlyBind::bind(&mut scene_state.main_viewport, main_viewport);
-		ExplicitlyBind::bind(
-			&mut scene_state.voxel_uniforms,
-			VoxelUniforms::new((gfx, asset_mgr), &block_texture_view),
-		);
+
+		// Register blocks
+		let mut atlas = AtlasBuilder::new(UVec2::new(100, 100), UVec2::new(3, 3));
+		let registry = &mut scene_state.block_registry;
+		{
+			// Register air block
+			{
+				let descriptor = invisible_material_bundle.spawn_with(
+					decompose!(cx),
+					"air block descriptor",
+					InvisibleBlockDescriptorBundle {
+						base: BaseMaterialState::default(),
+					},
+				);
+
+				// Register material
+				let id =
+					registry.register(decompose!(cx), format_args!("air").to_string(), descriptor);
+
+				assert_eq!(id, 0);
+			}
+
+			// Register other blocks
+			let images = [
+				image::load_from_memory(include_bytes!(
+					"./voxel/textures/placeholder_material_1.png"
+				))
+				.unwrap()
+				.into_rgba32f(),
+				image::load_from_memory(include_bytes!(
+					"./voxel/textures/placeholder_material_2.png"
+				))
+				.unwrap()
+				.into_rgba32f(),
+				image::load_from_memory(include_bytes!(
+					"./voxel/textures/placeholder_material_3.png"
+				))
+				.unwrap()
+				.into_rgba32f(),
+			];
+
+			for (i, image) in images.into_iter().enumerate() {
+				// Place into atlas
+				let atlas_tile = atlas.add(image);
+
+				// Spawn material descriptor
+				let descriptor = material_bundle.spawn_with(
+					decompose!(cx),
+					format_args!("block {i} descriptor"),
+					BasicBlockDescriptorBundle {
+						base: BaseMaterialState::default(),
+						visual: BlockDescriptorVisualState { atlas_tile },
+					},
+				);
+
+				// Register material
+				registry.register(
+					decompose!(cx),
+					format_args!("block_{i}").to_string(),
+					descriptor,
+				);
+
+				scene_state.materials.push(descriptor);
+			}
+
+			// Create block texture
+			let block_texture = gfx.device.create_texture_with_data(
+				&gfx.queue,
+				&wgpu::TextureDescriptor {
+					label: Some("block :)"),
+					size: wgpu::Extent3d {
+						width: atlas.texture().width(),
+						height: atlas.texture().height(),
+						depth_or_array_layers: 1,
+					},
+					mip_level_count: 1,
+					sample_count: 1,
+					dimension: wgpu::TextureDimension::D2,
+					format: wgpu::TextureFormat::Rgba32Float,
+					usage: wgpu::TextureUsages::TEXTURE_BINDING,
+				},
+				bytemuck::cast_slice(atlas.texture()),
+			);
+			let block_texture_view =
+				block_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+			ExplicitlyBind::bind(
+				&mut scene_state.voxel_uniforms,
+				VoxelUniforms::new((gfx, asset_mgr), &block_texture_view),
+			);
+			ExplicitlyBind::bind(&mut scene_state.block_atlas, atlas);
+		}
 
 		// Create scene entity
 		scene_arch.spawn_with(
@@ -127,12 +211,11 @@ impl PlaySceneState {
 			input_managers: @ref Storage<InputManager>,
 			chunk_datas: @mut Storage<VoxelChunkData>,
 			chunk_meshes: @mut Storage<VoxelChunkMesh>,
+			descriptor_base_states: @ref Storage<BaseMaterialState>,
+			descriptor_visual_states: @ref Storage<BlockDescriptorVisualState>,
 		});
 
 		let me = userdatas[me].downcast_mut::<Self>();
-
-		// Update timer
-		me.time += 0.1;
 
 		// Handle interactions
 		{
@@ -162,6 +245,23 @@ impl PlaySceneState {
 						back: input_mgr.key(VirtualKeyCode::S).state(),
 					},
 				);
+
+				// Process slot selection
+				{
+					let keys = [
+						VirtualKeyCode::Key1,
+						VirtualKeyCode::Key2,
+						VirtualKeyCode::Key3,
+						VirtualKeyCode::Key4,
+						VirtualKeyCode::Key5,
+					];
+					for (i, &key) in keys[0..me.materials.len()].iter().enumerate() {
+						if input_mgr.key(key).recently_pressed() {
+							me.selected_material_idx = i;
+							break;
+						}
+					}
+				}
 
 				// Handle chunk filling
 				if input_mgr.key(VirtualKeyCode::Space).state() {
@@ -206,12 +306,15 @@ impl PlaySceneState {
 							.p_is_some_and(|state| state.material != 0)
 						{
 							let mut target = isect.block.at_neighbor(cx, isect.face.invert());
+							let material = me.materials[me.selected_material_idx];
+							let material = descriptor_base_states[material].slot();
+
 							target.set_state_or_create(
 								(&mut me.world_data, chunk_datas),
 								&Provider::new_with_parent_and_comps(dyn_cx, (&mut *chunk_arch,)),
 								Self::chunk_factory,
 								BlockState {
-									material: 1,
+									material,
 									variant: 0,
 									light_level: 255,
 								},
@@ -290,8 +393,17 @@ impl PlaySceneState {
 			}
 		}
 
-		me.world_mesh
-			.update_chunks((&gfx, chunk_datas, chunk_meshes), None);
+		me.world_mesh.update_chunks(
+			(
+				&gfx,
+				&me.block_atlas,
+				&me.block_registry,
+				chunk_datas,
+				chunk_meshes,
+				descriptor_visual_states,
+			),
+			None,
+		);
 	}
 
 	fn on_render(cx: &Provider, me: Entity, event: SceneRenderEvent) {
@@ -351,9 +463,9 @@ impl PlaySceneState {
 					view: &view,
 					ops: wgpu::Operations {
 						load: wgpu::LoadOp::Clear(wgpu::Color {
-							r: 0.5 + 0.5 * me.time.cos(),
-							g: 0.1,
-							b: 0.1,
+							r: 0.45,
+							g: 0.66,
+							b: 1.0,
 							a: 1.0,
 						}),
 						store: true,

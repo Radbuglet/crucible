@@ -3,17 +3,23 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use crucible_common::voxel::{
-	data::VoxelChunkData,
-	math::{BlockFace, BlockVec, BlockVecExt, WorldVec, WorldVecExt},
+use crucible_common::{
+	game::material::MaterialRegistry,
+	voxel::{
+		data::VoxelChunkData,
+		math::{BlockFace, BlockVec, BlockVecExt, WorldVec, WorldVecExt},
+	},
 };
 use crucible_util::{lang::polyfill::OptionPoly, mem::c_enum::CEnum};
 use geode::{Dependent, Entity, Storage};
 use wgpu::util::DeviceExt;
 
-use crate::engine::io::gfx::GfxContext;
+use crate::engine::{gfx::atlas::AtlasBuilder, io::gfx::GfxContext};
 
-use super::pipeline::{VoxelUniforms, VoxelVertex};
+use super::{
+	material::BlockDescriptorVisualState,
+	pipeline::{VoxelUniforms, VoxelVertex},
+};
 
 #[derive(Debug, Default)]
 pub struct VoxelWorldMesh {
@@ -35,10 +41,13 @@ impl VoxelWorldMesh {
 
 	pub fn update_chunks(
 		&mut self,
-		(gfx, datas, meshes): (
+		(gfx, atlas, registry, datas, meshes, descriptor_visual_states): (
 			&GfxContext,
+			&AtlasBuilder,
+			&MaterialRegistry,
 			&Storage<VoxelChunkData>,
 			&mut Storage<VoxelChunkMesh>,
+			&Storage<BlockDescriptorVisualState>,
 		),
 		time_limit: Option<Duration>,
 	) {
@@ -53,10 +62,15 @@ impl VoxelWorldMesh {
 			let mut vertices = Vec::new();
 
 			for center_pos in BlockVec::iter() {
-				// Don't mesh air blocks
-				if chunk_data.block_state(center_pos).material == 0 {
+				// Process material
+				let material = chunk_data.block_state(center_pos).material;
+				if material == 0 {
 					continue;
 				}
+
+				let material_desc = registry.resolve_slot(material);
+				let atlas_tile = descriptor_visual_states[material_desc].atlas_tile;
+				let uv_bounds = atlas.decode_uv_bounds(atlas_tile);
 
 				// For every side of a solid block...
 				for face in BlockFace::variants() {
@@ -77,7 +91,12 @@ impl VoxelWorldMesh {
 
 					// Mesh it!
 					let center_pos = WorldVec::compose(chunk_data.pos(), center_pos);
-					VoxelVertex::push_quad(&mut vertices, center_pos.to_glam().as_vec3(), face);
+					VoxelVertex::push_quad(
+						&mut vertices,
+						center_pos.to_glam().as_vec3(),
+						face,
+						uv_bounds,
+					);
 				}
 			}
 
