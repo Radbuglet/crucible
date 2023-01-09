@@ -173,7 +173,7 @@ pub trait BlockVecExt: Sized {
 
 impl BlockVecExt for BlockVec {
 	fn is_valid(&self) -> bool {
-		self.all(|comp| comp >= 0 && comp < CHUNK_EDGE)
+		self.all(|comp| (0..CHUNK_EDGE).contains(&comp))
 	}
 
 	fn wrap(self) -> Self {
@@ -477,7 +477,7 @@ pub struct Line3 {
 impl Line3 {
 	pub fn new_origin_delta(start: EntityVec, delta: EntityVec) -> Self {
 		Self {
-			start: start,
+			start,
 			end: start + delta,
 		}
 	}

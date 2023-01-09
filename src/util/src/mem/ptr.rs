@@ -135,7 +135,7 @@ impl<T: ?Sized> HeapPointerExt for Box<T> {
 	type Pointee = T;
 
 	unsafe fn prolong_heap_ref<'a>(&self) -> &'a Self::Pointee {
-		(&**self).prolong()
+		(**self).prolong()
 	}
 }
 

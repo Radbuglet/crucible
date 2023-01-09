@@ -49,7 +49,7 @@ impl<T> ExplicitlyBind<T> {
 impl<T: fmt::Debug> fmt::Debug for ExplicitlyBind<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		// Disambiguated by generic constraints
-		(&**self).fmt(f)
+		(**self).fmt(f)
 	}
 }
 
@@ -57,13 +57,13 @@ impl<T: Copy> Copy for ExplicitlyBind<T> {}
 
 impl<T: Clone> Clone for ExplicitlyBind<T> {
 	fn clone(&self) -> Self {
-		(&**self).clone().into()
+		(**self).clone().into()
 	}
 }
 
 impl<T: hash::Hash> hash::Hash for ExplicitlyBind<T> {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		(&**self).hash(state);
+		(**self).hash(state);
 	}
 }
 
@@ -71,19 +71,19 @@ impl<T: Eq> Eq for ExplicitlyBind<T> {}
 
 impl<T: PartialEq> PartialEq for ExplicitlyBind<T> {
 	fn eq(&self, other: &Self) -> bool {
-		&**self == &**other
+		**self == **other
 	}
 }
 
 impl<T: Ord> Ord for ExplicitlyBind<T> {
 	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-		(&**self).cmp(&**other)
+		(**self).cmp(&**other)
 	}
 }
 
 impl<T: PartialOrd> PartialOrd for ExplicitlyBind<T> {
 	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-		(&**self).partial_cmp(&**other)
+		(**self).partial_cmp(&**other)
 	}
 }
 

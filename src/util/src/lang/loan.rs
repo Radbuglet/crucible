@@ -97,7 +97,7 @@ where
 	B: Borrower<A::Loan> + fmt::Debug,
 {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_tuple("LentRef").field(&&*self).finish()
+		f.debug_tuple("Mapped").field(&&**self).finish()
 	}
 }
 
@@ -114,7 +114,7 @@ where
 	B: Borrower<A::Loan> + PartialEq,
 {
 	fn eq(&self, other: &Self) -> bool {
-		&**self == &**other
+		**self == **other
 	}
 }
 
@@ -144,7 +144,7 @@ where
 	B: Borrower<A::Loan> + hash::Hash,
 {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		(&**self).hash(state);
+		(**self).hash(state);
 	}
 }
 
@@ -206,7 +206,7 @@ impl<T: ?Sized> Deref for LentRef<T> {
 
 impl<T: ?Sized + fmt::Debug> fmt::Debug for LentRef<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_tuple("LentRef").field(&&*self).finish()
+		f.debug_tuple("LentRef").field(&&**self).finish()
 	}
 }
 
@@ -214,7 +214,7 @@ impl<T: ?Sized + Eq> Eq for LentRef<T> {}
 
 impl<T: ?Sized + PartialEq> PartialEq for LentRef<T> {
 	fn eq(&self, other: &Self) -> bool {
-		&**self == &**other
+		**self == **other
 	}
 }
 
@@ -232,7 +232,7 @@ impl<T: ?Sized + PartialOrd> PartialOrd for LentRef<T> {
 
 impl<T: ?Sized + hash::Hash> hash::Hash for LentRef<T> {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		(&**self).hash(state);
+		(**self).hash(state);
 	}
 }
 
@@ -278,7 +278,7 @@ impl<T: ?Sized> DerefMut for LentMut<T> {
 
 impl<T: ?Sized + fmt::Debug> fmt::Debug for LentMut<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_tuple("LentMut").field(&&*self).finish()
+		f.debug_tuple("LentMut").field(&&**self).finish()
 	}
 }
 
@@ -286,7 +286,7 @@ impl<T: ?Sized + Eq> Eq for LentMut<T> {}
 
 impl<T: ?Sized + PartialEq> PartialEq for LentMut<T> {
 	fn eq(&self, other: &Self) -> bool {
-		&**self == &**other
+		**self == **other
 	}
 }
 
@@ -304,7 +304,7 @@ impl<T: ?Sized + PartialOrd> PartialOrd for LentMut<T> {
 
 impl<T: ?Sized + hash::Hash> hash::Hash for LentMut<T> {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		(&**self).hash(state);
+		(**self).hash(state);
 	}
 }
 

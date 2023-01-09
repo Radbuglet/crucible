@@ -45,14 +45,14 @@ impl<T: Default> Default for ExtRefCell<T> {
 
 impl<T: ?Sized + fmt::Debug> fmt::Debug for ExtRefCell<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		(&**self).fmt(f)
+		(**self).fmt(f)
 	}
 }
 
 impl<T: Clone> Clone for ExtRefCell<T> {
 	fn clone(&self) -> Self {
 		Self {
-			cell: RefCell::new((&**self).clone()),
+			cell: RefCell::new((**self).clone()),
 		}
 	}
 }
@@ -61,25 +61,25 @@ impl<T: ?Sized + Eq> Eq for ExtRefCell<T> {}
 
 impl<T: ?Sized + PartialEq> PartialEq for ExtRefCell<T> {
 	fn eq(&self, other: &Self) -> bool {
-		&*self == &*other
+		**self == **other
 	}
 }
 
 impl<T: ?Sized + PartialOrd> PartialOrd for ExtRefCell<T> {
 	fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-		(&**self).partial_cmp(&**other)
+		(**self).partial_cmp(&**other)
 	}
 }
 
 impl<T: ?Sized + Ord> Ord for ExtRefCell<T> {
 	fn cmp(&self, other: &Self) -> cmp::Ordering {
-		(&**self).cmp(&**other)
+		(**self).cmp(&**other)
 	}
 }
 
 impl<T: ?Sized + hash::Hash> hash::Hash for ExtRefCell<T> {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		(&**self).hash(state);
+		(**self).hash(state);
 	}
 }
 

@@ -228,7 +228,7 @@ impl VoxelUniforms {
 				},
 				wgpu::BindGroupEntry {
 					binding: 1,
-					resource: wgpu::BindingResource::TextureView(&texture),
+					resource: wgpu::BindingResource::TextureView(texture),
 				},
 				wgpu::BindGroupEntry {
 					binding: 2,

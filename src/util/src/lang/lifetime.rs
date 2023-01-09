@@ -1,6 +1,7 @@
 // When working with lifetime escape-hatches, we are better off being painfully explicit than
 // being [explicit] painfully.
-#[allow(clippy::needless_lifetimes)]
+#![allow(clippy::needless_lifetimes)]
+
 pub fn try_transform_mut<'a, T: ?Sized, R: ?Sized, F>(
 	orig: &'a mut T,
 	f: F,

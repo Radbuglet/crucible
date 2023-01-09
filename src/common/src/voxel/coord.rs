@@ -341,7 +341,6 @@ impl RayCast {
 				let (isect_lerp, isect_pos) = axis.plane_intersect(isect_layer, step_line);
 
 				intersections.push(RayCastIntersection {
-					_non_exhaustive: (),
 					block: block_loc, // This will be updated in a bit.
 					face,
 					distance: self.dist + isect_lerp,
@@ -376,8 +375,8 @@ impl RayCast {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RayCastIntersection {
-	_non_exhaustive: (),
 	pub block: BlockLocation,
 	pub face: BlockFace,
 	pub pos: EntityVec,
@@ -462,7 +461,7 @@ pub fn move_rigid_body(
 	size: EntityVec,
 	delta: EntityVec,
 ) -> EntityVec {
-	let mut loc = EntityLocation::new(&cx.0, src);
+	let mut loc = EntityLocation::new(cx.0, src);
 
 	'a: for movement_axis in Axis3::variants() {
 		// Decompose delta

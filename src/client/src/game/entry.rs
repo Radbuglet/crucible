@@ -152,7 +152,7 @@ impl PlaySceneState {
 		decompose!(cx => cx & { material_bundle: &mut Archetype<BasicMaterialDescriptorBundle> });
 
 		// Place into atlas
-		let atlas_tile = self.block_atlas.add(&texture);
+		let atlas_tile = self.block_atlas.add(texture);
 
 		// Spawn material descriptor
 		let descriptor = material_bundle.spawn_with(
@@ -239,7 +239,7 @@ impl PlaySceneState {
 				me.free_cam.handle_mouse_move(input_mgr.mouse_delta());
 
 				me.free_cam.process(
-					(&me.world_data, &chunk_datas),
+					(&me.world_data, chunk_datas),
 					FreeCamInputs {
 						up: input_mgr.key(VirtualKeyCode::E).state(),
 						down: input_mgr.key(VirtualKeyCode::Q).state(),
@@ -399,7 +399,7 @@ impl PlaySceneState {
 
 		me.world_mesh.update_chunks(
 			(
-				&gfx,
+				gfx,
 				&me.block_atlas,
 				&me.block_registry,
 				chunk_datas,
@@ -428,7 +428,7 @@ impl PlaySceneState {
 		let viewport = &viewports[me.main_viewport];
 		let depth_texture = &mut depth_textures[me.main_viewport];
 		let depth_texture_format = depth_texture.wgpu_descriptor().format;
-		let (_, depth_texture_view) = depth_texture.acquire((&gfx, viewport)).unwrap();
+		let (_, depth_texture_view) = depth_texture.acquire((gfx, viewport)).unwrap();
 
 		// Create encoder
 		let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
@@ -457,7 +457,7 @@ impl PlaySceneState {
 					is_wireframe: false,
 					back_face_culling: true,
 				},
-				&gfx,
+				gfx,
 			);
 
 			// Begin render pass
@@ -495,12 +495,12 @@ impl PlaySceneState {
 				let view = me.free_cam.view_matrix();
 				let full = proj * view;
 
-				me.voxel_uniforms.set_camera_matrix(&gfx, full);
+				me.voxel_uniforms.set_camera_matrix(gfx, full);
 			}
 
 			// Render world
 			me.world_mesh
-				.render_chunks((&chunk_meshes, &me.voxel_uniforms), &mut pass);
+				.render_chunks((chunk_meshes, &me.voxel_uniforms), &mut pass);
 		}
 
 		// Submit work

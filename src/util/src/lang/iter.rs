@@ -62,7 +62,7 @@ impl<const N: usize> VolumetricIter<N> {
 		// Save the previous result so our iterator includes (0, ..., 0) automatically.
 		// If the `pos` is `None`, we have exhausted our iterator and can early-return.
 		let pos = self.pos.as_mut()?;
-		let next = pos.clone();
+		let next = *pos;
 
 		// Update the position for the next query
 		let mut i = N - 1;

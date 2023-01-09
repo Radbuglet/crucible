@@ -247,19 +247,19 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 	let scene = {
 		// Acquire context
-		let mut guard;
-		let mut cx = unpack!(&root.universe => guard & (
-			&Universe,
-			@arch SceneBundle,
-			@mut Storage<BoxedUserdata>,
-			@mut Storage<SceneUpdateHandler>,
-			@mut Storage<SceneRenderHandler>,
-			@arch InvisibleBlockDescriptorBundle,
-			@arch BasicMaterialDescriptorBundle,
-			@mut Storage<MaterialStateBase>,
-			@mut Storage<MaterialStateVisualBlock>,
-		))
-		.concat((&root.gfx, &mut root.asset_mgr));
+		unpack!(cx_full & cx = &root.universe => {
+			scene_bundle: @arch SceneBundle,
+			...:
+				&Universe,
+				@mut Storage<BoxedUserdata>,
+				@mut Storage<SceneUpdateHandler>,
+				@mut Storage<SceneRenderHandler>,
+				@arch InvisibleBlockDescriptorBundle,
+				@arch BasicMaterialDescriptorBundle,
+				@mut Storage<MaterialStateBase>,
+				@mut Storage<MaterialStateVisualBlock>,
+		});
+		let mut cx = (cx, (&root.gfx, &mut root.asset_mgr));
 
 		// Create scene
 		let mut scene = PlaySceneState::new(decompose!(cx), main_viewport);
@@ -269,7 +269,6 @@ pub fn main_inner() -> anyhow::Result<()> {
 		scene.upload_atlases(decompose!(cx));
 
 		// Construct entity
-		decompose!(cx => cx & { scene_bundle: &mut Archetype<SceneBundle> });
 		scene_bundle.spawn_with(decompose!(cx), "play scene", scene.make_bundle())
 	};
 
