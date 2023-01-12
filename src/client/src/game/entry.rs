@@ -276,7 +276,7 @@ impl PlaySceneState {
 
 					// Fill volume
 					let set_state_cx =
-						Provider::new_with_parent_and_comps(dyn_cx, (&mut *chunk_arch,));
+						Provider::new_with_parent_and_comps(dyn_cx, (&mut **chunk_arch,));
 
 					for [x, y, z] in VolumetricIter::new([6, 6, 6]) {
 						let [x, y, z] = [x as i32 - 3, y as i32 - 10, z as i32 - 3];
@@ -301,7 +301,7 @@ impl PlaySceneState {
 						EntityVec::from_glam(me.free_cam.facing().as_dvec3()),
 					);
 
-					let cx = (&me.world_data, &*chunk_datas);
+					let cx = (&me.world_data, &**chunk_datas);
 
 					for mut isect in ray.step_for(cx, 6.) {
 						if isect
@@ -315,7 +315,7 @@ impl PlaySceneState {
 
 							target.set_state_or_create(
 								(&mut me.world_data, chunk_datas),
-								&Provider::new_with_parent_and_comps(dyn_cx, (&mut *chunk_arch,)),
+								&Provider::new_with_parent_and_comps(dyn_cx, (&mut **chunk_arch,)),
 								Self::chunk_factory,
 								BlockState {
 									material,
@@ -332,7 +332,7 @@ impl PlaySceneState {
 						EntityVec::from_glam(me.free_cam.facing().as_dvec3()),
 					);
 
-					let cx = (&me.world_data, &*chunk_datas);
+					let cx = (&me.world_data, &**chunk_datas);
 
 					for mut isect in ray.step_for(cx, 6.) {
 						if isect
@@ -342,7 +342,7 @@ impl PlaySceneState {
 						{
 							isect.block.set_state_or_create(
 								(&mut me.world_data, chunk_datas),
-								&Provider::new_with_parent_and_comps(dyn_cx, (&mut *chunk_arch,)),
+								&Provider::new_with_parent_and_comps(dyn_cx, (&mut **chunk_arch,)),
 								Self::chunk_factory,
 								BlockState::default(),
 							);

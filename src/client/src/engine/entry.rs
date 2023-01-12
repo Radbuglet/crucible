@@ -45,67 +45,77 @@ struct EngineRoot {
 
 impl EngineRoot {
 	fn new() -> anyhow::Result<(WinitEventLoop, Self)> {
+		let event_loop;
+		let gfx;
+		let asset_mgr;
+		let mut viewport_mgr;
+		let scene_mgr;
+
 		// Create universe and acquire context
 		let universe = Universe::new();
-		let mut guard;
-		let mut cx = unpack!(&universe => guard & (
-			&Universe,
-			@arch ViewportBundle,
-			@arch SceneBundle,
-			@mut Storage<Viewport>,
-			@mut Storage<InputManager>,
-			@mut Storage<FullScreenTexture>,
-			@mut Storage<BoxedUserdata>,
-			@mut Storage<SceneUpdateHandler>,
-			@mut Storage<SceneRenderHandler>,
-		));
 
-		// Create main window
-		let event_loop = EventLoopBuilder::with_user_event().build();
-		let main_window = WindowBuilder::new()
-			.with_title("Crucible")
-			.with_inner_size(LogicalSize::new(1920, 1080))
-			.with_visible(false)
-			.build(&event_loop)
-			.context("failed to create main window")?;
+		{
+			let mut cx = unpack!(&universe => (
+				&Universe,
+				@arch ViewportBundle,
+				@arch SceneBundle,
+				@mut Storage<Viewport>,
+				@mut Storage<InputManager>,
+				@mut Storage<FullScreenTexture>,
+				@mut Storage<BoxedUserdata>,
+				@mut Storage<SceneUpdateHandler>,
+				@mut Storage<SceneRenderHandler>,
+			));
 
-		// Create graphics subsystem
-		let (gfx, _compat, main_surface) =
-			futures::executor::block_on(GfxContext::init(&main_window, &mut GfxFeatureNeedsScreen))
-				.context("failed to create graphics context")?;
+			// Create main window
+			event_loop = EventLoopBuilder::with_user_event().build();
+			let main_window = WindowBuilder::new()
+				.with_title("Crucible")
+				.with_inner_size(LogicalSize::new(1920, 1080))
+				.with_visible(false)
+				.build(&event_loop)
+				.context("failed to create main window")?;
 
-		// Create main viewport
-		let mut viewport_mgr = ViewportManager::default();
-		let main_viewport = {
-			decompose!(cx => cx & { viewport_arch: &mut Archetype<ViewportBundle> });
-			viewport_arch.spawn_with(
-				decompose!(cx),
-				"my viewport",
-				ViewportBundle::new(Viewport::new(
-					(&gfx,),
-					main_window,
-					Some(main_surface),
-					SurfaceConfiguration {
-						alpha_mode: wgpu::CompositeAlphaMode::Auto,
-						format: wgpu::TextureFormat::Bgra8UnormSrgb,
-						present_mode: wgpu::PresentMode::Fifo,
-						usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-						width: 0,
-						height: 0,
-					},
-				)),
-			)
-		};
+			// Create graphics subsystem
+			let (gfx_tmp, _compat, main_surface) = futures::executor::block_on(GfxContext::init(
+				&main_window,
+				&mut GfxFeatureNeedsScreen,
+			))
+			.context("failed to create graphics context")?;
+			gfx = gfx_tmp;
 
-		decompose!(cx => { viewports: &Storage<Viewport> });
-		viewport_mgr.register((viewports,), main_viewport);
+			// Create main viewport
+			viewport_mgr = ViewportManager::default();
+			let main_viewport = {
+				decompose!(cx => cx & {
+					viewport_arch: &mut Archetype<ViewportBundle>
+				});
+				viewport_arch.spawn_with(
+					decompose!(cx),
+					"my viewport",
+					ViewportBundle::new(Viewport::new(
+						(&gfx,),
+						main_window,
+						Some(main_surface),
+						SurfaceConfiguration {
+							alpha_mode: wgpu::CompositeAlphaMode::Auto,
+							format: wgpu::TextureFormat::Bgra8UnormSrgb,
+							present_mode: wgpu::PresentMode::Fifo,
+							usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+							width: 0,
+							height: 0,
+						},
+					)),
+				)
+			};
 
-		// Create other services
-		let scene_mgr = SceneManager::default();
-		let asset_mgr = AssetManager::default();
+			decompose!(cx => { viewports: &Storage<Viewport> });
+			viewport_mgr.register((viewports,), main_viewport);
 
-		// Construct `EngineRoot`
-		drop(guard);
+			// Create other services
+			scene_mgr = SceneManager::default();
+			asset_mgr = AssetManager::default();
+		}
 
 		Ok((
 			event_loop,
@@ -187,7 +197,7 @@ impl MainLoopHandler for EngineRoot {
 			(
 				&self.gfx,
 				&mut self.asset_mgr,
-				&mut *viewports,
+				&mut **viewports,
 				main_loop,
 				proxy,
 			),
@@ -247,9 +257,9 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 	let scene = {
 		// Acquire context
-		unpack!(cx_full & cx = &root.universe => {
+		unpack!(&root.universe => full_cx, {
 			scene_bundle: @arch SceneBundle,
-			...:
+			...cx: (
 				&Universe,
 				@mut Storage<BoxedUserdata>,
 				@mut Storage<SceneUpdateHandler>,
@@ -258,6 +268,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 				@arch BasicMaterialDescriptorBundle,
 				@mut Storage<MaterialStateBase>,
 				@mut Storage<MaterialStateVisualBlock>,
+			),
 		});
 		let mut cx = (cx, (&root.gfx, &mut root.asset_mgr));
 

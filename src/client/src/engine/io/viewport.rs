@@ -304,8 +304,7 @@ impl ViewportBundle {
 	}
 
 	fn on_destroy(universe: &Universe, events: EventQueueIter<EntityDestroyEvent>) {
-		let mut guard;
-		let mut cx = unpack!(universe => guard & (
+		let mut cx = unpack!(universe => (
 			@mut Storage<Viewport>,
 			@mut Storage<InputManager>,
 			@mut Storage<FullScreenTexture>,

@@ -248,7 +248,7 @@ checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 [[package]]
 name = "compost"
 version = "0.4.0"
-source = "git+https://github.com/Radbuglet/compost.git?rev=0d532ccb26d79e9f043cc22faf66c806a40aeb74#0d532ccb26d79e9f043cc22faf66c806a40aeb74"
+source = "git+https://github.com/Radbuglet/compost.git?rev=6b029d6b4530b92b2e8b343f07069624da5541d1#6b029d6b4530b92b2e8b343f07069624da5541d1"
 
 [[package]]
 name = "core-foundation"
@@ -819,7 +819,7 @@ dependencies = [
 [[package]]
 name = "geode"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/geode.git?rev=6c9e8c5ca381074e40f2a150b5733cbffd7dc59a#6c9e8c5ca381074e40f2a150b5733cbffd7dc59a"
+source = "git+https://github.com/Radbuglet/geode.git?rev=5da53e8947a4211aae2397fe3fa5ffc0565f9d6b#5da53e8947a4211aae2397fe3fa5ffc0565f9d6b"
 dependencies = [
  "compost",
  "derive-where",

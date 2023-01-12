@@ -62,8 +62,7 @@ impl BuildableArchetypeBundle for SceneBundle {
 
 impl SceneBundle {
 	fn on_destroy(universe: &Universe, events: EventQueueIter<EntityDestroyEvent>) {
-		let mut guard;
-		let mut cx = unpack!(universe => guard & (
+		let mut cx = unpack!(universe => (
 			@mut Storage<BoxedUserdata>,
 			@mut Storage<SceneUpdateHandler>,
 			@mut Storage<SceneRenderHandler>,
