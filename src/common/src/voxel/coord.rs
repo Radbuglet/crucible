@@ -4,7 +4,7 @@ use crucible_util::{
 		polyfill::OptionPoly,
 	},
 	mem::c_enum::CEnum,
-	object::entity::Entity,
+	object::entity::{Entity, OwnedEntity},
 };
 use smallvec::SmallVec;
 use typed_glam::{
@@ -154,7 +154,7 @@ where
 	pub fn set_state_or_create(
 		&mut self,
 		world: &mut VoxelWorldData,
-		factory: impl FnOnce(ChunkVec) -> Entity,
+		factory: impl FnOnce(ChunkVec) -> OwnedEntity,
 		state: BlockState,
 	) {
 		// Fetch chunk
@@ -162,9 +162,9 @@ where
 			Some(chunk) => chunk,
 			None => {
 				let pos = WorldVec::cast_from(self.pos).chunk();
-				let chunk = factory(pos);
+				let (chunk, chunk_ref) = factory(pos).split_guard();
 				world.add_chunk(pos, chunk);
-				chunk
+				chunk_ref
 			}
 		};
 

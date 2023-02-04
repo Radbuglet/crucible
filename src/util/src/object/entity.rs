@@ -2,6 +2,7 @@ use derive_where::derive_where;
 use fnv::FnvHashMap;
 use std::{
 	any::{type_name, Any, TypeId},
+	borrow::Borrow,
 	cell::{Ref, RefCell, RefMut},
 	collections::hash_map,
 	iter::repeat_with,
@@ -121,7 +122,7 @@ impl<T: 'static> Storage<T> {
 pub struct Entity(NonZeroU64);
 
 impl Entity {
-	pub fn new() -> Self {
+	pub fn new_unguarded() -> Self {
 		static ID_GEN: AtomicU64 = AtomicU64::new(1);
 
 		Self(NonZeroU64::new(ID_GEN.fetch_add(1, Ordering::Relaxed)).unwrap())
@@ -158,5 +159,94 @@ impl Entity {
 
 	pub fn has<T: 'static>(self) -> bool {
 		storage::<T>().has(self)
+	}
+
+	pub fn is_alive(self) -> bool {
+		true
+	}
+
+	pub fn destroy(self) {
+		// TODO
+	}
+}
+
+// === OwnedEntity === //
+
+#[derive(Debug, Hash, Eq, PartialEq)]
+pub struct OwnedEntity(Entity);
+
+impl OwnedEntity {
+	// === Lifecycle === //
+
+	pub fn new() -> Self {
+		Self(Entity::new_unguarded())
+	}
+
+	pub fn entity(&self) -> Entity {
+		self.0
+	}
+
+	pub fn defuse(self) -> Entity {
+		let entity = self.0;
+		std::mem::forget(self);
+
+		entity
+	}
+
+	pub fn split_guard(self) -> (Self, Entity) {
+		let entity = self.entity();
+		(self, entity)
+	}
+
+	// === Forwards === //
+
+	pub fn with<T: 'static>(self, comp: T) -> Self {
+		self.0.insert(comp);
+		self
+	}
+
+	pub fn insert<T: 'static>(&self, comp: T) -> Option<T> {
+		self.0.insert(comp)
+	}
+
+	pub fn remove<T: 'static>(&self) -> Option<T> {
+		self.0.remove()
+	}
+
+	pub fn try_get<T: 'static>(&self) -> Option<Ref<'static, T>> {
+		self.0.try_get()
+	}
+
+	pub fn try_get_mut<T: 'static>(&self) -> Option<RefMut<'static, T>> {
+		self.0.try_get_mut()
+	}
+
+	pub fn get<T: 'static>(&self) -> Ref<'static, T> {
+		self.0.get()
+	}
+
+	pub fn get_mut<T: 'static>(&self) -> RefMut<'static, T> {
+		self.0.get_mut()
+	}
+
+	pub fn has<T: 'static>(&self) -> bool {
+		self.0.has::<T>()
+	}
+
+	pub fn is_alive(&self) -> bool {
+		self.0.is_alive()
+	}
+}
+
+impl Borrow<Entity> for OwnedEntity {
+	fn borrow(&self) -> &Entity {
+		&self.0
+	}
+}
+
+impl Drop for OwnedEntity {
+	fn drop(&mut self) {
+		dbg!(&self);
+		self.0.destroy();
 	}
 }

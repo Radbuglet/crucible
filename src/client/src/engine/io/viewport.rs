@@ -1,4 +1,7 @@
-use crucible_util::{lang::explicitly_bind::ExplicitlyBind, object::entity::Entity};
+use crucible_util::{
+	lang::explicitly_bind::ExplicitlyBind,
+	object::entity::{Entity, OwnedEntity},
+};
 use hashbrown::HashMap;
 use thiserror::Error;
 use typed_glam::glam::UVec2;
@@ -12,20 +15,20 @@ pub const FALLBACK_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bg
 
 #[derive(Debug, Default)]
 pub struct ViewportManager {
-	window_map: HashMap<WindowId, Entity>,
+	window_map: HashMap<WindowId, OwnedEntity>,
 }
 
 impl ViewportManager {
-	pub fn register(&mut self, viewport: Entity) {
+	pub fn register(&mut self, viewport: OwnedEntity) {
 		self.window_map
 			.insert(viewport.get::<Viewport>().window().id(), viewport);
 	}
 
 	pub fn get_viewport(&self, id: WindowId) -> Option<Entity> {
-		self.window_map.get(&id).copied()
+		self.window_map.get(&id).map(OwnedEntity::entity)
 	}
 
-	pub fn window_map(&self) -> &HashMap<WindowId, Entity> {
+	pub fn window_map(&self) -> &HashMap<WindowId, OwnedEntity> {
 		&self.window_map
 	}
 
@@ -128,7 +131,7 @@ impl Viewport {
 
 	pub fn present(
 		&mut self,
-		(gfx,): (&GfxContext,),
+		gfx: &GfxContext,
 	) -> Result<Option<wgpu::SurfaceTexture>, OutOfDeviceMemoryError> {
 		use wgpu::SurfaceError::*;
 

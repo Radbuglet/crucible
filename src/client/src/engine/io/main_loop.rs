@@ -43,15 +43,15 @@ impl MainLoop {
 
 				// Next, it dispatches window, user, suspension/resumption, and device events.
 				Event::WindowEvent { window_id, event } => {
-					handler.on_window_input((&mut main_loop, proxy), window_id, event);
+					handler.on_window_input(&mut main_loop, proxy, window_id, event);
 				}
 
 				Event::DeviceEvent { device_id, event } => {
-					handler.on_device_input((&mut main_loop, proxy), device_id, event);
+					handler.on_device_input(&mut main_loop, proxy, device_id, event);
 				}
 
 				Event::UserEvent(userdata) => {
-					handler.on_userdata((&mut main_loop, proxy), userdata);
+					handler.on_userdata(&mut main_loop, proxy, userdata);
 				}
 
 				Event::Suspended => {
@@ -71,7 +71,7 @@ impl MainLoop {
 						// Run user-define update logic.
 						// It is up to the update handler to queue up redraw requests where
 						// applicable.
-						handler.on_update((&mut main_loop, proxy));
+						handler.on_update(&mut main_loop, proxy);
 
 						// Wait until the next update.
 						main_loop.last_update = update_start;
@@ -91,7 +91,7 @@ impl MainLoop {
 				// Now, we receive redraw requests. These can either be app-generated refresh requests
 				// created by the previous event or OS generated redraws.
 				Event::RedrawRequested(window_id) => {
-					handler.on_render((&mut main_loop, proxy), window_id);
+					handler.on_render(&mut main_loop, proxy, window_id);
 				}
 
 				// This is handled after all redraw requests have cleared, even if none were queued up.
@@ -145,33 +145,43 @@ impl MainLoop {
 }
 
 pub trait MainLoopHandler: Sized {
-	fn on_update(&mut self, cx: (&mut MainLoop, &WinitEventProxy));
+	fn on_update(&mut self, main_loop: &mut MainLoop, winit: &WinitEventProxy);
 
-	fn on_render(&mut self, cx: (&mut MainLoop, &WinitEventProxy), window_id: WindowId);
+	fn on_render(&mut self, main_loop: &mut MainLoop, winit: &WinitEventProxy, window_id: WindowId);
 
-	fn on_userdata(&mut self, cx: (&mut MainLoop, &WinitEventProxy), event: BoxedUserdata) {
-		let _cx = cx;
+	fn on_userdata(
+		&mut self,
+		main_loop: &mut MainLoop,
+		winit: &WinitEventProxy,
+		event: BoxedUserdata,
+	) {
+		let _main_loop = main_loop;
+		let _winit = winit;
 		let _event = event;
 	}
 
 	fn on_window_input(
 		&mut self,
-		cx: (&mut MainLoop, &WinitEventProxy),
+		main_loop: &mut MainLoop,
+		winit: &WinitEventProxy,
 		window_id: WindowId,
 		event: WindowEvent,
 	) {
-		let _cx = cx;
+		let _main_loop = main_loop;
+		let _winit = winit;
 		let _window_id = window_id;
 		let _event = event;
 	}
 
 	fn on_device_input(
 		&mut self,
-		cx: (&mut MainLoop, &WinitEventProxy),
+		main_loop: &mut MainLoop,
+		winit: &WinitEventProxy,
 		device_id: DeviceId,
 		event: DeviceEvent,
 	) {
-		let _cx = cx;
+		let _main_loop = main_loop;
+		let _winit = winit;
 		let _device_id = device_id;
 		let _event = event;
 	}

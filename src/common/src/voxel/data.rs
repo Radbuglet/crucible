@@ -2,7 +2,7 @@ use std::mem;
 
 use crucible_util::{
 	mem::c_enum::{CEnum, CEnumMap},
-	object::entity::Entity,
+	object::entity::{Entity, OwnedEntity},
 };
 use hashbrown::HashMap;
 
@@ -12,15 +12,16 @@ use super::math::{BlockFace, BlockVec, BlockVecExt, ChunkVec, CHUNK_VOLUME};
 
 #[derive(Debug, Default)]
 pub struct VoxelWorldData {
-	pos_map: HashMap<ChunkVec, Entity>,
+	pos_map: HashMap<ChunkVec, OwnedEntity>,
 	flagged: Vec<Entity>,
 }
 
 impl VoxelWorldData {
-	pub fn add_chunk(&mut self, pos: ChunkVec, chunk: Entity) {
+	pub fn add_chunk(&mut self, pos: ChunkVec, chunk: OwnedEntity) {
 		debug_assert!(!self.pos_map.contains_key(&pos));
 
 		// Register chunk
+		let (chunk, chunk_ref) = chunk.split_guard();
 		chunk.insert(VoxelChunkData {
 			pos,
 			flagged: None,
@@ -30,22 +31,22 @@ impl VoxelWorldData {
 		self.pos_map.insert(pos, chunk);
 
 		// Link to neighbors
-		let mut chunk_data = chunk.get_mut::<VoxelChunkData>();
+		let mut chunk_data = chunk_ref.get_mut::<VoxelChunkData>();
 
 		for face in BlockFace::variants() {
 			let neighbor_pos = pos + face.unit();
 			let neighbor = match self.pos_map.get(&neighbor_pos) {
-				Some(ent) => *ent,
+				Some(ent) => ent.entity(),
 				None => continue,
 			};
 
 			chunk_data.neighbors[face] = Some(neighbor);
-			neighbor.get_mut::<VoxelChunkData>().neighbors[face.invert()] = Some(chunk);
+			neighbor.get_mut::<VoxelChunkData>().neighbors[face.invert()] = Some(chunk_ref);
 		}
 	}
 
 	pub fn get_chunk(&self, pos: ChunkVec) -> Option<Entity> {
-		self.pos_map.get(&pos).copied()
+		self.pos_map.get(&pos).map(OwnedEntity::entity)
 	}
 
 	pub fn remove_chunk(&mut self, pos: ChunkVec) {

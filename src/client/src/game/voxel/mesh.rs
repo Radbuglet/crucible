@@ -21,7 +21,7 @@ use wgpu::util::DeviceExt;
 use crate::engine::{gfx::atlas::AtlasTexture, io::gfx::GfxContext};
 
 use super::{
-	material::MaterialVisualBlock,
+	material::BlockDescriptorVisual,
 	pipeline::{VoxelUniforms, VoxelVertex},
 };
 
@@ -45,13 +45,15 @@ impl VoxelWorldMesh {
 
 	pub fn update_chunks(
 		&mut self,
-		(gfx, atlas, registry): (&GfxContext, &AtlasTexture, &MaterialRegistry),
+		gfx: &GfxContext,
+		atlas: &AtlasTexture,
+		registry: &MaterialRegistry,
 		time_limit: Option<Duration>,
 	) {
 		let started = Instant::now();
 
 		let datas = storage::<VoxelChunkData>();
-		let descriptors = storage::<MaterialVisualBlock>();
+		let descriptors = storage::<BlockDescriptorVisual>();
 
 		while let Some(chunk) = self.dirty_queue.pop() {
 			// Acquire dependencies
@@ -143,7 +145,8 @@ impl VoxelWorldMesh {
 		}
 	}
 
-	pub fn render_chunks(&self) -> ChunkRenderPass {
+	#[must_use]
+	pub fn prepare_chunk_draw_pass(&self) -> ChunkRenderPass {
 		let meshes = storage::<VoxelChunkMesh>();
 
 		ChunkRenderPass {

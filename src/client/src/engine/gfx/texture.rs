@@ -4,7 +4,7 @@ use std::{
 	sync::Arc,
 };
 
-use crucible_util::debug::label::{ReifiedDebugLabel, DebugLabel};
+use crucible_util::debug::label::{DebugLabel, ReifiedDebugLabel};
 use typed_glam::glam::UVec2;
 
 use crate::engine::{
@@ -89,7 +89,8 @@ impl FullScreenTexture {
 
 	pub fn acquire(
 		&mut self,
-		(gfx, viewport): (&GfxContext, &Viewport),
+		gfx: &GfxContext,
+		viewport: &Viewport,
 	) -> Option<(&mut wgpu::Texture, &mut wgpu::TextureView)> {
 		if let Some(curr_size) = viewport.curr_surface_size() {
 			// Look for a size mismatch

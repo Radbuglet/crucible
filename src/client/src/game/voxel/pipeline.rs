@@ -201,7 +201,8 @@ pub struct VoxelUniforms {
 
 impl VoxelUniforms {
 	pub fn new(
-		(gfx, asset_mgr): (&GfxContext, &mut AssetManager),
+		gfx: &GfxContext,
+		asset_mgr: &mut AssetManager,
 		texture: &wgpu::TextureView,
 	) -> Self {
 		let layout = asset_mgr.load(&VoxelPipelineLayoutDesc, gfx);

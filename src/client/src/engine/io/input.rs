@@ -91,6 +91,10 @@ impl InputManager {
 	}
 
 	pub fn handle_device_event(&mut self, _device_id: DeviceId, event: &DeviceEvent) {
+		if !self.has_focus() {
+			return;
+		}
+
 		if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
 			if self.has_focus {
 				self.mouse_delta += Vec2::new(*dx as f32, *dy as f32);
