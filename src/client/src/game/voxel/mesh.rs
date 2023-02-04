@@ -1,4 +1,5 @@
 use std::{
+	cell::Ref,
 	collections::HashSet,
 	time::{Duration, Instant},
 };
@@ -10,53 +11,51 @@ use crucible_common::{
 		math::{BlockFace, BlockVec, BlockVecExt, WorldVec, WorldVecExt},
 	},
 };
-use crucible_util::{lang::polyfill::OptionPoly, mem::c_enum::CEnum};
-use geode::{Dependent, Entity, Storage};
+use crucible_util::{
+	lang::polyfill::OptionPoly,
+	mem::c_enum::CEnum,
+	object::entity::{storage, Entity},
+};
 use wgpu::util::DeviceExt;
 
 use crate::engine::{gfx::atlas::AtlasTexture, io::gfx::GfxContext};
 
 use super::{
-	material::MaterialStateVisualBlock,
+	material::MaterialVisualBlock,
 	pipeline::{VoxelUniforms, VoxelVertex},
 };
 
 #[derive(Debug, Default)]
 pub struct VoxelWorldMesh {
-	rendered_chunks: HashSet<Dependent<Entity>>,
-	dirty_queue: Vec<Dependent<Entity>>,
+	rendered_chunks: HashSet<Entity>,
+	dirty_queue: Vec<Entity>,
 }
 
 impl VoxelWorldMesh {
-	pub fn flag_chunk(&mut self, (meshes,): (&mut Storage<VoxelChunkMesh>,), chunk: Entity) {
-		if let Some(chunk_mesh) = meshes.get_mut(chunk) {
+	pub fn flag_chunk(&mut self, chunk: Entity) {
+		if let Some(mut chunk_mesh) = chunk.try_get_mut::<VoxelChunkMesh>() {
 			if chunk_mesh.still_dirty {
 				return;
 			}
 			chunk_mesh.still_dirty = true;
 		}
 
-		self.dirty_queue.push(Dependent::new(chunk));
+		self.dirty_queue.push(chunk);
 	}
 
 	pub fn update_chunks(
 		&mut self,
-		(gfx, atlas, registry, datas, meshes, descriptor_visual_states): (
-			&GfxContext,
-			&AtlasTexture,
-			&MaterialRegistry,
-			&Storage<VoxelChunkData>,
-			&mut Storage<VoxelChunkMesh>,
-			&Storage<MaterialStateVisualBlock>,
-		),
+		(gfx, atlas, registry): (&GfxContext, &AtlasTexture, &MaterialRegistry),
 		time_limit: Option<Duration>,
 	) {
 		let started = Instant::now();
 
-		while let Some(chunk_lt) = self.dirty_queue.pop() {
+		let datas = storage::<VoxelChunkData>();
+		let descriptors = storage::<MaterialVisualBlock>();
+
+		while let Some(chunk) = self.dirty_queue.pop() {
 			// Acquire dependencies
-			let chunk = chunk_lt.get();
-			let chunk_data = &datas[chunk];
+			let chunk_data = datas.get(chunk);
 
 			// Mesh chunk
 			let mut vertices = Vec::new();
@@ -69,7 +68,7 @@ impl VoxelWorldMesh {
 				}
 
 				let material_desc = registry.resolve_slot(material);
-				let atlas_tile = descriptor_visual_states[material_desc].atlas_tile;
+				let atlas_tile = descriptors.get(material_desc).atlas_tile;
 				let uv_bounds = atlas.decode_uv_bounds(atlas_tile);
 
 				// For every side of a solid block...
@@ -81,7 +80,10 @@ impl VoxelWorldMesh {
 						chunk_data.block_state(neighbor_block).material != 0
 					} else {
 						chunk_data.neighbor(face).p_is_some_and(|neighbor| {
-							datas[neighbor].block_state(neighbor_block.wrap()).material != 0
+							datas
+								.get(neighbor)
+								.block_state(neighbor_block.wrap())
+								.material != 0
 						})
 					};
 
@@ -114,16 +116,13 @@ impl VoxelWorldMesh {
 				None
 			};
 
-			meshes.insert(
-				chunk,
-				VoxelChunkMesh {
-					still_dirty: false,
-					vertex_count: vertices.len() as u32,
-					buffer,
-				},
-			);
+			chunk.insert(VoxelChunkMesh {
+				still_dirty: false,
+				vertex_count: vertices.len() as u32,
+				buffer,
+			});
 
-			self.rendered_chunks.insert(chunk_lt);
+			self.rendered_chunks.insert(chunk);
 
 			// Log some debug info
 			log::info!(
@@ -144,23 +143,35 @@ impl VoxelWorldMesh {
 		}
 	}
 
-	pub fn render_chunks<'a>(
-		&mut self,
-		(meshes, voxel_uniforms): (&'a Storage<VoxelChunkMesh>, &'a VoxelUniforms),
-		pass: &mut wgpu::RenderPass<'a>,
-	) {
+	pub fn render_chunks(&self) -> ChunkRenderPass {
+		let meshes = storage::<VoxelChunkMesh>();
+
+		ChunkRenderPass {
+			meshes: self
+				.rendered_chunks
+				.iter()
+				.map(|&chunk| meshes.get(chunk))
+				.collect(),
+		}
+	}
+}
+
+#[derive(Debug)]
+pub struct ChunkRenderPass {
+	meshes: Vec<Ref<'static, VoxelChunkMesh>>,
+}
+
+impl ChunkRenderPass {
+	pub fn push<'a>(&'a self, voxel_uniforms: &'a VoxelUniforms, pass: &mut wgpu::RenderPass<'a>) {
 		voxel_uniforms.write_pass_state(pass);
 
-		for chunk in &self.rendered_chunks {
-			let chunk = chunk.get();
-			let chunk_mesh = &meshes[chunk];
-
-			let Some(buffer) = &chunk_mesh.buffer else {
+		for mesh in &self.meshes {
+			let Some(buffer) = &mesh.buffer else {
 				continue;
 			};
 
 			pass.set_vertex_buffer(0, buffer.slice(..));
-			pass.draw(0..chunk_mesh.vertex_count, 0..1);
+			pass.draw(0..mesh.vertex_count, 0..1);
 		}
 	}
 }

@@ -1,11 +1,6 @@
 use std::f32::consts::{PI, TAU};
 
-use crucible_common::voxel::{
-	coord::move_rigid_body,
-	data::{VoxelChunkData, VoxelWorldData},
-	math::EntityVec,
-};
-use geode::Storage;
+use crucible_common::voxel::{coord::move_rigid_body, data::VoxelWorldData, math::EntityVec};
 use typed_glam::glam::{Mat4, Vec2, Vec3};
 
 #[derive(Debug, Clone, Default)]
@@ -72,11 +67,7 @@ impl FreeCamController {
 		self.rot.y = self.rot.y.clamp(-PI / 2., PI / 2.);
 	}
 
-	pub fn process(
-		&mut self,
-		cx: (&VoxelWorldData, &Storage<VoxelChunkData>),
-		actions: FreeCamInputs,
-	) {
+	pub fn process(&mut self, world: &VoxelWorldData, actions: FreeCamInputs) {
 		// Update velocity
 		let heading = self
 			.rot_matrix()
@@ -89,7 +80,7 @@ impl FreeCamController {
 		// Move body
 		let size = EntityVec::ONE * 0.5;
 
-		self.pos = move_rigid_body(cx, self.pos - size / 2., size, self.pos_vel) + size / 2.;
+		self.pos = move_rigid_body(world, self.pos - size / 2., size, self.pos_vel) + size / 2.;
 	}
 
 	pub fn rot_matrix(&self) -> Mat4 {

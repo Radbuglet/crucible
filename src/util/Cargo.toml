@@ -7,4 +7,5 @@ edition = "2021"
 anyhow = "1.0.66"
 bytemuck = { version = "1.12.3", features = ["derive"] }
 derive-where = "1.0.0"
+fnv = "1.0.7"
 log = "0.4.17"

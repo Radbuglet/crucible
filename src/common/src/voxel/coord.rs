@@ -4,8 +4,8 @@ use crucible_util::{
 		polyfill::OptionPoly,
 	},
 	mem::c_enum::CEnum,
+	object::entity::Entity,
 };
-use geode::{Entity, Provider, Storage};
 use smallvec::SmallVec;
 use typed_glam::{
 	ext::VecExt,
@@ -20,6 +20,7 @@ use super::{
 };
 
 // === Location === //
+
 pub type BlockLocation = Location<WorldVec>;
 pub type EntityLocation = Location<EntityVec>;
 
@@ -49,7 +50,7 @@ where
 		}
 	}
 
-	pub fn refresh(&mut self, (world,): (&VoxelWorldData,)) {
+	pub fn refresh(&mut self, world: &VoxelWorldData) {
 		self.chunk_cache = world.get_chunk(WorldVec::cast_from(self.pos).chunk());
 	}
 
@@ -66,21 +67,17 @@ where
 		self.pos = pos;
 	}
 
-	pub fn chunk(&mut self, (world,): (&VoxelWorldData,)) -> Option<Entity> {
+	pub fn chunk(&mut self, world: &VoxelWorldData) -> Option<Entity> {
 		match self.chunk_cache {
 			Some(chunk) => Some(chunk),
 			None => {
-				self.refresh((world,));
+				self.refresh(world);
 				self.chunk_cache
 			}
 		}
 	}
 
-	pub fn move_to_neighbor(
-		&mut self,
-		(world, chunks): (&VoxelWorldData, &Storage<VoxelChunkData>),
-		face: BlockFace,
-	) {
+	pub fn move_to_neighbor(&mut self, world: &VoxelWorldData, face: BlockFace) {
 		// Update position
 		let old_pos = self.pos;
 		self.pos += face.unit_typed::<V>();
@@ -88,27 +85,19 @@ where
 		// Update chunk cache
 		if WorldVec::cast_from(old_pos).chunk() != WorldVec::cast_from(self.pos).chunk() {
 			if let Some(chunk) = self.chunk_cache {
-				self.chunk_cache = chunks[chunk].neighbor(face);
+				self.chunk_cache = chunk.get::<VoxelChunkData>().neighbor(face);
 			} else {
-				self.refresh((world,));
+				self.refresh(world);
 			}
 		}
 	}
 
-	pub fn at_neighbor(
-		mut self,
-		cx: (&VoxelWorldData, &Storage<VoxelChunkData>),
-		face: BlockFace,
-	) -> Self {
-		self.move_to_neighbor(cx, face);
+	pub fn at_neighbor(mut self, world: &VoxelWorldData, face: BlockFace) -> Self {
+		self.move_to_neighbor(world, face);
 		self
 	}
 
-	pub fn move_to(
-		&mut self,
-		(world, chunks): (&VoxelWorldData, &Storage<VoxelChunkData>),
-		new_pos: V,
-	) {
+	pub fn move_to(&mut self, world: &VoxelWorldData, new_pos: V) {
 		let chunk_delta =
 			WorldVec::cast_from(new_pos).chunk() - WorldVec::cast_from(self.pos).chunk();
 
@@ -116,49 +105,37 @@ where
 			(self.chunk_cache, BlockFace::from_vec(chunk_delta.to_glam()))
 		{
 			self.pos = new_pos;
-			self.chunk_cache = chunks[chunk].neighbor(face);
+			self.chunk_cache = chunk.get::<VoxelChunkData>().neighbor(face);
 		} else {
 			self.pos = new_pos;
-			self.refresh((world,));
+			self.refresh(world);
 		}
 	}
 
-	pub fn at_absolute(
-		mut self,
-		cx: (&VoxelWorldData, &Storage<VoxelChunkData>),
-		new_pos: V,
-	) -> Self {
-		self.move_to(cx, new_pos);
+	pub fn at_absolute(mut self, world: &VoxelWorldData, new_pos: V) -> Self {
+		self.move_to(world, new_pos);
 		self
 	}
 
-	pub fn move_relative(&mut self, cx: (&VoxelWorldData, &Storage<VoxelChunkData>), delta: V) {
-		self.move_to(cx, self.pos + delta);
+	pub fn move_relative(&mut self, world: &VoxelWorldData, delta: V) {
+		self.move_to(world, self.pos + delta);
 	}
 
-	pub fn at_relative(
-		mut self,
-		cx: (&VoxelWorldData, &Storage<VoxelChunkData>),
-		delta: V,
-	) -> Self {
-		self.move_relative(cx, delta);
+	pub fn at_relative(mut self, world: &VoxelWorldData, delta: V) -> Self {
+		self.move_relative(world, delta);
 		self
 	}
 
-	pub fn state(
-		&mut self,
-		(world, chunks): (&VoxelWorldData, &Storage<VoxelChunkData>),
-	) -> Option<BlockState> {
-		self.chunk((world,))
-			.map(|chunk| chunks[chunk].block_state(WorldVec::cast_from(self.pos).block()))
+	pub fn state(&mut self, world: &VoxelWorldData) -> Option<BlockState> {
+		self.chunk(world).map(|chunk| {
+			chunk
+				.get::<VoxelChunkData>()
+				.block_state(WorldVec::cast_from(self.pos).block())
+		})
 	}
 
-	pub fn set_state(
-		&mut self,
-		(world, chunks): (&mut VoxelWorldData, &mut Storage<VoxelChunkData>),
-		state: BlockState,
-	) {
-		let chunk = match self.chunk((world,)) {
+	pub fn set_state(&mut self, world: &mut VoxelWorldData, state: BlockState) {
+		let chunk = match self.chunk(world) {
 			Some(chunk) => chunk,
 			None => {
 				log::warn!("`set_state` called on `BlockLocation` outside of the world.");
@@ -166,8 +143,8 @@ where
 			}
 		};
 
-		chunks[chunk].set_block_state(
-			(world,),
+		chunk.get_mut::<VoxelChunkData>().set_block_state(
+			world,
 			chunk,
 			WorldVec::cast_from(self.pos).block(),
 			state,
@@ -176,30 +153,24 @@ where
 
 	pub fn set_state_or_create(
 		&mut self,
-		(world, chunks): (&mut VoxelWorldData, &mut Storage<VoxelChunkData>),
-		factory_cx: &Provider,
-		factory: impl FnOnce(&Provider, ChunkVec) -> Entity,
+		world: &mut VoxelWorldData,
+		factory: impl FnOnce(ChunkVec) -> Entity,
 		state: BlockState,
 	) {
 		// Fetch chunk
-		let chunk = match self.chunk((world,)) {
+		let chunk = match self.chunk(world) {
 			Some(chunk) => chunk,
 			None => {
 				let pos = WorldVec::cast_from(self.pos).chunk();
-				let chunk = factory(
-					&Provider::new_with_parent(factory_cx)
-						.with(&mut *world)
-						.with(&mut *chunks),
-					pos,
-				);
-				world.add_chunk((chunks,), pos, chunk);
+				let chunk = factory(pos);
+				world.add_chunk(pos, chunk);
 				chunk
 			}
 		};
 
 		// Set block state
-		chunks[chunk].set_block_state(
-			(world,),
+		chunk.get_mut::<VoxelChunkData>().set_block_state(
+			world,
 			chunk,
 			WorldVec::cast_from(self.pos).block(),
 			state,
@@ -215,52 +186,14 @@ where
 
 	pub fn iter_volume<'a>(
 		self,
-		cx: (&'a VoxelWorldData, &'a Storage<VoxelChunkData>),
+		world: &'a VoxelWorldData,
 		size: WorldVec,
 	) -> impl Iterator<Item = Self> + 'a {
 		debug_assert!(size.all(|v| u32::try_from(v).is_ok()));
 
-		// TODO: Use the more efficient implementation below
-		// 		let mut fingers = [self; 3];
-		// 		let mut iter = VolumetricIter::new([size.x() as u32, size.y() as u32, size.z() as u32]);
-		//
-		// 		std::iter::from_fn(move || {
-		// 			let [x, y, z] = iter.next_capturing(|i| {
-		// 				if i > 0 {
-		// 					fingers[i] = fingers[i - 1];
-		// 					fingers[i - 1].move_to_neighbor(
-		// 						cx,
-		// 						match i {
-		// 							1 => BlockFace::PositiveX,
-		// 							2 => BlockFace::PositiveY,
-		// 							_ => unreachable!(),
-		// 						},
-		// 					)
-		// 				}
-		// 			})?;
-		//
-		// 			let curr = fingers[2];
-		//
-		// 			fn workaround(a: WorldVec, b: WorldVec) -> WorldVec {
-		// 				a + b
-		// 			}
-		//
-		// 			debug_assert_eq!(
-		// 				workaround(
-		// 					WorldVec::cast_from(self.pos()),
-		// 					WorldVec::new(x as i32, y as i32, z as i32)
-		// 				),
-		// 				WorldVec::cast_from(curr.pos())
-		// 			);
-		//
-		// 			fingers[2].move_to_neighbor(cx, BlockFace::PositiveZ);
-		//
-		// 			Some(curr)
-		// 		})
-
 		VolumetricIter::new([size.x() as u32, size.y() as u32, size.z() as u32]).map(
 			move |[x, y, z]| {
-				self.at_relative(cx, WorldVec::new(x as i32, y as i32, z as i32).cast())
+				self.at_relative(world, WorldVec::new(x as i32, y as i32, z as i32).cast())
 			},
 		)
 	}
@@ -310,17 +243,14 @@ impl RayCast {
 		self.dist
 	}
 
-	pub fn step(
-		&mut self,
-		cx: (&VoxelWorldData, &Storage<VoxelChunkData>),
-	) -> SmallVec<[RayCastIntersection; 3]> {
+	pub fn step(&mut self, world: &VoxelWorldData) -> SmallVec<[RayCastIntersection; 3]> {
 		let mut intersections = SmallVec::<[RayCastIntersection; 3]>::new();
 
 		// Collect intersections
 		let mut block_loc = self.loc.as_block_location();
 		{
 			let step_line = Line3::new_origin_delta(self.pos(), self.dir);
-			self.loc.move_relative(cx, self.dir);
+			self.loc.move_relative(world, self.dir);
 
 			let start_block = step_line.start.block_pos();
 			let end_block = step_line.end.block_pos();
@@ -353,7 +283,7 @@ impl RayCast {
 
 		// Update block positions
 		for isect in &mut intersections {
-			isect.block = block_loc.at_neighbor(cx, isect.face);
+			isect.block = block_loc.at_neighbor(world, isect.face);
 			block_loc = isect.block;
 		}
 
@@ -365,12 +295,8 @@ impl RayCast {
 		intersections
 	}
 
-	pub fn step_for<'a>(
-		&'a mut self,
-		cx: (&'a VoxelWorldData, &'a Storage<VoxelChunkData>),
-		max_dist: f64,
-	) -> RayCastIter<'a> {
-		ContextualRayCastIter::new(max_dist).with_context((cx, self))
+	pub fn step_for<'a>(&'a mut self, world: &'a VoxelWorldData, max_dist: f64) -> RayCastIter<'a> {
+		ContextualRayCastIter::new(max_dist).with_context((world, self))
 	}
 }
 
@@ -383,13 +309,8 @@ pub struct RayCastIntersection {
 	pub distance: f64,
 }
 
-pub type RayCastIter<'a> = WithContext<
-	(
-		(&'a VoxelWorldData, &'a Storage<VoxelChunkData>),
-		&'a mut RayCast,
-	),
-	ContextualRayCastIter,
->;
+pub type RayCastIter<'a> =
+	WithContext<(&'a VoxelWorldData, &'a mut RayCast), ContextualRayCastIter>;
 
 #[derive(Debug, Clone)]
 pub struct ContextualRayCastIter {
@@ -406,38 +327,30 @@ impl ContextualRayCastIter {
 	}
 }
 
-impl<'a>
-	ContextualIter<(
-		(&'a VoxelWorldData, &'a Storage<VoxelChunkData>),
-		&'a mut RayCast,
-	)> for ContextualRayCastIter
-{
+impl<'a> ContextualIter<(&'a VoxelWorldData, &'a mut RayCast)> for ContextualRayCastIter {
 	type Item = RayCastIntersection;
 
 	fn next_on_ref(
 		&mut self,
-		(cx, ray): &mut (
-			(&'a VoxelWorldData, &'a Storage<VoxelChunkData>),
-			&'a mut RayCast,
-		),
+		(world, ray): &mut (&'a VoxelWorldData, &'a mut RayCast),
 	) -> Option<Self::Item> {
-		let cx = *cx;
+		let world = *world;
 
 		while self.back_log.is_empty() {
-			self.back_log = ray.step(cx);
+			self.back_log = ray.step(world);
 		}
 
 		let next = if !self.back_log.is_empty() {
 			self.back_log.remove(0)
 		} else if ray.dist() < self.max_dist {
-			self.back_log = ray.step(cx);
+			self.back_log = ray.step(world);
 
 			// It is possible that the ray needs to travel more than 1 unit to get out of a block.
 			// The furthest it can travel is `sqrt(3 * 1^2) ~= 1.7` so we have to call this method
 			// at most twice. Also, yes, this handles a zero-vector direction because rays with no
 			// direction automatically get infinite distance.
 			if self.back_log.is_empty() {
-				self.back_log = ray.step(cx);
+				self.back_log = ray.step(world);
 			}
 
 			self.back_log.remove(0)
@@ -456,12 +369,12 @@ impl<'a>
 // === Collisions === //
 
 pub fn move_rigid_body(
-	cx: (&VoxelWorldData, &Storage<VoxelChunkData>),
+	world: &VoxelWorldData,
 	src: EntityVec,
 	size: EntityVec,
 	delta: EntityVec,
 ) -> EntityVec {
-	let mut loc = EntityLocation::new(cx.0, src);
+	let mut loc = EntityLocation::new(world, src);
 
 	'a: for movement_axis in Axis3::variants() {
 		// Decompose delta
@@ -473,9 +386,9 @@ pub fn move_rigid_body(
 		// Determine the occlusion candidate volume
 		let volume_start = match movement_sign {
 			// Align to the far side of the collider
-			Sign::Positive => loc.at_relative(cx, movement_unit * size.comp(movement_axis)),
+			Sign::Positive => loc.at_relative(world, movement_unit * size.comp(movement_axis)),
 			// Align to the destination corner
-			Sign::Negative => loc.at_relative(cx, -movement_unit * movement_magnitude),
+			Sign::Negative => loc.at_relative(world, -movement_unit * movement_magnitude),
 		};
 		let mut volume_size = size;
 		*volume_size.comp_mut(movement_axis) = movement_magnitude;
@@ -484,9 +397,9 @@ pub fn move_rigid_body(
 		let volume_size = volume_end.block_pos() - volume_start.pos().block_pos();
 
 		// Check volume for occluding blocks
-		for mut occluder in volume_start.iter_volume(cx, volume_size) {
+		for mut occluder in volume_start.iter_volume(world, volume_size) {
 			if occluder
-				.state(cx)
+				.state(world)
 				.p_is_some_and(|state| state.material != 0)
 			{
 				// TODO: Allow partial movements
@@ -495,7 +408,7 @@ pub fn move_rigid_body(
 		}
 
 		// Otherwise, commit the movement in full
-		loc.move_relative(cx, movement_unit * movement_delta);
+		loc.move_relative(world, movement_unit * movement_delta);
 	}
 
 	loc.pos()

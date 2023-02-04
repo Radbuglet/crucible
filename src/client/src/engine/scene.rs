@@ -1,9 +1,6 @@
 #![allow(dead_code)]
 
-use crucible_util::debug::userdata::{BoxedUserdata, DebugOpaque};
-use geode::prelude::*;
-
-// === SceneManager === //
+use crucible_util::{delegate, object::entity::Entity};
 
 #[derive(Debug, Default)]
 pub struct SceneManager {
@@ -27,55 +24,10 @@ impl SceneManager {
 	}
 }
 
-// === Handlers === //
-
-pub type SceneUpdateHandler = DebugOpaque<fn(&Provider, Entity, SceneUpdateEvent)>;
-pub type SceneRenderHandler = DebugOpaque<fn(&Provider, Entity, SceneRenderEvent)>;
-
-#[derive(Debug)]
-pub struct SceneUpdateEvent {}
-
-#[derive(Debug)]
-pub struct SceneRenderEvent<'a> {
-	pub frame: &'a mut wgpu::SurfaceTexture,
+delegate! {
+	pub fn SceneUpdateHandler(me: Entity)
 }
 
-// === SceneArch === //
-
-bundle! {
-	#[derive(Debug)]
-	pub struct SceneBundle {
-		pub userdata: BoxedUserdata,
-		pub update_handler: SceneUpdateHandler,
-		pub render_handler: SceneRenderHandler,
-	}
-}
-
-impl BuildableArchetypeBundle for SceneBundle {
-	fn create_archetype(universe: &Universe) -> ArchetypeHandle<Self> {
-		let arch = universe.create_archetype("SceneArch");
-		universe.add_archetype_queue_handler(arch.id(), Self::on_destroy);
-
-		arch
-	}
-}
-
-impl SceneBundle {
-	fn on_destroy(universe: &Universe, events: EventQueueIter<EntityDestroyEvent>) {
-		let mut cx = unpack!(universe => (
-			@mut Storage<BoxedUserdata>,
-			@mut Storage<SceneUpdateHandler>,
-			@mut Storage<SceneRenderHandler>,
-		));
-
-		let arch_id = events.arch();
-		let mut arch = universe.archetype_by_id(arch_id).lock();
-
-		for (target, _) in events {
-			let state = SceneBundle::detach(decompose!(cx), target);
-			drop(state);
-
-			arch.despawn(target);
-		}
-	}
+delegate! {
+	pub fn SceneRenderHandler(me: Entity, frame: &mut wgpu::SurfaceTexture)
 }

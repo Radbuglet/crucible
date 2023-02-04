@@ -4,7 +4,7 @@ use std::{
 	sync::Arc,
 };
 
-use geode::debug::label::{DebugLabel, ReifiedDebugLabel};
+use crucible_util::debug::label::{ReifiedDebugLabel, DebugLabel};
 use typed_glam::glam::UVec2;
 
 use crate::engine::{

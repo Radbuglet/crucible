@@ -82,12 +82,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "atom"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9ff149ed9780025acfdb36862d35b28856bb693ceb451259a7164442f22fdc3"
-
-[[package]]
 name = "autocfg"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -244,11 +238,6 @@ name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
-
-[[package]]
-name = "compost"
-version = "0.4.0"
-source = "git+https://github.com/Radbuglet/compost.git?rev=6b029d6b4530b92b2e8b343f07069624da5541d1#6b029d6b4530b92b2e8b343f07069624da5541d1"
 
 [[package]]
 name = "core-foundation"
@@ -413,7 +402,6 @@ dependencies = [
  "env_logger",
  "fastrand",
  "futures",
- "geode",
  "hashbrown 0.13.1",
  "image",
  "log",
@@ -429,7 +417,6 @@ name = "crucible-common"
 version = "0.1.0"
 dependencies = [
  "crucible-util",
- "geode",
  "hashbrown 0.13.1",
  "log",
  "num-traits",
@@ -444,6 +431,7 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "derive-where",
+ "fnv",
  "log",
 ]
 
@@ -817,20 +805,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "geode"
-version = "0.1.0"
-source = "git+https://github.com/Radbuglet/geode.git?rev=5da53e8947a4211aae2397fe3fa5ffc0565f9d6b#5da53e8947a4211aae2397fe3fa5ffc0565f9d6b"
-dependencies = [
- "compost",
- "derive-where",
- "fastrand",
- "fnv",
- "hibitset",
- "log",
- "parking_lot",
-]
-
-[[package]]
 name = "getrandom"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -963,16 +937,6 @@ name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
-
-[[package]]
-name = "hibitset"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93a1bb8316a44459a7d14253c4d28dd7395cbd23cc04a68c46e851b8e46d64b1"
-dependencies = [
- "atom",
- "rayon",
-]
 
 [[package]]
 name = "humantime"
