@@ -427,6 +427,6 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 		}))
 }
 
-fn create_chunk(_pos: ChunkVec) -> OwnedEntity {
-	Entity::new()
+fn create_chunk(pos: ChunkVec) -> OwnedEntity {
+	Entity::new().with_debug_label(format_args!("chunk at {pos:?}"))
 }

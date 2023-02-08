@@ -67,7 +67,7 @@ impl Viewport {
 	) -> Self {
 		let surface = surface.unwrap_or_else(|| unsafe {
 			// Safety: the surface lives for a strictly shorter lifetime than the window
-			gfx.instance.create_surface(&window)
+			gfx.instance.create_surface(&window).unwrap()
 		});
 
 		Self {
@@ -141,7 +141,7 @@ impl Viewport {
 			config_changed: &mut bool,
 		) -> bool {
 			// Ensure that we're still using a supported format.
-			let supported_formats = surface.get_supported_formats(&gfx.adapter);
+			let supported_formats = surface.get_capabilities(&gfx.adapter).formats;
 
 			assert!(
 				!supported_formats.is_empty(),

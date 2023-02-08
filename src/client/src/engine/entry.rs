@@ -1,5 +1,5 @@
 use anyhow::Context;
-use geode::Entity;
+use geode::{Entity, OwnedEntity};
 use winit::{
 	dpi::LogicalSize,
 	event::WindowEvent,
@@ -43,6 +43,7 @@ pub fn main() -> anyhow::Result<()> {
 
 	// Create primary viewport
 	let main_viewport = Entity::new()
+		.with_debug_label("main viewport")
 		.with(Viewport::new(
 			&gfx,
 			main_window,
@@ -54,6 +55,7 @@ pub fn main() -> anyhow::Result<()> {
 				height: 0,
 				present_mode: wgpu::PresentMode::default(),
 				alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+				view_formats: Vec::new(),
 			},
 		))
 		.with(InputManager::default())
@@ -64,12 +66,13 @@ pub fn main() -> anyhow::Result<()> {
 		));
 
 	// Create engine
-	let engine = Entity::new()
+	let (engine, engine_ref) = Entity::new()
+		.with_debug_label("engine root")
 		.with(gfx)
 		.with(SceneManager::default())
 		.with(ViewportManager::default())
 		.with(AssetManager::default())
-		.unmanage();
+		.split_guard();
 
 	// Register main viewport
 	let main_viewport_ref = main_viewport.entity();
@@ -78,7 +81,7 @@ pub fn main() -> anyhow::Result<()> {
 	// Setup initial scene
 	engine
 		.get_mut::<SceneManager>()
-		.set_initial(make_game_scene(engine, main_viewport_ref));
+		.set_initial(make_game_scene(engine_ref, main_viewport_ref));
 
 	// Show all viewports
 	for (_, viewport) in engine.get::<ViewportManager>().window_map() {
@@ -88,7 +91,7 @@ pub fn main() -> anyhow::Result<()> {
 	// Start main loop
 	#[derive(Debug)]
 	struct EngineRootHandler {
-		engine: Entity,
+		engine: OwnedEntity,
 	}
 
 	impl MainLoopHandler for EngineRootHandler {
@@ -172,6 +175,18 @@ pub fn main() -> anyhow::Result<()> {
 				viewport
 					.get_mut::<InputManager>()
 					.handle_device_event(device_id, &event);
+			}
+		}
+
+		fn on_shutdown(self) {
+			drop(self.engine);
+
+			let leaked = geode::debug::alive_entity_count();
+			if leaked > 0 {
+				log::warn!(
+					"Leaked {leaked} {}.",
+					if leaked == 1 { "entity" } else { "entities" }
+				);
 			}
 		}
 	}

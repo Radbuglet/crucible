@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 crucible-util = { path = "../util" }
-geode = { git = "https://github.com/Radbuglet/mini-geode.git", rev = "0653f6ff1311b73db30146c925f0a65f72a1a2b5" }
+geode = { git = "https://github.com/Radbuglet/mini-geode.git", rev = "7b22ab51d01a1b12b6a58f8c416a93b305d5ec75" }
 hashbrown = "0.13.1"
 log = "0.4.17"
 num-traits = "0.2.15"

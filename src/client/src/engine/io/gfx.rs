@@ -33,11 +33,19 @@ impl GfxContext {
 		compat_detector: &mut D,
 	) -> anyhow::Result<(Self, D::Table, wgpu::Surface)> {
 		let backends = wgpu::Backends::PRIMARY;
-		let instance = wgpu::Instance::new(backends);
+		let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+			backends,
+			dx12_shader_compiler: wgpu::Dx12Compiler::Dxc {
+				dxil_path: None,
+				dxc_path: None,
+			},
+		});
 		let main_surface = unsafe {
 			// FIXME: Windows can still be destroyed unexpectedly, potentially causing UB. We need
 			// tighter integration between the viewport manager and our `GfxContext`.
-			instance.create_surface(main_window)
+			instance
+				.create_surface(main_window)
+				.context("failed to create main surface")?
 		};
 
 		struct ValidatedAdapter<'a, T> {

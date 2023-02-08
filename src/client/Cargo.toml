@@ -12,12 +12,12 @@ crucible-util = { path = "../util" }
 env_logger = "0.10.0"
 fastrand = "1.8.0"
 futures = "0.3.25"
-geode = { git = "https://github.com/Radbuglet/mini-geode.git", rev = "0653f6ff1311b73db30146c925f0a65f72a1a2b5" }
+geode = { git = "https://github.com/Radbuglet/mini-geode.git", rev = "7b22ab51d01a1b12b6a58f8c416a93b305d5ec75" }
 hashbrown = "0.13.2"
 image = "0.24.5"
 log = "0.4.17"
 once_cell = "1.13.0"
 thiserror = "1.0.31"
 typed-glam = { path = "../typed-glam" }
-wgpu = "0.14.2"
-winit = "0.27.5"
+wgpu = "0.15.0"
+winit = "0.28.1"

@@ -83,6 +83,7 @@ impl FullScreenTexture {
 			dimension: wgpu::TextureDimension::D2,
 			format: self.conf_format,
 			usage: self.conf_usages,
+			view_formats: &[],
 		}
 	}
 
