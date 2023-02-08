@@ -1,9 +1,7 @@
 use std::borrow::Cow;
 
-use crucible_util::{
-	mem::free_list::FreeList,
-	object::entity::{Entity, OwnedEntity},
-};
+use crucible_util::mem::free_list::FreeList;
+use geode::{Entity, OwnedEntity};
 use hashbrown::HashMap;
 
 #[derive(Debug, Default)]

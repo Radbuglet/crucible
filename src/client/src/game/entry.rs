@@ -10,8 +10,8 @@ use crucible_util::{
 	debug::error::ResultExt,
 	lang::{iter::VolumetricIter, polyfill::OptionPoly},
 	mem::c_enum::CEnum,
-	object::entity::{Entity, OwnedEntity},
 };
+use geode::{Entity, OwnedEntity};
 use image::Rgba32FImage;
 use typed_glam::glam::{Mat4, UVec2};
 use winit::{
@@ -78,7 +78,7 @@ impl GameSceneState {
 		let selected_material_idx = 0;
 		block_registry.register(
 			"crucible:air",
-			OwnedEntity::new().with(MaterialDescriptorBase::default()),
+			Entity::new().with(MaterialDescriptorBase::default()),
 		);
 
 		// Create voxel uniforms
@@ -133,7 +133,7 @@ impl GameSceneState {
 		let atlas_tile = self.block_atlas.add(texture);
 
 		// Spawn material descriptor
-		let (descriptor, descriptor_ref) = OwnedEntity::new()
+		let (descriptor, descriptor_ref) = Entity::new()
 			.with(MaterialDescriptorBase::default())
 			.with(BlockDescriptorVisual { atlas_tile })
 			.split_guard();
@@ -415,7 +415,7 @@ impl GameSceneState {
 }
 
 pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
-	OwnedEntity::new()
+	Entity::new()
 		.with(GameSceneState::new(engine, main_viewport))
 		.with(VoxelWorldData::default())
 		.with(VoxelWorldMesh::default())
@@ -428,5 +428,5 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 }
 
 fn create_chunk(_pos: ChunkVec) -> OwnedEntity {
-	OwnedEntity::new()
+	Entity::new()
 }

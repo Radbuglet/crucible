@@ -1,9 +1,7 @@
 #![allow(dead_code)]
 
-use crucible_util::{
-	delegate,
-	object::entity::{Entity, OwnedEntity},
-};
+use crucible_util::delegate;
+use geode::{Entity, OwnedEntity};
 
 #[derive(Debug, Default)]
 pub struct SceneManager {

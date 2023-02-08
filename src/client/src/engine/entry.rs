@@ -1,5 +1,5 @@
 use anyhow::Context;
-use crucible_util::object::entity::{Entity, OwnedEntity};
+use geode::Entity;
 use winit::{
 	dpi::LogicalSize,
 	event::WindowEvent,
@@ -42,7 +42,7 @@ pub fn main() -> anyhow::Result<()> {
 			.context("failed to initialize a graphics adapter")?;
 
 	// Create primary viewport
-	let main_viewport = OwnedEntity::new()
+	let main_viewport = Entity::new()
 		.with(Viewport::new(
 			&gfx,
 			main_window,
@@ -64,11 +64,12 @@ pub fn main() -> anyhow::Result<()> {
 		));
 
 	// Create engine
-	let engine = Entity::new_unguarded()
+	let engine = Entity::new()
 		.with(gfx)
 		.with(SceneManager::default())
 		.with(ViewportManager::default())
-		.with(AssetManager::default());
+		.with(AssetManager::default())
+		.unmanage();
 
 	// Register main viewport
 	let main_viewport_ref = main_viewport.entity();

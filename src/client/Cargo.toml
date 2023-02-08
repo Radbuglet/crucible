@@ -12,7 +12,8 @@ crucible-util = { path = "../util" }
 env_logger = "0.10.0"
 fastrand = "1.8.0"
 futures = "0.3.25"
-hashbrown = { version = "0.13.1", features = ["raw"] }
+geode = { git = "https://github.com/Radbuglet/mini-geode.git", rev = "0653f6ff1311b73db30146c925f0a65f72a1a2b5" }
+hashbrown = { version = "0.13.2", features = ["raw"] }
 image = "0.24.5"
 log = "0.4.17"
 once_cell = "1.13.0"

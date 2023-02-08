@@ -11,11 +11,8 @@ use crucible_common::{
 		math::{BlockFace, BlockVec, BlockVecExt, WorldVec, WorldVecExt},
 	},
 };
-use crucible_util::{
-	lang::polyfill::OptionPoly,
-	mem::c_enum::CEnum,
-	object::entity::{storage, Entity},
-};
+use crucible_util::{lang::polyfill::OptionPoly, mem::c_enum::CEnum};
+use geode::{storage, Entity};
 use wgpu::util::DeviceExt;
 
 use crate::engine::{gfx::atlas::AtlasTexture, io::gfx::GfxContext};

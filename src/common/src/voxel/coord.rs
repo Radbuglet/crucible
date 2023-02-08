@@ -4,8 +4,8 @@ use crucible_util::{
 		polyfill::OptionPoly,
 	},
 	mem::c_enum::CEnum,
-	object::entity::{Entity, OwnedEntity},
 };
+use geode::{Entity, OwnedEntity};
 use smallvec::SmallVec;
 use typed_glam::{
 	ext::VecExt,

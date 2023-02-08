@@ -1,9 +1,7 @@
 use std::mem;
 
-use crucible_util::{
-	mem::c_enum::{CEnum, CEnumMap},
-	object::entity::{Entity, OwnedEntity},
-};
+use crucible_util::mem::c_enum::{CEnum, CEnumMap};
+use geode::{Entity, OwnedEntity};
 use hashbrown::HashMap;
 
 use super::math::{BlockFace, BlockVec, BlockVecExt, ChunkVec, CHUNK_VOLUME};
