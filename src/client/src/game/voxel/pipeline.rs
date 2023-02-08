@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, cell::Ref};
 
 use crevice::std430::AsStd430;
 use crucible_common::voxel::math::{BlockFace, Sign};
@@ -19,16 +19,14 @@ impl AssetDescriptor for OpaqueBlockShaderDesc {
 	type Context<'a> = &'a GfxContext;
 	type Asset = wgpu::ShaderModule;
 
-	fn construct(&self, _asset_mgr: &mut AssetManager, gfx: Self::Context<'_>) -> Arc<Self::Asset> {
-		Arc::new(
-			gfx.device
-				.create_shader_module(wgpu::ShaderModuleDescriptor {
-					label: Some("opaque_block.wgsl"),
-					source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-						"shaders/opaque_block.wgsl"
-					))),
-				}),
-		)
+	fn construct(&self, _asset_mgr: &mut AssetManager, gfx: Self::Context<'_>) -> Self::Asset {
+		gfx.device
+			.create_shader_module(wgpu::ShaderModuleDescriptor {
+				label: Some("opaque_block.wgsl"),
+				source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+					"shaders/opaque_block.wgsl"
+				))),
+			})
 	}
 }
 
@@ -47,7 +45,7 @@ impl AssetDescriptor for VoxelPipelineLayoutDesc {
 	type Context<'a> = &'a GfxContext;
 	type Asset = VoxelPipelineLayout;
 
-	fn construct(&self, _asset_mgr: &mut AssetManager, gfx: Self::Context<'_>) -> Arc<Self::Asset> {
+	fn construct(&self, _asset_mgr: &mut AssetManager, gfx: Self::Context<'_>) -> Self::Asset {
 		let uniform_group_layout =
 			gfx.device
 				.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -90,10 +88,10 @@ impl AssetDescriptor for VoxelPipelineLayoutDesc {
 				push_constant_ranges: &[],
 			});
 
-		Arc::new(VoxelPipelineLayout {
+		VoxelPipelineLayout {
 			uniform_group_layout,
 			pipeline_layout,
-		})
+		}
 	}
 }
 //
@@ -111,12 +109,11 @@ impl AssetDescriptor for VoxelRenderingPipelineDesc {
 	type Context<'a> = &'a GfxContext;
 	type Asset = wgpu::RenderPipeline;
 
-	fn construct(&self, asset_mgr: &mut AssetManager, gfx: Self::Context<'_>) -> Arc<Self::Asset> {
+	fn construct(&self, asset_mgr: &mut AssetManager, gfx: Self::Context<'_>) -> Self::Asset {
 		let shader = asset_mgr.load(&OpaqueBlockShaderDesc, gfx);
 		let layout = asset_mgr.load(&VoxelPipelineLayoutDesc, gfx);
 
-		let pipeline = gfx
-			.device
+		gfx.device
 			.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
 				label: Some("opaque voxel pipeline"),
 				layout: Some(&layout.pipeline_layout),
@@ -179,9 +176,7 @@ impl AssetDescriptor for VoxelRenderingPipelineDesc {
 					})],
 				}),
 				multiview: None,
-			});
-
-		Arc::new(pipeline)
+			})
 	}
 
 	fn keep_alive(&self, asset_mgr: &mut AssetManager) {
@@ -194,7 +189,7 @@ impl AssetDescriptor for VoxelRenderingPipelineDesc {
 
 #[derive(Debug)]
 pub struct VoxelUniforms {
-	_sampler_keep_alive: Arc<wgpu::Sampler>,
+	_sampler_keep_alive: Ref<'static, wgpu::Sampler>,
 	bind_group: wgpu::BindGroup,
 	buffer: wgpu::Buffer,
 }

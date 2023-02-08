@@ -1,7 +1,6 @@
 use std::{
 	borrow::{Borrow, Cow},
 	num::NonZeroU8,
-	sync::Arc,
 };
 
 use crucible_util::debug::label::{DebugLabel, ReifiedDebugLabel};
@@ -158,26 +157,20 @@ impl AssetDescriptor for SamplerAssetDescriptor {
 	type Context<'a> = (&'a GfxContext,);
 	type Asset = wgpu::Sampler;
 
-	fn construct(
-		&self,
-		_asset_mgr: &mut AssetManager,
-		(gfx,): Self::Context<'_>,
-	) -> Arc<Self::Asset> {
-		gfx.device
-			.create_sampler(&wgpu::SamplerDescriptor {
-				label: self.label.as_ref().map(Borrow::borrow),
-				address_mode_u: self.address_mode_u,
-				address_mode_v: self.address_mode_v,
-				address_mode_w: self.address_mode_w,
-				mag_filter: self.mag_filter,
-				min_filter: self.min_filter,
-				mipmap_filter: self.mipmap_filter,
-				lod_min_clamp: 0.0,
-				lod_max_clamp: f32::MAX,
-				compare: self.compare,
-				anisotropy_clamp: self.anisotropy_clamp,
-				border_color: self.border_color,
-			})
-			.into()
+	fn construct(&self, _asset_mgr: &mut AssetManager, (gfx,): Self::Context<'_>) -> Self::Asset {
+		gfx.device.create_sampler(&wgpu::SamplerDescriptor {
+			label: self.label.as_ref().map(Borrow::borrow),
+			address_mode_u: self.address_mode_u,
+			address_mode_v: self.address_mode_v,
+			address_mode_w: self.address_mode_w,
+			mag_filter: self.mag_filter,
+			min_filter: self.min_filter,
+			mipmap_filter: self.mipmap_filter,
+			lod_min_clamp: 0.0,
+			lod_max_clamp: f32::MAX,
+			compare: self.compare,
+			anisotropy_clamp: self.anisotropy_clamp,
+			border_color: self.border_color,
+		})
 	}
 }

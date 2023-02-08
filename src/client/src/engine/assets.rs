@@ -1,22 +1,16 @@
 #![allow(dead_code)]
 
-use crucible_util::{
-	debug::userdata::{BoxedUserdata, ErasedUserdata, Userdata},
-	lang::{
-		loan::downcast_userdata_arc,
-		polyfill::{BuildHasherPoly, OptionPoly},
-	},
-};
+use crucible_util::lang::polyfill::{BuildHasherPoly, OptionPoly};
+use geode::{Entity, OwnedEntity};
+use hashbrown::{hash_map::RawEntryMut, HashMap};
 
-use hashbrown::HashMap;
+use std::{any::type_name, cell::Ref, hash::Hash};
 
-use std::{hash::Hash, sync::Arc};
-
-pub trait AssetDescriptor: 'static + Userdata + Hash + Eq + Clone {
+pub trait AssetDescriptor: 'static + Hash + Eq + Clone {
 	type Context<'a>;
-	type Asset: Userdata;
+	type Asset: 'static;
 
-	fn construct(&self, asset_mgr: &mut AssetManager, cx: Self::Context<'_>) -> Arc<Self::Asset>;
+	fn construct(&self, asset_mgr: &mut AssetManager, cx: Self::Context<'_>) -> Self::Asset;
 
 	fn keep_alive(&self, asset_mgr: &mut AssetManager) {
 		let _ = asset_mgr;
@@ -26,72 +20,93 @@ pub trait AssetDescriptor: 'static + Userdata + Hash + Eq + Clone {
 
 #[derive(Debug, Default)]
 pub struct AssetManager {
-	assets: HashMap<ReifiedDescriptor, Option<Arc<dyn Userdata>>>,
-	// TODO: Implement automatic cleanup
+	assets: HashMap<ReifiedDescriptor, Option<OwnedEntity>>,
 }
 
 #[derive(Debug)]
 struct ReifiedDescriptor {
 	hash: u64,
-	desc: BoxedUserdata,
+	desc: OwnedEntity,
 }
 
 impl AssetManager {
-	pub fn load<D: AssetDescriptor>(&mut self, desc: &D, cx: D::Context<'_>) -> Arc<D::Asset> {
+	pub fn load<D: AssetDescriptor>(
+		&mut self,
+		desc: &D,
+		cx: D::Context<'_>,
+	) -> Ref<'static, D::Asset> {
+		// Hash the descriptor
+		let desc_hash = self.assets.hasher().p_hash_one(desc);
+
 		// Try to reuse an existing asset.
-		if let Some(asset) = self.find(desc) {
+		if let Some(asset) = self.find_with_hash(desc, desc_hash) {
 			return asset;
 		}
 
-		// Insert an unfinished asset stub into the registry. This is used to detect cyclic
-		// asset dependencies.
-		let hash = self.assets.hasher().p_hash_one(&desc);
-		let reified_desc = ReifiedDescriptor {
-			hash,
-			desc: Box::new(desc.clone()),
-		};
+		// Insert a stub to detect recursive dependency loading
+		let RawEntryMut::Vacant(entry) = self.assets
+			.raw_entry_mut()
+			.from_hash(desc_hash, |_| false) else { // We already know nothing can match this key.
+				unreachable!();
+			};
 
-		self.assets
-			.raw_table()
-			.insert(hash, (reified_desc, None), |(desc, _)| desc.hash);
+		let (desc_ent, desc_ent_ref) = Entity::new()
+			.with_debug_label("asset descriptor")
+			.with(desc.clone())
+			.split_guard();
 
-		// Construct the asset
-		let asset = desc.construct(self, cx);
+		entry.insert_with_hasher(
+			desc_hash,
+			ReifiedDescriptor {
+				hash: desc_hash,
+				desc: desc_ent,
+			},
+			None,
+			|desc| desc.hash,
+		);
 
-		// Update the stub to contain the asset.
-		let (_, stub) = self
-			.assets
-			.raw_table()
-			.get_mut(hash, |(candidate, _)| {
-				candidate
-					.desc
-					.try_downcast_ref::<D>()
-					.p_is_some_and(|desc_rhs| desc == desc_rhs)
-			})
-			.unwrap();
+		// Load the resource
+		let res = desc.construct(self, cx);
+		let res = OwnedEntity::new().with_debug_label("asset").with(res);
+		let res_ref = res.get();
 
-		*stub = Some(asset);
+		// Write it!
+		let RawEntryMut::Occupied(mut entry) = self.assets
+			.raw_entry_mut()
+			.from_hash(desc_hash, |v| v.hash == desc_hash && v.desc.entity() == desc_ent_ref) else {
+				unreachable!();
+			};
 
-		// Convert it into an `Arc<D::Asset>`
-		let asset = stub.as_ref().unwrap();
-		downcast_userdata_arc(asset.clone())
+		entry.insert(Some(res));
+		res_ref
 	}
 
-	pub fn find<D: AssetDescriptor>(&self, desc: &D) -> Option<Arc<D::Asset>> {
-		let hash = self.assets.hasher().p_hash_one(desc);
-		let (_, asset) = self.assets.raw_entry().from_hash(hash, |candidate| {
-			candidate.hash == hash
-				&& candidate
-					.desc
-					.try_downcast_ref::<D>()
-					.p_is_some_and(|candidate| desc == candidate)
-		})?;
+	pub fn find<D: AssetDescriptor>(&self, desc: &D) -> Option<Ref<'static, D::Asset>> {
+		let desc_hash = self.assets.hasher().p_hash_one(desc);
+		self.find_with_hash(desc, desc_hash)
+	}
 
-		let asset = asset
-			.as_ref()
-			.unwrap_or_else(|| panic!("Detected recursive dependency on dependency {desc:?}."));
-
-		Some(downcast_userdata_arc(asset.clone()))
+	fn find_with_hash<D: AssetDescriptor>(
+		&self,
+		desc: &D,
+		desc_hash: u64,
+	) -> Option<Ref<'static, D::Asset>> {
+		self.assets
+			.raw_entry()
+			.from_hash(desc_hash, |v| {
+				v.hash == desc_hash && v.desc.try_get::<D>().p_is_some_and(|v| &*v == desc)
+			})
+			.map(|(_, v)| {
+				v.as_ref()
+					.unwrap_or_else(|| {
+						panic!(
+							"attempted to acquire asset of type \"{}\", which was in the process of
+							 loading",
+							type_name::<D>()
+						)
+					})
+					.get()
+			})
 	}
 
 	pub fn keep_alive<D: AssetDescriptor>(&mut self, desc: &D) {
