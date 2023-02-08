@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 
 use crucible_util::lang::polyfill::{BuildHasherPoly, OptionPoly};
-use geode::{Entity, OwnedEntity};
+use geode::{CompRef, Entity, OwnedEntity};
 use hashbrown::{hash_map::RawEntryMut, HashMap};
 
-use std::{any::type_name, cell::Ref, hash::Hash};
+use std::{any::type_name, hash::Hash};
 
 pub trait AssetDescriptor: 'static + Hash + Eq + Clone {
 	type Context<'a>;
@@ -30,11 +30,7 @@ struct ReifiedDescriptor {
 }
 
 impl AssetManager {
-	pub fn load<D: AssetDescriptor>(
-		&mut self,
-		desc: &D,
-		cx: D::Context<'_>,
-	) -> Ref<'static, D::Asset> {
+	pub fn load<D: AssetDescriptor>(&mut self, desc: &D, cx: D::Context<'_>) -> CompRef<D::Asset> {
 		// Hash the descriptor
 		let desc_hash = self.assets.hasher().p_hash_one(desc);
 
@@ -81,7 +77,7 @@ impl AssetManager {
 		res_ref
 	}
 
-	pub fn find<D: AssetDescriptor>(&self, desc: &D) -> Option<Ref<'static, D::Asset>> {
+	pub fn find<D: AssetDescriptor>(&self, desc: &D) -> Option<CompRef<D::Asset>> {
 		let desc_hash = self.assets.hasher().p_hash_one(desc);
 		self.find_with_hash(desc, desc_hash)
 	}
@@ -90,7 +86,7 @@ impl AssetManager {
 		&self,
 		desc: &D,
 		desc_hash: u64,
-	) -> Option<Ref<'static, D::Asset>> {
+	) -> Option<CompRef<D::Asset>> {
 		self.assets
 			.raw_entry()
 			.from_hash(desc_hash, |v| {

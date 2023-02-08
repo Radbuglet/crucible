@@ -1,18 +1,17 @@
-use std::{
-	cell::Ref,
-	collections::HashSet,
-	time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
+use crevice::std430::AsStd430;
 use crucible_common::{
 	game::material::MaterialRegistry,
 	voxel::{
 		data::VoxelChunkData,
-		math::{BlockFace, BlockVec, BlockVecExt, WorldVec, WorldVecExt},
+		math::{BlockFace, BlockVec, BlockVecExt, Sign, WorldVec, WorldVecExt},
 	},
 };
 use crucible_util::{lang::polyfill::OptionPoly, mem::c_enum::CEnum};
-use geode::{storage, Entity};
+use geode::{storage, CompRef, Entity};
+use hashbrown::HashSet;
+use typed_glam::glam::{Vec2, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::engine::{gfx::atlas::AtlasTexture, io::gfx::GfxContext};
@@ -92,7 +91,7 @@ impl VoxelWorldMesh {
 
 					// Mesh it!
 					let center_pos = WorldVec::compose(chunk_data.pos(), center_pos);
-					VoxelVertex::push_quad(
+					push_quad(
 						&mut vertices,
 						center_pos.to_glam().as_vec3(),
 						face,
@@ -158,7 +157,7 @@ impl VoxelWorldMesh {
 
 #[derive(Debug)]
 pub struct ChunkRenderPass {
-	meshes: Vec<Ref<'static, VoxelChunkMesh>>,
+	meshes: Vec<CompRef<VoxelChunkMesh>>,
 }
 
 impl ChunkRenderPass {
@@ -181,4 +180,47 @@ pub struct VoxelChunkMesh {
 	still_dirty: bool,
 	vertex_count: u32,
 	buffer: Option<wgpu::Buffer>,
+}
+
+fn push_quad(
+	target: &mut Vec<<VoxelVertex as AsStd430>::Output>,
+	mut origin: Vec3,
+	face: BlockFace,
+	(uv_origin, uv_size): (Vec2, Vec2),
+) {
+	let (unit_a, unit_b) = face.ortho();
+	let (unit_a, unit_b) = (
+		unit_a.axis().unit().as_vec3(),
+		unit_b.axis().unit().as_vec3(),
+	);
+
+	if face.sign() == Sign::Positive {
+		origin += face.unit().as_vec3();
+	}
+
+	let point_a = VoxelVertex {
+		position: origin,
+		uv: uv_origin + uv_size * Vec2::new(0., 0.),
+	}
+	.as_std430();
+
+	let point_b = VoxelVertex {
+		position: origin + unit_a,
+		uv: uv_origin + uv_size * Vec2::new(1., 0.),
+	}
+	.as_std430();
+
+	let point_c = VoxelVertex {
+		position: origin + unit_a + unit_b,
+		uv: uv_origin + uv_size * Vec2::new(1., 1.),
+	}
+	.as_std430();
+
+	let point_d = VoxelVertex {
+		position: origin + unit_b,
+		uv: uv_origin + uv_size * Vec2::new(0., 1.),
+	}
+	.as_std430();
+
+	target.extend([point_a, point_b, point_c, point_a, point_c, point_d]);
 }

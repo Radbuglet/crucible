@@ -88,8 +88,8 @@ macro_rules! delegate {
 			#[allow(unused)]
 			pub fn new_method_ref<Injector, Receiver, Func>(_injector: Injector, handler: Func) -> Self
 			where
-				Injector: 'static + $crate::object::delegate::macro_internal::FuncMethodInjectorRefGetGuard<Receiver>,
-				Injector: $crate::object::delegate::FuncMethodInjectorRef<
+				Injector: 'static + $crate::lang::delegate::macro_internal::FuncMethodInjectorRefGetGuard<Receiver>,
+				Injector: $crate::lang::delegate::FuncMethodInjectorRef<
 					Receiver,
 					Injector = for<
 						$inj_lt
@@ -101,8 +101,8 @@ macro_rules! delegate {
 					) -> Injector::GuardHelper<$inj_lt>>,
 				Receiver: ?Sized + 'static,
 				Func: 'static
-					+ $crate::object::delegate::macro_internal::Send
-					+ $crate::object::delegate::macro_internal::Sync
+					+ $crate::lang::delegate::macro_internal::Send
+					+ $crate::lang::delegate::macro_internal::Sync
 					+ for<$inj_lt $($( $(,$fn_lt)* )?)?> Fn(
 						&Receiver,
 						$($inj,)*
@@ -119,8 +119,8 @@ macro_rules! delegate {
 			#[allow(unused)]
 			pub fn new_method_mut<Injector, Receiver, Func>(_injector: Injector, handler: Func) -> Self
 			where
-				Injector: 'static + $crate::object::delegate::macro_internal::FuncMethodInjectorMutGetGuard<Receiver>,
-				Injector: $crate::object::delegate::FuncMethodInjectorMut<
+				Injector: 'static + $crate::lang::delegate::macro_internal::FuncMethodInjectorMutGetGuard<Receiver>,
+				Injector: $crate::lang::delegate::FuncMethodInjectorMut<
 					Receiver,
 					Injector = for<
 						$inj_lt
@@ -132,8 +132,8 @@ macro_rules! delegate {
 					) -> Injector::GuardHelper<$inj_lt>>,
 				Receiver: ?Sized + 'static,
 				Func: 'static
-					+ $crate::object::delegate::macro_internal::Send
-					+ $crate::object::delegate::macro_internal::Sync
+					+ $crate::lang::delegate::macro_internal::Send
+					+ $crate::lang::delegate::macro_internal::Sync
 					+ for<$inj_lt $($( $(,$fn_lt)* )?)?> Fn(
 						&mut Receiver,
 						$($inj,)*
@@ -163,14 +163,14 @@ macro_rules! delegate {
 		$(where
 			$($where_token)*
 		)? {
-			_ty: ($($($crate::object::delegate::macro_internal::PhantomData<$generic>,)*)?),
+			_ty: ($($($crate::lang::delegate::macro_internal::PhantomData<$generic>,)*)?),
 			// TODO: Optimize the internal representation to avoid allocations for context-less handlers.
-			handler: $crate::object::delegate::macro_internal::Arc<
+			handler: $crate::lang::delegate::macro_internal::Arc<
 				dyn
 					$($(for<$($fn_lt),*>)?)?
 					Fn($($para),*) $(-> $ret)? +
-						$crate::object::delegate::macro_internal::Send +
-						$crate::object::delegate::macro_internal::Sync
+						$crate::lang::delegate::macro_internal::Send +
+						$crate::lang::delegate::macro_internal::Sync
 			>,
 		}
 
@@ -182,26 +182,26 @@ macro_rules! delegate {
 			pub fn new<Func>(handler: Func) -> Self
 			where
 				Func: 'static +
-					$crate::object::delegate::macro_internal::Send +
-					$crate::object::delegate::macro_internal::Sync +
+					$crate::lang::delegate::macro_internal::Send +
+					$crate::lang::delegate::macro_internal::Sync +
 					$($(for<$($fn_lt),*>)?)?
 						Fn($($para),*) $(-> $ret)?,
 			{
 				Self {
-					_ty: ($($($crate::object::delegate::macro_internal::PhantomData::<$generic>,)*)?),
-					handler: $crate::object::delegate::macro_internal::Arc::new(handler),
+					_ty: ($($($crate::lang::delegate::macro_internal::PhantomData::<$generic>,)*)?),
+					handler: $crate::lang::delegate::macro_internal::Arc::new(handler),
 				}
 			}
 		}
 
 		impl<
 			Func: 'static +
-				$crate::object::delegate::macro_internal::Send +
-				$crate::object::delegate::macro_internal::Sync +
+				$crate::lang::delegate::macro_internal::Send +
+				$crate::lang::delegate::macro_internal::Sync +
 				$($(for<$($fn_lt),*>)?)?
 					Fn($($para),*) $(-> $ret)?
 			$(, $($generic),*)?
-		> $crate::object::delegate::macro_internal::From<Func> for $name $(<$($generic),*>)?
+		> $crate::lang::delegate::macro_internal::From<Func> for $name $(<$($generic),*>)?
 		$(where
 			$($where_token)*
 		)? {
@@ -210,29 +210,29 @@ macro_rules! delegate {
 			}
 		}
 
-		impl$(<$($generic),*>)? $crate::object::delegate::macro_internal::Deref for $name $(<$($generic),*>)?
+		impl$(<$($generic),*>)? $crate::lang::delegate::macro_internal::Deref for $name $(<$($generic),*>)?
 		$(where
 			$($where_token)*
 		)? {
 			type Target = dyn $($(for<$($fn_lt),*>)?)? Fn($($para),*) $(-> $ret)? +
-				$crate::object::delegate::macro_internal::Send +
-				$crate::object::delegate::macro_internal::Sync;
+				$crate::lang::delegate::macro_internal::Send +
+				$crate::lang::delegate::macro_internal::Sync;
 
 			fn deref(&self) -> &Self::Target {
 				&*self.handler
 			}
 		}
 
-		impl$(<$($generic),*>)? $crate::object::delegate::macro_internal::fmt::Debug for $name $(<$($generic),*>)?
+		impl$(<$($generic),*>)? $crate::lang::delegate::macro_internal::fmt::Debug for $name $(<$($generic),*>)?
 		$(where
 			$($where_token)*
 		)? {
-			fn fmt(&self, fmt: &mut $crate::object::delegate::macro_internal::fmt::Formatter) -> $crate::object::delegate::macro_internal::fmt::Result {
+			fn fmt(&self, fmt: &mut $crate::lang::delegate::macro_internal::fmt::Formatter) -> $crate::lang::delegate::macro_internal::fmt::Result {
 				fmt.write_str("delegate::")?;
-				fmt.write_str($crate::object::delegate::macro_internal::stringify!($name))?;
+				fmt.write_str($crate::lang::delegate::macro_internal::stringify!($name))?;
 				fmt.write_str("(")?;
 				$(
-					fmt.write_str($crate::object::delegate::macro_internal::stringify!($para))?;
+					fmt.write_str($crate::lang::delegate::macro_internal::stringify!($para))?;
 				)*
 				fmt.write_str(")")?;
 
@@ -240,14 +240,14 @@ macro_rules! delegate {
 			}
 		}
 
-		impl$(<$($generic),*>)? $crate::object::delegate::macro_internal::Clone for $name $(<$($generic),*>)?
+		impl$(<$($generic),*>)? $crate::lang::delegate::macro_internal::Clone for $name $(<$($generic),*>)?
 		$(where
 			$($where_token)*
 		)? {
 			fn clone(&self) -> Self {
 				Self {
-					_ty: ($($($crate::object::delegate::macro_internal::PhantomData::<$generic>,)*)?),
-					handler: $crate::object::delegate::macro_internal::Clone::clone(&self.handler),
+					_ty: ($($($crate::lang::delegate::macro_internal::PhantomData::<$generic>,)*)?),
+					handler: $crate::lang::delegate::macro_internal::Clone::clone(&self.handler),
 				}
 			}
 		}

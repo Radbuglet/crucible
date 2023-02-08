@@ -94,9 +94,8 @@ impl AtlasTexture {
 	}
 
 	pub fn decode_uv_bounds(&self, tile: UVec2) -> (Vec2, Vec2) {
-		let tile_counts = self.tile_counts.as_vec2();
-		let origin = tile.as_vec2() / tile_counts;
-		let size = 1. / tile_counts;
+		let origin = tile.as_vec2() * self.tile_size.as_vec2();
+		let size = self.tile_size.as_vec2();
 		(origin, size)
 	}
 }

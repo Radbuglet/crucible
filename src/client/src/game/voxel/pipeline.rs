@@ -1,8 +1,7 @@
-use std::{borrow::Cow, cell::Ref};
+use std::borrow::Cow;
 
 use crevice::std430::AsStd430;
-use crucible_common::voxel::math::{BlockFace, Sign};
-use typed_glam::glam::{self, Vec2};
+use typed_glam::glam;
 
 use crate::engine::{
 	assets::{AssetDescriptor, AssetManager},
@@ -189,7 +188,6 @@ impl AssetDescriptor for VoxelRenderingPipelineDesc {
 
 #[derive(Debug)]
 pub struct VoxelUniforms {
-	_sampler_keep_alive: Ref<'static, wgpu::Sampler>,
 	bind_group: wgpu::BindGroup,
 	buffer: wgpu::Buffer,
 }
@@ -233,11 +231,7 @@ impl VoxelUniforms {
 			],
 		});
 
-		Self {
-			bind_group,
-			_sampler_keep_alive: sampler,
-			buffer,
-		}
+		Self { bind_group, buffer }
 	}
 
 	pub fn write_pass_state<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
@@ -264,49 +258,4 @@ struct ShaderUniformBuffer {
 pub struct VoxelVertex {
 	pub position: glam::Vec3,
 	pub uv: glam::Vec2,
-}
-
-impl VoxelVertex {
-	pub fn push_quad(
-		target: &mut Vec<<Self as AsStd430>::Output>,
-		mut origin: glam::Vec3,
-		face: BlockFace,
-		(uv_origin, uv_size): (Vec2, Vec2),
-	) {
-		let (unit_a, unit_b) = face.ortho();
-		let (unit_a, unit_b) = (
-			unit_a.axis().unit().as_vec3(),
-			unit_b.axis().unit().as_vec3(),
-		);
-
-		if face.sign() == Sign::Positive {
-			origin += face.unit().as_vec3();
-		}
-
-		let point_a = Self {
-			position: origin,
-			uv: uv_origin + uv_size * glam::Vec2::new(0., 0.),
-		}
-		.as_std430();
-
-		let point_b = Self {
-			position: origin + unit_a,
-			uv: uv_origin + uv_size * glam::Vec2::new(1., 0.),
-		}
-		.as_std430();
-
-		let point_c = Self {
-			position: origin + unit_a + unit_b,
-			uv: uv_origin + uv_size * glam::Vec2::new(1., 1.),
-		}
-		.as_std430();
-
-		let point_d = Self {
-			position: origin + unit_b,
-			uv: uv_origin + uv_size * glam::Vec2::new(0., 1.),
-		}
-		.as_std430();
-
-		target.extend([point_a, point_b, point_c, point_a, point_c, point_d]);
-	}
 }
