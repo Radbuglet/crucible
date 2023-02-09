@@ -104,6 +104,17 @@ pub fn arr_from_iter<T, I: IntoIterator<Item = T>, const N: usize>(iter: I) -> [
 	]
 }
 
+pub fn zip_arr<A, B, const N: usize>(a: [A; N], b: [B; N]) -> [(A, B); N] {
+	arr_from_iter(a.into_iter().zip(b.into_iter()))
+}
+
+pub fn map_arr<A, B, F, const N: usize>(a: [A; N], f: F) -> [B; N]
+where
+	F: FnMut(A) -> B,
+{
+	arr_from_iter(a.into_iter().map(f))
+}
+
 // === Boxed array creation === //
 
 pub fn iter_repeat_len<F, T>(f: F, len: usize) -> iter::Take<iter::RepeatWith<F>>

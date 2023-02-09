@@ -398,7 +398,7 @@ impl GameSceneState {
 				pass.set_pipeline(&pipeline);
 
 				let aspect = viewport.curr_surface_aspect().unwrap();
-				let proj = Mat4::perspective_lh(70f32.to_radians(), aspect, 0.1, 100.);
+				let proj = Mat4::perspective_rh(70f32.to_radians(), aspect, 0.1, 100.);
 				let view = self.free_cam.view_matrix();
 				let full = proj * view;
 

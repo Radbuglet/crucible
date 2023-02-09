@@ -1,8 +1,8 @@
 use num_traits::Signed;
 use typed_glam::{
 	ext::VecExt,
-	glam::{self, DVec3, IVec3},
-	traits::{NumericVector3, SignedNumericVector3},
+	glam::{self, DVec3, IVec2, IVec3},
+	traits::{NumericVector2, NumericVector3, SignedNumericVector3},
 	typed::{FlavorCastFrom, TypedVector, VecFlavor},
 };
 
@@ -289,6 +289,11 @@ c_enum! {
 		NegativeZ,
 	}
 
+	pub enum Axis2 {
+		X,
+		Y,
+	}
+
 	pub enum Axis3 {
 		X,
 		Y,
@@ -386,20 +391,21 @@ impl BlockFace {
 			v
 		}
 	}
+}
 
-	pub fn ortho(self) -> (Self, Self) {
-		let sign = self.sign();
+// Axis2
+impl Axis2 {
+	pub fn unit(self) -> IVec2 {
+		self.unit_typed()
+	}
 
-		// Get axes with proper winding
-		let (a, b) = if sign == Sign::Positive {
-			self.axis().ortho()
-		} else {
-			let (a, b) = self.axis().ortho();
-			(b, a)
-		};
+	pub fn unit_typed<V: NumericVector2>(self) -> V {
+		use Axis2::*;
 
-		// Construct faces
-		(Self::compose(a, sign), Self::compose(b, sign))
+		match self {
+			X => V::X,
+			Y => V::Y,
+		}
 	}
 }
 

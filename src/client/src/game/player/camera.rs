@@ -41,11 +41,11 @@ impl FreeCamInputs {
 		}
 
 		if self.fore {
-			heading += Vec3::Z;
+			heading -= Vec3::Z;
 		}
 
 		if self.back {
-			heading -= Vec3::Z;
+			heading += Vec3::Z;
 		}
 
 		heading.normalize_or_zero()
@@ -58,11 +58,11 @@ impl FreeCamController {
 	}
 
 	pub fn facing(&self) -> Vec3 {
-		self.rot_matrix().transform_vector3(Vec3::Z)
+		-self.rot_matrix().transform_vector3(Vec3::Z)
 	}
 
 	pub fn handle_mouse_move(&mut self, delta: Vec2) {
-		self.rot += delta * 0.1f32.to_radians();
+		self.rot -= delta * 0.1f32.to_radians();
 		self.rot.x = self.rot.x.rem_euclid(TAU);
 		self.rot.y = self.rot.y.clamp(-PI / 2., PI / 2.);
 	}

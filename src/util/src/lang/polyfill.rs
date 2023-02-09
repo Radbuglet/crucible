@@ -3,7 +3,7 @@ use std::{
 	ops::{Bound, RangeBounds},
 };
 
-use super::std_traits::{OptionLike, ResultLike};
+use super::std_traits::OptionLike;
 
 // === Option === //
 
@@ -80,24 +80,6 @@ impl<T> BoundPoly for Bound<T> {
 	}
 }
 
-// === Float === //
-
-trait FloatPoly: Sized {
-	fn from_frac(num: u32, denom: u32) -> Option<Self>;
-}
-
-impl FloatPoly for f32 {
-	fn from_frac(num: u32, denom: u32) -> Option<f32> {
-		if denom != 0 {
-			// Yes, there are truncation errors with this routine. However, none of the routines
-			// using this method are dealing with big fractions so this is fine.
-			Some((num as f64 / denom as f64) as f32)
-		} else {
-			None
-		}
-	}
-}
-
 // === Hasher === //
 
 pub trait BuildHasherPoly: hash::BuildHasher {
@@ -109,90 +91,3 @@ pub trait BuildHasherPoly: hash::BuildHasher {
 }
 
 impl<T: ?Sized + hash::BuildHasher> BuildHasherPoly for T {}
-
-// === Result === //
-
-pub trait ResultPoly: ResultLike {
-	fn swap_parts(self) -> Result<Self::Error, Self::Success>;
-}
-
-impl<T, E> ResultPoly for Result<T, E> {
-	fn swap_parts(self) -> Result<Self::Error, Self::Success> {
-		match self {
-			Ok(ok) => Err(ok),
-			Err(err) => Ok(err),
-		}
-	}
-}
-
-pub trait BiResultPoly {
-	type Value;
-
-	fn unwrap_either(self) -> Self::Value;
-}
-
-impl<T> BiResultPoly for Result<T, T> {
-	type Value = T;
-
-	fn unwrap_either(self) -> Self::Value {
-		match self {
-			Ok(val) => val,
-			Err(val) => val,
-		}
-	}
-}
-
-// === Slice === //
-
-pub trait SlicePoly {
-	type Elem;
-
-	fn limit_len(&self, max_len: usize) -> &[Self::Elem];
-}
-
-impl<T> SlicePoly for [T] {
-	type Elem = T;
-
-	fn limit_len(&self, max_len: usize) -> &[Self::Elem] {
-		if self.len() > max_len {
-			&self[..max_len]
-		} else {
-			self
-		}
-	}
-}
-
-// === Vec === //
-
-pub trait VecPoly {
-	type Elem;
-
-	fn ensure_length_with<F>(&mut self, min_len: usize, f: F)
-	where
-		F: FnMut() -> Self::Elem;
-
-	fn ensure_slot_with<F>(&mut self, index: usize, f: F) -> &mut Self::Elem
-	where
-		F: FnMut() -> Self::Elem;
-}
-
-impl<T> VecPoly for Vec<T> {
-	type Elem = T;
-
-	fn ensure_length_with<F>(&mut self, min_len: usize, f: F)
-	where
-		F: FnMut() -> Self::Elem,
-	{
-		if self.len() < min_len {
-			self.resize_with(min_len, f);
-		}
-	}
-
-	fn ensure_slot_with<F>(&mut self, index: usize, f: F) -> &mut Self::Elem
-	where
-		F: FnMut() -> Self::Elem,
-	{
-		self.ensure_length_with(index + 1, f);
-		&mut self[index]
-	}
-}
