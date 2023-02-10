@@ -307,7 +307,7 @@ pub mod geom {
 				//     / |
 				//    d  |
 				//    |  b 0
-				//    | /
+				//    | /         ---> -x
 				//    |/
 				//    a +z
 				//
@@ -317,9 +317,9 @@ pub mod geom {
 				// A quad facing the negative y direction looks like this:
 				//
 				//  +x        0
-				//    d------a
-				//   /      /
-				//  /      /
+				//    d------a       |
+				//   /      /        |
+				//  /      /         ↓ -y
 				// c------b
 				//         +z
 				//
@@ -330,9 +330,9 @@ pub mod geom {
 				//
 				//              +y
 				//      c------d
-				//      |      |
-				//      |      |
-				//      b------a
+				//      |      |     ^ -z
+				//      |      |    /
+				//      b------a   /
 				//    +x        0
 				//
 				[origin, origin + V::X, origin + V::X + V::Y, origin + V::Y]
@@ -340,11 +340,10 @@ pub mod geom {
 		};
 
 		// Flip the winding order if the quad is actually facing the positive direction:
-		// FIXME: Why is this the other way around?!
 		if sign == Sign::Positive {
-			quad
-		} else {
 			flip_quad_winding(quad)
+		} else {
+			quad
 		}
 	}
 }
