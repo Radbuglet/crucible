@@ -1,6 +1,7 @@
-pub mod engine;
-pub mod game;
-pub mod util;
+#![allow(dead_code)]
+
+mod engine;
+mod game;
 
 fn main() {
 	env_logger::init();

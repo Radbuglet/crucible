@@ -31,12 +31,11 @@ use crate::engine::{
 };
 
 use super::{
-	player::camera::{FreeCamController, FreeCamInputs},
-	voxel::{
-		material::BlockDescriptorVisual,
-		mesh::VoxelWorldMesh,
+	gfx::voxel::{
+		mesh::{BlockDescriptorVisual, VoxelWorldMesh},
 		pipeline::{VoxelRenderingPipelineDesc, VoxelUniforms},
 	},
+	player::camera::{FreeCamController, FreeCamInputs},
 };
 
 #[derive(Debug)]
@@ -103,23 +102,29 @@ impl GameSceneState {
 		// Load default materials
 		state.create_material(
 			"crucible_prototyping:one".to_string(),
-			&image::load_from_memory(include_bytes!("voxel/textures/placeholder_material_1.png"))
-				.unwrap_pretty()
-				.into_rgba32f(),
+			&image::load_from_memory(include_bytes!(
+				"gfx/placeholders/placeholder_material_1.png"
+			))
+			.unwrap_pretty()
+			.into_rgba32f(),
 		);
 
 		state.create_material(
 			"crucible_prototyping:two".to_string(),
-			&image::load_from_memory(include_bytes!("voxel/textures/placeholder_material_2.png"))
-				.unwrap_pretty()
-				.into_rgba32f(),
+			&image::load_from_memory(include_bytes!(
+				"gfx/placeholders/placeholder_material_2.png"
+			))
+			.unwrap_pretty()
+			.into_rgba32f(),
 		);
 
 		state.create_material(
 			"crucible_prototyping:three".to_string(),
-			&image::load_from_memory(include_bytes!("voxel/textures/placeholder_material_3.png"))
-				.unwrap_pretty()
-				.into_rgba32f(),
+			&image::load_from_memory(include_bytes!(
+				"gfx/placeholders/placeholder_material_3.png"
+			))
+			.unwrap_pretty()
+			.into_rgba32f(),
 		);
 
 		state.upload_atlases(gfx);

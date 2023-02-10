@@ -1,7 +1,8 @@
-use crate::util::features::{FeatureDescriptor, FeatureList, FeatureScore};
 use anyhow::Context;
 use std::fmt::Display;
 use winit::window::Window;
+
+use super::features::{FeatureDescriptor, FeatureList, FeatureScore};
 
 #[derive(Debug)]
 pub struct GfxContext {
