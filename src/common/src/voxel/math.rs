@@ -308,6 +308,17 @@ c_enum! {
 
 // BlockFace
 impl BlockFace {
+	pub const TOP: Self = Self::PositiveY;
+
+	pub const BOTTOM: Self = Self::NegativeY;
+
+	pub const SIDES: [Self; 4] = [
+		Self::PositiveX,
+		Self::NegativeZ,
+		Self::NegativeX,
+		Self::PositiveZ,
+	];
+
 	pub fn from_vec(vec: IVec3) -> Option<Self> {
 		let mut choice = None;
 

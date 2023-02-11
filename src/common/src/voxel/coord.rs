@@ -9,7 +9,7 @@ use geode::{Entity, OwnedEntity};
 use smallvec::SmallVec;
 use typed_glam::{
 	ext::VecExt,
-	traits::{SignedNumericVector3, VecFrom},
+	traits::{CastVecFrom, SignedNumericVector3},
 };
 
 use crate::voxel::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt};
@@ -32,8 +32,8 @@ pub struct Location<V> {
 
 impl<V> Location<V>
 where
-	WorldVec: VecFrom<V>,
-	V: VecFrom<WorldVec>,
+	WorldVec: CastVecFrom<V>,
+	V: CastVecFrom<WorldVec>,
 	V: SignedNumericVector3,
 {
 	pub fn new(world: &VoxelWorldData, pos: V) -> Self {

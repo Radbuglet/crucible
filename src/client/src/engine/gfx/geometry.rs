@@ -1,5 +1,8 @@
 use crucible_common::voxel::math::{Axis3, BlockFace, Sign};
-use typed_glam::{glam::Vec2, traits::NumericVector3};
+use typed_glam::{
+	glam::Vec2,
+	traits::{NumericVector2, NumericVector3},
+};
 
 // Quads, from a front-view, are laid out as follows:
 //
@@ -69,8 +72,13 @@ pub fn flip_quad_winding<V>([a, b, c, d]: [V; 4]) -> [V; 4] {
 	[b, a, d, c]
 }
 
-pub fn aabb_quad<V: NumericVector3>(origin: V, facing: BlockFace) -> [V; 4] {
+pub fn scaled_aabb_quad<V, S>(origin: V, size: S, facing: BlockFace) -> [V; 4]
+where
+	V: NumericVector3,
+	S: Into<(V::Comp, V::Comp)>,
+{
 	let (axis, sign) = facing.decompose();
+	let (w, h) = size.into();
 
 	// Build the quad with a winding order assumed to be for a negative facing quad.
 	let quad = match axis {
@@ -88,37 +96,50 @@ pub fn aabb_quad<V: NumericVector3>(origin: V, facing: BlockFace) -> [V; 4] {
 			//       c +y
 			//      /|
 			//     / |
-			//    d  |
-			//    |  b 0
-			//    | /         ---> -x
-			//    |/
-			//    a +z
+			//    d  |                --
+			//    |  b 0              /
+			//    | /     ---> -x    / size.x
+			//    |/                /
+			//    a +z            --
 			//
-			[origin + V::Z, origin, origin + V::Y, origin + V::Y + V::Z]
+			let z = V::Z * V::splat(w);
+			let y = V::Y * V::splat(h);
+
+			[origin + z, origin, origin + y, origin + y + z]
 		}
 		Axis3::Y => {
 			// A quad facing the negative y direction looks like this:
 			//
 			//  +x        0
-			//    d------a       |
-			//   /      /        |
-			//  /      /         ↓ -y
-			// c------b
+			//    d------a       |        --
+			//   /      /        |        / size.x
+			//  /      /         ↓ -y    /
+			// c------b                --
 			//         +z
 			//
-			[origin, origin + V::Z, origin + V::X + V::Z, origin + V::X]
+			// |______| size.y
+			//
+			let x = V::X * V::splat(w);
+			let z = V::Z * V::splat(h);
+
+			[origin, origin + z, origin + x + z, origin + x]
 		}
 		Axis3::Z => {
 			// A quad facing the negative z direction looks like this:
 			//
 			//              +y
-			//      c------d
-			//      |      |     ^ -z
-			//      |      |    /
-			//      b------a   /
+			//      c------d            --
+			//      |      |     ^ -z    | size.y
+			//      |      |    /        |
+			//      b------a   /        --
 			//    +x        0
 			//
-			[origin, origin + V::X, origin + V::X + V::Y, origin + V::Y]
+			//      |______| size.x
+			//
+			let x = V::X * V::splat(w);
+			let y = V::Y * V::splat(h);
+
+			[origin, origin + x, origin + x + y, origin + y]
 		}
 	};
 
@@ -128,4 +149,22 @@ pub fn aabb_quad<V: NumericVector3>(origin: V, facing: BlockFace) -> [V; 4] {
 	} else {
 		quad
 	}
+}
+
+pub fn face_size_given_volume<V, S>(volume: V, axis: Axis3) -> S
+where
+	V: NumericVector3,
+	S: NumericVector2<Comp = V::Comp>,
+{
+	// We're essentially matching the conventions defined in `scaled_aabb_quad`.
+	match axis {
+		Axis3::X => S::new(volume.z(), volume.y()),
+		Axis3::Y => S::new(volume.x(), volume.z()),
+		Axis3::Z => S::new(volume.x(), volume.y()),
+	}
+}
+
+pub fn aabb_quad<V: NumericVector3>(origin: V, facing: BlockFace) -> [V; 4] {
+	let unit = V::ONE.x();
+	scaled_aabb_quad(origin, (unit, unit), facing)
 }

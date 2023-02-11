@@ -84,7 +84,7 @@ pub trait GlamBacked: Sized {
 	}
 }
 
-pub trait VecFrom<C> {
+pub trait CastVecFrom<C> {
 	fn cast_from(other: C) -> Self;
 }
 
@@ -112,7 +112,7 @@ pub trait NumericVector:
 	+ for<'a> Sum<&'a Self>
 	+ for<'a> Product<&'a Self>
 	+ GlamBacked
-	+ VecFrom<Self>
+	+ CastVecFrom<Self>
 {
 	// Types
 	type Dim: DimClass;
@@ -152,7 +152,7 @@ pub trait NumericVector:
 	fn dot(self, rhs: Self) -> Self::Comp;
 
 	// Typed-glam extensions
-	fn cast<V: VecFrom<Self>>(self) -> V {
+	fn cast<V: CastVecFrom<Self>>(self) -> V {
 		V::cast_from(self)
 	}
 }
@@ -450,7 +450,7 @@ macro_rules! impl_numeric_vector {
 		*$(;)?
 	) => {
 		$(
-			impl VecFrom<$ty> for $ty {
+			impl CastVecFrom<$ty> for $ty {
 				fn cast_from(other: $ty) -> Self {
 					other
 				}

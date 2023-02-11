@@ -9,10 +9,10 @@ use std::{
 };
 
 use crate::traits::{
-	floating_vector_forwards, numeric_vector_forwards, signed_vector_forwards, Dim2, Dim3, Dim4,
-	DimClass, FloatingVector, FloatingVector2, FloatingVector3, FloatingVector4, GlamBacked,
-	IntegerVector, NumericVector, NumericVector2, NumericVector3, NumericVector4,
-	SignedNumericVector2, SignedNumericVector3, SignedNumericVector4, SignedVector, VecFrom,
+	floating_vector_forwards, numeric_vector_forwards, signed_vector_forwards, CastVecFrom, Dim2,
+	Dim3, Dim4, DimClass, FloatingVector, FloatingVector2, FloatingVector3, FloatingVector4,
+	GlamBacked, IntegerVector, NumericVector, NumericVector2, NumericVector3, NumericVector4,
+	SignedNumericVector2, SignedNumericVector3, SignedNumericVector4, SignedVector,
 };
 
 // === Flavor traits === //
@@ -51,17 +51,17 @@ unsafe impl<F: ?Sized + VecFlavor> TransparentWrapper<F::Backing> for TypedVecto
 impl<F: ?Sized + VecFlavor> TypedVector<F> {
 	pub fn cast_from<T>(v: T) -> Self
 	where
-		Self: VecFrom<T>,
+		Self: CastVecFrom<T>,
 	{
-		<Self as VecFrom<T>>::cast_from(v)
+		<Self as CastVecFrom<T>>::cast_from(v)
 	}
 
-	pub fn cast<T: VecFrom<Self>>(self) -> T {
+	pub fn cast<T: CastVecFrom<Self>>(self) -> T {
 		T::cast_from(self)
 	}
 }
 
-impl<F, V> VecFrom<V> for TypedVector<F>
+impl<F, V> CastVecFrom<V> for TypedVector<F>
 where
 	F: ?Sized + VecFlavor,
 	F: FlavorCastFrom<V>,
