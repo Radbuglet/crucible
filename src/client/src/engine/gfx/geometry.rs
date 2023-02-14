@@ -72,7 +72,7 @@ pub fn flip_quad_winding<V>([a, b, c, d]: [V; 4]) -> [V; 4] {
 	[b, a, d, c]
 }
 
-pub fn scaled_aabb_quad<V, S>(origin: V, size: S, facing: BlockFace) -> [V; 4]
+pub fn scaled_aa_quad<V, S>(origin: V, size: S, facing: BlockFace) -> [V; 4]
 where
 	V: NumericVector3,
 	S: Into<(V::Comp, V::Comp)>,
@@ -156,7 +156,7 @@ where
 	V: NumericVector3,
 	S: NumericVector2<Comp = V::Comp>,
 {
-	// We're essentially matching the conventions defined in `scaled_aabb_quad`.
+	// We're essentially matching the conventions defined in `scaled_aa_quad`.
 	match axis {
 		Axis3::X => S::new(volume.z(), volume.y()),
 		Axis3::Y => S::new(volume.x(), volume.z()),
@@ -164,7 +164,7 @@ where
 	}
 }
 
-pub fn aabb_quad<V: NumericVector3>(origin: V, facing: BlockFace) -> [V; 4] {
+pub fn aa_quad<V: NumericVector3>(origin: V, facing: BlockFace) -> [V; 4] {
 	let unit = V::ONE.x();
-	scaled_aabb_quad(origin, (unit, unit), facing)
+	scaled_aa_quad(origin, (unit, unit), facing)
 }

@@ -13,7 +13,7 @@ use crucible_util::{
 };
 use geode::{Entity, OwnedEntity};
 use image::Rgba32FImage;
-use typed_glam::glam::{Mat4, UVec2};
+use typed_glam::glam::{Mat4, UVec2, Vec3};
 use winit::{
 	dpi::PhysicalPosition,
 	event::{MouseButton, VirtualKeyCode},
@@ -31,9 +31,12 @@ use crate::engine::{
 };
 
 use super::{
-	gfx::voxel::{
-		mesh::{BlockDescriptorVisual, VoxelWorldMesh},
-		pipeline::{VoxelRenderingPipelineDesc, VoxelUniforms},
+	gfx::{
+		mesh::store::QuadMeshLayer,
+		voxel::{
+			mesh::{BlockDescriptorVisual, VoxelWorldMesh},
+			pipeline::{VoxelRenderingPipelineDesc, VoxelUniforms},
+		},
 	},
 	player::camera::{FreeCamController, FreeCamInputs},
 };
@@ -127,6 +130,58 @@ impl GameSceneState {
 			.into_rgba32f(),
 		);
 
+		// Create slabs
+		{
+			// Load common slab texture
+			let atlas_tile = state.block_atlas.add(
+				&image::load_from_memory(include_bytes!(
+					"gfx/placeholders/placeholder_material_3.png"
+				))
+				.unwrap_pretty()
+				.into_rgba32f(),
+			);
+
+			// Create slabs
+			state.register_material(
+				"crucible_prototyping:four".to_string(),
+				Entity::new().with(MaterialDescriptorBase::default()).with(
+					BlockDescriptorVisual::Mesh {
+						mesh: QuadMeshLayer::default().with_cube(
+							Vec3::ZERO,
+							Vec3::new(1.0, 0.5, 1.0),
+							atlas_tile,
+						),
+					},
+				),
+			);
+
+			state.register_material(
+				"crucible_prototyping:five".to_string(),
+				Entity::new().with(MaterialDescriptorBase::default()).with(
+					BlockDescriptorVisual::Mesh {
+						mesh: QuadMeshLayer::default().with_cube(
+							Vec3::new(0.0, 0.5, 0.0),
+							Vec3::new(1.0, 0.5, 1.0),
+							atlas_tile,
+						),
+					},
+				),
+			);
+
+			state.register_material(
+				"crucible_prototyping:six".to_string(),
+				Entity::new().with(MaterialDescriptorBase::default()).with(
+					BlockDescriptorVisual::Mesh {
+						mesh: QuadMeshLayer::default().with_cube(
+							Vec3::ZERO,
+							Vec3::new(0.5, 1.0, 1.0),
+							atlas_tile,
+						),
+					},
+				),
+			);
+		}
+
 		state.upload_atlases(gfx);
 
 		// Return state
@@ -134,16 +189,19 @@ impl GameSceneState {
 	}
 
 	pub fn create_material(&mut self, id: String, texture: &Rgba32FImage) {
-		// Place into atlas
 		let atlas_tile = self.block_atlas.add(texture);
 
-		// Spawn material descriptor
-		let (descriptor, descriptor_ref) = Entity::new()
-			.with(MaterialDescriptorBase::default())
-			.with(BlockDescriptorVisual { atlas_tile })
-			.split_guard();
+		self.register_material(
+			id,
+			Entity::new()
+				.with(MaterialDescriptorBase::default())
+				.with(BlockDescriptorVisual::cubic_simple(atlas_tile)),
+		);
+	}
 
-		// Register material
+	pub fn register_material(&mut self, id: String, descriptor: OwnedEntity) {
+		let (descriptor, descriptor_ref) = descriptor.split_guard();
+
 		self.block_registry.register(id, descriptor);
 		self.materials.push(descriptor_ref);
 	}
