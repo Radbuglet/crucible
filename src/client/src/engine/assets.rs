@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
+use bort::{CompRef, OwnedEntity};
 use crucible_util::lang::polyfill::{BuildHasherPoly, OptionPoly};
-use geode::{CompRef, Entity, OwnedEntity};
 use hashbrown::{hash_map::RawEntryMut, HashMap};
 
 use std::{any::type_name, hash::Hash};
@@ -46,7 +46,7 @@ impl AssetManager {
 				unreachable!();
 			};
 
-		let (desc_ent, desc_ent_ref) = Entity::new()
+		let (desc_ent, desc_ent_ref) = OwnedEntity::new()
 			.with_debug_label("asset descriptor")
 			.with(desc.clone())
 			.split_guard();

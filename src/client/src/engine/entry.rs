@@ -1,5 +1,5 @@
 use anyhow::Context;
-use geode::{Entity, OwnedEntity};
+use bort::OwnedEntity;
 use winit::{
 	dpi::LogicalSize,
 	event::WindowEvent,
@@ -42,7 +42,7 @@ pub fn main() -> anyhow::Result<()> {
 			.context("failed to initialize a graphics adapter")?;
 
 	// Create primary viewport
-	let main_viewport = Entity::new()
+	let main_viewport = OwnedEntity::new()
 		.with_debug_label("main viewport")
 		.with(Viewport::new(
 			&gfx,
@@ -66,7 +66,7 @@ pub fn main() -> anyhow::Result<()> {
 		));
 
 	// Create engine
-	let (engine, engine_ref) = Entity::new()
+	let (engine, engine_ref) = OwnedEntity::new()
 		.with_debug_label("engine root")
 		.with(gfx)
 		.with(SceneManager::default())
@@ -181,7 +181,7 @@ pub fn main() -> anyhow::Result<()> {
 		fn on_shutdown(self) {
 			drop(self.engine);
 
-			let leaked = geode::debug::alive_entity_count();
+			let leaked = bort::debug::alive_entity_count();
 			if leaked > 0 {
 				log::warn!(
 					"Leaked {leaked} {}.",

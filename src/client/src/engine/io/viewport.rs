@@ -1,5 +1,5 @@
+use bort::{Entity, OwnedEntity};
 use crucible_util::lang::explicitly_bind::ExplicitlyBind;
-use geode::{Entity, OwnedEntity};
 use hashbrown::HashMap;
 use thiserror::Error;
 use typed_glam::glam::UVec2;

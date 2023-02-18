@@ -1,3 +1,4 @@
+use bort::{Entity, OwnedEntity};
 use crucible_common::{
 	game::material::{MaterialDescriptorBase, MaterialRegistry},
 	voxel::{
@@ -11,7 +12,6 @@ use crucible_util::{
 	lang::{iter::VolumetricIter, polyfill::OptionPoly},
 	mem::c_enum::CEnum,
 };
-use geode::{Entity, OwnedEntity};
 use image::Rgba32FImage;
 use typed_glam::glam::{Mat4, UVec2, Vec3};
 use winit::{
@@ -80,7 +80,7 @@ impl GameSceneState {
 		let selected_material_idx = 0;
 		block_registry.register(
 			"crucible:air",
-			Entity::new().with(MaterialDescriptorBase::default()),
+			OwnedEntity::new().with(MaterialDescriptorBase::default()),
 		);
 
 		// Create voxel uniforms
@@ -105,80 +105,72 @@ impl GameSceneState {
 		// Load default materials
 		state.create_material(
 			"crucible_prototyping:one".to_string(),
-			&image::load_from_memory(include_bytes!(
-				"gfx/placeholders/placeholder_material_1.png"
-			))
-			.unwrap_pretty()
-			.into_rgba32f(),
+			&image::load_from_memory(include_bytes!("gfx/res/placeholder_material_1.png"))
+				.unwrap_pretty()
+				.into_rgba32f(),
 		);
 
 		state.create_material(
 			"crucible_prototyping:two".to_string(),
-			&image::load_from_memory(include_bytes!(
-				"gfx/placeholders/placeholder_material_2.png"
-			))
-			.unwrap_pretty()
-			.into_rgba32f(),
+			&image::load_from_memory(include_bytes!("gfx/res/placeholder_material_2.png"))
+				.unwrap_pretty()
+				.into_rgba32f(),
 		);
 
 		state.create_material(
 			"crucible_prototyping:three".to_string(),
-			&image::load_from_memory(include_bytes!(
-				"gfx/placeholders/placeholder_material_3.png"
-			))
-			.unwrap_pretty()
-			.into_rgba32f(),
+			&image::load_from_memory(include_bytes!("gfx/res/placeholder_material_3.png"))
+				.unwrap_pretty()
+				.into_rgba32f(),
 		);
 
 		// Create slabs
 		{
 			// Load common slab texture
 			let atlas_tile = state.block_atlas.add(
-				&image::load_from_memory(include_bytes!(
-					"gfx/placeholders/placeholder_material_3.png"
-				))
-				.unwrap_pretty()
-				.into_rgba32f(),
+				&image::load_from_memory(include_bytes!("gfx/res/placeholder_material_3.png"))
+					.unwrap_pretty()
+					.into_rgba32f(),
 			);
 
 			// Create slabs
 			state.register_material(
 				"crucible_prototyping:four".to_string(),
-				Entity::new().with(MaterialDescriptorBase::default()).with(
-					BlockDescriptorVisual::Mesh {
+				OwnedEntity::new()
+					.with(MaterialDescriptorBase::default())
+					.with(BlockDescriptorVisual::Mesh {
 						mesh: QuadMeshLayer::default().with_cube(
 							Vec3::ZERO,
 							Vec3::new(1.0, 0.5, 1.0),
 							atlas_tile,
 						),
-					},
-				),
+					}),
 			);
 
 			state.register_material(
 				"crucible_prototyping:five".to_string(),
-				Entity::new().with(MaterialDescriptorBase::default()).with(
-					BlockDescriptorVisual::Mesh {
+				OwnedEntity::new()
+					.with(MaterialDescriptorBase::default())
+					.with(BlockDescriptorVisual::Mesh {
 						mesh: QuadMeshLayer::default().with_cube(
 							Vec3::new(0.0, 0.5, 0.0),
 							Vec3::new(1.0, 0.5, 1.0),
 							atlas_tile,
 						),
-					},
-				),
+					}),
 			);
 
 			state.register_material(
 				"crucible_prototyping:six".to_string(),
-				Entity::new().with(MaterialDescriptorBase::default()).with(
-					BlockDescriptorVisual::Mesh {
+				OwnedEntity::new()
+					.with(MaterialDescriptorBase::default())
+					.with(BlockDescriptorVisual::Mesh {
 						mesh: QuadMeshLayer::default().with_cube(
 							Vec3::ZERO,
 							Vec3::new(0.5, 1.0, 1.0),
 							atlas_tile,
 						),
-					},
-				),
+					}),
 			);
 		}
 
@@ -193,7 +185,7 @@ impl GameSceneState {
 
 		self.register_material(
 			id,
-			Entity::new()
+			OwnedEntity::new()
 				.with(MaterialDescriptorBase::default())
 				.with(BlockDescriptorVisual::cubic_simple(atlas_tile)),
 		);
@@ -479,7 +471,7 @@ impl GameSceneState {
 }
 
 pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
-	Entity::new()
+	OwnedEntity::new()
 		.with(GameSceneState::new(engine, main_viewport))
 		.with(VoxelWorldData::default())
 		.with(VoxelWorldMesh::default())
@@ -492,5 +484,5 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 }
 
 fn create_chunk(pos: ChunkVec) -> OwnedEntity {
-	Entity::new().with_debug_label(format_args!("chunk at {pos:?}"))
+	OwnedEntity::new().with_debug_label(format_args!("chunk at {pos:?}"))
 }

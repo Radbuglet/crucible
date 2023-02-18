@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bort = { git = "https://github.com/Radbuglet/bort.git", rev = "a4486c4b764162fc29a4277615a16f612aa11073" }
 crucible-util = { path = "../util" }
-geode = { git = "https://github.com/Radbuglet/mini-geode.git", rev = "b4834cb7ac888f093797507726b456ab5579c3eb" }
 hashbrown = "0.13.1"
 log = "0.4.17"
 num-traits = "0.2.15"

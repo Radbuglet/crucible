@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.58"
+bort = { git = "https://github.com/Radbuglet/bort.git", rev = "a4486c4b764162fc29a4277615a16f612aa11073" }
 bytemuck = "1.10.0"
 crevice = { version = "0.11.0", features = ["glam"] }
 crucible-common = { path = "../common" }
@@ -13,7 +14,6 @@ derive-where = "1.1.0"
 env_logger = "0.10.0"
 fastrand = "1.8.0"
 futures = "0.3.25"
-geode = { git = "https://github.com/Radbuglet/mini-geode.git", rev = "b4834cb7ac888f093797507726b456ab5579c3eb" }
 hashbrown = "0.13.2"
 image = "0.24.5"
 log = "0.4.17"

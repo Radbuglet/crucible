@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use bort::{storage, CompRef, Entity};
 use crevice::std430::AsStd430;
 use crucible_common::{
 	game::material::MaterialRegistry,
@@ -15,7 +16,6 @@ use crucible_util::{
 		c_enum::{CEnum, CEnumMap},
 	},
 };
-use geode::{storage, CompRef, Entity};
 use hashbrown::HashSet;
 use typed_glam::glam::{UVec2, Vec3};
 use wgpu::util::DeviceExt;

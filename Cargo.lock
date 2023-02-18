@@ -198,6 +198,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bort"
+version = "0.1.0"
+source = "git+https://github.com/Radbuglet/bort.git?rev=a4486c4b764162fc29a4277615a16f612aa11073#a4486c4b764162fc29a4277615a16f612aa11073"
+dependencies = [
+ "hashbrown 0.13.2",
+ "rustc-hash",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -406,6 +415,7 @@ name = "crucible-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bort",
  "bytemuck",
  "crevice",
  "crucible-common",
@@ -414,7 +424,6 @@ dependencies = [
  "env_logger",
  "fastrand",
  "futures",
- "geode",
  "hashbrown 0.13.2",
  "image",
  "log",
@@ -428,8 +437,8 @@ dependencies = [
 name = "crucible-common"
 version = "0.1.0"
 dependencies = [
+ "bort",
  "crucible-util",
- "geode",
  "hashbrown 0.13.2",
  "log",
  "num-traits",
@@ -700,15 +709,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c"
 dependencies = [
  "byteorder",
-]
-
-[[package]]
-name = "geode"
-version = "0.1.0"
-source = "git+https://github.com/Radbuglet/mini-geode.git?rev=b4834cb7ac888f093797507726b456ab5579c3eb#b4834cb7ac888f093797507726b456ab5579c3eb"
-dependencies = [
- "hashbrown 0.13.2",
- "rustc-hash",
 ]
 
 [[package]]

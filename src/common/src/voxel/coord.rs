@@ -1,3 +1,4 @@
+use bort::{Entity, OwnedEntity};
 use crucible_util::{
 	lang::{
 		iter::{ContextualIter, VolumetricIter, WithContext},
@@ -5,7 +6,6 @@ use crucible_util::{
 	},
 	mem::c_enum::CEnum,
 };
-use geode::{Entity, OwnedEntity};
 use smallvec::SmallVec;
 use typed_glam::{
 	ext::VecExt,
