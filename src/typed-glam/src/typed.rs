@@ -574,13 +574,22 @@ where
 }
 
 // SignedNumericVector2
+impl<B, F> TypedVectorImpl<F, Dim2>
+where
+	B: ?Sized + SignedNumericVector2,
+	F: ?Sized + VecFlavor<Backing = B>,
+{
+	pub const NEG_X: Self = Self::from_glam(B::NEG_X);
+	pub const NEG_Y: Self = Self::from_glam(B::NEG_Y);
+}
+
 impl<B, F> SignedNumericVector2 for TypedVector<F>
 where
 	B: ?Sized + SignedNumericVector2,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	const NEG_X: Self = Self::from_glam(B::NEG_X);
-	const NEG_Y: Self = Self::from_glam(B::NEG_Y);
+	const NEG_X: Self = Self::NEG_X;
+	const NEG_Y: Self = Self::NEG_Y;
 }
 
 // NumericVector3
@@ -689,14 +698,24 @@ where
 }
 
 // SignedNumericVector3
+impl<B, F> TypedVectorImpl<F, Dim3>
+where
+	B: ?Sized + SignedNumericVector3,
+	F: ?Sized + VecFlavor<Backing = B>,
+{
+	pub const NEG_X: Self = Self::from_glam(B::NEG_X);
+	pub const NEG_Y: Self = Self::from_glam(B::NEG_Y);
+	pub const NEG_Z: Self = Self::from_glam(B::NEG_Z);
+}
+
 impl<B, F> SignedNumericVector3 for TypedVector<F>
 where
 	B: ?Sized + SignedNumericVector3,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	const NEG_X: Self = Self::from_glam(B::NEG_X);
-	const NEG_Y: Self = Self::from_glam(B::NEG_Y);
-	const NEG_Z: Self = Self::from_glam(B::NEG_Z);
+	const NEG_X: Self = Self::NEG_X;
+	const NEG_Y: Self = Self::NEG_Y;
+	const NEG_Z: Self = Self::NEG_Z;
 }
 
 // NumericVector4
@@ -815,69 +834,135 @@ where
 }
 
 // SignedNumericVector4
+impl<B, F> TypedVectorImpl<F, Dim4>
+where
+	B: ?Sized + SignedNumericVector4,
+	F: ?Sized + VecFlavor<Backing = B>,
+{
+	pub const NEG_X: Self = Self::from_glam(B::NEG_X);
+	pub const NEG_Y: Self = Self::from_glam(B::NEG_Y);
+	pub const NEG_Z: Self = Self::from_glam(B::NEG_Z);
+	pub const NEG_W: Self = Self::from_glam(B::NEG_W);
+}
+
 impl<B, F> SignedNumericVector4 for TypedVector<F>
 where
 	B: ?Sized + SignedNumericVector4,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
-	const NEG_X: Self = Self::from_glam(B::NEG_X);
-	const NEG_Y: Self = Self::from_glam(B::NEG_Y);
-	const NEG_Z: Self = Self::from_glam(B::NEG_Z);
-	const NEG_W: Self = Self::from_glam(B::NEG_W);
+	const NEG_X: Self = Self::NEG_X;
+	const NEG_Y: Self = Self::NEG_Y;
+	const NEG_Z: Self = Self::NEG_Z;
+	const NEG_W: Self = Self::NEG_W;
 }
 
 // FloatingVector2
+impl<B, F> TypedVectorImpl<F, Dim2>
+where
+	B: ?Sized + FloatingVector2,
+	F: ?Sized + VecFlavor<Backing = B>,
+{
+	pub fn from_angle(angle: B::Comp) -> Self {
+		Self::from_glam(B::from_angle(angle))
+	}
+
+	pub fn angle_between(self, rhs: Self) -> B::Comp {
+		self.to_glam().angle_between(rhs.to_glam())
+	}
+
+	pub fn perp(self) -> Self {
+		self.map_glam(|raw| raw.perp())
+	}
+
+	pub fn perp_dot(self, rhs: Self) -> B::Comp {
+		self.to_glam().perp_dot(rhs.to_glam())
+	}
+
+	pub fn rotate(self, rhs: Self) -> Self {
+		self.map_glam(|raw| raw.rotate(rhs.to_glam()))
+	}
+}
+
 impl<B, F> FloatingVector2 for TypedVector<F>
 where
 	B: ?Sized + FloatingVector2,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
 	fn from_angle(angle: Self::Comp) -> Self {
-		Self::from_glam(B::from_angle(angle))
+		Self::from_angle(angle)
 	}
 
 	fn angle_between(self, rhs: Self) -> Self::Comp {
-		self.to_glam().angle_between(rhs.to_glam())
+		self.angle_between(rhs)
 	}
 
 	fn perp(self) -> Self {
-		self.map_glam(|raw| raw.perp())
+		self.perp()
 	}
 
 	fn perp_dot(self, rhs: Self) -> Self::Comp {
-		self.to_glam().perp_dot(rhs.to_glam())
+		self.perp_dot(rhs)
 	}
 
 	fn rotate(self, rhs: Self) -> Self {
-		self.map_glam(|raw| raw.rotate(rhs.to_glam()))
+		self.rotate(rhs)
 	}
 }
 
 // FloatingVector3
+impl<B, F> TypedVectorImpl<F, Dim3>
+where
+	B: ?Sized + FloatingVector3,
+	F: ?Sized + VecFlavor<Backing = B>,
+{
+	pub fn angle_between(self, rhs: Self) -> B::Comp {
+		self.to_glam().angle_between(rhs.to_glam())
+	}
+
+	pub fn any_orthogonal_vector(&self) -> Self {
+		Self::from_glam(self.as_glam().any_orthogonal_vector())
+	}
+
+	pub fn any_orthonormal_vector(&self) -> Self {
+		Self::from_glam(self.as_glam().any_orthonormal_vector())
+	}
+
+	pub fn any_orthonormal_pair(&self) -> (Self, Self) {
+		let (a, b) = self.as_glam().any_orthonormal_pair();
+		(Self::from_glam(a), Self::from_glam(b))
+	}
+}
+
 impl<B, F> FloatingVector3 for TypedVector<F>
 where
 	B: ?Sized + FloatingVector3,
 	F: ?Sized + VecFlavor<Backing = B>,
 {
 	fn angle_between(self, rhs: Self) -> Self::Comp {
-		self.to_glam().angle_between(rhs.to_glam())
+		self.angle_between(rhs)
 	}
 
 	fn any_orthogonal_vector(&self) -> Self {
-		Self::from_glam(self.as_glam().any_orthogonal_vector())
+		self.any_orthogonal_vector()
 	}
 
 	fn any_orthonormal_vector(&self) -> Self {
-		Self::from_glam(self.as_glam().any_orthonormal_vector())
+		self.any_orthonormal_vector()
 	}
 
 	fn any_orthonormal_pair(&self) -> (Self, Self) {
-		let (a, b) = self.as_glam().any_orthonormal_pair();
-		(Self::from_glam(a), Self::from_glam(b))
+		self.any_orthonormal_pair()
 	}
 }
 
 // FloatingVector4
+impl<B, F> TypedVectorImpl<F, Dim4>
+where
+	B: ?Sized + FloatingVector4,
+	F: ?Sized + VecFlavor<Backing = B>,
+{
+}
+
 impl<B, F> FloatingVector4 for TypedVector<F>
 where
 	B: ?Sized + FloatingVector4,

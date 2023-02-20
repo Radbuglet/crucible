@@ -1,7 +1,7 @@
 use std::{iter, marker::PhantomData};
 
 use bort::{storage, CompRef, Entity, OwnedEntity};
-use crucible_util::debug::type_id::NamedTypeId;
+use crucible_util::{debug::type_id::NamedTypeId, impl_tuples};
 use hashbrown::HashMap;
 
 #[derive(Debug, Default)]
@@ -46,9 +46,7 @@ impl ActorManager {
 				let arch = OwnedEntity::new().with(ActorArchetype::default());
 
 				// Register it into the appropriate tag lists
-				for tag in T::iter_tags() {
-					self.tags.entry(tag).or_default().push(arch.entity());
-				}
+				T::for_each_tag(|tag| self.tags.entry(tag).or_default().push(arch.entity()));
 
 				arch
 			});
@@ -142,12 +140,6 @@ impl ActorManager {
 	}
 }
 
-pub trait TagList: 'static {
-	type Iter: IntoIterator<Item = NamedTypeId>;
-
-	fn iter_tags() -> Self::Iter;
-}
-
 pub trait Tag: Sized + 'static {
 	const TAG: TagMarker<Self> = TagMarker { _ty: PhantomData };
 }
@@ -155,3 +147,35 @@ pub trait Tag: Sized + 'static {
 pub struct TagMarker<T: Tag> {
 	_ty: PhantomData<fn(T) -> T>,
 }
+
+pub trait TagList: 'static {
+	fn for_each_tag<F>(f: F)
+	where
+		F: FnMut(NamedTypeId);
+}
+
+impl<T: Tag> TagList for TagMarker<T> {
+	fn for_each_tag<F>(mut f: F)
+	where
+		F: FnMut(NamedTypeId),
+	{
+		f(NamedTypeId::of::<T>());
+	}
+}
+
+macro_rules! impl_tag_list {
+	($($name:ident:$field:tt),*) => {
+		impl<$($name: TagList),*> TagList for ($($name,)*) {
+			#[allow(unused_mut)]
+			#[allow(unused_variables)]
+			fn for_each_tag<_F>(mut f: _F)
+			where
+				_F: FnMut(NamedTypeId),
+			{
+				$($name::for_each_tag(&mut f);)*
+			}
+		}
+	};
+}
+
+impl_tuples!(impl_tag_list);
