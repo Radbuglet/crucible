@@ -1,2 +1,2 @@
-pub mod entity;
+pub mod actor;
 pub mod material;
