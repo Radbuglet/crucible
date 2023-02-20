@@ -1,6 +1,9 @@
 use bort::{Entity, OwnedEntity};
 use crucible_common::{
-	game::material::{MaterialDescriptorBase, MaterialRegistry},
+	game::{
+		actor::ActorManager,
+		material::{MaterialDescriptorBase, MaterialRegistry},
+	},
 	voxel::{
 		data::{VoxelChunkData, VoxelWorldData},
 		math::{BlockFace, ChunkVec},
@@ -8,25 +11,68 @@ use crucible_common::{
 };
 use crucible_util::{debug::error::ResultExt, mem::c_enum::CEnum};
 use image::Rgba32FImage;
-use typed_glam::glam::{UVec2, Vec3};
+use typed_glam::glam::UVec2;
 
 use crate::engine::{
 	assets::AssetManager,
 	gfx::{
 		atlas::{AtlasTexture, AtlasTextureGfx},
+		camera::CameraManager,
 		texture::FullScreenTexture,
 	},
 	io::{gfx::GfxContext, viewport::Viewport},
 	scene::{SceneRenderHandler, SceneUpdateHandler},
 };
 
-use super::gfx::{
-	mesh::store::QuadMeshLayer,
-	voxel::{
+use super::{
+	actors::player::{spawn_local_player, update_local_players, PlayerInputController},
+	gfx::voxel::{
 		mesh::{BlockDescriptorVisual, VoxelWorldMesh},
 		pipeline::{VoxelRenderingPipelineDesc, VoxelUniforms},
 	},
 };
+
+// === Factories === //
+
+pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
+	// Construct the scene
+	let scene = OwnedEntity::new()
+		.with(GameSceneState::new(engine, main_viewport))
+		.with(CameraManager::default())
+		.with(ActorManager::default())
+		.with(PlayerInputController::default())
+		.with(VoxelWorldData::default())
+		.with(VoxelWorldMesh::default())
+		.with(SceneUpdateHandler::new(move |me| {
+			me.get_mut::<GameSceneState>().update(me);
+		}))
+		.with(SceneRenderHandler::new(move |me, frame| {
+			me.get_mut::<GameSceneState>().render(me, frame);
+		}));
+
+	// Populate the scene
+	let mut scene_state = scene.get_mut::<GameSceneState>();
+	scene_state.register_block_material(
+		"crucible_prototyping:one".to_string(),
+		&image::load_from_memory(include_bytes!("gfx/res/placeholder_material_1.png"))
+			.unwrap_pretty()
+			.into_rgba32f(),
+	);
+	scene_state.upload_atlases(&engine.get::<GfxContext>());
+
+	let mut actors = scene.get_mut::<ActorManager>();
+	let mut player_inputs = scene.get_mut::<PlayerInputController>();
+	let local_player = spawn_local_player(&mut actors);
+	player_inputs.set_local_player(Some(local_player));
+
+	scene
+}
+
+pub fn create_chunk(pos: ChunkVec) -> OwnedEntity {
+	OwnedEntity::new().with_debug_label(format_args!("chunk at {pos:?}"))
+}
+
+// === Components === //
 
 #[derive(Debug)]
 pub struct GameSceneState {
@@ -62,94 +108,17 @@ impl GameSceneState {
 		let voxel_uniforms = VoxelUniforms::new(gfx, &mut asset_mgr, &block_atlas_gfx.view);
 
 		// Create state
-		let mut state = Self {
+		Self {
 			engine,
 			voxel_uniforms,
 			main_viewport,
 			block_registry,
 			block_atlas,
 			block_atlas_gfx,
-		};
-
-		// Load default materials
-		state.create_material(
-			"crucible_prototyping:one".to_string(),
-			&image::load_from_memory(include_bytes!("gfx/res/placeholder_material_1.png"))
-				.unwrap_pretty()
-				.into_rgba32f(),
-		);
-
-		state.create_material(
-			"crucible_prototyping:two".to_string(),
-			&image::load_from_memory(include_bytes!("gfx/res/placeholder_material_2.png"))
-				.unwrap_pretty()
-				.into_rgba32f(),
-		);
-
-		state.create_material(
-			"crucible_prototyping:three".to_string(),
-			&image::load_from_memory(include_bytes!("gfx/res/placeholder_material_3.png"))
-				.unwrap_pretty()
-				.into_rgba32f(),
-		);
-
-		// Create slabs
-		{
-			// Load common slab texture
-			let atlas_tile = state.block_atlas.add(
-				&image::load_from_memory(include_bytes!("gfx/res/placeholder_material_3.png"))
-					.unwrap_pretty()
-					.into_rgba32f(),
-			);
-
-			// Create slabs
-			state.register_material(
-				"crucible_prototyping:four".to_string(),
-				OwnedEntity::new()
-					.with(MaterialDescriptorBase::default())
-					.with(BlockDescriptorVisual::Mesh {
-						mesh: QuadMeshLayer::default().with_cube(
-							Vec3::ZERO,
-							Vec3::new(1.0, 0.5, 1.0),
-							atlas_tile,
-						),
-					}),
-			);
-
-			state.register_material(
-				"crucible_prototyping:five".to_string(),
-				OwnedEntity::new()
-					.with(MaterialDescriptorBase::default())
-					.with(BlockDescriptorVisual::Mesh {
-						mesh: QuadMeshLayer::default().with_cube(
-							Vec3::new(0.0, 0.5, 0.0),
-							Vec3::new(1.0, 0.5, 1.0),
-							atlas_tile,
-						),
-					}),
-			);
-
-			state.register_material(
-				"crucible_prototyping:six".to_string(),
-				OwnedEntity::new()
-					.with(MaterialDescriptorBase::default())
-					.with(BlockDescriptorVisual::Mesh {
-						mesh: QuadMeshLayer::default().with_cube(
-							Vec3::ZERO,
-							Vec3::new(0.5, 1.0, 1.0),
-							atlas_tile,
-						),
-					}),
-			);
 		}
-
-		state.upload_atlases(gfx);
-
-		// Return state
-		state
 	}
 
-	pub fn create_material(&mut self, id: String, texture: &Rgba32FImage) {
+	pub fn register_block_material(&mut self, id: String, texture: &Rgba32FImage) {
 		let atlas_tile = self.block_atlas.add(texture);
 
 		self.register_material(
@@ -171,8 +140,20 @@ impl GameSceneState {
 	pub fn update(&mut self, me: Entity) {
 		// Decompose self
 		let gfx = &*self.engine.get::<GfxContext>();
+		let actors = me.get::<ActorManager>();
 		let mut world_data = me.get_mut::<VoxelWorldData>();
 		let mut world_mesh = me.get_mut::<VoxelWorldMesh>();
+		let mut player_inputs = me.get_mut::<PlayerInputController>();
+		let mut camera = me.get_mut::<CameraManager>();
+
+		// Reset camera
+		camera.unset();
+
+		// Process player inputs
+		player_inputs.update(self.main_viewport, &mut camera, &mut world_data);
+
+		// Process actors
+		update_local_players(&actors, &world_data);
 
 		// Update chunk meshes
 		for chunk in world_data.flush_flagged() {
@@ -198,6 +179,7 @@ impl GameSceneState {
 		let gfx = &*self.engine.get::<GfxContext>();
 		let mut asset_mgr = self.engine.get_mut::<AssetManager>();
 		let world_mesh = me.get::<VoxelWorldMesh>();
+		let camera = me.get::<CameraManager>();
 
 		// Acquire viewport
 		let viewport = self.main_viewport.get::<Viewport>();
@@ -258,14 +240,9 @@ impl GameSceneState {
 			{
 				pass.set_pipeline(&pipeline);
 
-				// TODO
-				// 				let aspect = viewport.curr_surface_aspect().unwrap();
-				// 				// FIXME: Why does "_lh" correspond to a right-handed coordinate system?!
-				// 				let proj = Mat4::perspective_lh(70f32.to_radians(), aspect, 0.1, 100.);
-				// 				let view = self.free_cam.view_matrix();
-				// 				let full = proj * view;
-				//
-				// 				self.voxel_uniforms.set_camera_matrix(gfx, full);
+				let aspect = viewport.curr_surface_aspect().unwrap();
+				let xform = camera.get_camera_xform(aspect);
+				self.voxel_uniforms.set_camera_matrix(gfx, xform);
 			}
 
 			// Render world
@@ -275,21 +252,4 @@ impl GameSceneState {
 		// Submit work
 		gfx.queue.submit([encoder.finish()]);
 	}
-}
-
-pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
-	OwnedEntity::new()
-		.with(GameSceneState::new(engine, main_viewport))
-		.with(VoxelWorldData::default())
-		.with(VoxelWorldMesh::default())
-		.with(SceneUpdateHandler::new(move |me| {
-			me.get_mut::<GameSceneState>().update(me);
-		}))
-		.with(SceneRenderHandler::new(move |me, frame| {
-			me.get_mut::<GameSceneState>().render(me, frame);
-		}))
-}
-
-fn create_chunk(pos: ChunkVec) -> OwnedEntity {
-	OwnedEntity::new().with_debug_label(format_args!("chunk at {pos:?}"))
 }

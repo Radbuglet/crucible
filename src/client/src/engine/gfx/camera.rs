@@ -1,31 +1,37 @@
-use typed_glam::glam::Mat4;
+use crucible_common::voxel::math::{Angle3D, Angle3DExt};
+use typed_glam::glam::{Mat4, Vec3};
 
 #[derive(Debug, Default)]
 pub struct CameraManager {
 	is_locked: bool,
-	proj: Mat4,
+	view: Mat4,
 	settings: CameraSettings,
 }
 
 impl CameraManager {
-	pub fn unlock(&mut self) {
+	pub fn unset(&mut self) {
 		self.is_locked = false;
 	}
 
-	pub fn provide(&mut self, view: Mat4, settings: CameraSettings) {
+	pub fn set(&mut self, view: Mat4, settings: CameraSettings) {
 		if self.is_locked {
 			log::warn!("Provided multiple view transforms in a single frame.");
 		}
 		self.is_locked = true;
-		self.proj = view;
+		self.view = view;
 		self.settings = settings;
+	}
+
+	pub fn set_pos_rot(&mut self, pos: Vec3, angle: Angle3D, settings: CameraSettings) {
+		let view = angle.as_matrix().inverse() * Mat4::from_translation(-pos);
+		self.set(view, settings);
 	}
 
 	pub fn get_view_xform(&self) -> Mat4 {
 		if !self.is_locked {
 			log::warn!("Called `get_view_xform` on a `CameraManager` before a camera was set.");
 		}
-		self.proj
+		self.view
 	}
 
 	pub fn get_settings(&self) -> CameraSettings {
