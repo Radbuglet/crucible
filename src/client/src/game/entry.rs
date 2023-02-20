@@ -2,23 +2,13 @@ use bort::{Entity, OwnedEntity};
 use crucible_common::{
 	game::material::{MaterialDescriptorBase, MaterialRegistry},
 	voxel::{
-		coord::{EntityLocation, Location, RayCast},
-		data::{BlockState, VoxelChunkData, VoxelWorldData},
-		math::{BlockFace, ChunkVec, EntityVec, WorldVec},
+		data::{VoxelChunkData, VoxelWorldData},
+		math::{BlockFace, ChunkVec},
 	},
 };
-use crucible_util::{
-	debug::error::ResultExt,
-	lang::{iter::VolumetricIter, polyfill::OptionPoly},
-	mem::c_enum::CEnum,
-};
+use crucible_util::{debug::error::ResultExt, mem::c_enum::CEnum};
 use image::Rgba32FImage;
-use typed_glam::glam::{Mat4, UVec2, Vec3};
-use winit::{
-	dpi::PhysicalPosition,
-	event::{MouseButton, VirtualKeyCode},
-	window::CursorGrabMode,
-};
+use typed_glam::glam::{UVec2, Vec3};
 
 use crate::engine::{
 	assets::AssetManager,
@@ -26,29 +16,21 @@ use crate::engine::{
 		atlas::{AtlasTexture, AtlasTextureGfx},
 		texture::FullScreenTexture,
 	},
-	io::{gfx::GfxContext, input::InputManager, viewport::Viewport},
+	io::{gfx::GfxContext, viewport::Viewport},
 	scene::{SceneRenderHandler, SceneUpdateHandler},
 };
 
-use super::{
-	gfx::{
-		mesh::store::QuadMeshLayer,
-		voxel::{
-			mesh::{BlockDescriptorVisual, VoxelWorldMesh},
-			pipeline::{VoxelRenderingPipelineDesc, VoxelUniforms},
-		},
+use super::gfx::{
+	mesh::store::QuadMeshLayer,
+	voxel::{
+		mesh::{BlockDescriptorVisual, VoxelWorldMesh},
+		pipeline::{VoxelRenderingPipelineDesc, VoxelUniforms},
 	},
-	player::camera::{FreeCamController, FreeCamInputs},
 };
 
 #[derive(Debug)]
 pub struct GameSceneState {
 	engine: Entity,
-	time: f64,
-
-	// Camera controller
-	has_control: bool,
-	free_cam: FreeCamController,
 
 	// World state
 	voxel_uniforms: VoxelUniforms,
@@ -58,8 +40,6 @@ pub struct GameSceneState {
 	block_registry: MaterialRegistry,
 	block_atlas: AtlasTexture,
 	block_atlas_gfx: AtlasTextureGfx,
-	materials: Vec<Entity>,
-	selected_material_idx: usize,
 }
 
 impl GameSceneState {
@@ -68,16 +48,10 @@ impl GameSceneState {
 		let gfx = &*engine.get::<GfxContext>();
 		let mut asset_mgr = engine.get_mut::<AssetManager>();
 
-		// Create free cam
-		let has_control = false;
-		let free_cam = FreeCamController::default();
-
 		// Create block registry
 		let block_atlas = AtlasTexture::new(UVec2::new(100, 100), UVec2::new(16, 16));
 		let mut block_registry = MaterialRegistry::default();
-		let materials = Vec::new();
 
-		let selected_material_idx = 0;
 		block_registry.register(
 			"crucible:air",
 			OwnedEntity::new().with(MaterialDescriptorBase::default()),
@@ -90,16 +64,11 @@ impl GameSceneState {
 		// Create state
 		let mut state = Self {
 			engine,
-			time: 0.,
-			has_control,
-			free_cam,
 			voxel_uniforms,
 			main_viewport,
 			block_registry,
 			block_atlas,
 			block_atlas_gfx,
-			materials,
-			selected_material_idx,
 		};
 
 		// Load default materials
@@ -192,10 +161,7 @@ impl GameSceneState {
 	}
 
 	pub fn register_material(&mut self, id: String, descriptor: OwnedEntity) {
-		let (descriptor, descriptor_ref) = descriptor.split_guard();
-
 		self.block_registry.register(id, descriptor);
-		self.materials.push(descriptor_ref);
 	}
 
 	pub fn upload_atlases(&mut self, gfx: &GfxContext) {
@@ -208,186 +174,26 @@ impl GameSceneState {
 		let mut world_data = me.get_mut::<VoxelWorldData>();
 		let mut world_mesh = me.get_mut::<VoxelWorldMesh>();
 
-		// Handle interactions
-		{
-			let viewport = self.main_viewport.get::<Viewport>();
-			let window = viewport.window();
-			let input_mgr = self.main_viewport.get::<InputManager>();
+		// Update chunk meshes
+		for chunk in world_data.flush_flagged() {
+			world_mesh.flag_chunk(chunk);
 
-			if !input_mgr.has_focus() {
-				self.has_control = false;
+			// TODO: Make this more conservative
+			let chunk_data = chunk.get::<VoxelChunkData>();
+
+			for face in BlockFace::variants() {
+				let Some(neighbor) = chunk_data.neighbor(face) else {
+				continue;
+				};
+
+				world_mesh.flag_chunk(neighbor);
 			}
-
-			let esc_pressed = input_mgr.key(VirtualKeyCode::Escape).recently_pressed();
-			let left_pressed = input_mgr.button(MouseButton::Left).recently_pressed();
-			let right_pressed = input_mgr.button(MouseButton::Right).recently_pressed();
-
-			if self.has_control {
-				// Update camera
-				self.free_cam.handle_mouse_move(input_mgr.mouse_delta());
-
-				self.free_cam.process(
-					&world_data,
-					FreeCamInputs {
-						up: input_mgr.key(VirtualKeyCode::E).state(),
-						down: input_mgr.key(VirtualKeyCode::Q).state(),
-						left: input_mgr.key(VirtualKeyCode::A).state(),
-						right: input_mgr.key(VirtualKeyCode::D).state(),
-						fore: input_mgr.key(VirtualKeyCode::W).state(),
-						back: input_mgr.key(VirtualKeyCode::S).state(),
-					},
-				);
-
-				// Process slot selection
-				for (i, &key) in [
-					VirtualKeyCode::Key1,
-					VirtualKeyCode::Key2,
-					VirtualKeyCode::Key3,
-					VirtualKeyCode::Key4,
-					VirtualKeyCode::Key5,
-					VirtualKeyCode::Key6,
-					VirtualKeyCode::Key7,
-					VirtualKeyCode::Key8,
-					VirtualKeyCode::Key9,
-					VirtualKeyCode::Key0,
-				][0..self.materials.len()]
-					.iter()
-					.enumerate()
-				{
-					if input_mgr.key(key).recently_pressed() {
-						self.selected_material_idx = i;
-						break;
-					}
-				}
-
-				// Handle chunk filling
-				if input_mgr.key(VirtualKeyCode::Space).state() {
-					// Determine camera position
-					let pos = self.free_cam.pos();
-					let pos = WorldVec::cast_from(pos.floor());
-					let pos = Location::new(&world_data, pos);
-
-					// Fill volume
-					for [x, y, z] in VolumetricIter::new([6, 6, 6]) {
-						let [x, y, z] = [x as i32 - 3, y as i32 - 10, z as i32 - 3];
-
-						pos.at_relative(&world_data, WorldVec::new(x, y, z))
-							.set_state_or_create(
-								&mut world_data,
-								create_chunk,
-								BlockState {
-									material: 1,
-									variant: 0,
-									light_level: 255,
-								},
-							);
-					}
-				}
-
-				if input_mgr.button(MouseButton::Right).recently_pressed() {
-					let mut ray = RayCast::new_at(
-						EntityLocation::new(&world_data, self.free_cam.pos()),
-						EntityVec::from_glam(self.free_cam.facing().as_dvec3()),
-					);
-
-					for mut isect in ray.step_for(&world_data, 6.) {
-						if isect
-							.block
-							.state(&world_data)
-							.p_is_some_and(|state| state.material != 0)
-						{
-							let mut target =
-								isect.block.at_neighbor(&world_data, isect.face.invert());
-
-							let material = self.materials[self.selected_material_idx];
-							let material = material.get::<MaterialDescriptorBase>().slot();
-
-							target.set_state_or_create(
-								&mut world_data,
-								create_chunk,
-								BlockState {
-									material,
-									variant: 0,
-									light_level: 255,
-								},
-							);
-							break;
-						}
-					}
-				} else if input_mgr.button(MouseButton::Left).recently_pressed() {
-					let mut ray = RayCast::new_uncached(
-						self.free_cam.pos(),
-						EntityVec::from_glam(self.free_cam.facing().as_dvec3()),
-					);
-
-					for mut isect in ray.step_for(&world_data, 6.) {
-						if isect
-							.block
-							.state(&world_data)
-							.p_is_some_and(|state| state.material != 0)
-						{
-							isect.block.set_state_or_create(
-								&mut world_data,
-								create_chunk,
-								BlockState::default(),
-							);
-							break;
-						}
-					}
-				}
-
-				// Handle control release
-				if esc_pressed {
-					self.has_control = false;
-
-					window.set_cursor_visible(true);
-					window.set_cursor_grab(CursorGrabMode::None).log();
-				}
-			} else {
-				// Handle control acquire
-				if left_pressed || right_pressed {
-					self.has_control = true;
-
-					// Warp cursor to the center and lock it
-					let win_sz = window.inner_size();
-					let win_center = PhysicalPosition::new(win_sz.width / 2, win_sz.height / 2);
-					window.set_cursor_position(win_center).log();
-
-					let modes = [CursorGrabMode::Confined, CursorGrabMode::Locked];
-					for mode in modes {
-						if window.set_cursor_grab(mode).log().is_some() {
-							break;
-						}
-					}
-
-					// Hide cursor
-					window.set_cursor_visible(false);
-				}
-			}
-
-			// Update chunk meshes
-			for chunk in world_data.flush_flagged() {
-				world_mesh.flag_chunk(chunk);
-
-				// TODO: Make this more conservative
-				let chunk_data = chunk.get::<VoxelChunkData>();
-
-				for face in BlockFace::variants() {
-					let Some(neighbor) = chunk_data.neighbor(face) else {
-					continue;
-					};
-
-					world_mesh.flag_chunk(neighbor);
-				}
-			}
-
-			world_mesh.update_chunks(gfx, &self.block_atlas, &self.block_registry, None);
 		}
+
+		world_mesh.update_chunks(gfx, &self.block_atlas, &self.block_registry, None);
 	}
 
 	pub fn render(&mut self, me: Entity, frame: &mut wgpu::SurfaceTexture) {
-		self.time += 0.1;
-
 		// Acquire services
 		let gfx = &*self.engine.get::<GfxContext>();
 		let mut asset_mgr = self.engine.get_mut::<AssetManager>();
@@ -429,7 +235,7 @@ impl GameSceneState {
 					view: &view,
 					ops: wgpu::Operations {
 						load: wgpu::LoadOp::Clear(wgpu::Color {
-							r: 0.45 + 0.4 * self.time.cos(),
+							r: 0.45,
 							g: 0.66,
 							b: 1.0,
 							a: 1.0,
@@ -452,13 +258,14 @@ impl GameSceneState {
 			{
 				pass.set_pipeline(&pipeline);
 
-				let aspect = viewport.curr_surface_aspect().unwrap();
-				// FIXME: Why does "_lh" correspond to a right-handed coordinate system?!
-				let proj = Mat4::perspective_lh(70f32.to_radians(), aspect, 0.1, 100.);
-				let view = self.free_cam.view_matrix();
-				let full = proj * view;
-
-				self.voxel_uniforms.set_camera_matrix(gfx, full);
+				// TODO
+				// 				let aspect = viewport.curr_surface_aspect().unwrap();
+				// 				// FIXME: Why does "_lh" correspond to a right-handed coordinate system?!
+				// 				let proj = Mat4::perspective_lh(70f32.to_radians(), aspect, 0.1, 100.);
+				// 				let view = self.free_cam.view_matrix();
+				// 				let full = proj * view;
+				//
+				// 				self.voxel_uniforms.set_camera_matrix(gfx, full);
 			}
 
 			// Render world

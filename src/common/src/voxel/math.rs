@@ -1,4 +1,4 @@
-use std::f32::consts::TAU;
+use std::f32::consts::{PI, TAU};
 
 use num_traits::Signed;
 use typed_glam::{
@@ -526,6 +526,8 @@ impl<V: NumericVector3> Vec3Ext for V {
 
 // === Angle3D === //
 
+pub const HALF_PI: f32 = PI / 2.0;
+
 pub type Angle3D = TypedVector<Angle3DFlavor>;
 
 pub struct Angle3DFlavor;
@@ -550,13 +552,21 @@ pub trait Angle3DExt {
 
 	fn as_matrix(&self) -> Mat4;
 
+	fn as_matrix_horizontal(&self) -> Mat4;
+
+	fn as_matrix_vertical(&self) -> Mat4;
+
 	fn forward(&self) -> Vec3;
 
-	fn wrapped(&self) -> Self;
+	fn wrap(&self) -> Self;
 
-	fn wrapped_x(&self) -> Self;
+	fn wrap_x(&self) -> Self;
 
-	fn wrapped_y(&self) -> Self;
+	fn wrap_y(&self) -> Self;
+
+	fn clamp_y(&self, min: f32, max: f32) -> Self;
+
+	fn clamp_y_90(&self) -> Self;
 }
 
 impl Angle3DExt for Angle3D {
@@ -565,22 +575,38 @@ impl Angle3DExt for Angle3D {
 	}
 
 	fn as_matrix(&self) -> Mat4 {
-		Mat4::from_rotation_y(self.x()) * Mat4::from_rotation_x(self.y())
+		self.as_matrix_horizontal() * self.as_matrix_vertical()
+	}
+
+	fn as_matrix_horizontal(&self) -> Mat4 {
+		Mat4::from_rotation_y(self.x())
+	}
+
+	fn as_matrix_vertical(&self) -> Mat4 {
+		Mat4::from_rotation_x(self.y())
 	}
 
 	fn forward(&self) -> Vec3 {
 		self.as_matrix().transform_vector3(Vec3::Z)
 	}
 
-	fn wrapped(&self) -> Self {
-		self.wrapped_x().wrapped_y()
+	fn wrap(&self) -> Self {
+		self.wrap_x().wrap_y()
 	}
 
-	fn wrapped_x(&self) -> Self {
+	fn wrap_x(&self) -> Self {
 		Self::new(self.x().rem_euclid(TAU), self.y())
 	}
 
-	fn wrapped_y(&self) -> Self {
+	fn wrap_y(&self) -> Self {
 		Self::new(self.x(), self.y().rem_euclid(TAU))
+	}
+
+	fn clamp_y(&self, min: f32, max: f32) -> Self {
+		Self::new(self.x(), self.y().clamp(min, max))
+	}
+
+	fn clamp_y_90(&self) -> Self {
+		self.clamp_y(-HALF_PI, HALF_PI)
 	}
 }
