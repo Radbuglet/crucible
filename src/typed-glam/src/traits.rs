@@ -17,25 +17,22 @@ pub trait DimClass: Sized + 'static {
 	const DIM: usize;
 }
 
-pub struct Dim2 {
-	_private: (),
-}
+#[non_exhaustive]
+pub struct Dim2;
 
 impl DimClass for Dim2 {
 	const DIM: usize = 2;
 }
 
-pub struct Dim3 {
-	_private: (),
-}
+#[non_exhaustive]
+pub struct Dim3;
 
 impl DimClass for Dim3 {
 	const DIM: usize = 3;
 }
 
-pub struct Dim4 {
-	_private: (),
-}
+#[non_exhaustive]
+pub struct Dim4;
 
 impl DimClass for Dim4 {
 	const DIM: usize = 4;

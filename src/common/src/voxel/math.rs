@@ -1,7 +1,9 @@
+use std::f32::consts::TAU;
+
 use num_traits::Signed;
 use typed_glam::{
 	ext::VecExt,
-	glam::{self, DVec3, IVec2, IVec3},
+	glam::{self, DVec3, IVec2, IVec3, Mat4, Vec2, Vec3},
 	traits::{NumericVector2, NumericVector3, SignedNumericVector3},
 	typed::{FlavorCastFrom, TypedVector, VecFlavor},
 };
@@ -18,9 +20,8 @@ pub const CHUNK_VOLUME: i32 = CHUNK_EDGE.pow(3);
 
 pub type WorldVec = TypedVector<WorldVecFlavor>;
 
-pub struct WorldVecFlavor {
-	_private: (),
-}
+#[non_exhaustive]
+pub struct WorldVecFlavor;
 
 impl VecFlavor for WorldVecFlavor {
 	type Backing = glam::IVec3;
@@ -102,9 +103,8 @@ impl WorldVecExt for WorldVec {
 
 pub type ChunkVec = TypedVector<ChunkVecFlavor>;
 
-pub struct ChunkVecFlavor {
-	_private: (),
-}
+#[non_exhaustive]
+pub struct ChunkVecFlavor;
 
 impl VecFlavor for ChunkVecFlavor {
 	type Backing = glam::IVec3;
@@ -138,9 +138,8 @@ impl ChunkVecExt for ChunkVec {
 
 pub type BlockVec = TypedVector<BlockVecFlavor>;
 
-pub struct BlockVecFlavor {
-	_private: (),
-}
+#[non_exhaustive]
+pub struct BlockVecFlavor;
 
 impl VecFlavor for BlockVecFlavor {
 	type Backing = glam::IVec3;
@@ -239,9 +238,8 @@ impl Iterator for BlockPosIter {
 /// `(-2..-1, -3..-2, 1..2)`.
 pub type EntityVec = TypedVector<EntityVecFlavor>;
 
-pub struct EntityVecFlavor {
-	_private: (),
-}
+#[non_exhaustive]
+pub struct EntityVecFlavor;
 
 impl VecFlavor for EntityVecFlavor {
 	type Backing = DVec3;
@@ -523,5 +521,66 @@ impl<V: NumericVector3> Vec3Ext for V {
 
 	fn comp_mut(&mut self, axis: Axis3) -> &mut Self::Comp {
 		&mut self[axis.index()]
+	}
+}
+
+// === Angle3D === //
+
+pub type Angle3D = TypedVector<Angle3DFlavor>;
+
+pub struct Angle3DFlavor;
+
+impl VecFlavor for Angle3DFlavor {
+	type Backing = Vec2;
+
+	const DEBUG_NAME: &'static str = "Angle3D";
+}
+
+impl FlavorCastFrom<Vec2> for Angle3DFlavor {
+	fn cast_from(vec: Vec2) -> TypedVector<Self>
+	where
+		Self: VecFlavor,
+	{
+		TypedVector::from_glam(vec)
+	}
+}
+
+pub trait Angle3DExt {
+	fn new_deg(yaw: f32, pitch: f32) -> Self;
+
+	fn as_matrix(&self) -> Mat4;
+
+	fn forward(&self) -> Vec3;
+
+	fn wrapped(&self) -> Self;
+
+	fn wrapped_x(&self) -> Self;
+
+	fn wrapped_y(&self) -> Self;
+}
+
+impl Angle3DExt for Angle3D {
+	fn new_deg(yaw: f32, pitch: f32) -> Self {
+		Self::new(yaw.to_radians(), pitch.to_radians())
+	}
+
+	fn as_matrix(&self) -> Mat4 {
+		Mat4::from_rotation_y(self.x()) * Mat4::from_rotation_x(self.y())
+	}
+
+	fn forward(&self) -> Vec3 {
+		self.as_matrix().transform_vector3(Vec3::Z)
+	}
+
+	fn wrapped(&self) -> Self {
+		self.wrapped_x().wrapped_y()
+	}
+
+	fn wrapped_x(&self) -> Self {
+		Self::new(self.x().rem_euclid(TAU), self.y())
+	}
+
+	fn wrapped_y(&self) -> Self {
+		Self::new(self.x(), self.y().rem_euclid(TAU))
 	}
 }
