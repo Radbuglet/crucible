@@ -287,6 +287,7 @@ impl BlockVecExt for BlockVec {
 	}
 }
 
+#[derive(Debug)]
 pub struct BlockPosIter(usize);
 
 impl Iterator for BlockPosIter {
@@ -303,12 +304,6 @@ impl Iterator for BlockPosIter {
 
 /// A vector in the logical vector-space of valid entity positions. This is a double precision float
 /// vector because we need all world positions to be encodable as entity positions.
-///
-/// ## Conventions
-///
-/// A block position, when converted to a floating point, represents the most negative corner of a
-/// given block. For example, the block position `(-2, -3, 1)` occupies the space
-/// `(-2..-1, -3..-2, 1..2)`.
 pub type EntityVec = TypedVector<EntityVecFlavor>;
 
 #[non_exhaustive]
@@ -506,6 +501,72 @@ impl Axis3 {
 			Z => V::Z,
 		}
 	}
+
+	pub fn ortho_hv(self) -> (Axis3, Axis3) {
+		match self {
+			// As a reminder, our coordinate system is y-up right-handed and looks like this:
+			//
+			//     +y
+			//      |
+			// +x---|
+			//     /
+			//   +z
+			//
+			Self::X => {
+				// A quad facing the negative x direction looks like this:
+				//
+				//       c +y
+				//      /|
+				//     / |
+				//    d  |
+				//    |  b 0
+				//    | /     ---> -x
+				//    |/
+				//    a +z
+				//
+				(Self::Z, Self::Y)
+			}
+			Self::Y => {
+				// A quad facing the negative y direction looks like this:
+				//
+				//  +x        0
+				//    d------a    |
+				//   /      /     |
+				//  /      /      ↓ -y
+				// c------b
+				//         +z
+				(Self::X, Self::Z)
+			}
+			Self::Z => {
+				// A quad facing the negative z direction looks like this:
+				//
+				//              +y
+				//      c------d
+				//      |      |     ^ -z
+				//      |      |    /
+				//      b------a   /
+				//    +x        0
+				//
+				(Self::X, Self::Y)
+			}
+		}
+	}
+
+	pub fn extrude_volume_hv<V: NumericVector3>(
+		self,
+		size: impl Into<(V::Comp, V::Comp)>,
+		perp: V::Comp,
+	) -> V {
+		let (ha, va) = self.ortho_hv();
+		let (hm, vm) = size.into();
+
+		let mut target = V::ZERO;
+		*target.comp_mut(ha) = hm;
+		*target.comp_mut(va) = vm;
+		*target.comp_mut(self) = perp;
+
+		target
+	}
 }
 
 impl Axis3 {
@@ -687,7 +748,7 @@ pub struct AaQuad<V: NumericVector3> {
 
 impl<V: NumericVector3> AaQuad<V> {
 	pub fn new_given_volume(origin: V, face: BlockFace, volume: V) -> Self {
-		let (h, v) = Self::size_axes(face.axis());
+		let (h, v) = face.axis().ortho_hv();
 		let size = (volume.comp(h), volume.comp(v));
 
 		Self { origin, face, size }
@@ -703,58 +764,8 @@ impl<V: NumericVector3> AaQuad<V> {
 		}
 	}
 
-	pub fn size_axes(axis: Axis3) -> (Axis3, Axis3) {
-		match axis {
-			// As a reminder, our coordinate system is y-up right-handed and looks like this:
-			//
-			//     +y
-			//      |
-			// +x---|
-			//     /
-			//   +z
-			//
-			Axis3::X => {
-				// A quad facing the negative x direction looks like this:
-				//
-				//       c +y
-				//      /|
-				//     / |
-				//    d  |
-				//    |  b 0
-				//    | /     ---> -x
-				//    |/
-				//    a +z
-				//
-				(Axis3::Z, Axis3::Y)
-			}
-			Axis3::Y => {
-				// A quad facing the negative y direction looks like this:
-				//
-				//  +x        0
-				//    d------a
-				//   /      /
-				//  /      /
-				// c------b
-				//         +z
-				(Axis3::X, Axis3::Z)
-			}
-			Axis3::Z => {
-				// A quad facing the negative z direction looks like this:
-				//
-				//              +y
-				//      c------d
-				//      |      |     ^ -z
-				//      |      |    /
-				//      b------a   /
-				//    +x        0
-				//
-				(Axis3::X, Axis3::Y)
-			}
-		}
-	}
-
 	pub fn size_deltas(&self) -> (V, V) {
-		let (h, v) = Self::size_axes(self.face.axis());
+		let (h, v) = self.face.axis().ortho_hv();
 		let (sh, sv) = self.size;
 		(
 			h.unit_typed::<V>() * V::splat(sh),
@@ -835,6 +846,21 @@ impl<V: NumericVector3> AaQuad<V> {
 			quad.flip_winding()
 		} else {
 			quad
+		}
+	}
+
+	pub fn extrude_hv(self, delta: V::Comp) -> Aabb<V>
+	where
+		V: SignedNumericVector3,
+		V::Comp: Signed,
+	{
+		Aabb {
+			origin: if self.face.sign() == Sign::Negative {
+				self.origin + self.face.unit_typed::<V>() * V::splat(delta)
+			} else {
+				self.origin
+			},
+			size: self.face.axis().extrude_volume_hv(self.size, delta),
 		}
 	}
 }
@@ -924,5 +950,28 @@ impl<V> Quad<V> {
 
 	pub fn map<R>(self, f: impl FnMut(V) -> R) -> Quad<R> {
 		Quad(map_arr(self.0, f))
+	}
+}
+
+// === Aabb === //
+
+pub type EntityAabb = Aabb<EntityVec>;
+
+#[derive(Debug, Copy, Clone)]
+pub struct Aabb<V> {
+	pub origin: V,
+	pub size: V,
+}
+
+impl<V: SignedNumericVector3> Aabb<V> {
+	pub fn quad(self, face: BlockFace) -> AaQuad<V> {
+		let origin = self.origin;
+		let origin = if face.sign() == Sign::Positive {
+			origin + face.unit_typed::<V>() * V::splat(self.size.comp(face.axis()))
+		} else {
+			origin
+		};
+
+		AaQuad::new_given_volume(origin, face, self.size)
 	}
 }

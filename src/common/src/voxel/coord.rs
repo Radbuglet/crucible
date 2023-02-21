@@ -15,8 +15,8 @@ use typed_glam::{
 use crate::voxel::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt};
 
 use super::{
-	data::{BlockState, VoxelChunkData, VoxelWorldData},
-	math::{ChunkVec, EntityVec, WorldVec},
+	data::{BlockState, VoxelChunkData, VoxelWorldData, AIR_MATERIAL_SLOT},
+	math::{AaQuad, Aabb, ChunkVec, EntityAabb, EntityVec, WorldVec},
 };
 
 // === Location === //
@@ -336,10 +336,6 @@ impl<'a> ContextualIter<(&'a VoxelWorldData, &'a mut RayCast)> for ContextualRay
 	) -> Option<Self::Item> {
 		let world = *world;
 
-		while self.back_log.is_empty() {
-			self.back_log = ray.step(world);
-		}
-
 		let next = if !self.back_log.is_empty() {
 			self.back_log.remove(0)
 		} else if ray.dist() < self.max_dist {
@@ -368,58 +364,64 @@ impl<'a> ContextualIter<(&'a VoxelWorldData, &'a mut RayCast)> for ContextualRay
 
 // === Collisions === //
 
+pub fn cast_volume(world: &VoxelWorldData, quad: AaQuad<EntityVec>, delta: f64) -> f64 {
+	let check_aabb = quad.extrude_hv(delta);
+
+	EntityLocation::new(world, check_aabb.origin)
+		// For every block in the check volume
+		.iter_volume(world, check_aabb.size.ceil().block_pos())
+		// See how far we can travel
+		.map(|mut pos| {
+			if pos
+				.state(world)
+				.p_is_none_or(|v| v.material == AIR_MATERIAL_SLOT)
+			{
+				delta
+			} else {
+				// TODO: Choose this appropriately.
+				0.0
+			}
+		})
+		// And take the minimum allowable distance.
+		.min_by(f64::total_cmp)
+		.unwrap()
+}
+
 pub fn move_rigid_body(
 	world: &VoxelWorldData,
-	pos: EntityVec,
-	size: EntityVec,
+	mut aabb: EntityAabb,
 	delta: EntityVec,
 ) -> EntityVec {
-	let mut loc = EntityLocation::new(world, pos);
+	for axis in Axis3::variants() {
+		// Decompose the movement part
+		let signed_delta = delta.comp(axis);
+		let delta = signed_delta.abs();
+		let sign = Sign::of(signed_delta).unwrap_or(Sign::Positive);
+		let face = BlockFace::compose(axis, sign);
 
-	'a: for movement_axis in Axis3::variants() {
-		// Decompose delta
-		let movement_unit = movement_axis.unit_typed::<EntityVec>();
-		let movement_delta = delta.comp(movement_axis);
-		let movement_magnitude = movement_delta.abs();
-		let movement_sign = Sign::of(movement_delta).unwrap_or(Sign::Positive);
+		// Determine how far we can move
+		let actual_delta = cast_volume(world, aabb.quad(face), delta);
 
-		// Determine the occlusion candidate volume
-		let volume_start = match movement_sign {
-			// Align to the far side of the collider
-			Sign::Positive => loc.at_relative(world, movement_unit * size.comp(movement_axis)),
-			// Align to the destination corner
-			Sign::Negative => loc.at_relative(world, -movement_unit * movement_magnitude),
-		};
-		let mut volume_size = size;
-		*volume_size.comp_mut(movement_axis) = movement_magnitude;
-
-		let volume_end = volume_start.pos() + volume_size;
-		let volume_size = volume_end.block_pos() - volume_start.pos().block_pos();
-
-		// Check volume for occluding blocks
-		for mut occluder in volume_start.iter_volume(world, volume_size) {
-			if occluder
-				.state(world)
-				.p_is_some_and(|state| state.material != 0)
-			{
-				// TODO: Allow partial movements
-				continue 'a;
-			}
-		}
-
-		// Otherwise, commit the movement in full
-		loc.move_relative(world, movement_unit * movement_delta);
+		// Commit the movement
+		aabb.origin += face.unit_typed::<EntityVec>() * actual_delta;
 	}
 
-	loc.pos()
+	aabb.origin
 }
 
 pub fn move_rigid_body_relative(
 	world: &VoxelWorldData,
-	src: EntityVec,
-	src_offset: EntityVec,
+	origin: EntityVec,
+	origin_offset: EntityVec,
 	size: EntityVec,
 	delta: EntityVec,
 ) -> EntityVec {
-	move_rigid_body(world, src - src_offset, size, delta) + src_offset
+	move_rigid_body(
+		world,
+		Aabb {
+			origin: origin - origin_offset,
+			size,
+		},
+		delta,
+	) + origin_offset
 }

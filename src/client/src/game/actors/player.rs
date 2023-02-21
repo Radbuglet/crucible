@@ -194,7 +194,11 @@ impl PlayerInputController {
 				world,
 				create_chunk,
 				BlockState {
-					material: 1,
+					material: if input_manager.key(VirtualKeyCode::LShift).state() {
+						0
+					} else {
+						1
+					},
 					variant: 0,
 					light_level: u8::MAX,
 				},

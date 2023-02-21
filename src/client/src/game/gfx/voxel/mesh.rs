@@ -5,7 +5,7 @@ use crevice::std430::AsStd430;
 use crucible_common::{
 	game::material::MaterialRegistry,
 	voxel::{
-		data::VoxelChunkData,
+		data::{VoxelChunkData, AIR_MATERIAL_SLOT},
 		math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, WorldVec, WorldVecExt, QUAD_UVS},
 	},
 };
@@ -104,7 +104,7 @@ impl VoxelWorldMesh {
 									datas.get(neighbor).block_state(neighbor_block.wrap())
 								};
 
-								if state.material == 0 {
+								if state.material == AIR_MATERIAL_SLOT {
 									break 'a false;
 								}
 
