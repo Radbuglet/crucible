@@ -1,21 +1,17 @@
-use crucible_common::voxel::math::{BlockFace, Sign, Vec3Ext};
+use crucible_common::voxel::math::{AaQuad, BlockFace, Sign, Vec3Ext};
 use crucible_util::mem::c_enum::CEnum;
 use derive_where::derive_where;
-use typed_glam::glam::{Vec2, Vec3};
-
-use crate::engine::gfx::geometry;
+use typed_glam::glam::Vec3;
 
 #[derive(Debug, Clone)]
 #[derive_where(Default)]
 pub struct QuadMeshLayer<M> {
-	pub quads: Vec<Quad<M>>,
+	pub quads: Vec<StyledQuad<M>>,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct Quad<M> {
-	pub face: BlockFace,
-	pub origin: Vec3,
-	pub size: Vec2,
+pub struct StyledQuad<M> {
+	pub quad: AaQuad<Vec3>,
 	pub material: M,
 }
 
@@ -33,14 +29,8 @@ impl<M> QuadMeshLayer<M> {
 				origin
 			};
 
-			let size = geometry::face_size_given_volume(volume, axis);
-
-			self.quads.push(Quad {
-				face,
-				origin,
-				size,
-				material,
-			});
+			let quad = AaQuad::new_given_volume(origin, face, volume);
+			self.quads.push(StyledQuad { quad, material });
 		}
 	}
 

@@ -1,3 +1,73 @@
+//! ## Coordinate System
+//!
+//! Crucible uses a **y-up right-handed** coordinate system. Thus, our axes look like this:
+//!
+//! ```plain_text
+//!     +y
+//!      |
+//! +x---|
+//!     /
+//!   +z
+//! ```
+//!
+//! This coordinate system is nice because it works well with graphics conventions. For example,
+//! because object depth increases along the positive `z` direction, camera view matrices transform
+//! positive `z` local-space vectors into the forward direction. Thus, it is fair to call:
+//!
+//! ```plain_text
+//!              +y (up)
+//!              | +z (forward)
+//!              |/
+//! (left) -x----|---+x (right)
+//!             /|
+//!            / |
+//!    (back) -z  -y (down)
+//! ```
+//!
+//! ...which feels pretty intuitive.
+//!
+//! ## Relation to Voxels
+//!
+//! There are four major typed vector types to represent Crucible's various coordinate systems:
+//!
+//! 1. [`WorldVec`]: a block vector in world-space i.e. global block coordinates.
+//! 2. [`ChunkVec`]: a chunk position vector i.e. the coordinate of a chunk.
+//! 3. [`BlockVec`]: a block vector in chunk-relative-space i.e. the coordinate of a block relative
+//!    to a chunk.
+//! 4. [`EntityVec`]: an entity vector in world-space i.e. global entity coordinates.
+//!
+//! ##### `EntityVec` and `WorldVec`
+//!
+//! A voxel takes up the size `EntityVec::ONE`. For a given voxel at `(x, y, z)` in world-vec
+//! coordinates, the corresponding entity-vec at `(x, y, z)` will be positioned at the bottom most-
+//! negative corner of the block:
+//!
+//! ```plain_text
+//!              <1>
+//!          *---------*    +y
+//!         /         /|    |  +z
+//!        / |       / |    | /
+//!       *---------|  |    |/
+//!       |  /- - - | -*    *-----+x
+//!   <1> | /       | /
+//!       |/        |/    <----- voxel at (x, y, z)
+//!       #---------*
+//!       ^   <1>
+//!       |---- point at (x, y, z)
+//! ```
+//!
+//! ##### `BlockVec`, `ChunkVec`, and `WorldVec`
+//!
+//! A chunk is a cubic section of `(CHUNK_EDGE, CHUNK_EDGE, CHUNK_EDGE)` blocks. Like entity
+//! coordinates on a block, chunk coordinates, when converted to world block vectors, correspond to
+//! the negative-most corner of the chunk. `BlockVec` measure block positions relative to that point.
+//!
+//! A valid `BlockVec` is comprised of components from 0 to `CHUNK_EDGE` upper exclusive.
+//!
+//! ## Block Faces
+//!
+//! Block faces are axis-aligned, and are enumerated by the `BlockFace` enum.
+
 use std::f32::consts::{PI, TAU};
 
 use num_traits::Signed;
@@ -8,7 +78,10 @@ use typed_glam::{
 	typed::{FlavorCastFrom, TypedVector, VecFlavor},
 };
 
-use crucible_util::mem::c_enum::{c_enum, CEnum};
+use crucible_util::mem::{
+	array::{map_arr, zip_arr},
+	c_enum::{c_enum, CEnum},
+};
 
 // === Coordinate Systems === //
 
@@ -436,14 +509,6 @@ impl Axis3 {
 }
 
 impl Axis3 {
-	pub fn ortho(self) -> (Self, Self) {
-		match self {
-			Self::X => (Self::Z, Self::Y),
-			Self::Y => (Self::X, Self::Z),
-			Self::Z => (Self::Y, Self::X),
-		}
-	}
-
 	pub fn plane_intersect(self, layer: f64, line: Line3) -> (f64, EntityVec) {
 		let lerp = lerp_percent_at(layer, line.start.comp(self), line.end.comp(self));
 		(lerp, line.start.lerp(line.end, lerp))
@@ -608,5 +673,256 @@ impl Angle3DExt for Angle3D {
 
 	fn clamp_y_90(&self) -> Self {
 		self.clamp_y(-HALF_PI, HALF_PI)
+	}
+}
+
+// === Quad === //
+
+#[derive(Debug, Copy, Clone)]
+pub struct AaQuad<V: NumericVector3> {
+	pub origin: V,
+	pub face: BlockFace,
+	pub size: (V::Comp, V::Comp),
+}
+
+impl<V: NumericVector3> AaQuad<V> {
+	pub fn new_given_volume(origin: V, face: BlockFace, volume: V) -> Self {
+		let (h, v) = Self::size_axes(face.axis());
+		let size = (volume.comp(h), volume.comp(v));
+
+		Self { origin, face, size }
+	}
+
+	pub fn new_unit(origin: V, face: BlockFace) -> Self {
+		let one = V::ONE.x();
+
+		Self {
+			origin,
+			face,
+			size: (one, one),
+		}
+	}
+
+	pub fn size_axes(axis: Axis3) -> (Axis3, Axis3) {
+		match axis {
+			// As a reminder, our coordinate system is y-up right-handed and looks like this:
+			//
+			//     +y
+			//      |
+			// +x---|
+			//     /
+			//   +z
+			//
+			Axis3::X => {
+				// A quad facing the negative x direction looks like this:
+				//
+				//       c +y
+				//      /|
+				//     / |
+				//    d  |
+				//    |  b 0
+				//    | /     ---> -x
+				//    |/
+				//    a +z
+				//
+				(Axis3::Z, Axis3::Y)
+			}
+			Axis3::Y => {
+				// A quad facing the negative y direction looks like this:
+				//
+				//  +x        0
+				//    d------a
+				//   /      /
+				//  /      /
+				// c------b
+				//         +z
+				(Axis3::X, Axis3::Z)
+			}
+			Axis3::Z => {
+				// A quad facing the negative z direction looks like this:
+				//
+				//              +y
+				//      c------d
+				//      |      |     ^ -z
+				//      |      |    /
+				//      b------a   /
+				//    +x        0
+				//
+				(Axis3::X, Axis3::Y)
+			}
+		}
+	}
+
+	pub fn size_deltas(&self) -> (V, V) {
+		let (h, v) = Self::size_axes(self.face.axis());
+		let (sh, sv) = self.size;
+		(
+			h.unit_typed::<V>() * V::splat(sh),
+			v.unit_typed::<V>() * V::splat(sv),
+		)
+	}
+
+	pub fn as_quad_ccw(&self) -> Quad<V> {
+		let (axis, sign) = self.face.decompose();
+		let (w, h) = self.size;
+		let origin = self.origin;
+
+		// Build the quad with a winding order assumed to be for a negative facing quad.
+		let quad = match axis {
+			// As a reminder, our coordinate system is y-up right-handed and looks like this:
+			//
+			//     +y
+			//      |
+			// +x---|
+			//     /
+			//   +z
+			//
+			Axis3::X => {
+				// A quad facing the negative x direction looks like this:
+				//
+				//       c +y
+				//      /|
+				//     / |
+				//    d  |                --
+				//    |  b 0              /
+				//    | /     ---> -x    / size.x
+				//    |/                /
+				//    a +z            --
+				//
+				let z = V::Z * V::splat(w);
+				let y = V::Y * V::splat(h);
+
+				Quad([origin + z, origin, origin + y, origin + y + z])
+			}
+			Axis3::Y => {
+				// A quad facing the negative y direction looks like this:
+				//
+				//  +x        0
+				//    d------a       |        --
+				//   /      /        |        / size.x
+				//  /      /         ↓ -y    /
+				// c------b                --
+				//         +z
+				//
+				// |______| size.y
+				//
+				let x = V::X * V::splat(w);
+				let z = V::Z * V::splat(h);
+
+				Quad([origin, origin + z, origin + x + z, origin + x])
+			}
+			Axis3::Z => {
+				// A quad facing the negative z direction looks like this:
+				//
+				//              +y
+				//      c------d            --
+				//      |      |     ^ -z    | size.y
+				//      |      |    /        |
+				//      b------a   /        --
+				//    +x        0
+				//
+				//      |______| size.x
+				//
+				let x = V::X * V::splat(w);
+				let y = V::Y * V::splat(h);
+
+				Quad([origin, origin + x, origin + x + y, origin + y])
+			}
+		};
+
+		// Flip the winding order if the quad is actually facing the positive direction:
+		if sign == Sign::Positive {
+			quad.flip_winding()
+		} else {
+			quad
+		}
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Quad<V>(pub [V; 4]);
+
+// Quads, from a front-view, are laid out as follows:
+//
+//      d---c
+//      |   |
+//      a---b
+//
+// Textures, meanwhile, are laid out as follows:
+//
+// (0,0)     (1,0)
+//      *---*
+//      |   |
+//      *---*
+// (0,1)     (1,1)
+//
+// Hence:
+pub const QUAD_UVS: Quad<Vec2> = Quad([
+	Vec2::new(0.0, 1.0),
+	Vec2::new(1.0, 1.0),
+	Vec2::new(1.0, 0.0),
+	Vec2::new(0.0, 0.0),
+]);
+
+impl<V> Quad<V> {
+	pub fn flip_winding(self) -> Self {
+		let [a, b, c, d] = self.0;
+
+		// If we have a quad like this facing us:
+		//
+		// d---c
+		// |   |
+		// a---b
+		//
+		// From the other side, it looks like this:
+		//
+		// c---d
+		// |   |
+		// b---a
+		//
+		// If we preserve quad UV rules, we get the new ordering:
+		Self([b, a, d, c])
+	}
+
+	pub fn to_tris(self) -> [[V; 3]; 2]
+	where
+		V: Copy,
+	{
+		let [a, b, c, d] = self.0;
+
+		// If we have a quad like this facing us:
+		//
+		// d---c
+		// |   |
+		// a---b
+		//
+		// We can split it up into triangles preserving the winding order like so:
+		//
+		//       3
+		//      c
+		//     /|
+		//    / |
+		//   /  |
+		//  a---b
+		// 1     2
+		//
+		// ...and:
+		//
+		// 3     2
+		//  d---c
+		//  |  /
+		//  | /
+		//  |/
+		//  a
+		// 1
+		[[a, b, c], [a, c, d]]
+	}
+
+	pub fn zip<R>(self, rhs: Quad<R>) -> Quad<(V, R)> {
+		Quad(zip_arr(self.0, rhs.0))
+	}
+
+	pub fn map<R>(self, f: impl FnMut(V) -> R) -> Quad<R> {
+		Quad(map_arr(self.0, f))
 	}
 }

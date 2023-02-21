@@ -6,13 +6,13 @@ use crucible_common::{
 	game::material::MaterialRegistry,
 	voxel::{
 		data::VoxelChunkData,
-		math::{BlockFace, BlockVec, BlockVecExt, Sign, WorldVec, WorldVecExt},
+		math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, WorldVec, WorldVecExt, QUAD_UVS},
 	},
 };
 use crucible_util::{
 	lang::polyfill::OptionPoly,
 	mem::{
-		array::{map_arr, zip_arr},
+		array::map_arr,
 		c_enum::{CEnum, CEnumMap},
 	},
 };
@@ -21,13 +21,7 @@ use typed_glam::glam::{UVec2, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::{
-	engine::{
-		gfx::{
-			atlas::AtlasTexture,
-			geometry::{self, scaled_aa_quad},
-		},
-		io::gfx::GfxContext,
-	},
+	engine::{gfx::atlas::AtlasTexture, io::gfx::GfxContext},
 	game::gfx::mesh::store::QuadMeshLayer,
 };
 
@@ -137,12 +131,12 @@ impl VoxelWorldMesh {
 								};
 
 								// Construct the quad
-								let quad = geometry::aa_quad(center_origin, face);
-								let quad = zip_arr(
-									quad,
-									map_arr(geometry::QUAD_UVS, |v| uv_origin + v * uv_size),
-								);
-								let [[a, b, c], [d, e, f]] = geometry::quad_to_tris(quad);
+								let quad = AaQuad::new_unit(center_origin, face);
+								let quad = quad
+									.as_quad_ccw()
+									.zip(QUAD_UVS.map(|v| uv_origin + v * uv_size));
+
+								let [[a, b, c], [d, e, f]] = quad.to_tris();
 								let quad_vertices = [a, b, c, d, e, f];
 
 								// Write the quad
@@ -156,22 +150,19 @@ impl VoxelWorldMesh {
 					}
 					BlockDescriptorVisual::Mesh { mesh } => {
 						// Push the mesh
-						for quad in &mesh.quads {
-							// Decode the texture bounds
-							let (uv_origin, uv_size) = atlas.decode_uv_bounds(quad.material);
+						for styled_quad in &mesh.quads {
+							let quad = styled_quad.quad;
 
-							// Construct the quad
-							let origin = center_origin + quad.origin;
-							let quad = scaled_aa_quad(origin, quad.size, quad.face);
+							// Decode the texture bounds
+							let (uv_origin, uv_size) = atlas.decode_uv_bounds(styled_quad.material);
 
 							// Give it UVs
-							let quad = zip_arr(
-								quad,
-								map_arr(geometry::QUAD_UVS, |v| uv_origin + v * uv_size),
-							);
+							let quad = quad
+								.as_quad_ccw()
+								.zip(QUAD_UVS.map(|v| uv_origin + v * uv_size));
 
 							// Convert to triangles
-							let [[a, b, c], [d, e, f]] = geometry::quad_to_tris(quad);
+							let [[a, b, c], [d, e, f]] = quad.to_tris();
 							let quad_vertices = [a, b, c, d, e, f];
 
 							// Convert to std340

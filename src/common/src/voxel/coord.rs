@@ -370,11 +370,11 @@ impl<'a> ContextualIter<(&'a VoxelWorldData, &'a mut RayCast)> for ContextualRay
 
 pub fn move_rigid_body(
 	world: &VoxelWorldData,
-	src: EntityVec,
+	pos: EntityVec,
 	size: EntityVec,
 	delta: EntityVec,
 ) -> EntityVec {
-	let mut loc = EntityLocation::new(world, src);
+	let mut loc = EntityLocation::new(world, pos);
 
 	'a: for movement_axis in Axis3::variants() {
 		// Decompose delta
@@ -412,4 +412,14 @@ pub fn move_rigid_body(
 	}
 
 	loc.pos()
+}
+
+pub fn move_rigid_body_relative(
+	world: &VoxelWorldData,
+	src: EntityVec,
+	src_offset: EntityVec,
+	size: EntityVec,
+	delta: EntityVec,
+) -> EntityVec {
+	move_rigid_body(world, src - src_offset, size, delta) + src_offset
 }

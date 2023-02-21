@@ -2,7 +2,7 @@ use bort::{storage, Entity, OwnedEntity};
 use crucible_common::{
 	game::actor::{ActorManager, Tag},
 	voxel::{
-		coord::{move_rigid_body, Location},
+		coord::{move_rigid_body_relative, Location},
 		data::{BlockState, VoxelWorldData},
 		math::{Angle3D, Angle3DExt, EntityVec},
 	},
@@ -66,9 +66,10 @@ pub fn update_local_players(actors: &ActorManager, world: &VoxelWorldData) {
 		player_state.vel *= PLAYER_FRICTION_COEF;
 
 		// Update position
-		player_state.pos = move_rigid_body(
+		player_state.pos = move_rigid_body_relative(
 			world,
 			player_state.pos,
+			EntityVec::new(PLAYER_WIDTH / 2.0, 0.0, PLAYER_WIDTH / 2.0),
 			EntityVec::new(PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_WIDTH),
 			player_state.vel,
 		);
