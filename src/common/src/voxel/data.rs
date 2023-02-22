@@ -1,6 +1,7 @@
 use std::{
 	cell::{Ref, RefMut},
 	mem,
+	ops::{Deref, DerefMut},
 };
 
 use bort::{storage, Entity, OwnedEntity, Storage};
@@ -161,6 +162,20 @@ pub struct VoxelChunkDataViewMut<'a> {
 	data: RefMut<'a, VoxelChunkData>,
 }
 
+impl Deref for VoxelChunkDataViewMut<'_> {
+	type Target = VoxelChunkData;
+
+	fn deref(&self) -> &Self::Target {
+		&self.data
+	}
+}
+
+impl DerefMut for VoxelChunkDataViewMut<'_> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.data
+	}
+}
+
 impl VoxelChunkDataViewMut<'_> {
 	pub fn set_block_state(&mut self, pos: BlockVec, new: BlockState) {
 		let state = &mut self.data.data[pos.to_index()];
@@ -168,7 +183,7 @@ impl VoxelChunkDataViewMut<'_> {
 
 		if *state != new {
 			*state = new;
-			self.flag_list.flag_chunk(&mut self.data, self.chunk)
+			self.flag_list.flag_chunk(&mut self.data, self.chunk);
 		}
 	}
 }

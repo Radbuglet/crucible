@@ -1,16 +1,13 @@
 use bort::{Entity, OwnedEntity};
 use crucible_util::{
 	lang::{
-		iter::{ContextualIter, VolumetricIter, WithContext},
+		iter::{ContextualIter, WithContext},
 		polyfill::OptionPoly,
 	},
 	mem::c_enum::CEnum,
 };
 use smallvec::SmallVec;
-use typed_glam::{
-	ext::VecExt,
-	traits::{CastVecFrom, SignedNumericVector3},
-};
+use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 
 use crate::voxel::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt};
 
@@ -176,20 +173,6 @@ where
 			chunk_cache: self.chunk_cache,
 			pos: WorldVec::cast_from(self.pos),
 		}
-	}
-
-	pub fn iter_volume<'a>(
-		self,
-		world: &'a VoxelWorldData,
-		size: WorldVec,
-	) -> impl Iterator<Item = Self> + 'a {
-		debug_assert!(size.all(|v| u32::try_from(v).is_ok()));
-
-		VolumetricIter::new([size.x() as u32, size.y() as u32, size.z() as u32]).map(
-			move |[x, y, z]| {
-				self.at_relative(world, WorldVec::new(x as i32, y as i32, z as i32).cast())
-			},
-		)
 	}
 }
 
@@ -359,25 +342,27 @@ impl<'a> ContextualIter<(&'a VoxelWorldData, &'a mut RayCast)> for ContextualRay
 // === Collisions === //
 
 pub fn cast_volume(world: &VoxelWorldData, quad: AaQuad<EntityVec>, delta: f64) -> f64 {
-	let check_aabb = quad.extrude_hv(delta);
+	let check_aabb = quad.extrude_hv(delta).as_blocks();
 
-	EntityLocation::new(world, check_aabb.origin)
-		// For every block in the check volume
-		.iter_volume(world, check_aabb.size.ceil().block_pos())
+	let loc = BlockLocation::new(world, check_aabb.origin);
+
+	check_aabb
+		.iter_blocks()
 		// See how far we can travel
-		.map(|mut pos| {
-			if pos
+		.map(|pos| {
+			if loc
+				.at_absolute(world, pos)
 				.state(world)
 				.p_is_none_or(|v| v.material == AIR_MATERIAL_SLOT)
 			{
 				delta
 			} else {
-				// TODO: Choose this appropriately.
 				0.0
 			}
 		})
-		// And take the minimum allowable distance.
+		// And take the minimum distance
 		.min_by(f64::total_cmp)
+		// This is safe to unwrap because all entity AABBs will cover at least one block.
 		.unwrap()
 }
 
@@ -389,12 +374,12 @@ pub fn move_rigid_body(
 	for axis in Axis3::variants() {
 		// Decompose the movement part
 		let signed_delta = delta.comp(axis);
-		let delta = signed_delta.abs();
+		let unsigned_delta = signed_delta.abs();
 		let sign = Sign::of(signed_delta).unwrap_or(Sign::Positive);
 		let face = BlockFace::compose(axis, sign);
 
 		// Determine how far we can move
-		let actual_delta = cast_volume(world, aabb.quad(face), delta);
+		let actual_delta = cast_volume(world, aabb.quad(face), unsigned_delta);
 
 		// Commit the movement
 		aabb.origin += face.unit_typed::<EntityVec>() * actual_delta;

@@ -2,8 +2,8 @@ use bort::{storage, Entity, OwnedEntity};
 use crucible_common::{
 	game::actor::{ActorManager, Tag},
 	voxel::{
-		coord::{move_rigid_body_relative, Location},
-		data::{BlockState, VoxelWorldData},
+		coord::move_rigid_body_relative,
+		data::VoxelWorldData,
 		math::{Angle3D, Angle3DExt, EntityVec},
 	},
 };
@@ -15,18 +15,15 @@ use winit::{
 	window::CursorGrabMode,
 };
 
-use crate::{
-	engine::{
-		gfx::camera::{CameraManager, CameraSettings},
-		io::{input::InputManager, viewport::Viewport},
-	},
-	game::entry::create_chunk,
+use crate::engine::{
+	gfx::camera::{CameraManager, CameraSettings},
+	io::{input::InputManager, viewport::Viewport},
 };
 
 // === Constants === //
 
-const PLAYER_SPEED: f64 = 0.05;
-const PLAYER_GRAVITY: f64 = 0.01;
+const PLAYER_SPEED: f64 = 0.04;
+const PLAYER_GRAVITY: f64 = 0.03;
 const PLAYER_FRICTION_COEF: f64 = 0.9;
 const PLAYER_WIDTH: f64 = 0.8;
 const PLAYER_HEIGHT: f64 = 1.8;
@@ -95,7 +92,7 @@ impl PlayerInputController {
 		&mut self,
 		main_viewport: Entity,
 		camera: &mut CameraManager,
-		world: &mut VoxelWorldData,
+		_world: &mut VoxelWorldData,
 	) {
 		// Acquire context
 		let viewport = main_viewport.get::<Viewport>();
@@ -188,21 +185,6 @@ impl PlayerInputController {
 					player_state.vel = EntityVec::Y * PLAYER_JUMP_IMPULSE;
 				}
 			}
-
-			// Process block placement
-			Location::new(world, player_state.pos - EntityVec::Y).set_state_or_create(
-				world,
-				create_chunk,
-				BlockState {
-					material: if input_manager.key(VirtualKeyCode::LShift).state() {
-						0
-					} else {
-						1
-					},
-					variant: 0,
-					light_level: u8::MAX,
-				},
-			);
 
 			// Attach camera to player head
 			camera.set_pos_rot(

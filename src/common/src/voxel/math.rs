@@ -78,9 +78,12 @@ use typed_glam::{
 	typed::{FlavorCastFrom, TypedVector, VecFlavor},
 };
 
-use crucible_util::mem::{
-	array::{map_arr, zip_arr},
-	c_enum::{c_enum, CEnum},
+use crucible_util::{
+	lang::iter::VolumetricIter,
+	mem::{
+		array::{map_arr, zip_arr},
+		c_enum::{c_enum, CEnum},
+	},
 };
 
 // === Coordinate Systems === //
@@ -567,9 +570,7 @@ impl Axis3 {
 
 		target
 	}
-}
 
-impl Axis3 {
 	pub fn plane_intersect(self, layer: f64, line: Line3) -> (f64, EntityVec) {
 		let lerp = lerp_percent_at(layer, line.start.comp(self), line.end.comp(self));
 		(lerp, line.start.lerp(line.end, lerp))
@@ -856,7 +857,7 @@ impl<V: NumericVector3> AaQuad<V> {
 	{
 		Aabb {
 			origin: if self.face.sign() == Sign::Negative {
-				self.origin + self.face.unit_typed::<V>() * V::splat(delta)
+				self.origin - self.face.axis().unit_typed::<V>() * V::splat(delta)
 			} else {
 				self.origin
 			},
@@ -956,6 +957,7 @@ impl<V> Quad<V> {
 // === Aabb === //
 
 pub type EntityAabb = Aabb<EntityVec>;
+pub type WorldAabb = Aabb<WorldVec>;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Aabb<V> {
@@ -964,6 +966,10 @@ pub struct Aabb<V> {
 }
 
 impl<V: SignedNumericVector3> Aabb<V> {
+	pub fn positive_corner(&self) -> V {
+		self.origin + self.size
+	}
+
 	pub fn quad(self, face: BlockFace) -> AaQuad<V> {
 		let origin = self.origin;
 		let origin = if face.sign() == Sign::Positive {
@@ -973,5 +979,29 @@ impl<V: SignedNumericVector3> Aabb<V> {
 		};
 
 		AaQuad::new_given_volume(origin, face, self.size)
+	}
+}
+
+impl EntityAabb {
+	pub fn as_blocks(&self) -> WorldAabb {
+		Aabb::from_blocks_corners(self.origin.block_pos(), self.positive_corner().block_pos())
+	}
+}
+
+impl WorldAabb {
+	pub fn from_blocks_corners(a: WorldVec, b: WorldVec) -> Self {
+		let origin = a.min(b);
+		let size = (b - a).abs() + WorldVec::ONE;
+
+		Self { origin, size }
+	}
+
+	pub fn iter_blocks(self) -> impl Iterator<Item = WorldVec> {
+		VolumetricIter::new_exclusive_iter([
+			self.size.x() as u32,
+			self.size.y() as u32,
+			self.size.z() as u32,
+		])
+		.map(move |[x, y, z]| self.origin + WorldVec::new(x as i32, y as i32, z as i32))
 	}
 }

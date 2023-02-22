@@ -390,7 +390,7 @@ macro_rules! numeric_vector_forwards {
 		}
 
 		fn min(self, rhs: Self) -> Self {
-			self.max(rhs)
+			self.min(rhs)
 		}
 
 		fn max(self, rhs: Self) -> Self {

@@ -22,7 +22,7 @@ impl AtlasTexture {
 		Self {
 			tile_size,
 			tile_counts,
-			free_tiles: VolumetricIter::new((tile_counts - UVec2::ONE).to_array())
+			free_tiles: VolumetricIter::new_exclusive_iter(tile_counts.to_array())
 				.map(UVec2::from_array)
 				.collect::<HashSet<_>>(),
 			atlas: Rgba32FImage::new(image_size.x, image_size.y),

@@ -5,8 +5,9 @@ use crucible_common::{
 		material::{MaterialDescriptorBase, MaterialRegistry},
 	},
 	voxel::{
-		data::VoxelWorldData,
-		math::{BlockFace, ChunkVec},
+		coord::BlockLocation,
+		data::{BlockState, VoxelWorldData},
+		math::{Aabb, BlockFace, ChunkVec, WorldVec},
 	},
 };
 use crucible_util::{debug::error::ResultExt, mem::c_enum::CEnum};
@@ -50,9 +51,9 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 			me.get_mut::<GameSceneState>().render(me, frame);
 		}));
 
-	// Populate the scene
+	// Register materials
 	let mut scene_state = scene.get_mut::<GameSceneState>();
-	scene_state.register_block_material(
+	let material = scene_state.register_block_material(
 		"crucible_prototyping:one".to_string(),
 		&image::load_from_memory(include_bytes!("gfx/res/placeholder_material_1.png"))
 			.unwrap_pretty()
@@ -60,10 +61,30 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 	);
 	scene_state.upload_atlases(&engine.get::<GfxContext>());
 
+	// Spawn local player
 	let mut actors = scene.get_mut::<ActorManager>();
 	let mut player_inputs = scene.get_mut::<PlayerInputController>();
 	let local_player = spawn_local_player(&mut actors);
 	player_inputs.set_local_player(Some(local_player));
+
+	// Populate world
+	let mut world_data = scene.get_mut::<VoxelWorldData>();
+	let the_box = Aabb {
+		origin: WorldVec::splat(-5),
+		size: WorldVec::splat(10),
+	};
+	for face in BlockFace::variants() {
+		for pos in the_box.quad(face).extrude_hv(1).iter_blocks() {
+			BlockLocation::new(&world_data, pos).set_state_or_create(
+				&mut world_data,
+				create_chunk,
+				BlockState {
+					material,
+					..Default::default()
+				},
+			);
+		}
+	}
 
 	scene
 }
@@ -118,7 +139,7 @@ impl GameSceneState {
 		}
 	}
 
-	pub fn register_block_material(&mut self, id: String, texture: &Rgba32FImage) {
+	pub fn register_block_material(&mut self, id: String, texture: &Rgba32FImage) -> u16 {
 		let atlas_tile = self.block_atlas.add(texture);
 
 		self.register_material(
@@ -126,11 +147,11 @@ impl GameSceneState {
 			OwnedEntity::new()
 				.with(MaterialDescriptorBase::default())
 				.with(BlockDescriptorVisual::cubic_simple(atlas_tile)),
-		);
+		)
 	}
 
-	pub fn register_material(&mut self, id: String, descriptor: OwnedEntity) {
-		self.block_registry.register(id, descriptor);
+	pub fn register_material(&mut self, id: String, descriptor: OwnedEntity) -> u16 {
+		self.block_registry.register(id, descriptor)
 	}
 
 	pub fn upload_atlases(&mut self, gfx: &GfxContext) {
