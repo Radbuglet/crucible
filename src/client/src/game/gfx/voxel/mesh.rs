@@ -5,7 +5,7 @@ use crevice::std430::AsStd430;
 use crucible_common::{
 	game::material::MaterialRegistry,
 	voxel::{
-		data::{VoxelChunkData, AIR_MATERIAL_SLOT},
+		data::{VoxelWorldData, AIR_MATERIAL_SLOT},
 		math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, WorldVec, WorldVecExt, QUAD_UVS},
 	},
 };
@@ -49,6 +49,7 @@ impl VoxelWorldMesh {
 
 	pub fn update_chunks(
 		&mut self,
+		world: &VoxelWorldData,
 		gfx: &GfxContext,
 		atlas: &AtlasTexture,
 		registry: &MaterialRegistry,
@@ -56,7 +57,6 @@ impl VoxelWorldMesh {
 	) {
 		let started = Instant::now();
 
-		let datas = storage::<VoxelChunkData>();
 		let descriptors = storage::<BlockDescriptorVisual>();
 
 		while let Some(chunk) = self.dirty_queue.pop() {
@@ -66,7 +66,7 @@ impl VoxelWorldMesh {
 			}
 
 			// Acquire dependencies
-			let chunk_data = datas.get(chunk);
+			let chunk_data = world.chunk_state(chunk);
 
 			// Mesh chunk
 			let mut vertices = Vec::new();
@@ -101,7 +101,7 @@ impl VoxelWorldMesh {
 										break 'a false;
 									};
 
-									datas.get(neighbor).block_state(neighbor_block.wrap())
+									world.chunk_state(neighbor).block_state(neighbor_block.wrap())
 								};
 
 								if state.material == AIR_MATERIAL_SLOT {

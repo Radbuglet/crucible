@@ -15,7 +15,7 @@ use typed_glam::{
 use crate::voxel::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt};
 
 use super::{
-	data::{BlockState, VoxelChunkData, VoxelWorldData, AIR_MATERIAL_SLOT},
+	data::{BlockState, VoxelWorldData, AIR_MATERIAL_SLOT},
 	math::{AaQuad, Aabb, ChunkVec, EntityAabb, EntityVec, WorldVec},
 };
 
@@ -85,7 +85,7 @@ where
 		// Update chunk cache
 		if WorldVec::cast_from(old_pos).chunk() != WorldVec::cast_from(self.pos).chunk() {
 			if let Some(chunk) = self.chunk_cache {
-				self.chunk_cache = chunk.get::<VoxelChunkData>().neighbor(face);
+				self.chunk_cache = world.chunk_state(chunk).neighbor(face);
 			} else {
 				self.refresh(world);
 			}
@@ -105,7 +105,7 @@ where
 			(self.chunk_cache, BlockFace::from_vec(chunk_delta.to_glam()))
 		{
 			self.pos = new_pos;
-			self.chunk_cache = chunk.get::<VoxelChunkData>().neighbor(face);
+			self.chunk_cache = world.chunk_state(chunk).neighbor(face);
 		} else {
 			self.pos = new_pos;
 			self.refresh(world);
@@ -128,8 +128,8 @@ where
 
 	pub fn state(&mut self, world: &VoxelWorldData) -> Option<BlockState> {
 		self.chunk(world).map(|chunk| {
-			chunk
-				.get::<VoxelChunkData>()
+			world
+				.chunk_state(chunk)
 				.block_state(WorldVec::cast_from(self.pos).block())
 		})
 	}
@@ -143,12 +143,9 @@ where
 			}
 		};
 
-		chunk.get_mut::<VoxelChunkData>().set_block_state(
-			world,
-			chunk,
-			WorldVec::cast_from(self.pos).block(),
-			state,
-		);
+		world
+			.chunk_state_mut(chunk)
+			.set_block_state(WorldVec::cast_from(self.pos).block(), state);
 	}
 
 	pub fn set_state_or_create(
@@ -169,12 +166,9 @@ where
 		};
 
 		// Set block state
-		chunk.get_mut::<VoxelChunkData>().set_block_state(
-			world,
-			chunk,
-			WorldVec::cast_from(self.pos).block(),
-			state,
-		);
+		world
+			.chunk_state_mut(chunk)
+			.set_block_state(WorldVec::cast_from(self.pos).block(), state);
 	}
 
 	pub fn as_block_location(&self) -> BlockLocation {

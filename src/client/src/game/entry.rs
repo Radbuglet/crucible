@@ -5,7 +5,7 @@ use crucible_common::{
 		material::{MaterialDescriptorBase, MaterialRegistry},
 	},
 	voxel::{
-		data::{VoxelChunkData, VoxelWorldData},
+		data::VoxelWorldData,
 		math::{BlockFace, ChunkVec},
 	},
 };
@@ -160,7 +160,7 @@ impl GameSceneState {
 			world_mesh.flag_chunk(chunk);
 
 			// TODO: Make this more conservative
-			let chunk_data = chunk.get::<VoxelChunkData>();
+			let chunk_data = world_data.chunk_state(chunk);
 
 			for face in BlockFace::variants() {
 				let Some(neighbor) = chunk_data.neighbor(face) else {
@@ -171,7 +171,13 @@ impl GameSceneState {
 			}
 		}
 
-		world_mesh.update_chunks(gfx, &self.block_atlas, &self.block_registry, None);
+		world_mesh.update_chunks(
+			&world_data,
+			gfx,
+			&self.block_atlas,
+			&self.block_registry,
+			None,
+		);
 	}
 
 	pub fn render(&mut self, me: Entity, frame: &mut wgpu::SurfaceTexture) {

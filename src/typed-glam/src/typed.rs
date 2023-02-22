@@ -1,5 +1,7 @@
-use bytemuck::TransparentWrapper;
-use crucible_util::lang::{marker::PhantomInvariant, std_traits::ArrayLike};
+use crucible_util::{
+	lang::{marker::PhantomInvariant, std_traits::ArrayLike},
+	mem::ptr::PointeeCastExt,
+};
 
 use std::{
 	fmt, hash,
@@ -44,8 +46,6 @@ pub struct TypedVectorImpl<F: ?Sized + VecFlavor, D: DimClass> {
 	_ty: PhantomInvariant<D>,
 	vec: F::Backing,
 }
-
-unsafe impl<F: ?Sized + VecFlavor> TransparentWrapper<F::Backing> for TypedVector<F> {}
 
 // `VecFrom` and `NumericVector`
 impl<F: ?Sized + VecFlavor> TypedVector<F> {
@@ -121,11 +121,17 @@ impl<F: ?Sized + VecFlavor> TypedVector<F> {
 	}
 
 	pub fn from_glam_ref(glam: &F::Backing) -> &Self {
-		TransparentWrapper::wrap_ref(glam)
+		unsafe {
+			// Safety: we are `repr(transparent)` w.r.t `F::Backing`.
+			glam.transmute_pointee_ref()
+		}
 	}
 
 	pub fn from_glam_mut(glam: &mut F::Backing) -> &mut Self {
-		TransparentWrapper::wrap_mut(glam)
+		unsafe {
+			// Safety: we are `repr(transparent)` w.r.t `F::Backing`.
+			glam.transmute_pointee_mut()
+		}
 	}
 
 	// Copied from `GlamConvert`

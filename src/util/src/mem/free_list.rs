@@ -1,18 +1,10 @@
 use std::{fmt, hash};
 
-use bytemuck::TransparentWrapper;
-
 #[derive(Debug)]
 pub struct FreeList<T, H: Handle = FreeListHandle> {
 	slots: Vec<Option<(T, H::Meta)>>,
 	free: Vec<usize>,
 	state: H::State,
-}
-
-pub trait NewtypedHandle:
-	Sized + fmt::Debug + Copy + hash::Hash + Eq + TransparentWrapper<Self::DeferTo>
-{
-	type DeferTo: Handle;
 }
 
 pub trait Handle: Sized + fmt::Debug + Copy + hash::Hash + Eq {
@@ -28,32 +20,6 @@ pub trait Handle: Sized + fmt::Debug + Copy + hash::Hash + Eq {
 	fn validate_handle(state: &Self::State, handle: Self, meta: &Self::Meta) -> bool;
 
 	fn slot(&self) -> usize;
-}
-
-impl<H: NewtypedHandle> Handle for H {
-	type State = <H::DeferTo as Handle>::State;
-	type Meta = <H::DeferTo as Handle>::Meta;
-
-	fn default_state() -> Self::State {
-		<H::DeferTo>::default_state()
-	}
-
-	fn slot_occupied(state: &mut Self::State, slot: usize) -> (Self, Self::Meta) {
-		let (handle, meta) = <H::DeferTo>::slot_occupied(state, slot);
-		(H::wrap(handle), meta)
-	}
-
-	fn slot_freed(state: &mut Self::State, handle: Self, meta: Self::Meta) {
-		<H::DeferTo>::slot_freed(state, H::peel(handle), meta);
-	}
-
-	fn validate_handle(state: &Self::State, handle: Self, meta: &Self::Meta) -> bool {
-		<H::DeferTo>::validate_handle(state, H::peel(handle), meta)
-	}
-
-	fn slot(&self) -> usize {
-		H::peel_ref(self).slot()
-	}
 }
 
 impl<T, H: Handle> Default for FreeList<T, H> {

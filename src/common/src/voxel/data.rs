@@ -1,17 +1,48 @@
-use std::mem;
+use std::{
+	cell::{Ref, RefMut},
+	mem,
+};
 
-use bort::{Entity, OwnedEntity};
-use crucible_util::mem::c_enum::{CEnum, CEnumMap};
+use bort::{storage, Entity, OwnedEntity, Storage};
+use crucible_util::{
+	lang::view::View,
+	mem::c_enum::{CEnum, CEnumMap},
+};
 use hashbrown::HashMap;
 
 use super::math::{BlockFace, BlockVec, BlockVecExt, ChunkVec, CHUNK_VOLUME};
 
 // === World === //
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct VoxelWorldData {
+	data_store: &'static Storage<VoxelChunkData>,
 	pos_map: HashMap<ChunkVec, OwnedEntity>,
+	flag_list: VoxelWorldFlagList,
+}
+
+#[derive(Debug, Default)]
+struct VoxelWorldFlagList {
 	flagged: Vec<Entity>,
+}
+
+impl VoxelWorldFlagList {
+	fn flag_chunk(&mut self, chunk_data: &mut VoxelChunkData, chunk: Entity) {
+		if chunk_data.flagged.is_none() {
+			chunk_data.flagged = Some(self.flagged.len());
+			self.flagged.push(chunk);
+		}
+	}
+}
+
+impl Default for VoxelWorldData {
+	fn default() -> Self {
+		Self {
+			data_store: storage::<VoxelChunkData>(),
+			pos_map: Default::default(),
+			flag_list: Default::default(),
+		}
+	}
 }
 
 impl VoxelWorldData {
@@ -20,12 +51,15 @@ impl VoxelWorldData {
 
 		// Register chunk
 		let (chunk, chunk_ref) = chunk.split_guard();
-		chunk.insert(VoxelChunkData {
-			pos,
-			flagged: None,
-			neighbors: CEnumMap::default(),
-			data: Box::new([0; CHUNK_VOLUME as usize]),
-		});
+		self.data_store.insert(
+			chunk.entity(),
+			VoxelChunkData {
+				pos,
+				flagged: None,
+				neighbors: CEnumMap::default(),
+				data: Box::new([0; CHUNK_VOLUME as usize]),
+			},
+		);
 		self.pos_map.insert(pos, chunk);
 
 		// Link to neighbors
@@ -49,35 +83,40 @@ impl VoxelWorldData {
 
 	pub fn remove_chunk(&mut self, pos: ChunkVec) {
 		let chunk = self.pos_map.remove(&pos).unwrap();
-		let chunk_data = chunk.remove::<VoxelChunkData>().unwrap();
+		let chunk_data = self.data_store.remove(chunk.entity()).unwrap();
 
 		// Unlink neighbors
 		for (face, &neighbor) in chunk_data.neighbors.iter() {
 			let Some(neighbor) = neighbor else {
 				continue;
 			};
-			neighbor.get_mut::<VoxelChunkData>().neighbors[face.invert()] = None;
+			self.data_store.get_mut(neighbor).neighbors[face.invert()] = None;
 		}
 
 		// Remove from dirty queue
 		if let Some(flagged_idx) = chunk_data.flagged {
-			self.flagged.swap_remove(flagged_idx);
+			self.flag_list.flagged.swap_remove(flagged_idx);
 
-			if let Some(moved) = self.flagged.get(flagged_idx).copied() {
-				moved.get_mut::<VoxelChunkData>().flagged = Some(flagged_idx);
+			if let Some(moved) = self.flag_list.flagged.get(flagged_idx).copied() {
+				self.data_store.get_mut(moved).flagged = Some(flagged_idx);
 			}
 		}
 	}
 
-	pub fn flag_chunk(&mut self, (chunk_data,): (&mut VoxelChunkData,), chunk: Entity) {
-		if chunk_data.flagged.is_none() {
-			chunk_data.flagged = Some(self.flagged.len());
-			self.flagged.push(chunk);
+	pub fn chunk_state(&self, chunk: Entity) -> Ref<VoxelChunkDataView> {
+		Ref::map(self.data_store.get(chunk), View::from_ref)
+	}
+
+	pub fn chunk_state_mut(&mut self, chunk: Entity) -> VoxelChunkDataViewMut {
+		VoxelChunkDataViewMut {
+			chunk,
+			flag_list: &mut self.flag_list,
+			data: self.data_store.get_mut(chunk),
 		}
 	}
 
 	pub fn flush_flagged(&mut self) -> Vec<Entity> {
-		let flagged = mem::take(&mut self.flagged);
+		let flagged = mem::take(&mut self.flag_list.flagged);
 
 		for &flagged in &flagged {
 			flagged.get_mut::<VoxelChunkData>().flagged = None;
@@ -87,12 +126,17 @@ impl VoxelWorldData {
 	}
 }
 
-#[derive(Debug)]
-pub struct VoxelChunkData {
-	pos: ChunkVec,
-	flagged: Option<usize>,
-	neighbors: CEnumMap<BlockFace, Option<Entity>>,
-	data: Box<[u32; CHUNK_VOLUME as usize]>,
+use sealed::VoxelChunkData;
+mod sealed {
+	use super::*;
+
+	#[derive(Debug)]
+	pub struct VoxelChunkData {
+		pub(super) pos: ChunkVec,
+		pub(super) flagged: Option<usize>,
+		pub(super) neighbors: CEnumMap<BlockFace, Option<Entity>>,
+		pub(super) data: Box<[u32; CHUNK_VOLUME as usize]>,
+	}
 }
 
 impl VoxelChunkData {
@@ -107,20 +151,24 @@ impl VoxelChunkData {
 	pub fn block_state(&self, pos: BlockVec) -> BlockState {
 		BlockState::decode(self.data[pos.to_index()])
 	}
+}
 
-	pub fn set_block_state(
-		&mut self,
-		world: &mut VoxelWorldData,
-		me: Entity,
-		pos: BlockVec,
-		state: BlockState,
-	) {
-		let old = &mut self.data[pos.to_index()];
-		let new = state.encode();
+pub type VoxelChunkDataView = View<VoxelChunkData>;
 
-		if *old != new {
-			*old = new;
-			world.flag_chunk((self,), me);
+pub struct VoxelChunkDataViewMut<'a> {
+	chunk: Entity,
+	flag_list: &'a mut VoxelWorldFlagList,
+	data: RefMut<'a, VoxelChunkData>,
+}
+
+impl VoxelChunkDataViewMut<'_> {
+	pub fn set_block_state(&mut self, pos: BlockVec, new: BlockState) {
+		let state = &mut self.data.data[pos.to_index()];
+		let new = new.encode();
+
+		if *state != new {
+			*state = new;
+			self.flag_list.flag_chunk(&mut self.data, self.chunk)
 		}
 	}
 }
