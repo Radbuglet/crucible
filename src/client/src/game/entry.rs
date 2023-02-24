@@ -7,7 +7,7 @@ use crucible_common::{
 	voxel::{
 		coord::BlockLocation,
 		data::{BlockState, VoxelWorldData},
-		math::{Aabb, BlockFace, ChunkVec, WorldVec},
+		math::{Aabb3, BlockFace, ChunkVec, WorldVec},
 	},
 };
 use crucible_util::{debug::error::ResultExt, mem::c_enum::CEnum};
@@ -69,7 +69,7 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 
 	// Populate world
 	let mut world_data = scene.get_mut::<VoxelWorldData>();
-	let the_box = Aabb {
+	let the_box = Aabb3 {
 		origin: WorldVec::splat(-5),
 		size: WorldVec::splat(10),
 	};

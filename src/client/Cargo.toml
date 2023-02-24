@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.58"
-bort = { git = "https://github.com/Radbuglet/bort.git", rev = "a4486c4b764162fc29a4277615a16f612aa11073" }
+bort = { git = "https://github.com/Radbuglet/bort.git", rev = "631b4dd36b537231e12588729b8f258f88cf5650" }
 bytemuck = "1.10.0"
 crevice = { version = "0.11.0", features = ["glam"] }
 crucible-common = { path = "../common" }

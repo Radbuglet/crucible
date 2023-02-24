@@ -128,7 +128,7 @@ pub trait WorldVecExt: Sized {
 	fn decompose(self) -> (ChunkVec, BlockVec);
 	fn chunk(self) -> ChunkVec;
 	fn block(self) -> BlockVec;
-	fn as_entity_vec(self) -> EntityVec;
+	fn negative_most_corner(self) -> EntityVec;
 	fn block_interface_layer(self, face: BlockFace) -> f64;
 }
 
@@ -159,12 +159,12 @@ impl WorldVecExt for WorldVec {
 		)
 	}
 
-	fn as_entity_vec(self) -> EntityVec {
+	fn negative_most_corner(self) -> EntityVec {
 		self.map_glam(|raw| raw.as_dvec3())
 	}
 
 	fn block_interface_layer(self, face: BlockFace) -> f64 {
-		let corner = self.as_entity_vec();
+		let corner = self.negative_most_corner();
 		let (axis, sign) = face.decompose();
 
 		if sign == Sign::Positive {
@@ -332,7 +332,7 @@ impl FlavorCastFrom<f64> for EntityVecFlavor {
 
 impl FlavorCastFrom<WorldVec> for EntityVecFlavor {
 	fn cast_from(v: WorldVec) -> EntityVec {
-		v.as_entity_vec()
+		v.negative_most_corner()
 	}
 }
 
@@ -850,12 +850,12 @@ impl<V: NumericVector3> AaQuad<V> {
 		}
 	}
 
-	pub fn extrude_hv(self, delta: V::Comp) -> Aabb<V>
+	pub fn extrude_hv(self, delta: V::Comp) -> Aabb3<V>
 	where
 		V: SignedNumericVector3,
 		V::Comp: Signed,
 	{
-		Aabb {
+		Aabb3 {
 			origin: if self.face.sign() == Sign::Negative {
 				self.origin - self.face.axis().unit_typed::<V>() * V::splat(delta)
 			} else {
@@ -954,18 +954,18 @@ impl<V> Quad<V> {
 	}
 }
 
-// === Aabb === //
+// === Aabb3 === //
 
-pub type EntityAabb = Aabb<EntityVec>;
-pub type WorldAabb = Aabb<WorldVec>;
+pub type EntityAabb = Aabb3<EntityVec>;
+pub type WorldAabb = Aabb3<WorldVec>;
 
 #[derive(Debug, Copy, Clone)]
-pub struct Aabb<V> {
+pub struct Aabb3<V> {
 	pub origin: V,
 	pub size: V,
 }
 
-impl<V: SignedNumericVector3> Aabb<V> {
+impl<V: SignedNumericVector3> Aabb3<V> {
 	pub fn positive_corner(&self) -> V {
 		self.origin + self.size
 	}
@@ -984,7 +984,7 @@ impl<V: SignedNumericVector3> Aabb<V> {
 
 impl EntityAabb {
 	pub fn as_blocks(&self) -> WorldAabb {
-		Aabb::from_blocks_corners(self.origin.block_pos(), self.positive_corner().block_pos())
+		Aabb3::from_blocks_corners(self.origin.block_pos(), self.positive_corner().block_pos())
 	}
 }
 

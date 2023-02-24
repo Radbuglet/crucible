@@ -13,7 +13,7 @@ use crate::voxel::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, W
 
 use super::{
 	data::{BlockState, VoxelWorldData, AIR_MATERIAL_SLOT},
-	math::{AaQuad, Aabb, ChunkVec, EntityAabb, EntityVec, WorldVec},
+	math::{AaQuad, Aabb3, ChunkVec, EntityAabb, EntityVec, WorldVec},
 };
 
 // === Location === //
@@ -357,7 +357,20 @@ pub fn cast_volume(world: &VoxelWorldData, quad: AaQuad<EntityVec>, delta: f64) 
 			{
 				delta
 			} else {
-				0.0
+				// Determine the AABB of the block being intersected
+				let block_aabb = Aabb3 {
+					origin: pos.negative_most_corner(),
+					size: EntityVec::ONE,
+				};
+
+				// Get the quad of the face closest to our moving plane
+				let closest_face = block_aabb.quad(quad.face.invert());
+
+				// Find its depth along the axis of movement
+				let my_depth = closest_face.origin.comp(quad.face.axis());
+
+				// And compare that to the starting depth to find the maximum allowable distance.
+				(my_depth - quad.origin.comp(quad.face.axis())).abs()
 			}
 		})
 		// And take the minimum distance
@@ -371,6 +384,8 @@ pub fn move_rigid_body(
 	mut aabb: EntityAabb,
 	delta: EntityVec,
 ) -> EntityVec {
+	dbg!(aabb.origin + aabb.size / 2.0);
+
 	for axis in Axis3::variants() {
 		// Decompose the movement part
 		let signed_delta = delta.comp(axis);
@@ -397,7 +412,7 @@ pub fn move_rigid_body_relative(
 ) -> EntityVec {
 	move_rigid_body(
 		world,
-		Aabb {
+		Aabb3 {
 			origin: origin - origin_offset,
 			size,
 		},
