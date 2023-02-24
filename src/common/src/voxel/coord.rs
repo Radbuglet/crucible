@@ -341,22 +341,53 @@ impl<'a> ContextualIter<(&'a VoxelWorldData, &'a mut RayCast)> for ContextualRay
 
 // === Collisions === //
 
-pub fn cast_volume(world: &VoxelWorldData, quad: AaQuad<EntityVec>, delta: f64) -> f64 {
-	let check_aabb = quad.extrude_hv(delta).as_blocks();
+pub const DEFAULT_COLLISION_TOLERANCE: f64 = 0.0005;
 
-	let loc = BlockLocation::new(world, check_aabb.origin);
+pub fn cast_volume(
+	world: &VoxelWorldData,
+	quad: AaQuad<EntityVec>,
+	delta: f64,
+	tolerance: f64,
+) -> f64 {
+	// N.B. to ensure that `tolerance` is respected, we have to increase our check volume by
+	// `tolerance` so that we catch blocks that our outside the check volume but may nonetheless
+	// wish to enforce a tolerance margin of their own.
+	//
+	// We do this to prevent the following scenario:
+	//
+	// ```
+	// 0   1   2
+	// *---*---*
+	// | %--->*|
+	// *---*---*
+	//       |--   Let's say this is the required tolerance.
+	//   |----|    ...and this is the actual movement delta.
+	//
+	// Because our movement delta never hits the block face at `x = 2`, it never requires it to
+	// contribute to tolerance checking, allowing us to bypass its tolerance and eventually "tunnel"
+	// through the collider.
+	// ```
+	//
+	// If these blocks don't contribute to tolerance, we'll just ignore them.
+	let check_aabb = quad.extrude_hv(delta + tolerance).as_blocks();
+	let cached_loc = BlockLocation::new(world, check_aabb.origin);
 
+	// Return the allowed delta.
 	check_aabb
 		.iter_blocks()
 		// See how far we can travel
 		.map(|pos| {
-			if loc
+			// First, determine whether this block is an occluder.
+			if cached_loc
 				.at_absolute(world, pos)
 				.state(world)
 				.p_is_none_or(|v| v.material == AIR_MATERIAL_SLOT)
 			{
+				// If it isn't, allow unobstructed movement.
 				delta
 			} else {
+				// Otherwise...
+
 				// Determine the AABB of the block being intersected
 				let block_aabb = Aabb3 {
 					origin: pos.negative_most_corner(),
@@ -370,7 +401,29 @@ pub fn cast_volume(world: &VoxelWorldData, quad: AaQuad<EntityVec>, delta: f64) 
 				let my_depth = closest_face.origin.comp(quad.face.axis());
 
 				// And compare that to the starting depth to find the maximum allowable distance.
-				(my_depth - quad.origin.comp(quad.face.axis())).abs()
+				// FIXME: We may be comparing against faces behind us!
+				let rel_depth = (my_depth - quad.origin.comp(quad.face.axis())).abs();
+
+				// Now, provide `tolerance`.
+				// This step also ensures that, if the block plus its tolerance is outside of our delta,
+				// it will have essentially zero effect on collision detection.
+				let rel_depth = rel_depth - tolerance;
+
+				// If `rel_depth` is negative, we were not within tolerance to begin with. We trace
+				// this scenario for debug purposes.
+
+				// It has to be a somewhat big bypass to be reported. Floating point errors are
+				// expected—after all, that's why we have a tolerance in the first place.
+				if rel_depth < -tolerance / 2.0 {
+					log::trace!(
+						"cast_volume(quad: {quad:?}, delta: {delta}, tolerance: {tolerance}) could \
+						 not keep collider within tolerance. Bypass depth: {}",
+						 -rel_depth,
+					);
+				}
+
+				// We still clamp this to `[0..)`.
+				rel_depth.max(0.0)
 			}
 		})
 		// And take the minimum distance
@@ -384,8 +437,6 @@ pub fn move_rigid_body(
 	mut aabb: EntityAabb,
 	delta: EntityVec,
 ) -> EntityVec {
-	dbg!(aabb.origin + aabb.size / 2.0);
-
 	for axis in Axis3::variants() {
 		// Decompose the movement part
 		let signed_delta = delta.comp(axis);
@@ -394,7 +445,12 @@ pub fn move_rigid_body(
 		let face = BlockFace::compose(axis, sign);
 
 		// Determine how far we can move
-		let actual_delta = cast_volume(world, aabb.quad(face), unsigned_delta);
+		let actual_delta = cast_volume(
+			world,
+			aabb.quad(face),
+			unsigned_delta,
+			DEFAULT_COLLISION_TOLERANCE,
+		);
 
 		// Commit the movement
 		aabb.origin += face.unit_typed::<EntityVec>() * actual_delta;

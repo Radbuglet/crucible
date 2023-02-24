@@ -970,6 +970,13 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 		self.origin + self.size
 	}
 
+	pub fn grow(self, by: V) -> Self {
+		Self {
+			origin: self.origin - by,
+			size: self.size + by + by,
+		}
+	}
+
 	pub fn quad(self, face: BlockFace) -> AaQuad<V> {
 		let origin = self.origin;
 		let origin = if face.sign() == Sign::Positive {
