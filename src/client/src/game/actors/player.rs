@@ -23,12 +23,12 @@ use crate::engine::{
 // === Constants === //
 
 const PLAYER_SPEED: f64 = 0.04;
-const PLAYER_GRAVITY: f64 = 0.03;
+const PLAYER_GRAVITY: f64 = 0.02;
 const PLAYER_FRICTION_COEF: f64 = 0.9;
 const PLAYER_WIDTH: f64 = 0.8;
 const PLAYER_HEIGHT: f64 = 1.8;
 const PLAYER_EYE_LEVEL: f64 = 1.6;
-const PLAYER_JUMP_IMPULSE: f64 = 0.5;
+const PLAYER_JUMP_IMPULSE: f64 = 0.2;
 
 // === Factory === //
 
@@ -182,7 +182,7 @@ impl PlayerInputController {
 				// Handle jumps
 				// TODO: Prevent air jumps
 				if input_manager.key(VirtualKeyCode::Space).recently_pressed() {
-					player_state.vel = EntityVec::Y * PLAYER_JUMP_IMPULSE;
+					*player_state.vel.y_mut() = PLAYER_JUMP_IMPULSE;
 				}
 			}
 

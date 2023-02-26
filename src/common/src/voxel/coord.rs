@@ -350,7 +350,7 @@ pub fn cast_volume(
 	tolerance: f64,
 ) -> f64 {
 	// N.B. to ensure that `tolerance` is respected, we have to increase our check volume by
-	// `tolerance` so that we catch blocks that our outside the check volume but may nonetheless
+	// `tolerance` so that we catch blocks that are outside the check volume but may nonetheless
 	// wish to enforce a tolerance margin of their own.
 	//
 	// We do this to prevent the following scenario:
@@ -360,15 +360,16 @@ pub fn cast_volume(
 	// *---*---*
 	// | %--->*|
 	// *---*---*
-	//       |--   Let's say this is the required tolerance.
+	//       |--   Let's say this is the required tolerance...
 	//   |----|    ...and this is the actual movement delta.
 	//
-	// Because our movement delta never hits the block face at `x = 2`, it never requires it to
+	// Because our movement delta never hits the block face at `x = 2`, it never requires the face to
 	// contribute to tolerance checking, allowing us to bypass its tolerance and eventually "tunnel"
-	// through the collider.
+	// through the occluder.
 	// ```
 	//
-	// If these blocks don't contribute to tolerance, we'll just ignore them.
+	// If these additional blocks don't contribute to collision detection with their tolerance, we'll
+	// just ignore them.
 	let check_aabb = quad.extrude_hv(delta + tolerance).as_blocks();
 	let cached_loc = BlockLocation::new(world, check_aabb.origin);
 
