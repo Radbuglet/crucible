@@ -1,112 +1,131 @@
-#![allow(dead_code)]
-
-use bort::{CompRef, OwnedEntity};
-use crucible_util::lang::polyfill::{BuildHasherPoly, OptionPoly};
+use bort::{storage, CompRef, Entity, OwnedEntity};
+use crucible_util::lang::polyfill::BuildHasherPoly;
 use hashbrown::{hash_map::RawEntryMut, HashMap};
 
-use std::{any::type_name, hash::Hash};
-
-pub trait AssetDescriptor: 'static + Hash + Eq + Clone {
-	type Context<'a>;
-	type Asset: 'static;
-
-	fn construct(&self, asset_mgr: &mut AssetManager, cx: Self::Context<'_>) -> Self::Asset;
-
-	fn keep_alive(&self, asset_mgr: &mut AssetManager) {
-		let _ = asset_mgr;
-		// (no op)
-	}
-}
+use std::hash::Hash;
 
 #[derive(Debug, Default)]
 pub struct AssetManager {
-	assets: HashMap<ReifiedDescriptor, Option<OwnedEntity>>,
+	assets: HashMap<ReifiedKey, Option<OwnedEntity>>,
 }
 
 #[derive(Debug)]
-struct ReifiedDescriptor {
+struct ReifiedKey {
 	hash: u64,
-	desc: OwnedEntity,
+	func: usize,
+	args: OwnedEntity,
 }
 
 impl AssetManager {
-	pub fn load<D: AssetDescriptor>(&mut self, desc: &D, cx: D::Context<'_>) -> CompRef<D::Asset> {
-		// Hash the descriptor
-		let desc_hash = self.assets.hasher().p_hash_one(desc);
+	pub fn cache<K, L, R>(&mut self, args: K, loader: L) -> CompRef<R>
+	where
+		K: 'static + Hash + Eq,
+		L: AssetLoaderFunc<Output = R>,
+		R: 'static,
+	{
+		// Acquire relevant storages
+		let args_storage = storage::<K>();
+		let vals_storage = storage::<R>();
 
-		// Try to reuse an existing asset.
-		if let Some(asset) = self.find_with_hash(desc, desc_hash) {
-			return asset;
-		}
+		// Get the loading closure's function pointer. This is a sound way to differentiate asset
+		// types because:
+		//
+		// 1. No false negatives unless the compiler decides to produce a different specialized
+		//    closure dependent on the invocation site. FIXME: That could actually happen...
+		//
+		// 2. No false positives unless the compiler manages to combine the two closures, which is
+		//    only sound if the two closures have the same effect, in which case the behavior is
+		//    still correct and actually more optimal.
+		//
+		// We have to go through an `AssetLoaderFunc` indirection because `FnOnce::call_once` is not
+		// yet namable on stable.
+		let func = L::load as usize;
 
-		// Insert a stub to detect recursive dependency loading
-		let RawEntryMut::Vacant(entry) = self.assets
-			.raw_entry_mut()
-			.from_hash(desc_hash, |_| false) else { // We already know nothing can match this key.
-				unreachable!();
-			};
+		// Now, hash the combination of the function pointer and the arguments.
+		let hash = self.assets.hasher().p_hash_one(&(func, &args));
 
-		let (desc_ent, desc_ent_ref) = OwnedEntity::new()
-			.with_debug_label("asset descriptor")
-			.with(desc.clone())
-			.split_guard();
+		// Now, fetch the asset...
+		let entry = self.assets.raw_entry_mut().from_hash(hash, |candidate| {
+			// Check hash
+			if hash != candidate.hash {
+				return false;
+			}
 
-		entry.insert_with_hasher(
-			desc_hash,
-			ReifiedDescriptor {
-				hash: desc_hash,
-				desc: desc_ent,
-			},
-			None,
-			|desc| desc.hash,
-		);
+			// Check function pointer
+			if func != candidate.func {
+				return false;
+			}
 
-		// Load the resource
-		let res = desc.construct(self, cx);
-		let res = OwnedEntity::new().with_debug_label("asset").with(res);
-		let res_ref = res.get();
+			// See if the candidate has the appropriate arguments
+			let Some(candidate_args) = args_storage.try_get(candidate.args.entity()) else {
+					return false
+				};
 
-		// Write it!
+			// Finally, ensure that they are equal
+			&args == &*candidate_args
+		});
+
+		let args_entity: Entity;
+		match entry {
+			// If the asset has a value, yield it.
+			RawEntryMut::Occupied(entry) => {
+				return vals_storage.get(
+					entry // OccupiedEntry
+						.get() // `&Option<OwnedEntity>`
+						.as_ref() // Option<&OwnedEntity>`
+						.expect("Cyclic cache dependency detected") // `&OwnedEntity`
+						.entity(), // `Entity`
+				);
+			}
+			// Otherwise, mark the entry as "loading"...
+			RawEntryMut::Vacant(entry) => {
+				let args_entity_guard = OwnedEntity::new();
+				args_storage.insert(args_entity_guard.entity(), args);
+				args_entity = args_entity_guard.entity();
+				entry.insert_with_hasher(
+					hash,
+					ReifiedKey {
+						hash,
+						func,
+						args: args_entity_guard,
+					},
+					None,
+					|k| k.hash,
+				);
+			}
+		};
+
+		// Load the asset
+		let res = loader.load(self);
+		let res_ent = OwnedEntity::new();
+		vals_storage.insert(res_ent.entity(), res);
+		let res_ref = vals_storage.get(res_ent.entity());
+
+		// Insert it into the store
 		let RawEntryMut::Occupied(mut entry) = self.assets
 			.raw_entry_mut()
-			.from_hash(desc_hash, |v| v.hash == desc_hash && v.desc.entity() == desc_ent_ref) else {
-				unreachable!();
-			};
+			.from_hash(hash, |candidate| candidate.args.entity() == args_entity)
+		else {
+			unreachable!()
+		};
 
-		entry.insert(Some(res));
+		entry.insert(Some(res_ent));
+
+		// And return our reference
 		res_ref
 	}
+}
 
-	pub fn find<D: AssetDescriptor>(&self, desc: &D) -> Option<CompRef<D::Asset>> {
-		let desc_hash = self.assets.hasher().p_hash_one(desc);
-		self.find_with_hash(desc, desc_hash)
-	}
+pub trait AssetLoaderFunc {
+	type Output;
 
-	fn find_with_hash<D: AssetDescriptor>(
-		&self,
-		desc: &D,
-		desc_hash: u64,
-	) -> Option<CompRef<D::Asset>> {
-		self.assets
-			.raw_entry()
-			.from_hash(desc_hash, |v| {
-				v.hash == desc_hash && v.desc.try_get::<D>().p_is_some_and(|v| &*v == desc)
-			})
-			.map(|(_, v)| {
-				v.as_ref()
-					.unwrap_or_else(|| {
-						panic!(
-							"attempted to acquire asset of type \"{}\", which was in the process of
-							 loading",
-							type_name::<D>()
-						)
-					})
-					.get()
-			})
-	}
+	fn load(self, assets: &mut AssetManager) -> Self::Output;
+}
 
-	pub fn keep_alive<D: AssetDescriptor>(&mut self, desc: &D) {
-		let _ = desc;
-		todo!()
+impl<F: FnOnce(&mut AssetManager) -> R, R> AssetLoaderFunc for F {
+	type Output = R;
+
+	fn load(self, assets: &mut AssetManager) -> Self::Output {
+		(self)(assets)
 	}
 }

@@ -1,24 +1,20 @@
 use std::borrow::Cow;
 
+use bort::CompRef;
 use crevice::std430::AsStd430;
 use typed_glam::glam;
 
 use crate::engine::{
-	assets::{AssetDescriptor, AssetManager},
-	gfx::texture::SamplerAssetDescriptor,
-	io::gfx::GfxContext,
+	assets::AssetManager, gfx::texture::SamplerAssetDescriptor, io::gfx::GfxContext,
 };
 
 // === OpaqueBlockShader === //
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct OpaqueBlockShaderDesc;
-
-impl AssetDescriptor for OpaqueBlockShaderDesc {
-	type Context<'a> = &'a GfxContext;
-	type Asset = wgpu::ShaderModule;
-
-	fn construct(&self, _asset_mgr: &mut AssetManager, gfx: Self::Context<'_>) -> Self::Asset {
+pub fn load_opaque_block_shader(
+	assets: &mut AssetManager,
+	gfx: &GfxContext,
+) -> CompRef<wgpu::ShaderModule> {
+	assets.cache((), move |_: &mut AssetManager| {
 		gfx.device
 			.create_shader_module(wgpu::ShaderModuleDescriptor {
 				label: Some("opaque_block.wgsl"),
@@ -26,13 +22,9 @@ impl AssetDescriptor for OpaqueBlockShaderDesc {
 					"shaders/opaque_block.wgsl"
 				))),
 			})
-	}
+	})
 }
-
-// // === VoxelPipelineLayout === //
-//
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct VoxelPipelineLayoutDesc;
+// === VoxelPipelineLayout === //
 
 #[derive(Debug)]
 pub struct VoxelPipelineLayout {
@@ -40,61 +32,58 @@ pub struct VoxelPipelineLayout {
 	pub pipeline_layout: wgpu::PipelineLayout,
 }
 
-impl AssetDescriptor for VoxelPipelineLayoutDesc {
-	type Context<'a> = &'a GfxContext;
-	type Asset = VoxelPipelineLayout;
-
-	fn construct(&self, _asset_mgr: &mut AssetManager, gfx: Self::Context<'_>) -> Self::Asset {
+pub fn load_voxel_pipeline_layout(
+	assets: &mut AssetManager,
+	GfxContext { device, .. }: &GfxContext,
+) -> CompRef<VoxelPipelineLayout> {
+	assets.cache((), move |_: &mut AssetManager| {
 		let uniform_group_layout =
-			gfx.device
-				.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-					label: None,
-					entries: &[
-						wgpu::BindGroupLayoutEntry {
-							binding: 0,
-							visibility: wgpu::ShaderStages::VERTEX,
-							ty: wgpu::BindingType::Buffer {
-								ty: wgpu::BufferBindingType::Uniform,
-								has_dynamic_offset: false,
-								min_binding_size: None,
-							},
-							count: None,
-						},
-						wgpu::BindGroupLayoutEntry {
-							binding: 1,
-							visibility: wgpu::ShaderStages::FRAGMENT,
-							ty: wgpu::BindingType::Texture {
-								sample_type: wgpu::TextureSampleType::Float { filterable: false },
-								view_dimension: wgpu::TextureViewDimension::D2,
-								multisampled: false,
-							},
-							count: None,
-						},
-						wgpu::BindGroupLayoutEntry {
-							binding: 2,
-							visibility: wgpu::ShaderStages::FRAGMENT,
-							ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-							count: None,
-						},
-					],
-				});
-
-		let pipeline_layout = gfx
-			.device
-			.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+			device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
 				label: None,
-				bind_group_layouts: &[&uniform_group_layout],
-				push_constant_ranges: &[],
+				entries: &[
+					wgpu::BindGroupLayoutEntry {
+						binding: 0,
+						visibility: wgpu::ShaderStages::VERTEX,
+						ty: wgpu::BindingType::Buffer {
+							ty: wgpu::BufferBindingType::Uniform,
+							has_dynamic_offset: false,
+							min_binding_size: None,
+						},
+						count: None,
+					},
+					wgpu::BindGroupLayoutEntry {
+						binding: 1,
+						visibility: wgpu::ShaderStages::FRAGMENT,
+						ty: wgpu::BindingType::Texture {
+							sample_type: wgpu::TextureSampleType::Float { filterable: false },
+							view_dimension: wgpu::TextureViewDimension::D2,
+							multisampled: false,
+						},
+						count: None,
+					},
+					wgpu::BindGroupLayoutEntry {
+						binding: 2,
+						visibility: wgpu::ShaderStages::FRAGMENT,
+						ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+						count: None,
+					},
+				],
 			});
+
+		let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+			label: None,
+			bind_group_layouts: &[&uniform_group_layout],
+			push_constant_ranges: &[],
+		});
 
 		VoxelPipelineLayout {
 			uniform_group_layout,
 			pipeline_layout,
 		}
-	}
+	})
 }
-//
-// // === VoxelRenderingPipeline === //
+
+// === VoxelRenderingPipeline === //
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct VoxelRenderingPipelineDesc {
@@ -104,83 +93,81 @@ pub struct VoxelRenderingPipelineDesc {
 	pub back_face_culling: bool,
 }
 
-impl AssetDescriptor for VoxelRenderingPipelineDesc {
-	type Context<'a> = &'a GfxContext;
-	type Asset = wgpu::RenderPipeline;
+impl VoxelRenderingPipelineDesc {
+	pub fn load(
+		self,
+		assets: &mut AssetManager,
+		gfx: &GfxContext,
+	) -> CompRef<wgpu::RenderPipeline> {
+		assets.cache(self, move |assets: &mut AssetManager| {
+			let shader = load_opaque_block_shader(assets, gfx);
+			let layout = load_voxel_pipeline_layout(assets, gfx);
 
-	fn construct(&self, asset_mgr: &mut AssetManager, gfx: Self::Context<'_>) -> Self::Asset {
-		let shader = asset_mgr.load(&OpaqueBlockShaderDesc, gfx);
-		let layout = asset_mgr.load(&VoxelPipelineLayoutDesc, gfx);
-
-		gfx.device
-			.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-				label: Some("opaque voxel pipeline"),
-				layout: Some(&layout.pipeline_layout),
-				vertex: wgpu::VertexState {
-					module: &shader,
-					entry_point: "vs_main",
-					buffers: &[wgpu::VertexBufferLayout {
-						array_stride: VoxelVertex::std430_size_static() as wgpu::BufferAddress,
-						step_mode: wgpu::VertexStepMode::Vertex,
-						attributes: &[
-							wgpu::VertexAttribute {
-								shader_location: 0,
-								offset: 0,
-								format: wgpu::VertexFormat::Float32x3,
-							},
-							wgpu::VertexAttribute {
-								shader_location: 1,
-								offset: 16,
-								format: wgpu::VertexFormat::Float32x2,
-							},
-						],
-					}],
-				},
-				primitive: wgpu::PrimitiveState {
-					topology: wgpu::PrimitiveTopology::TriangleList,
-					strip_index_format: None,
-					front_face: wgpu::FrontFace::Ccw,
-					cull_mode: if self.back_face_culling {
-						Some(wgpu::Face::Back)
-					} else {
-						None
+			gfx.device
+				.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+					label: Some("opaque voxel pipeline"),
+					layout: Some(&layout.pipeline_layout),
+					vertex: wgpu::VertexState {
+						module: &shader,
+						entry_point: "vs_main",
+						buffers: &[wgpu::VertexBufferLayout {
+							array_stride: VoxelVertex::std430_size_static() as wgpu::BufferAddress,
+							step_mode: wgpu::VertexStepMode::Vertex,
+							attributes: &[
+								wgpu::VertexAttribute {
+									shader_location: 0,
+									offset: 0,
+									format: wgpu::VertexFormat::Float32x3,
+								},
+								wgpu::VertexAttribute {
+									shader_location: 1,
+									offset: 16,
+									format: wgpu::VertexFormat::Float32x2,
+								},
+							],
+						}],
 					},
-					unclipped_depth: false,
-					polygon_mode: if self.is_wireframe {
-						wgpu::PolygonMode::Line
-					} else {
-						wgpu::PolygonMode::Fill
+					primitive: wgpu::PrimitiveState {
+						topology: wgpu::PrimitiveTopology::TriangleList,
+						strip_index_format: None,
+						front_face: wgpu::FrontFace::Ccw,
+						cull_mode: if self.back_face_culling {
+							Some(wgpu::Face::Back)
+						} else {
+							None
+						},
+						unclipped_depth: false,
+						polygon_mode: if self.is_wireframe {
+							wgpu::PolygonMode::Line
+						} else {
+							wgpu::PolygonMode::Fill
+						},
+						conservative: false,
 					},
-					conservative: false,
-				},
-				depth_stencil: Some(wgpu::DepthStencilState {
-					format: self.depth_format,
-					depth_write_enabled: true,
-					depth_compare: wgpu::CompareFunction::Less,
-					stencil: wgpu::StencilState::default(),
-					bias: wgpu::DepthBiasState::default(),
-				}),
-				multisample: wgpu::MultisampleState {
-					count: 1,
-					mask: !0,
-					alpha_to_coverage_enabled: false,
-				},
-				fragment: Some(wgpu::FragmentState {
-					module: &shader,
-					entry_point: "fs_main",
-					targets: &[Some(wgpu::ColorTargetState {
-						format: self.surface_format,
-						blend: None,
-						write_mask: wgpu::ColorWrites::all(),
-					})],
-				}),
-				multiview: None,
-			})
-	}
-
-	fn keep_alive(&self, asset_mgr: &mut AssetManager) {
-		asset_mgr.keep_alive(&OpaqueBlockShaderDesc);
-		asset_mgr.keep_alive(&VoxelPipelineLayoutDesc);
+					depth_stencil: Some(wgpu::DepthStencilState {
+						format: self.depth_format,
+						depth_write_enabled: true,
+						depth_compare: wgpu::CompareFunction::Less,
+						stencil: wgpu::StencilState::default(),
+						bias: wgpu::DepthBiasState::default(),
+					}),
+					multisample: wgpu::MultisampleState {
+						count: 1,
+						mask: !0,
+						alpha_to_coverage_enabled: false,
+					},
+					fragment: Some(wgpu::FragmentState {
+						module: &shader,
+						entry_point: "fs_main",
+						targets: &[Some(wgpu::ColorTargetState {
+							format: self.surface_format,
+							blend: None,
+							write_mask: wgpu::ColorWrites::all(),
+						})],
+					}),
+					multiview: None,
+				})
+		})
 	}
 }
 
@@ -193,13 +180,9 @@ pub struct VoxelUniforms {
 }
 
 impl VoxelUniforms {
-	pub fn new(
-		gfx: &GfxContext,
-		asset_mgr: &mut AssetManager,
-		texture: &wgpu::TextureView,
-	) -> Self {
-		let layout = asset_mgr.load(&VoxelPipelineLayoutDesc, gfx);
-		let sampler = asset_mgr.load(&SamplerAssetDescriptor::NEAREST_CLAMP_EDGES, (gfx,));
+	pub fn new(gfx: &GfxContext, assets: &mut AssetManager, texture: &wgpu::TextureView) -> Self {
+		let layout = load_voxel_pipeline_layout(assets, gfx);
+		let sampler = SamplerAssetDescriptor::NEAREST_CLAMP_EDGES.load(assets, gfx);
 
 		let buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("uniform buffer"),

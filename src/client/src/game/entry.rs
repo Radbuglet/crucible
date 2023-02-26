@@ -204,7 +204,7 @@ impl GameSceneState {
 	pub fn render(&mut self, me: Entity, frame: &mut wgpu::SurfaceTexture) {
 		// Acquire services
 		let gfx = &*self.engine.get::<GfxContext>();
-		let mut asset_mgr = self.engine.get_mut::<AssetManager>();
+		let mut assets = self.engine.get_mut::<AssetManager>();
 		let world_mesh = me.get::<VoxelWorldMesh>();
 		let camera = me.get::<CameraManager>();
 
@@ -225,15 +225,13 @@ impl GameSceneState {
 
 		// Encode rendering commands
 		{
-			let pipeline = asset_mgr.load(
-				&VoxelRenderingPipelineDesc {
-					surface_format: viewport.curr_config().format,
-					depth_format: depth_texture_format,
-					is_wireframe: false,
-					back_face_culling: true,
-				},
-				gfx,
-			);
+			let pipeline = VoxelRenderingPipelineDesc {
+				surface_format: viewport.curr_config().format,
+				depth_format: depth_texture_format,
+				is_wireframe: false,
+				back_face_culling: true,
+			}
+			.load(&mut assets, gfx);
 
 			let chunk_pass = world_mesh.prepare_chunk_draw_pass();
 
