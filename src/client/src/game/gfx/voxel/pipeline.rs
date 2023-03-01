@@ -5,7 +5,9 @@ use crevice::std430::AsStd430;
 use typed_glam::glam;
 
 use crate::engine::{
-	assets::AssetManager, gfx::texture::SamplerAssetDescriptor, io::gfx::GfxContext,
+	assets::AssetManager,
+	gfx::pipeline::{load_pipeline_layout, BindUniform, BindUniformBuilder},
+	io::gfx::GfxContext,
 };
 
 // === OpaqueBlockShader === //
@@ -24,66 +26,30 @@ pub fn load_opaque_block_shader(
 			})
 	})
 }
-// === VoxelPipelineLayout === //
-
-#[derive(Debug)]
-pub struct VoxelPipelineLayout {
-	pub uniform_group_layout: wgpu::BindGroupLayout,
-	pub pipeline_layout: wgpu::PipelineLayout,
-}
-
-pub fn load_voxel_pipeline_layout(
-	assets: &mut AssetManager,
-	GfxContext { device, .. }: &GfxContext,
-) -> CompRef<VoxelPipelineLayout> {
-	assets.cache((), move |_: &mut AssetManager| {
-		let uniform_group_layout =
-			device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-				label: None,
-				entries: &[
-					wgpu::BindGroupLayoutEntry {
-						binding: 0,
-						visibility: wgpu::ShaderStages::VERTEX,
-						ty: wgpu::BindingType::Buffer {
-							ty: wgpu::BufferBindingType::Uniform,
-							has_dynamic_offset: false,
-							min_binding_size: None,
-						},
-						count: None,
-					},
-					wgpu::BindGroupLayoutEntry {
-						binding: 1,
-						visibility: wgpu::ShaderStages::FRAGMENT,
-						ty: wgpu::BindingType::Texture {
-							sample_type: wgpu::TextureSampleType::Float { filterable: false },
-							view_dimension: wgpu::TextureViewDimension::D2,
-							multisampled: false,
-						},
-						count: None,
-					},
-					wgpu::BindGroupLayoutEntry {
-						binding: 2,
-						visibility: wgpu::ShaderStages::FRAGMENT,
-						ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-						count: None,
-					},
-				],
-			});
-
-		let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-			label: None,
-			bind_group_layouts: &[&uniform_group_layout],
-			push_constant_ranges: &[],
-		});
-
-		VoxelPipelineLayout {
-			uniform_group_layout,
-			pipeline_layout,
-		}
-	})
-}
 
 // === VoxelRenderingPipeline === //
+
+#[derive(Debug)]
+pub struct VoxelRenderingUniforms<'a> {
+	pub camera: wgpu::BufferBinding<'a>,
+	pub texture: &'a wgpu::TextureView,
+}
+
+impl BindUniform for VoxelRenderingUniforms<'_> {
+	type Config = ();
+
+	fn layout(builder: &mut impl BindUniformBuilder<Self>, _config: Self::Config) {
+		builder
+			.with_uniform_buffer(wgpu::ShaderStages::VERTEX, false, |me| me.camera.clone())
+			.with_texture(
+				wgpu::ShaderStages::FRAGMENT,
+				wgpu::TextureSampleType::Float { filterable: false },
+				wgpu::TextureViewDimension::D2,
+				false,
+				|me| me.texture,
+			);
+	}
+}
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct VoxelRenderingPipelineDesc {
@@ -101,12 +67,13 @@ impl VoxelRenderingPipelineDesc {
 	) -> CompRef<wgpu::RenderPipeline> {
 		assets.cache(self, move |assets: &mut AssetManager| {
 			let shader = load_opaque_block_shader(assets, gfx);
-			let layout = load_voxel_pipeline_layout(assets, gfx);
+			let layout = VoxelRenderingUniforms::load_layout(assets, gfx, ());
+			let layout = load_pipeline_layout(assets, gfx, [&layout], []);
 
 			gfx.device
 				.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
 					label: Some("opaque voxel pipeline"),
-					layout: Some(&layout.pipeline_layout),
+					layout: Some(&layout),
 					vertex: wgpu::VertexState {
 						module: &shader,
 						entry_point: "vs_main",
@@ -180,10 +147,7 @@ pub struct VoxelUniforms {
 }
 
 impl VoxelUniforms {
-	pub fn new(gfx: &GfxContext, assets: &mut AssetManager, texture: &wgpu::TextureView) -> Self {
-		let layout = load_voxel_pipeline_layout(assets, gfx);
-		let sampler = SamplerAssetDescriptor::NEAREST_CLAMP_EDGES.load(assets, gfx);
-
+	pub fn new(assets: &mut AssetManager, gfx: &GfxContext, texture: &wgpu::TextureView) -> Self {
 		let buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("uniform buffer"),
 			mapped_at_creation: false,
@@ -191,28 +155,11 @@ impl VoxelUniforms {
 			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
 		});
 
-		let bind_group = gfx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-			label: None,
-			layout: &layout.uniform_group_layout,
-			entries: &[
-				wgpu::BindGroupEntry {
-					binding: 0,
-					resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-						buffer: &buffer,
-						offset: 0,
-						size: None,
-					}),
-				},
-				wgpu::BindGroupEntry {
-					binding: 1,
-					resource: wgpu::BindingResource::TextureView(texture),
-				},
-				wgpu::BindGroupEntry {
-					binding: 2,
-					resource: wgpu::BindingResource::Sampler(&sampler),
-				},
-			],
-		});
+		let bind_group = VoxelRenderingUniforms {
+			camera: buffer.as_entire_buffer_binding(),
+			texture,
+		}
+		.create_instance(assets, gfx, ());
 
 		Self { bind_group, buffer }
 	}

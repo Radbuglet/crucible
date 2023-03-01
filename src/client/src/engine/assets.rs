@@ -35,7 +35,8 @@ impl AssetManager {
 		//
 		// 2. No false positives unless the compiler manages to combine the two closures, which is
 		//    only sound if the two closures have the same effect, in which case the behavior is
-		//    still correct and actually more optimal.
+		//    still correct and actually more optimal. FIXME: There could be funky tampolining of
+		//    `dyn FnOnce()` instances.
 		//
 		// We have to go through an `AssetLoaderFunc` indirection because `FnOnce::call_once` is not
 		// yet namable on stable.

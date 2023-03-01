@@ -7,6 +7,6 @@ members = [
 	"src/util",
 ]
 
-[profile.release]
-lto = true
-opt-level = 3
+# [profile.release]
+# lto = true
+# opt-level = 3

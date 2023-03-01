@@ -1,38 +1,64 @@
-use std::any::type_name;
+use std::{any::type_name, hash::Hash};
 
-use crate::engine::io::gfx::GfxContext;
+use bort::CompRef;
+use crucible_util::mem::array::map_arr;
+
+use crate::engine::{assets::AssetManager, io::gfx::GfxContext};
 
 // === BindUniform === //
 
 pub trait BindUniform {
-	type Config<'a>;
+	type Config: 'static + Hash + Eq + Clone;
 
-	fn layout(config: Self::Config<'_>, builder: &mut impl BindUniformLayoutBuilder<Self>);
+	fn layout(builder: &mut impl BindUniformBuilder<Self>, config: Self::Config);
 
-	fn make_wgpu_layout(config: Self::Config<'_>, gfx: &GfxContext) -> wgpu::BindGroupLayout {
-		let mut builder = LayoutBuilder::default();
-		<LayoutBuilder as BindUniformLayoutBuilder<Self>>::with_label(
+	fn create_layout(gfx: &GfxContext, config: Self::Config) -> wgpu::BindGroupLayout {
+		let mut builder = BindUniformLayoutBuilder::default();
+		<BindUniformLayoutBuilder as BindUniformBuilder<Self>>::with_label(
 			&mut builder,
 			type_name::<Self>(),
 		);
-		Self::layout(config, &mut builder);
+		Self::layout(&mut builder, config);
 		builder.finish(gfx)
 	}
 
-	fn make_wgpu_instance(
+	fn create_instance_given_layout(
 		&self,
-		config: Self::Config<'_>,
 		gfx: &GfxContext,
 		layout: &wgpu::BindGroupLayout,
+		config: Self::Config,
 	) -> wgpu::BindGroup {
-		let mut builder = InstanceBuilder::new(self);
-		Self::layout(config, &mut builder);
+		let mut builder = BindUniformInstanceBuilder::new(self);
+		Self::layout(&mut builder, config);
 		builder.finish(gfx, layout)
+	}
+
+	fn load_layout(
+		assets: &mut AssetManager,
+		gfx: &GfxContext,
+		config: Self::Config,
+	) -> CompRef<wgpu::BindGroupLayout> {
+		assets.cache(config.clone(), |_: &mut AssetManager| {
+			Self::create_layout(gfx, config)
+		})
+	}
+
+	fn create_instance(
+		&self,
+		assets: &mut AssetManager,
+		gfx: &GfxContext,
+		config: Self::Config,
+	) -> wgpu::BindGroup {
+		self.create_instance_given_layout(
+			gfx,
+			&Self::load_layout(assets, gfx, config.clone()),
+			config,
+		)
 	}
 }
 
 // TODO: Arrays
-pub trait BindUniformLayoutBuilder<T: ?Sized> {
+pub trait BindUniformBuilder<T: ?Sized> {
 	fn with_label(&mut self, label: &str) -> &mut Self;
 
 	fn with_binding(&mut self, loc: u32) -> &mut Self;
@@ -89,11 +115,11 @@ pub trait BindUniformLayoutBuilder<T: ?Sized> {
 }
 
 #[derive(Default)]
-struct BindSlotAssigner {
+struct SlotAssigner {
 	next_slot: u32,
 }
 
-impl BindSlotAssigner {
+impl SlotAssigner {
 	fn jump_to(&mut self, slot: u32) {
 		self.next_slot = slot;
 	}
@@ -110,13 +136,13 @@ impl BindSlotAssigner {
 }
 
 #[derive(Default)]
-struct LayoutBuilder {
+struct BindUniformLayoutBuilder {
 	label: Option<String>,
-	binding: BindSlotAssigner,
+	binding: SlotAssigner,
 	entries: Vec<wgpu::BindGroupLayoutEntry>,
 }
 
-impl<T: ?Sized> BindUniformLayoutBuilder<T> for LayoutBuilder {
+impl<T: ?Sized> BindUniformBuilder<T> for BindUniformLayoutBuilder {
 	fn with_label(&mut self, label: &str) -> &mut Self {
 		self.label = Some(label.to_string());
 		self
@@ -244,7 +270,7 @@ impl<T: ?Sized> BindUniformLayoutBuilder<T> for LayoutBuilder {
 	}
 }
 
-impl LayoutBuilder {
+impl BindUniformLayoutBuilder {
 	pub fn finish(self, gfx: &GfxContext) -> wgpu::BindGroupLayout {
 		gfx.device
 			.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -254,23 +280,23 @@ impl LayoutBuilder {
 	}
 }
 
-struct InstanceBuilder<'a, T: ?Sized> {
+struct BindUniformInstanceBuilder<'a, T: ?Sized> {
 	me: &'a T,
-	binding: BindSlotAssigner,
+	binding: SlotAssigner,
 	entries: Vec<wgpu::BindGroupEntry<'a>>,
 }
 
-impl<'a, T: ?Sized> InstanceBuilder<'a, T> {
+impl<'a, T: ?Sized> BindUniformInstanceBuilder<'a, T> {
 	pub fn new(me: &'a T) -> Self {
 		Self {
 			me,
-			binding: BindSlotAssigner::default(),
+			binding: SlotAssigner::default(),
 			entries: Vec::default(),
 		}
 	}
 }
 
-impl<'a, T: ?Sized> BindUniformLayoutBuilder<T> for InstanceBuilder<'a, T> {
+impl<'a, T: ?Sized> BindUniformBuilder<T> for BindUniformInstanceBuilder<'a, T> {
 	fn with_label(&mut self, _label: &str) -> &mut Self {
 		self
 	}
@@ -366,7 +392,7 @@ impl<'a, T: ?Sized> BindUniformLayoutBuilder<T> for InstanceBuilder<'a, T> {
 	}
 }
 
-impl<'a, T: ?Sized> InstanceBuilder<'a, T> {
+impl<'a, T: ?Sized> BindUniformInstanceBuilder<'a, T> {
 	pub fn finish(self, gfx: &GfxContext, layout: &wgpu::BindGroupLayout) -> wgpu::BindGroup {
 		gfx.device.create_bind_group(&wgpu::BindGroupDescriptor {
 			label: None,
@@ -374,4 +400,27 @@ impl<'a, T: ?Sized> InstanceBuilder<'a, T> {
 			entries: &self.entries,
 		})
 	}
+}
+
+// === PipelineLayout === //
+
+pub fn load_pipeline_layout<const N: usize, const M: usize>(
+	assets: &mut AssetManager,
+	gfx: &GfxContext,
+	bind_uniforms: [&wgpu::BindGroupLayout; N],
+	push_uniforms: [wgpu::PushConstantRange; M],
+) -> CompRef<wgpu::PipelineLayout> {
+	let bind_ids = map_arr(bind_uniforms, |v| v.global_id());
+
+	assets.cache(
+		(bind_ids, push_uniforms.clone()),
+		move |_: &mut AssetManager| {
+			gfx.device
+				.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+					label: None,
+					bind_group_layouts: &bind_uniforms,
+					push_constant_ranges: &push_uniforms,
+				})
+		},
+	)
 }
