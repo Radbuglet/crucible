@@ -92,7 +92,7 @@ where
 	}
 }
 
-// === OwnedDrop === //
+// === DropOwned === //
 
 pub type DropOwnedGuard<T> = DropGuard<T, DropOwnedGuardHandler>;
 

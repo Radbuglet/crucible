@@ -1,16 +1,16 @@
 use std::{iter, mem::MaybeUninit};
 
-use super::ptr::{entirely_unchecked_transmute, sizealign_checked_transmute};
+use super::transmute::{entirely_unchecked_transmute, sizealign_checked_transmute};
 
-// === Array transmute === //
+// === Array transposition === //
 
-pub const fn transmute_uninit_array_to_inner<T, const N: usize>(
+pub const fn transpose_uninit_array_inner<T, const N: usize>(
 	arr: MaybeUninit<[T; N]>,
 ) -> [MaybeUninit<T>; N] {
 	unsafe { sizealign_checked_transmute(arr) }
 }
 
-pub const fn transmute_uninit_array_to_outer<T, const N: usize>(
+pub const fn transpose_uninit_array_outer<T, const N: usize>(
 	arr: [MaybeUninit<T>; N],
 ) -> MaybeUninit<[T; N]> {
 	unsafe { sizealign_checked_transmute(arr) }
@@ -18,52 +18,57 @@ pub const fn transmute_uninit_array_to_outer<T, const N: usize>(
 
 pub const fn new_uninit_array<T, const N: usize>() -> [MaybeUninit<T>; N] {
 	let arr = MaybeUninit::<[T; N]>::uninit();
-	transmute_uninit_array_to_inner(arr)
+	transpose_uninit_array_inner(arr)
 }
 
 pub const unsafe fn assume_init_array<T, const N: usize>(arr: [MaybeUninit<T>; N]) -> [T; N] {
-	transmute_uninit_array_to_outer(arr)
+	transpose_uninit_array_outer(arr)
 		// Safety: provided by caller
 		.assume_init()
 }
 
-// === Array constructors === //
+// === Array macro === //
 
 #[doc(hidden)]
 pub mod macro_internal {
 	use super::*;
 	pub use std::mem::MaybeUninit;
 
-	#[repr(C)]
-	pub struct MacroArrayBuilder<T, const N: usize> {
+	#[repr(C)] // N.B. this is needed for a janky CTFE hack in `unwrap()`.
+	pub struct ArrayBuilder<T, const N: usize> {
 		pub array: [MaybeUninit<T>; N],
+		// Invariant: The first `init_count` of `array` must be initialized.
 		pub init_count: usize,
-		pub len: usize,
 	}
 
-	impl<T, const N: usize> MacroArrayBuilder<T, N> {
+	impl<T, const N: usize> ArrayBuilder<T, N> {
 		pub const unsafe fn new() -> Self {
 			Self {
 				array: new_uninit_array(),
 				init_count: 0,
-				len: N,
 			}
 		}
 
 		pub const unsafe fn unwrap(self) -> [T; N] {
-			// Safety: `array` is the first element of this `repr(C)` structure so we can transmute an
-			// owned instance of the structure into an owned instance of this field. We also perform an
-			// implicit transmute from `[MaybeUninit<T>; N]` to `[T; N]`, whose safety is guaranteed by
-			// the caller.
+			// Safety: `array` is the first element of this `repr(C)` structure so we can transmute
+			// an owned instance of the structure into an owned instance of this field. We also
+			// perform an implicit transmute from `[MaybeUninit<T>; N]` to `[T; N]`, whose safety is
+			// guaranteed by the caller.
+			//
+			// We do things this way to avoid calling our destructor.
 			entirely_unchecked_transmute(self)
+		}
+
+		pub const fn len(&self) -> usize {
+			N
 		}
 	}
 
-	impl<T, const N: usize> Drop for MacroArrayBuilder<T, N> {
+	impl<T, const N: usize> Drop for ArrayBuilder<T, N> {
 		fn drop(&mut self) {
 			for i in 0..self.init_count {
 				unsafe {
-					// Safety: provided during call to `MacroArrayBuilder::new`.
+					// Safety: provided during call to `ArrayBuilder::new`.
 					self.array[i].assume_init_drop()
 				};
 			}
@@ -78,9 +83,9 @@ macro_rules! arr {
 	}};
 	($index:ident => $ctor:expr; $size:expr) => {{
 		// N.B. const expressions do not inherit the `unsafe` scope from their surroundings.
-		let mut arr = unsafe { $crate::mem::array::macro_internal::MacroArrayBuilder::<_, { $size }>::new() };
+		let mut arr = unsafe { $crate::mem::array::macro_internal::ArrayBuilder::<_, { $size }>::new() };
 
-		while arr.init_count < arr.len {
+		while arr.init_count < arr.len() {
 			arr.array[arr.init_count] = $crate::mem::array::macro_internal::MaybeUninit::new({
 				let $index = arr.init_count;
 				$ctor
@@ -93,6 +98,8 @@ macro_rules! arr {
 }
 
 pub use arr;
+
+// === Array constructors === //
 
 pub fn arr_from_iter<T, I: IntoIterator<Item = T>, const N: usize>(iter: I) -> [T; N] {
 	let mut iter = iter.into_iter();
@@ -135,5 +142,10 @@ pub fn boxed_arr_from_fn<F, T>(f: F, len: usize) -> Box<[T]>
 where
 	F: FnMut() -> T,
 {
-	vec_from_fn(f, len).into_boxed_slice()
+	// We must reserve the exact capacity up-front to avoid re-allocation, which `Vec::from_iter`
+	// may not do (it's hard to tell what exactly will happen in Rust 1.66.0 because there's a *lot*
+	// of specialization happening under the hood)
+	let mut arr = Vec::with_capacity(len);
+	arr.extend(iter_repeat_len(f, len));
+	arr.into_boxed_slice()
 }

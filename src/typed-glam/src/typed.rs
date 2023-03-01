@@ -1,12 +1,10 @@
-use crucible_util::{
-	lang::{marker::PhantomInvariant, std_traits::ArrayLike},
-	mem::ptr::PointeeCastExt,
-};
+use crucible_util::lang::{marker::PhantomInvariant, std_traits::ArrayLike};
 
 use std::{
 	fmt, hash,
 	iter::{Product, Sum},
 	marker::PhantomData,
+	mem::transmute,
 	ops::{self, Index, IndexMut},
 };
 
@@ -123,14 +121,14 @@ impl<F: ?Sized + VecFlavor> TypedVector<F> {
 	pub fn from_glam_ref(glam: &F::Backing) -> &Self {
 		unsafe {
 			// Safety: we are `repr(transparent)` w.r.t `F::Backing`.
-			glam.transmute_pointee_ref()
+			transmute(glam)
 		}
 	}
 
 	pub fn from_glam_mut(glam: &mut F::Backing) -> &mut Self {
 		unsafe {
 			// Safety: we are `repr(transparent)` w.r.t `F::Backing`.
-			glam.transmute_pointee_mut()
+			transmute(glam)
 		}
 	}
 

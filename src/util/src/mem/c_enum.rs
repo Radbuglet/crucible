@@ -1,8 +1,8 @@
-use std::{fmt, hash, marker::PhantomData, ops::Index, ops::IndexMut};
+use std::{fmt, hash, marker::PhantomData, ops};
 
 use crate::lang::{marker::PhantomInvariant, std_traits::ArrayLike};
 
-// === `ExposesVariants` === //
+// === CEnum === //
 
 pub type VariantIter<T> = std::iter::Copied<std::slice::Iter<'static, T>>;
 
@@ -77,7 +77,7 @@ macro_rules! c_enum {
 
 pub use c_enum;
 
-// === `CEnumMap` === //
+// === CEnumMap === //
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct CEnumMap<K: CEnum, V> {
@@ -119,7 +119,7 @@ impl<K: CEnum, V> CEnumMap<K, V> {
 	}
 }
 
-impl<K: CEnum, V> Index<K> for CEnumMap<K, V> {
+impl<K: CEnum, V> ops::Index<K> for CEnumMap<K, V> {
 	type Output = V;
 
 	fn index(&self, index: K) -> &Self::Output {
@@ -127,7 +127,7 @@ impl<K: CEnum, V> Index<K> for CEnumMap<K, V> {
 	}
 }
 
-impl<K: CEnum, V> IndexMut<K> for CEnumMap<K, V> {
+impl<K: CEnum, V> ops::IndexMut<K> for CEnumMap<K, V> {
 	fn index_mut(&mut self, index: K) -> &mut Self::Output {
 		&mut self.map[index.index()]
 	}

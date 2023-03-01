@@ -126,7 +126,7 @@ pub fn main() -> anyhow::Result<()> {
 				return;
 			};
 
-			let mut frame = match viewport.get_mut::<Viewport>().present(&gfx) {
+			let mut frame = match viewport.get_mut::<Viewport>().present(gfx) {
 				Ok(Some(frame)) => frame,
 				Ok(None) => return,
 				Err(err) => {

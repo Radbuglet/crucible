@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.66"
-derive-where = "1.0.0"
+anyhow = "1.0.69"
+derive-where = "1.1.0"
 log = "0.4.17"

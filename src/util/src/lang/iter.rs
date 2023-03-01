@@ -1,23 +1,6 @@
-// === `WithContext` === //
-
 use crate::mem::array::map_arr;
 
-#[derive(Debug, Clone)]
-pub struct WithContext<C, I: ContextualIter<C>> {
-	pub context: C,
-	pub iter: I,
-}
-
-impl<C, I> Iterator for WithContext<C, I>
-where
-	I: ContextualIter<C>,
-{
-	type Item = I::Item;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		self.iter.next_on_ref(&mut self.context)
-	}
-}
+// === ContextualIter === //
 
 pub trait ContextualIter<C>: Sized {
 	type Item;
@@ -36,7 +19,24 @@ pub trait ContextualIter<C>: Sized {
 	}
 }
 
-// === Volumetric === //
+#[derive(Debug, Clone)]
+pub struct WithContext<C, I: ContextualIter<C>> {
+	pub context: C,
+	pub iter: I,
+}
+
+impl<C, I> Iterator for WithContext<C, I>
+where
+	I: ContextualIter<C>,
+{
+	type Item = I::Item;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.iter.next_on_ref(&mut self.context)
+	}
+}
+
+// === VolumetricIter === //
 
 #[derive(Debug, Clone)]
 pub struct VolumetricIter<const N: usize> {
@@ -113,7 +113,7 @@ impl<const N: usize> Iterator for VolumetricIter<N> {
 	}
 }
 
-// === OptionalIter === //
+// === optionally_iter === //
 
 pub fn optionally_iter<I: Iterator>(iter: Option<I>) -> impl Iterator<Item = I::Item> {
 	iter.into_iter().flatten()

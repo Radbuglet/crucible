@@ -1,5 +1,5 @@
 use bort::{Entity, OwnedEntity};
-use crucible_util::lang::explicitly_bind::ExplicitlyBind;
+use crucible_util::mem::manually_bind::ManuallyBind;
 use hashbrown::HashMap;
 use thiserror::Error;
 use typed_glam::glam::UVec2;
@@ -52,7 +52,7 @@ fn surface_size_from_config(config: &wgpu::SurfaceConfiguration) -> Option<UVec2
 #[derive(Debug)]
 pub struct Viewport {
 	window: Window,
-	surface: ExplicitlyBind<wgpu::Surface>,
+	surface: ManuallyBind<wgpu::Surface>,
 	curr_config: wgpu::SurfaceConfiguration,
 	next_config: wgpu::SurfaceConfiguration,
 	config_dirty: bool,
@@ -260,7 +260,7 @@ impl Viewport {
 impl Drop for Viewport {
 	fn drop(&mut self) {
 		// Ensure that the surface gets dropped before the window
-		ExplicitlyBind::drop(&mut self.surface)
+		ManuallyBind::drop_by_ref(&mut self.surface)
 	}
 }
 

@@ -1,6 +1,4 @@
-use std::ops::{Deref, DerefMut};
-
-use crate::mem::ptr::PointeeCastExt;
+use std::{ops::{Deref, DerefMut}, mem::transmute};
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -10,14 +8,14 @@ impl<T: ?Sized> View<T> {
 	pub fn from_ref(value: &T) -> &Self {
 		unsafe {
 			// Safety: we are `repr(transparent)` w.r.t `T`.
-			value.transmute_pointee_ref()
+			transmute(value)
 		}
 	}
 
 	pub fn from_mut(value: &mut T) -> &mut Self {
 		unsafe {
 			// Safety: we are `repr(transparent)` w.r.t `T`.
-			value.transmute_pointee_mut()
+			transmute(value)
 		}
 	}
 }

@@ -63,7 +63,7 @@ impl AssetManager {
 				};
 
 			// Finally, ensure that they are equal
-			&args == &*candidate_args
+			args == *candidate_args
 		});
 
 		let args_entity: Entity;

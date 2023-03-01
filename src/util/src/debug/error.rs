@@ -1,24 +1,10 @@
 //! Error reporting built off the Rust standard library [Error] trait.
 
-use std::{
-	error::Error,
-	fmt::{Display, Formatter, Result as FmtResult},
-	thread::panicking,
-};
+use std::{error::Error, fmt, thread};
 
 use derive_where::derive_where;
 
 use crate::lang::std_traits::ResultLike;
-
-// === Constants === //
-
-#[cfg(debug_assertions)]
-pub const DEBUG_ASSERTIONS_ENABLED: bool = true;
-
-#[cfg(not(debug_assertions))]
-pub const DEBUG_ASSERTIONS_ENABLED: bool = false;
-
-// === Standard Error Extensions === //
 
 pub trait ErrorFormatExt: Error {
 	fn format_error(&self) -> FormattedError<Self> {
@@ -34,7 +20,7 @@ pub trait ErrorFormatExt: Error {
 	}
 
 	fn raise_unless_panicking(&self) {
-		if !panicking() {
+		if !thread::panicking() {
 			self.raise();
 		} else {
 			self.log();
@@ -47,17 +33,17 @@ impl<T: ?Sized + Error> ErrorFormatExt for T {}
 #[derive_where(Copy, Clone)]
 pub struct FormattedError<'a, T: ?Sized>(pub &'a T);
 
-impl<T: ?Sized + Error> Display for FormattedError<'_, T> {
-	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+impl<T: ?Sized + Error> fmt::Display for FormattedError<'_, T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let target = self.0;
 
 		// Write context
-		writeln!(f, "Error: {}", target)?;
+		write!(f, "Error: {}", target)?;
 
 		// Write cause chain
 		let mut cause_iter = target.source();
 		if cause_iter.is_some() {
-			writeln!(f, "\nCaused by:")?;
+			writeln!(f, "\n\nCaused by:")?;
 		}
 
 		while let Some(cause) = cause_iter {
@@ -106,18 +92,16 @@ impl<T, E: Error> ResultExt for Result<T, E> {
 	}
 }
 
-// === Anyhow conversions === //
-
-pub type AnyhowErrorBoxed = Box<AnyhowErrorInner>;
-pub type AnyhowErrorInner = dyn Error + Send + Sync + 'static;
-
-pub trait AnyhowConvertExt {
+pub trait IntoStdError {
 	type AsStd;
 
 	fn into_std_error(self) -> Self::AsStd;
 }
 
-impl<T> AnyhowConvertExt for anyhow::Result<T> {
+pub type AnyhowErrorBoxed = Box<AnyhowErrorInner>;
+pub type AnyhowErrorInner = dyn Error + Send + Sync + 'static;
+
+impl<T> IntoStdError for anyhow::Result<T> {
 	type AsStd = Result<T, AnyhowErrorBoxed>;
 
 	fn into_std_error(self) -> Self::AsStd {

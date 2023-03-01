@@ -1,6 +1,9 @@
-use std::time::{Duration, Instant};
+use std::{
+	any::Any,
+	time::{Duration, Instant},
+};
 
-use crucible_util::{debug::userdata::BoxedUserdata, lang::explicitly_bind::ExplicitlyBind};
+use crucible_util::mem::manually_bind::ManuallyBind;
 use winit::{
 	event::{DeviceEvent, DeviceId, Event, WindowEvent},
 	event_loop::{EventLoop, EventLoopWindowTarget},
@@ -9,7 +12,7 @@ use winit::{
 
 // === MainLoop === //
 
-pub type WinitUserdata = BoxedUserdata;
+pub type WinitUserdata = Box<dyn Any>;
 
 pub type WinitEventLoop = EventLoop<WinitUserdata>;
 
@@ -33,7 +36,7 @@ impl MainLoop {
 			max_ups: 60,
 			exit_requested: None,
 		};
-		let mut handler = ExplicitlyBind::new(handler);
+		let mut handler = ManuallyBind::new(handler);
 
 		// Run main loop
 		event_loop.run(move |event, proxy, flow| {
@@ -105,7 +108,7 @@ impl MainLoop {
 				// This is the last thing to run before our engine is torn down.
 				Event::LoopDestroyed => {
 					// Run the handler's destructor and drop logic.
-					ExplicitlyBind::extract(&mut handler).on_shutdown();
+					ManuallyBind::extract(&mut handler).on_shutdown();
 
 					// (the `main_loop` is dropped later but doesn't really do much so this is the likely
 					// the last real code the app will run)
@@ -153,7 +156,7 @@ pub trait MainLoopHandler: Sized {
 		&mut self,
 		main_loop: &mut MainLoop,
 		winit: &WinitEventProxy,
-		event: BoxedUserdata,
+		event: WinitUserdata,
 	) {
 		let _main_loop = main_loop;
 		let _winit = winit;
