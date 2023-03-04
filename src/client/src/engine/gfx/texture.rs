@@ -156,8 +156,8 @@ impl Default for SamplerAssetDescriptor {
 }
 
 impl SamplerAssetDescriptor {
-	pub fn load(self, assets: &mut AssetManager, gfx: &GfxContext) -> CompRef<wgpu::Sampler> {
-		assets.cache(self.clone(), move |_: &mut AssetManager| {
+	pub fn load(&self, assets: &mut AssetManager, gfx: &GfxContext) -> CompRef<wgpu::Sampler> {
+		assets.cache(self, move |_: &mut AssetManager| {
 			gfx.device.create_sampler(&wgpu::SamplerDescriptor {
 				label: self.label.as_ref().map(Borrow::borrow),
 				address_mode_u: self.address_mode_u,

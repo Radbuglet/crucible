@@ -1,14 +1,14 @@
-use std::{any::type_name, hash::Hash};
+use std::{any::type_name, hash};
 
 use bort::CompRef;
-use crucible_util::mem::array::map_arr;
+use crucible_util::{lang::tuple::{ToOwnedTupleEq, PreOwned}, mem::array::map_arr};
 
 use crate::engine::{assets::AssetManager, io::gfx::GfxContext};
 
 // === BindUniform === //
 
 pub trait BindUniform {
-	type Config: 'static + Hash + Eq + Clone;
+	type Config: 'static + Eq + hash::Hash;
 
 	fn layout(builder: &mut impl BindUniformBuilder<Self>, config: Self::Config);
 
@@ -36,10 +36,10 @@ pub trait BindUniform {
 	fn load_layout(
 		assets: &mut AssetManager,
 		gfx: &GfxContext,
-		config: Self::Config,
+		config: impl ToOwnedTupleEq<_OwnedEq = Self::Config>,
 	) -> CompRef<wgpu::BindGroupLayout> {
-		assets.cache(config.clone(), |_: &mut AssetManager| {
-			Self::create_layout(gfx, config)
+		assets.cache(config.as_ref(), |_: &mut AssetManager| {
+			Self::create_layout(gfx, config.to_owned_by_ref())
 		})
 	}
 
@@ -47,13 +47,10 @@ pub trait BindUniform {
 		&self,
 		assets: &mut AssetManager,
 		gfx: &GfxContext,
-		config: Self::Config,
+		config: impl ToOwnedTupleEq<_OwnedEq = Self::Config>,
 	) -> wgpu::BindGroup {
-		self.create_instance_given_layout(
-			gfx,
-			&Self::load_layout(assets, gfx, config.clone()),
-			config,
-		)
+		let layout = Self::load_layout(assets, gfx, config.as_ref());
+		self.create_instance_given_layout(gfx, &layout, config.to_owned())
 	}
 }
 
@@ -413,7 +410,7 @@ pub fn load_pipeline_layout<const N: usize, const M: usize>(
 	let bind_ids = map_arr(bind_uniforms, |v| v.global_id());
 
 	assets.cache(
-		(bind_ids, push_uniforms.clone()),
+		(&bind_ids, PreOwned(push_uniforms.clone())),
 		move |_: &mut AssetManager| {
 			gfx.device
 				.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

@@ -60,6 +60,7 @@ macro_rules! impl_tuples {
 	};
 }
 
+use derive_where::derive_where;
 // Technically, this re-exports from the macro-prelude, not the local scope. Neat!
 pub use impl_tuples;
 
@@ -69,6 +70,12 @@ pub trait ToOwnedTuple {
 	type Owned;
 
 	fn to_owned(self) -> Self::Owned;
+
+	fn to_owned_by_ref(&self) -> Self::Owned;
+
+	fn as_ref(&self) -> RefToOwnable<'_, Self> {
+		RefToOwnable(self)
+	}
 }
 
 pub trait ToOwnedTupleEq: hash::Hash + Eq + ToOwnedTuple<Owned = Self::_OwnedEq> {
@@ -82,6 +89,10 @@ impl<'a, T: ?Sized + ToOwned> ToOwnedTuple for &'a T {
 
 	fn to_owned(self) -> Self::Owned {
 		ToOwned::to_owned(self)
+	}
+
+	fn to_owned_by_ref(&self) -> Self::Owned {
+		ToOwned::to_owned(*self)
 	}
 }
 
@@ -100,19 +111,47 @@ where
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Default)]
 pub struct PreOwned<T>(pub T);
 
-impl<T> ToOwnedTuple for PreOwned<T> {
+impl<T: Clone> ToOwnedTuple for PreOwned<T> {
 	type Owned = T;
 
 	fn to_owned(self) -> Self::Owned {
 		self.0
 	}
+
+	fn to_owned_by_ref(&self) -> Self::Owned {
+		self.0.clone()
+	}
 }
 
-impl<T: Eq + hash::Hash> ToOwnedTupleEq for PreOwned<T> {
+impl<T: Clone + Eq + hash::Hash> ToOwnedTupleEq for PreOwned<T> {
 	type _OwnedEq = Self::Owned;
 
 	fn is_eq_owned(&self, owned: &Self::Owned) -> bool {
 		&self.0 == owned
+	}
+}
+
+#[derive(Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive_where(Copy, Clone)]
+pub struct RefToOwnable<'a, T: ?Sized>(pub &'a T);
+
+impl<T: ?Sized + ToOwnedTuple> ToOwnedTuple for RefToOwnable<'_, T> {
+	type Owned = T::Owned;
+
+	fn to_owned(self) -> Self::Owned {
+		T::to_owned_by_ref(self.0)
+	}
+
+	fn to_owned_by_ref(&self) -> Self::Owned {
+		(*self).to_owned()
+	}
+}
+
+impl<T: ?Sized + ToOwnedTupleEq> ToOwnedTupleEq for RefToOwnable<'_, T> {
+	type _OwnedEq = Self::Owned;
+
+	fn is_eq_owned(&self, owned: &Self::Owned) -> bool {
+		self.0.is_eq_owned(owned)
 	}
 }
 
@@ -123,6 +162,10 @@ macro_rules! impl_to_owned_tuple {
 
 			fn to_owned(self) -> Self::Owned {
 				($(self.$field.to_owned(),)*)
+			}
+
+			fn to_owned_by_ref(&self) -> Self::Owned {
+				($(self.$field.to_owned_by_ref(),)*)
 			}
 		}
 

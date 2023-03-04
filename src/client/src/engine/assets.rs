@@ -1,8 +1,6 @@
 use bort::{storage, CompRef, Entity, OwnedEntity};
-use crucible_util::lang::polyfill::BuildHasherPoly;
+use crucible_util::lang::{polyfill::BuildHasherPoly, tuple::ToOwnedTupleEq};
 use hashbrown::{hash_map::RawEntryMut, HashMap};
-
-use std::hash::Hash;
 
 #[derive(Debug, Default)]
 pub struct AssetManager {
@@ -19,12 +17,13 @@ struct ReifiedKey {
 impl AssetManager {
 	pub fn cache<K, L, R>(&mut self, args: K, loader: L) -> CompRef<R>
 	where
-		K: 'static + Hash + Eq,
+		K: ToOwnedTupleEq,
+		K::Owned: 'static,
 		L: AssetLoaderFunc<Output = R>,
 		R: 'static,
 	{
 		// Acquire relevant storages
-		let args_storage = storage::<K>();
+		let args_storage = storage::<K::Owned>();
 		let vals_storage = storage::<R>();
 
 		// Get the loading closure's function pointer. This is a sound way to differentiate asset
@@ -63,7 +62,7 @@ impl AssetManager {
 				};
 
 			// Finally, ensure that they are equal
-			args == *candidate_args
+			args.is_eq_owned(&candidate_args)
 		});
 
 		let args_entity: Entity;
@@ -81,7 +80,7 @@ impl AssetManager {
 			// Otherwise, mark the entry as "loading"...
 			RawEntryMut::Vacant(entry) => {
 				let args_entity_guard = OwnedEntity::new();
-				args_storage.insert(args_entity_guard.entity(), args);
+				args_storage.insert(args_entity_guard.entity(), args.to_owned());
 				args_entity = args_entity_guard.entity();
 				entry.insert_with_hasher(
 					hash,

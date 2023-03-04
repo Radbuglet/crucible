@@ -61,7 +61,7 @@ pub struct VoxelRenderingPipelineDesc {
 
 impl VoxelRenderingPipelineDesc {
 	pub fn load(
-		self,
+		&self,
 		assets: &mut AssetManager,
 		gfx: &GfxContext,
 	) -> CompRef<wgpu::RenderPipeline> {
