@@ -4,9 +4,6 @@ members = [
 	"src/client",
 	"src/common",
 	"src/typed-glam",
+	"src/typed-wgpu",
 	"src/util",
 ]
-
-# [profile.release]
-# lto = true
-# opt-level = 3

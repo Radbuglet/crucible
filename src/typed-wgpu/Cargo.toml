@@ -1,0 +1,8 @@
+[package]
+name = "typed-wgpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+derive-where = "1.1.0"
+wgpu = { version = "0.15.1", default-features = false }
