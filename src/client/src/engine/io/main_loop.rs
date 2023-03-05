@@ -3,7 +3,7 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use crucible_util::mem::manually_bind::ManuallyBind;
+use crucible_util::{lang::polyfill::OptionPoly, mem::manually_bind::ManuallyBind};
 use winit::{
 	event::{DeviceEvent, DeviceId, Event, WindowEvent},
 	event_loop::{EventLoop, EventLoopWindowTarget},
@@ -20,7 +20,7 @@ pub type WinitEventProxy = EventLoopWindowTarget<WinitUserdata>;
 
 #[derive(Debug)]
 pub struct MainLoop {
-	last_update: Instant,
+	last_update: Option<Instant>,
 	max_ups: u32,
 	exit_requested: Option<i32>,
 }
@@ -32,7 +32,7 @@ impl MainLoop {
 	) -> ! {
 		// Create main loop state
 		let mut main_loop = MainLoop {
-			last_update: Instant::now(),
+			last_update: None,
 			max_ups: 60,
 			exit_requested: None,
 		};
@@ -70,15 +70,15 @@ impl MainLoop {
 					let update_start = Instant::now();
 					let next_update = main_loop.next_update();
 
-					if update_start > next_update {
+					if next_update.p_is_none_or(|next_update| update_start > next_update) {
 						// Run user-define update logic.
 						// It is up to the update handler to queue up redraw requests where
 						// applicable.
 						handler.on_update(&mut main_loop, proxy);
 
 						// Wait until the next update.
-						main_loop.last_update = update_start;
-						let next_update = main_loop.next_update();
+						main_loop.last_update = Some(update_start);
+						let next_update = main_loop.next_update().unwrap();
 						flow.set_wait_until(next_update);
 					} else {
 						// We need to wait a bit more before the next update/render cycle.
@@ -87,7 +87,7 @@ impl MainLoop {
 						//
 						// Note that `MainEventsCleared` will always be called before `flow`
 						// is interpreted by winit so it's fine to only set the flow here.
-						flow.set_wait_until(next_update);
+						flow.set_wait_until(next_update.unwrap());
 					}
 				}
 
@@ -142,8 +142,9 @@ impl MainLoop {
 		Duration::from_secs(1) / self.max_ups
 	}
 
-	pub fn next_update(&self) -> Instant {
-		self.last_update + self.min_delta()
+	pub fn next_update(&self) -> Option<Instant> {
+		self.last_update
+			.map(|last_update| last_update + self.min_delta())
 	}
 }
 

@@ -1,3 +1,5 @@
+use std::any::type_name;
+
 use bort::{storage, CompRef, Entity, OwnedEntity};
 use crucible_util::lang::{polyfill::BuildHasherPoly, tuple::ToOwnedTupleEq};
 use hashbrown::{hash_map::RawEntryMut, HashMap};
@@ -15,31 +17,41 @@ struct ReifiedKey {
 }
 
 impl AssetManager {
+	fn closure_identifier<L: FnOnce(&mut Self) -> R, R>(
+		loader: L,
+		assets: &mut Self,
+		dummy: fn(&str),
+	) -> R {
+		dummy(type_name::<L>());
+		loader(assets)
+	}
+
 	pub fn cache<K, L, R>(&mut self, args: K, loader: L) -> CompRef<R>
 	where
 		K: ToOwnedTupleEq,
 		K::Owned: 'static,
-		L: AssetLoaderFunc<Output = R>,
+		L: FnOnce(&mut Self) -> R,
 		R: 'static,
 	{
 		// Acquire relevant storages
 		let args_storage = storage::<K::Owned>();
 		let vals_storage = storage::<R>();
 
-		// Get the loading closure's function pointer. This is a sound way to differentiate asset
-		// types because:
+		// Get a function pointer to a unique closure identifier. This identifier mixes in both the
+		// type name of the closure, which depends on the calling function path, and the actual
+		// closure behavior itself.
 		//
-		// 1. No false negatives unless the compiler decides to produce a different specialized
-		//    closure dependent on the invocation site. FIXME: That could actually happen...
+		// False negatives: we are referring to a function pointer in the abstract so the optimizer
+		// is not able to perform context-dependent optimizations that would result in creating a
+		// different function given a different calling context since it has **no context**.
 		//
-		// 2. No false positives unless the compiler manages to combine the two closures, which is
-		//    only sound if the two closures have the same effect, in which case the behavior is
-		//    still correct and actually more optimal. FIXME: There could be funky tampolining of
-		//    `dyn FnOnce()` instances.
+		// False positives: the closure identifier mixes in both the type name of the closure (which
+		// is usually unique per calling function path) and the actual behavior of the closure being
+		// invoked statically.
 		//
-		// We have to go through an `AssetLoaderFunc` indirection because `FnOnce::call_once` is not
-		// yet namable on stable.
-		let func = L::load as usize;
+		// FIXME: there is a risk that the user passes in a function pointer instead of an actual
+		//        function.
+		let func = Self::closure_identifier::<L, R> as usize;
 
 		// Now, hash the combination of the function pointer and the arguments.
 		let hash = self.assets.hasher().p_hash_one(&(func, &args));
@@ -96,7 +108,7 @@ impl AssetManager {
 		};
 
 		// Load the asset
-		let res = loader.load(self);
+		let res = loader(self);
 		let res_ent = OwnedEntity::new();
 		vals_storage.insert(res_ent.entity(), res);
 		let res_ref = vals_storage.get(res_ent.entity());
@@ -113,19 +125,5 @@ impl AssetManager {
 
 		// And return our reference
 		res_ref
-	}
-}
-
-pub trait AssetLoaderFunc {
-	type Output;
-
-	fn load(self, assets: &mut AssetManager) -> Self::Output;
-}
-
-impl<F: FnOnce(&mut AssetManager) -> R, R> AssetLoaderFunc for F {
-	type Output = R;
-
-	fn load(self, assets: &mut AssetManager) -> Self::Output {
-		(self)(assets)
 	}
 }

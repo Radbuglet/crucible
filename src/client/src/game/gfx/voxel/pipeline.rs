@@ -16,7 +16,7 @@ pub fn load_opaque_block_shader(
 	assets: &mut AssetManager,
 	gfx: &GfxContext,
 ) -> CompRef<wgpu::ShaderModule> {
-	assets.cache((), move |_: &mut AssetManager| {
+	assets.cache((), move |_| {
 		gfx.device
 			.create_shader_module(wgpu::ShaderModuleDescriptor {
 				label: Some("opaque_block.wgsl"),
@@ -65,7 +65,7 @@ impl VoxelRenderingPipelineDesc {
 		assets: &mut AssetManager,
 		gfx: &GfxContext,
 	) -> CompRef<wgpu::RenderPipeline> {
-		assets.cache(self, move |assets: &mut AssetManager| {
+		assets.cache(self, move |assets| {
 			let shader = load_opaque_block_shader(assets, gfx);
 			let layout = VoxelRenderingUniforms::load_layout(assets, gfx, ());
 			let layout = load_pipeline_layout(assets, gfx, [&layout], []);

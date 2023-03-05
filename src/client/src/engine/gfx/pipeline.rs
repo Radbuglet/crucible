@@ -1,7 +1,10 @@
 use std::{any::type_name, hash};
 
 use bort::CompRef;
-use crucible_util::{lang::tuple::{ToOwnedTupleEq, PreOwned}, mem::array::map_arr};
+use crucible_util::{
+	lang::tuple::{PreOwned, ToOwnedTupleEq},
+	mem::array::map_arr,
+};
 
 use crate::engine::{assets::AssetManager, io::gfx::GfxContext};
 
@@ -38,7 +41,7 @@ pub trait BindUniform {
 		gfx: &GfxContext,
 		config: impl ToOwnedTupleEq<_OwnedEq = Self::Config>,
 	) -> CompRef<wgpu::BindGroupLayout> {
-		assets.cache(config.as_ref(), |_: &mut AssetManager| {
+		assets.cache(config.as_ref(), |_| {
 			Self::create_layout(gfx, config.to_owned_by_ref())
 		})
 	}
@@ -409,15 +412,12 @@ pub fn load_pipeline_layout<const N: usize, const M: usize>(
 ) -> CompRef<wgpu::PipelineLayout> {
 	let bind_ids = map_arr(bind_uniforms, |v| v.global_id());
 
-	assets.cache(
-		(&bind_ids, PreOwned(push_uniforms.clone())),
-		move |_: &mut AssetManager| {
-			gfx.device
-				.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-					label: None,
-					bind_group_layouts: &bind_uniforms,
-					push_constant_ranges: &push_uniforms,
-				})
-		},
-	)
+	assets.cache((&bind_ids, PreOwned(push_uniforms.clone())), move |_| {
+		gfx.device
+			.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+				label: None,
+				bind_group_layouts: &bind_uniforms,
+				push_constant_ranges: &push_uniforms,
+			})
+	})
 }
