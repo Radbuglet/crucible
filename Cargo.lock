@@ -1797,6 +1797,7 @@ dependencies = [
 name = "typed-wgpu"
 version = "0.1.0"
 dependencies = [
+ "crucible-util",
  "derive-where",
  "wgpu",
 ]

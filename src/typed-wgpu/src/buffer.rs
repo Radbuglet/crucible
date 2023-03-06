@@ -1,10 +1,10 @@
+use crucible_util::transparent;
 use derive_where::derive_where;
 
-use crate::util::transparent_wrapper;
+transparent! {
+	#[derive_where(Debug)]
+	pub struct Buffer<T>(pub wgpu::Buffer, T);
 
-transparent_wrapper! {
-	pub struct Buffer(wgpu::Buffer);
-
-	#[derive_where(Copy, Clone)]
-	pub struct BufferSlice<'a>(wgpu::BufferSlice<'a>);
+	#[derive_where(Debug, Copy, Clone)]
+	pub struct BufferSlice<'a, T>(pub wgpu::BufferSlice<'a>, T);
 }

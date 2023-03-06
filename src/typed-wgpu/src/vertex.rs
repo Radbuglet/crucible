@@ -1,11 +1,9 @@
 use std::{fmt, hash::Hash};
 
+use crucible_util::transparent;
 use derive_where::derive_where;
 
-use crate::{
-	buffer::BufferSlice,
-	util::{transparent_wrapper, SlotAssigner},
-};
+use crate::{buffer::BufferSlice, util::SlotAssigner};
 
 // === VertexShader === //
 
@@ -18,9 +16,9 @@ pub struct VertexShader<V> {
 
 // === VertexBufferSet === //
 
-transparent_wrapper! {
-	#[derive_where(Clone)]
-	pub struct VertexBufferSetLayout(RawVertexBufferSetLayout);
+transparent! {
+	#[derive_where(Debug, Clone)]
+	pub struct VertexBufferSetLayout<T>(pub RawVertexBufferSetLayout, T);
 }
 
 #[derive(Debug, Clone)]
@@ -117,8 +115,9 @@ impl<'a, 'me, T: ?Sized> VertexBufferSetBuilder<T> for VertexBufferSetCommitBuil
 
 // === VertexBufferLayout === //
 
-transparent_wrapper! {
-	pub struct VertexBufferLayout(RawVertexBufferLayout);
+transparent! {
+	#[derive_where(Debug)]
+	pub struct VertexBufferLayout<T>(pub RawVertexBufferLayout, T);
 }
 
 #[derive(Debug, Clone, Default)]
@@ -221,7 +220,7 @@ impl VertexBufferLayoutBuilder {
 		self
 	}
 
-	pub fn finish<B: ?Sized>(self) -> VertexBufferLayout<B> {
+	pub fn finish<T>(self) -> VertexBufferLayout<T> {
 		RawVertexBufferLayout {
 			stride: self.size,
 			attributes: self.attributes,

@@ -1,5 +1,9 @@
-use std::{ops::{Deref, DerefMut}, mem::transmute};
+use std::{
+	mem::transmute,
+	ops::{Deref, DerefMut},
+};
 
+// TODO: Find a way to use `transparent!` here.
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct View<T: ?Sized>(T);

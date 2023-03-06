@@ -1,9 +1,11 @@
-use crucible_util::lang::{marker::PhantomInvariant, std_traits::ArrayLike};
+use crucible_util::{
+	lang::{marker::PhantomInvariant, std_traits::ArrayLike},
+	transparent,
+};
 
 use std::{
 	fmt, hash,
 	iter::{Product, Sum},
-	marker::PhantomData,
 	mem::transmute,
 	ops::{self, Index, IndexMut},
 };
@@ -39,10 +41,12 @@ impl<F: ?Sized + VecFlavor> FlavorCastFrom<TypedVector<F>> for F {
 
 pub type TypedVector<F> = TypedVectorImpl<F, <<F as VecFlavor>::Backing as NumericVector>::Dim>;
 
-#[repr(transparent)]
-pub struct TypedVectorImpl<F: ?Sized + VecFlavor, D: DimClass> {
-	_ty: PhantomInvariant<D>,
-	vec: F::Backing,
+transparent! {
+	pub struct TypedVectorImpl<F, D>(F::Backing, PhantomInvariant<D>)
+	where {
+		F: ?Sized + VecFlavor,
+		D: DimClass,
+	};
 }
 
 // `VecFrom` and `NumericVector`
@@ -100,22 +104,19 @@ impl<F: ?Sized + VecFlavor> GlamBacked for TypedVector<F> {
 
 impl<F: ?Sized + VecFlavor> TypedVector<F> {
 	pub fn to_glam(self) -> F::Backing {
-		self.vec
+		self.raw
 	}
 
 	pub fn as_glam(&self) -> &F::Backing {
-		&self.vec
+		&self.raw
 	}
 
 	pub fn as_glam_mut(&mut self) -> &mut F::Backing {
-		&mut self.vec
+		&mut self.raw
 	}
 
-	pub const fn from_glam(vec: F::Backing) -> Self {
-		Self {
-			_ty: PhantomData,
-			vec,
-		}
+	pub const fn from_glam(raw: F::Backing) -> Self {
+		Self::wrap(raw)
 	}
 
 	pub fn from_glam_ref(glam: &F::Backing) -> &Self {

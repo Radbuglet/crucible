@@ -1,12 +1,14 @@
+use crucible_util::transparent;
 use derive_where::derive_where;
 use std::{any::type_name, fmt, hash::Hash, num::NonZeroU32};
 
-use crate::util::{transparent_wrapper, SlotAssigner};
+use crate::util::SlotAssigner;
 
 // === UniformSet === //
 
-transparent_wrapper! {
-	pub struct UniformSetLayout(wgpu::PipelineLayout);
+transparent! {
+	#[derive_where(Debug)]
+	pub struct UniformSetLayout<T>(pub wgpu::PipelineLayout, T);
 }
 
 // TODO: Figure out constructor context and automation
@@ -25,10 +27,12 @@ pub trait UniformSet: Sized {
 
 // === BindUniform === //
 
-transparent_wrapper! {
-	pub struct BindUniformLayout(wgpu::BindGroupLayout);
+transparent! {
+	#[derive_where(Debug)]
+	pub struct BindUniformLayout<T>(pub wgpu::BindGroupLayout, T);
 
-	pub struct BindUniformInstance(wgpu::BindGroup);
+	#[derive_where(Debug)]
+	pub struct BindUniformInstance<T>(pub wgpu::BindGroup, T);
 }
 
 pub trait BindUniform: Sized {

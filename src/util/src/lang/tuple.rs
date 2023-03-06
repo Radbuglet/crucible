@@ -1,3 +1,4 @@
+use derive_where::derive_where;
 use std::{borrow::Borrow, hash};
 
 // === Macros === //
@@ -60,8 +61,6 @@ macro_rules! impl_tuples {
 	};
 }
 
-use derive_where::derive_where;
-// Technically, this re-exports from the macro-prelude, not the local scope. Neat!
 pub use impl_tuples;
 
 // === ToOwnedTuple === //
