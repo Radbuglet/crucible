@@ -85,8 +85,6 @@ pub trait CastVecFrom<C> {
 	fn cast_from(other: C) -> Self;
 }
 
-// TODO: BoolVector trait
-
 pub trait NumericVector:
 	'static
 	+ Debug
@@ -353,11 +351,6 @@ impl_glam_convert_identity!(
 	glam::UVec2,
 	glam::UVec3,
 	glam::UVec4,
-	// glam::BVec2,
-	// glam::BVec3,
-	// glam::BVec3A,
-	// glam::BVec4,
-	// glam::BVec4A,
 );
 
 macro_rules! numeric_vector_forwards {

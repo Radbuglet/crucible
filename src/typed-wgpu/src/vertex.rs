@@ -1,6 +1,6 @@
 use std::{fmt, hash::Hash};
 
-use crucible_util::transparent;
+use crucible_util::{lang::marker::PhantomProlong, transparent};
 use derive_where::derive_where;
 
 use crate::{buffer::BufferSlice, util::SlotAssigner};
@@ -18,7 +18,7 @@ pub struct VertexShader<V> {
 
 transparent! {
 	#[derive_where(Debug, Clone)]
-	pub struct VertexBufferSetLayout<T>(pub RawVertexBufferSetLayout, T);
+	pub struct VertexBufferSetLayout<T>(pub RawVertexBufferSetLayout, PhantomProlong<T>);
 }
 
 #[derive(Debug, Clone)]
@@ -27,12 +27,19 @@ pub struct RawVertexBufferSetLayout {
 }
 
 pub trait VertexBufferSet {
+	type CtorContext: ?Sized;
 	type Config: 'static + Hash + Eq + Clone;
 
-	fn layout(config: &Self::Config, builder: &mut impl VertexBufferSetBuilder<Self>);
+	fn layout(
+		config: &Self::Config,
+		builder: &mut impl VertexBufferSetBuilder<Self, Self::CtorContext>,
+	);
 
-	fn buffer_layouts(config: &Self::Config) -> RawVertexBufferSetLayout {
-		let mut builder = VertexBufferSetLayoutBuilder::default();
+	fn buffer_layouts(config: &Self::Config, ctx: &Self::CtorContext) -> RawVertexBufferSetLayout {
+		let mut builder = VertexBufferSetLayoutBuilder {
+			ctx,
+			layouts: Vec::new(),
+		};
 		Self::layout(config, &mut builder);
 
 		RawVertexBufferSetLayout {
@@ -40,7 +47,7 @@ pub trait VertexBufferSet {
 		}
 	}
 
-	fn apply<'r>(&'r self, config: &Self::Config, pass: &mut wgpu::RenderPass<'r>) {
+	fn apply_to_pass<'r>(&'r self, config: &Self::Config, pass: &mut wgpu::RenderPass<'r>) {
 		Self::layout(
 			config,
 			&mut VertexBufferSetCommitBuilder {
@@ -52,7 +59,7 @@ pub trait VertexBufferSet {
 	}
 }
 
-pub trait VertexBufferSetBuilder<T: ?Sized>: fmt::Debug {
+pub trait VertexBufferSetBuilder<T: ?Sized, C: ?Sized>: fmt::Debug {
 	fn with_buffer<B, F1, F2>(
 		&mut self,
 		step_mode: wgpu::VertexStepMode,
@@ -60,16 +67,18 @@ pub trait VertexBufferSetBuilder<T: ?Sized>: fmt::Debug {
 		data: F2,
 	) -> &mut Self
 	where
-		F1: FnOnce() -> VertexBufferLayout<B>,
+		F1: FnOnce(&C) -> VertexBufferLayout<B>,
 		F2: FnOnce(&T) -> BufferSlice<B>;
 }
 
-#[derive(Debug, Default)]
-struct VertexBufferSetLayoutBuilder {
+#[derive_where(Debug)]
+struct VertexBufferSetLayoutBuilder<'a, C: ?Sized> {
+	#[derive_where(skip)]
+	ctx: &'a C,
 	layouts: Vec<(wgpu::VertexStepMode, RawVertexBufferLayout)>,
 }
 
-impl<T: ?Sized> VertexBufferSetBuilder<T> for VertexBufferSetLayoutBuilder {
+impl<T: ?Sized, C: ?Sized> VertexBufferSetBuilder<T, C> for VertexBufferSetLayoutBuilder<'_, C> {
 	fn with_buffer<B, F1, F2>(
 		&mut self,
 		step_mode: wgpu::VertexStepMode,
@@ -77,10 +86,10 @@ impl<T: ?Sized> VertexBufferSetBuilder<T> for VertexBufferSetLayoutBuilder {
 		_data: F2,
 	) -> &mut Self
 	where
-		F1: FnOnce() -> VertexBufferLayout<B>,
+		F1: FnOnce(&C) -> VertexBufferLayout<B>,
 		F2: FnOnce(&T) -> BufferSlice<B>,
 	{
-		self.layouts.push((step_mode, layout().raw));
+		self.layouts.push((step_mode, layout(self.ctx).raw));
 		self
 	}
 }
@@ -93,7 +102,9 @@ struct VertexBufferSetCommitBuilder<'a, 'me, T: ?Sized> {
 	slot: u32,
 }
 
-impl<'a, 'me, T: ?Sized> VertexBufferSetBuilder<T> for VertexBufferSetCommitBuilder<'a, 'me, T> {
+impl<'a, 'me, T: ?Sized, C: ?Sized> VertexBufferSetBuilder<T, C>
+	for VertexBufferSetCommitBuilder<'a, 'me, T>
+{
 	fn with_buffer<B, F1, F2>(
 		&mut self,
 		_step_mode: wgpu::VertexStepMode,
@@ -101,7 +112,7 @@ impl<'a, 'me, T: ?Sized> VertexBufferSetBuilder<T> for VertexBufferSetCommitBuil
 		data: F2,
 	) -> &mut Self
 	where
-		F1: FnOnce() -> VertexBufferLayout<B>,
+		F1: FnOnce(&C) -> VertexBufferLayout<B>,
 		F2: FnOnce(&T) -> BufferSlice<B>,
 	{
 		self.pass.set_vertex_buffer(self.slot, data(self.me).raw);
@@ -117,7 +128,7 @@ impl<'a, 'me, T: ?Sized> VertexBufferSetBuilder<T> for VertexBufferSetCommitBuil
 
 transparent! {
 	#[derive_where(Debug)]
-	pub struct VertexBufferLayout<T>(pub RawVertexBufferLayout, T);
+	pub struct VertexBufferLayout<T>(pub RawVertexBufferLayout, PhantomProlong<T>);
 }
 
 #[derive(Debug, Clone, Default)]

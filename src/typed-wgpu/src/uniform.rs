@@ -1,14 +1,17 @@
-use crucible_util::transparent;
+use crucible_util::{
+	lang::marker::{PhantomInvariant, PhantomProlong},
+	transparent,
+};
 use derive_where::derive_where;
 use std::{any::type_name, fmt, hash::Hash, num::NonZeroU32};
 
-use crate::util::SlotAssigner;
+use crate::{buffer::BufferBinding, util::SlotAssigner};
 
 // === UniformSet === //
 
 transparent! {
 	#[derive_where(Debug)]
-	pub struct UniformSetLayout<T>(pub wgpu::PipelineLayout, T);
+	pub struct UniformSetLayout<T>(pub wgpu::PipelineLayout, PhantomInvariant<T>);
 }
 
 // TODO: Figure out constructor context and automation
@@ -19,20 +22,20 @@ pub trait UniformSet: Sized {
 	fn create_layout(
 		device: &wgpu::Device,
 		context: Self::CtorContext<'_>,
-		config: Self::Config,
+		config: &Self::Config,
 	) -> UniformSetLayout<Self>;
 
-	fn apply_to_pass<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>, config: Self::Config);
+	fn apply_to_pass<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>, config: &Self::Config);
 }
 
 // === BindUniform === //
 
 transparent! {
 	#[derive_where(Debug)]
-	pub struct BindUniformLayout<T>(pub wgpu::BindGroupLayout, T);
+	pub struct BindUniformLayout<T>(pub wgpu::BindGroupLayout, PhantomProlong<T>);
 
 	#[derive_where(Debug)]
-	pub struct BindUniformInstance<T>(pub wgpu::BindGroup, T);
+	pub struct BindUniformInstance<T>(pub wgpu::BindGroup, PhantomProlong<T>);
 }
 
 pub trait BindUniform: Sized {
@@ -657,3 +660,16 @@ impl<'a, T: ?Sized> BindUniformInstanceBuilder<'a, T> {
 // === PushUniform === //
 
 // TODO
+
+// === Utilities === //
+
+#[derive_where(Debug, Clone)]
+pub struct BufferBindUniform<'a, T>(BufferBinding<'a, T>);
+
+impl<T> BindUniform for BufferBindUniform<'_, T> {
+	type Config = wgpu::ShaderStages;
+
+	fn layout(builder: &mut impl BindUniformBuilder<Self>, &stages: &Self::Config) {
+		builder.with_uniform_buffer(stages, false, |me| me.0.raw.clone());
+	}
+}

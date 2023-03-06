@@ -61,12 +61,13 @@ macro_rules! transparent {
 			$rvis raw: $raw,
 		}
 
+		#[allow(dead_code)]
 		impl<$($($lt,)* $($para,)*)?> $name<$($($lt,)* $($para,)*)?>
 		$(where $($where_clause)*)?
 		{
 			$rvis const fn wrap(raw: $raw) -> Self
 			where
-				$crate::lang::transparent::macro_internal::SizedHack<$raw, Self>: Sized,
+				for<'trivial> <$raw as $crate::lang::transparent::macro_internal::TrivialBounds<'trivial>>::Of: Sized,
 			{
 				Self {
 					$(ty: $crate::lang::transparent::macro_internal::PhantomData::<$dummy>,)?
@@ -91,9 +92,11 @@ pub use transparent;
 pub mod macro_internal {
 	pub use core::{convert::From, marker::PhantomData, mem::transmute};
 
-	pub struct SizedHack<A: ?Sized, B: ?Sized>(PhantomData<A>, PhantomData<B>);
+	pub trait TrivialBounds<'a> {
+		type Of: ?Sized;
+	}
 
-	pub trait IsSized {}
-
-	impl<A, B> IsSized for SizedHack<A, B> {}
+	impl<'a, T: ?Sized> TrivialBounds<'a> for T {
+		type Of = T;
+	}
 }

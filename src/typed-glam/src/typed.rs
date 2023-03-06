@@ -6,7 +6,6 @@ use crucible_util::{
 use std::{
 	fmt, hash,
 	iter::{Product, Sum},
-	mem::transmute,
 	ops::{self, Index, IndexMut},
 };
 
@@ -120,17 +119,11 @@ impl<F: ?Sized + VecFlavor> TypedVector<F> {
 	}
 
 	pub fn from_glam_ref(glam: &F::Backing) -> &Self {
-		unsafe {
-			// Safety: we are `repr(transparent)` w.r.t `F::Backing`.
-			transmute(glam)
-		}
+		Self::wrap_ref(glam)
 	}
 
 	pub fn from_glam_mut(glam: &mut F::Backing) -> &mut Self {
-		unsafe {
-			// Safety: we are `repr(transparent)` w.r.t `F::Backing`.
-			transmute(glam)
-		}
+		Self::wrap_mut(glam)
 	}
 
 	// Copied from `GlamConvert`
