@@ -145,6 +145,14 @@ pub struct VertexBufferLayoutBuilder {
 	attributes: Vec<wgpu::VertexAttribute>,
 }
 
+// N.B. we only impl this for some arbitrary type `()` so calls to `VertexBufferLayout::builder()`
+// can resolve unambiguously.
+impl VertexBufferLayout<()> {
+	pub fn builder() -> VertexBufferLayoutBuilder {
+		VertexBufferLayoutBuilder::new()
+	}
+}
+
 // TODO: Check for duplicates and overlap?
 impl VertexBufferLayoutBuilder {
 	const OVERFLOW_ERR: &str = "attribute offset overflowed";
@@ -178,19 +186,17 @@ impl VertexBufferLayoutBuilder {
 		self.location.peek()
 	}
 
-	// Builders
-	pub fn with_location(&mut self, location: u32) -> &mut Self {
+	// Procedural builder
+	pub fn set_location(&mut self, location: u32) {
 		self.location.jump_to(location);
-		self
 	}
 
-	pub fn with_offset(&mut self, offset: u64) -> &mut Self {
+	pub fn set_offset(&mut self, offset: u64) {
 		self.next_offset = offset;
 		self.size = self.size.max(self.next_offset);
-		self
 	}
 
-	pub fn with_attribute(&mut self, format: wgpu::VertexFormat) -> &mut Self {
+	pub fn push_attribute(&mut self, format: wgpu::VertexFormat) {
 		self.attributes.push(wgpu::VertexAttribute {
 			format,
 			// Vertex attributes are packed in wgpu. See the source of `wgpu::vertex_attr_array` for
@@ -198,15 +204,14 @@ impl VertexBufferLayoutBuilder {
 			offset: self.next_offset,
 			shader_location: self.location.next(),
 		});
-		self.with_offset(
+		self.set_offset(
 			self.next_offset
 				.checked_add(format.size())
 				.expect(Self::OVERFLOW_ERR),
 		);
-		self
 	}
 
-	pub fn with_sub_layout(&mut self, layout: &RawVertexBufferLayout) -> &mut Self {
+	pub fn push_sub_layout(&mut self, layout: &RawVertexBufferLayout) {
 		for attrib in &layout.attributes {
 			self.attributes.push(wgpu::VertexAttribute {
 				format: attrib.format,
@@ -218,16 +223,40 @@ impl VertexBufferLayoutBuilder {
 			});
 		}
 
-		self.with_offset(
+		self.set_offset(
 			self.next_offset
 				.checked_add(layout.stride)
 				.expect(Self::OVERFLOW_ERR),
 		);
+	}
+
+	pub fn pad_to_size(&mut self, size: u64) {
+		self.size = self.size.max(size);
+	}
+
+	// Builder methods
+	pub fn with_location(mut self, location: u32) -> Self {
+		self.set_location(location);
 		self
 	}
 
-	pub fn with_pad_to_size(&mut self, size: u64) -> &mut Self {
-		self.size = self.size.max(size);
+	pub fn with_offset(mut self, offset: u64) -> Self {
+		self.set_offset(offset);
+		self
+	}
+
+	pub fn with_attribute(mut self, format: wgpu::VertexFormat) -> Self {
+		self.push_attribute(format);
+		self
+	}
+
+	pub fn with_sub_layout(mut self, layout: &RawVertexBufferLayout) -> Self {
+		self.push_sub_layout(layout);
+		self
+	}
+
+	pub fn with_padding_to_size(mut self, size: u64) -> Self {
+		self.pad_to_size(size);
 		self
 	}
 

@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, num::NonZeroU32};
+use std::{fmt::Debug, hash::Hash, num::NonZeroU32};
 
 use derive_where::derive_where;
 
@@ -7,14 +7,51 @@ use crate::{
 	vertex::{VertexBufferSet, VertexShader},
 };
 
-#[derive_where(Debug, Default)]
-pub struct RenderPipelineBuilder<'a, U, V> {
+// === Builder === //
+
+mod sealed {
+	use super::*;
+
+	pub enum Unspecified {}
+
+	pub trait UniformSetOrNever {
+		type Config: 'static + Hash + Eq;
+	}
+
+	impl UniformSetOrNever for Unspecified {
+		type Config = ();
+	}
+
+	impl<T: UniformSet> UniformSetOrNever for T {
+		type Config = T::Config;
+	}
+
+	pub trait VertexBufferSetOrNever {
+		type Config: 'static + Hash + Eq;
+	}
+
+	impl VertexBufferSetOrNever for Unspecified {
+		type Config = ();
+	}
+
+	impl<T: VertexBufferSet> VertexBufferSetOrNever for T {
+		type Config = T::Config;
+	}
+}
+
+#[derive_where(Debug; U::Config: Debug, V::Config: Debug)]
+#[derive_where(Default)]
+pub struct RenderPipelineBuilder<'a, U = sealed::Unspecified, V = sealed::Unspecified>
+where
+	U: sealed::UniformSetOrNever,
+	V: sealed::VertexBufferSetOrNever,
+{
 	// Debug config
 	label: Option<&'a str>,
 
 	// Shader config
-	uniform_layout: Option<&'a UniformSetLayout<U>>,
-	vertex_shader: Option<&'a VertexShader<V>>,
+	uniform_layout: Option<(&'a UniformSetLayout<U>, U::Config)>,
+	vertex_shader: Option<(&'a VertexShader<V>, V::Config)>,
 	fragment_shader: Option<wgpu::FragmentState<'a>>,
 
 	// Fixed-function config
@@ -24,8 +61,28 @@ pub struct RenderPipelineBuilder<'a, U, V> {
 	multiview: Option<NonZeroU32>,
 }
 
+impl RenderPipelineBuilder<'_> {
+	pub fn new() -> Self {
+		Self::default()
+	}
+}
+
+impl<'a, U, V> RenderPipelineBuilder<'a, U, V>
+where
+	U: sealed::UniformSetOrNever,
+	V: sealed::VertexBufferSetOrNever,
+{
+	pub fn with_label(mut self, label: &'a str) -> Self {
+		self.label = Some(label);
+		self
+	}
+
+	// TODO
+}
+
+// === Instance === //
+
 pub struct RenderPipeline<U: UniformSet, V: VertexBufferSet> {
-	pub ty: PhantomData<(U, V)>,
 	pub uniform_config: U::Config,
 	pub vertex_config: V::Config,
 	pub raw: wgpu::RenderPipeline,

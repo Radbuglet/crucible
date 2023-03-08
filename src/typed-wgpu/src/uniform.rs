@@ -5,16 +5,16 @@ use crucible_util::{
 use derive_where::derive_where;
 use std::{any::type_name, fmt, hash::Hash, num::NonZeroU32};
 
-use crate::{buffer::BufferBinding, util::SlotAssigner};
+use crate::util::SlotAssigner;
 
 // === UniformSet === //
 
+// Core
 transparent! {
 	#[derive_where(Debug)]
 	pub struct UniformSetLayout<T>(pub wgpu::PipelineLayout, PhantomInvariant<T>);
 }
 
-// TODO: Figure out constructor context and automation
 pub trait UniformSet: Sized {
 	type CtorContext<'a>;
 	type Config: 'static + Hash + Eq;
@@ -660,16 +660,3 @@ impl<'a, T: ?Sized> BindUniformInstanceBuilder<'a, T> {
 // === PushUniform === //
 
 // TODO
-
-// === Utilities === //
-
-#[derive_where(Debug, Clone)]
-pub struct BufferBindUniform<'a, T>(BufferBinding<'a, T>);
-
-impl<T> BindUniform for BufferBindUniform<'_, T> {
-	type Config = wgpu::ShaderStages;
-
-	fn layout(builder: &mut impl BindUniformBuilder<Self>, &stages: &Self::Config) {
-		builder.with_uniform_buffer(stages, false, |me| me.0.raw.clone());
-	}
-}
