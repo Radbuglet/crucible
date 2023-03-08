@@ -7,71 +7,62 @@ use crate::{buffer::BufferSlice, util::SlotAssigner};
 
 // === VertexBufferSet === //
 
-pub trait VertexBufferSet {
-	type InstanceSet<'a>
-	where
-		Self: 'a;
+// Core
+pub trait VertexBufferSetKind: Sized + 'static {}
 
-	type InstanceSetIter<'a>: IntoIterator<Item = wgpu::BufferSlice<'a>>
-	where
-		Self: 'a;
+pub trait VertexBufferSetLayoutGenerator {
+	type Kind: VertexBufferSetKind;
 
 	fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]>;
-
-	fn instances<'a>(set: Self::InstanceSet<'a>) -> Self::InstanceSetIter<'a>
-	where
-		Self: 'a;
-
-	fn apply_instances<'a>(pass: &mut wgpu::RenderPass<'a>, set: Self::InstanceSet<'a>) {
-		for (idx, slice) in Self::instances(set).into_iter().enumerate() {
-			pass.set_vertex_buffer(idx as u32, slice);
-		}
-	}
 }
 
-impl VertexBufferSet for [wgpu::VertexBufferLayout<'_>] {
-	type InstanceSet<'a> = &'a [wgpu::BufferSlice<'a>]
-	where
-		Self: 'a;
+pub trait VertexBufferSetInstanceGenerator<K: VertexBufferSetKind> {
+	fn apply<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>);
+}
 
-	type InstanceSetIter<'a> = std::iter::Copied<std::slice::Iter<'a, wgpu::BufferSlice<'a>>>
-	where
-		Self: 'a;
+// Untyped kind
+#[non_exhaustive]
+pub struct UntypedVertexBufferSetKind;
+
+impl VertexBufferSetKind for UntypedVertexBufferSetKind {}
+
+impl VertexBufferSetLayoutGenerator for [wgpu::VertexBufferLayout<'_>] {
+	type Kind = UntypedVertexBufferSetKind;
 
 	fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
 		self.into()
 	}
+}
 
-	fn instances<'a>(set: Self::InstanceSet<'a>) -> Self::InstanceSetIter<'a>
-	where
-		Self: 'a,
-	{
-		set.iter().copied()
+impl VertexBufferSetInstanceGenerator<UntypedVertexBufferSetKind> for &[wgpu::BufferSlice<'_>] {
+	fn apply<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+		for (index, &buffer) in self.iter().enumerate() {
+			pass.set_vertex_buffer(index as u32, buffer);
+		}
 	}
 }
 
+// Typed kinds
 macro_rules! impl_vertex_buffer_set {
 	($($para:ident:$field:tt),*) => {
-		impl<$($para),*> VertexBufferSet for ($(VertexBufferLayout<$para>,)*) {
-			type InstanceSet<'a> = ($(BufferSlice<'a, $para>,)*)
-			where
-				Self: 'a;
+		impl<$($para: 'static),*> VertexBufferSetKind for ($($para,)*) {}
 
-			#[allow(non_snake_case)]
-			type InstanceSetIter<'a> = [wgpu::BufferSlice<'a>; $({ let $para = (); let _ = $para; 1 } +)* 0]
-			where
-				Self: 'a;
+		impl<'a, $($para: 'static),*> VertexBufferSetLayoutGenerator for ($(&'a VertexBufferLayout<$para>,)*) {
+			type Kind = ($($para,)*);
 
 			fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
 				vec![$(self.$field.raw.as_wgpu()),*].into()
 			}
+		}
 
+		impl<$($para: 'static),*> VertexBufferSetInstanceGenerator<($($para,)*)> for ($(BufferSlice<'_, $para>,)*) {
 			#[allow(unused)]
-			fn instances<'a>(set: Self::InstanceSet<'a>) -> Self::InstanceSetIter<'a>
-			where
-				Self: 'a,
-			{
-				[$(set.$field.raw),*]
+			fn apply<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+				let mut index = 0;
+				$({
+					pass.set_vertex_buffer(index, self.$field.raw);
+					index += 1;
+				})*
 			}
 		}
 	};

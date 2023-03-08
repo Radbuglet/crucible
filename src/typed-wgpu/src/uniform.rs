@@ -6,20 +6,57 @@ use crate::util::SlotAssigner;
 
 // === UniformSet === //
 
+// Core
 transparent! {
-	pub struct UniformSetLayout<T>(wgpu::PipelineLayout, T);  // where T: UniformSet
+	pub struct UniformSetLayout<T>(pub wgpu::PipelineLayout, T)
+	where {
+		T: UniformSetKind,
+	};
 }
 
-pub trait UniformSet {
-	type Input<'a>;
+pub trait UniformSetKind: Sized + 'static {}
 
-	fn bind_instances<'a>(
-		pipeline: &wgpu::RenderPipeline,
-		pass: &mut wgpu::RenderPass<'a>,
-		input: Self::Input<'a>,
-	);
+pub trait UniformSetLayoutGenerator {
+	type Kind: UniformSetKind;
+
+	fn create_layout(&self, device: &wgpu::Device) -> UniformSetLayout<Self::Kind>;
 }
 
+pub trait UniformSetInstanceGenerator<K: UniformSetKind> {
+	fn apply<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>);
+}
+
+// Untyped kind
+#[non_exhaustive]
+pub struct UntypedUniformSetKind;
+
+impl UniformSetKind for UntypedUniformSetKind {}
+
+impl UniformSetLayoutGenerator for wgpu::PipelineLayoutDescriptor<'_> {
+	type Kind = UntypedUniformSetKind;
+
+	fn create_layout(&self, device: &wgpu::Device) -> UniformSetLayout<Self::Kind> {
+		device.create_pipeline_layout(self).into()
+	}
+}
+
+impl UniformSetInstanceGenerator<UntypedUniformSetKind> for [&wgpu::BindGroup] {
+	fn apply<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>) {
+		for (index, bind_group) in self.iter().enumerate() {
+			pass.set_bind_group(index as u32, bind_group, &[]);
+		}
+	}
+}
+
+impl UniformSetInstanceGenerator<UntypedUniformSetKind> for [(&wgpu::BindGroup, &[u32])] {
+	fn apply<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>) {
+		for (index, (bind_group, offsets)) in self.iter().enumerate() {
+			pass.set_bind_group(index as u32, bind_group, offsets);
+		}
+	}
+}
+
+// Typed kinds
 // TODO
 
 // === BindUniform === //
