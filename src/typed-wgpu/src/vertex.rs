@@ -1,128 +1,83 @@
-use std::{fmt, hash::Hash};
+use std::borrow::Cow;
 
-use crucible_util::{lang::marker::PhantomProlong, transparent};
+use crucible_util::{impl_tuples, lang::marker::PhantomProlong, transparent};
 use derive_where::derive_where;
 
 use crate::{buffer::BufferSlice, util::SlotAssigner};
 
-// === VertexShader === //
-
-#[derive_where(Debug)]
-pub struct VertexShader<V> {
-	pub module: wgpu::ShaderModule,
-	pub entry_point: String,
-	pub vertex_layout: VertexBufferSetLayout<V>,
-}
-
 // === VertexBufferSet === //
 
-transparent! {
-	#[derive_where(Debug, Clone)]
-	pub struct VertexBufferSetLayout<T>(pub RawVertexBufferSetLayout, PhantomProlong<T>);
-}
-
-#[derive(Debug, Clone)]
-pub struct RawVertexBufferSetLayout {
-	pub buffers: Vec<(wgpu::VertexStepMode, RawVertexBufferLayout)>,
-}
-
 pub trait VertexBufferSet {
-	type CtorContext: ?Sized;
-	type Config: 'static + Hash + Eq + Clone;
+	type InstanceSet<'a>
+	where
+		Self: 'a;
 
-	fn layout(
-		config: &Self::Config,
-		builder: &mut impl VertexBufferSetBuilder<Self, Self::CtorContext>,
-	);
+	type InstanceSetIter<'a>: IntoIterator<Item = wgpu::BufferSlice<'a>>
+	where
+		Self: 'a;
 
-	fn buffer_layouts(config: &Self::Config, ctx: &Self::CtorContext) -> RawVertexBufferSetLayout {
-		let mut builder = VertexBufferSetLayoutBuilder {
-			ctx,
-			layouts: Vec::new(),
-		};
-		Self::layout(config, &mut builder);
+	fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]>;
 
-		RawVertexBufferSetLayout {
-			buffers: builder.layouts,
+	fn instances<'a>(set: Self::InstanceSet<'a>) -> Self::InstanceSetIter<'a>
+	where
+		Self: 'a;
+
+	fn apply_instances<'a>(pass: &mut wgpu::RenderPass<'a>, set: Self::InstanceSet<'a>) {
+		for (idx, slice) in Self::instances(set).into_iter().enumerate() {
+			pass.set_vertex_buffer(idx as u32, slice);
 		}
 	}
+}
 
-	fn apply_to_pass<'r>(&'r self, config: &Self::Config, pass: &mut wgpu::RenderPass<'r>) {
-		Self::layout(
-			config,
-			&mut VertexBufferSetCommitBuilder {
-				me: self,
-				pass,
-				slot: 0,
-			},
-		);
+impl VertexBufferSet for [wgpu::VertexBufferLayout<'_>] {
+	type InstanceSet<'a> = &'a [wgpu::BufferSlice<'a>]
+	where
+		Self: 'a;
+
+	type InstanceSetIter<'a> = std::iter::Copied<std::slice::Iter<'a, wgpu::BufferSlice<'a>>>
+	where
+		Self: 'a;
+
+	fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
+		self.into()
 	}
-}
 
-pub trait VertexBufferSetBuilder<T: ?Sized, C: ?Sized>: fmt::Debug {
-	fn with_buffer<B, F1, F2>(
-		&mut self,
-		step_mode: wgpu::VertexStepMode,
-		layout: F1,
-		data: F2,
-	) -> &mut Self
+	fn instances<'a>(set: Self::InstanceSet<'a>) -> Self::InstanceSetIter<'a>
 	where
-		F1: FnOnce(&C) -> VertexBufferLayout<B>,
-		F2: FnOnce(&T) -> BufferSlice<B>;
-}
-
-#[derive_where(Debug)]
-struct VertexBufferSetLayoutBuilder<'a, C: ?Sized> {
-	#[derive_where(skip)]
-	ctx: &'a C,
-	layouts: Vec<(wgpu::VertexStepMode, RawVertexBufferLayout)>,
-}
-
-impl<T: ?Sized, C: ?Sized> VertexBufferSetBuilder<T, C> for VertexBufferSetLayoutBuilder<'_, C> {
-	fn with_buffer<B, F1, F2>(
-		&mut self,
-		step_mode: wgpu::VertexStepMode,
-		layout: F1,
-		_data: F2,
-	) -> &mut Self
-	where
-		F1: FnOnce(&C) -> VertexBufferLayout<B>,
-		F2: FnOnce(&T) -> BufferSlice<B>,
+		Self: 'a,
 	{
-		self.layouts.push((step_mode, layout(self.ctx).raw));
-		self
+		set.iter().copied()
 	}
 }
 
-#[derive_where(Debug)]
-struct VertexBufferSetCommitBuilder<'a, 'me, T: ?Sized> {
-	#[derive_where(skip)]
-	me: &'me T,
-	pass: &'a mut wgpu::RenderPass<'me>,
-	slot: u32,
+macro_rules! impl_vertex_buffer_set {
+	($($para:ident:$field:tt),*) => {
+		impl<$($para),*> VertexBufferSet for ($(VertexBufferLayout<$para>,)*) {
+			type InstanceSet<'a> = ($(BufferSlice<'a, $para>,)*)
+			where
+				Self: 'a;
+
+			#[allow(non_snake_case)]
+			type InstanceSetIter<'a> = [wgpu::BufferSlice<'a>; $({ let $para = (); let _ = $para; 1 } +)* 0]
+			where
+				Self: 'a;
+
+			fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
+				vec![$(self.$field.raw.as_wgpu()),*].into()
+			}
+
+			#[allow(unused)]
+			fn instances<'a>(set: Self::InstanceSet<'a>) -> Self::InstanceSetIter<'a>
+			where
+				Self: 'a,
+			{
+				[$(set.$field.raw),*]
+			}
+		}
+	};
 }
 
-impl<'a, 'me, T: ?Sized, C: ?Sized> VertexBufferSetBuilder<T, C>
-	for VertexBufferSetCommitBuilder<'a, 'me, T>
-{
-	fn with_buffer<B, F1, F2>(
-		&mut self,
-		_step_mode: wgpu::VertexStepMode,
-		_layout: F1,
-		data: F2,
-	) -> &mut Self
-	where
-		F1: FnOnce(&C) -> VertexBufferLayout<B>,
-		F2: FnOnce(&T) -> BufferSlice<B>,
-	{
-		self.pass.set_vertex_buffer(self.slot, data(self.me).raw);
-		self.slot = self
-			.slot
-			.checked_add(1)
-			.expect("VertexBufferSetBuilder slot counter overflowed.");
-		self
-	}
-}
+impl_tuples!(impl_vertex_buffer_set);
 
 // === VertexBufferLayout === //
 
@@ -133,15 +88,26 @@ transparent! {
 
 #[derive(Debug, Clone, Default)]
 pub struct RawVertexBufferLayout {
-	pub stride: u64,
+	pub stride: wgpu::BufferAddress,
+	pub step_mode: wgpu::VertexStepMode,
 	pub attributes: Vec<wgpu::VertexAttribute>,
+}
+
+impl RawVertexBufferLayout {
+	pub fn as_wgpu(&self) -> wgpu::VertexBufferLayout {
+		wgpu::VertexBufferLayout {
+			array_stride: self.stride,
+			step_mode: self.step_mode,
+			attributes: &self.attributes,
+		}
+	}
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct VertexBufferLayoutBuilder {
 	location: SlotAssigner,
-	size: u64,
-	next_offset: u64,
+	size: wgpu::BufferAddress,
+	next_offset: wgpu::BufferAddress,
 	attributes: Vec<wgpu::VertexAttribute>,
 }
 
@@ -153,7 +119,6 @@ impl VertexBufferLayout<()> {
 	}
 }
 
-// TODO: Check for duplicates and overlap?
 impl VertexBufferLayoutBuilder {
 	const OVERFLOW_ERR: &str = "attribute offset overflowed";
 
@@ -174,11 +139,11 @@ impl VertexBufferLayoutBuilder {
 		self.attributes
 	}
 
-	pub fn size(&self) -> u64 {
+	pub fn size(&self) -> wgpu::BufferAddress {
 		self.size
 	}
 
-	pub fn next_offset(&self) -> u64 {
+	pub fn next_offset(&self) -> wgpu::BufferAddress {
 		self.next_offset
 	}
 
@@ -191,7 +156,7 @@ impl VertexBufferLayoutBuilder {
 		self.location.jump_to(location);
 	}
 
-	pub fn set_offset(&mut self, offset: u64) {
+	pub fn set_offset(&mut self, offset: wgpu::BufferAddress) {
 		self.next_offset = offset;
 		self.size = self.size.max(self.next_offset);
 	}
@@ -230,7 +195,7 @@ impl VertexBufferLayoutBuilder {
 		);
 	}
 
-	pub fn pad_to_size(&mut self, size: u64) {
+	pub fn pad_to_size(&mut self, size: wgpu::BufferAddress) {
 		self.size = self.size.max(size);
 	}
 
@@ -240,7 +205,7 @@ impl VertexBufferLayoutBuilder {
 		self
 	}
 
-	pub fn with_offset(mut self, offset: u64) -> Self {
+	pub fn with_offset(mut self, offset: wgpu::BufferAddress) -> Self {
 		self.set_offset(offset);
 		self
 	}
@@ -260,9 +225,10 @@ impl VertexBufferLayoutBuilder {
 		self
 	}
 
-	pub fn finish<T>(self) -> VertexBufferLayout<T> {
+	pub fn finish<T>(self, step_mode: wgpu::VertexStepMode) -> VertexBufferLayout<T> {
 		RawVertexBufferLayout {
 			stride: self.size,
+			step_mode,
 			attributes: self.attributes,
 		}
 		.into()

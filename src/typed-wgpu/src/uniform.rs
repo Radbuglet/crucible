@@ -1,7 +1,4 @@
-use crucible_util::{
-	lang::marker::{PhantomInvariant, PhantomProlong},
-	transparent,
-};
+use crucible_util::{lang::marker::PhantomProlong, transparent};
 use derive_where::derive_where;
 use std::{any::type_name, fmt, hash::Hash, num::NonZeroU32};
 
@@ -9,24 +6,21 @@ use crate::util::SlotAssigner;
 
 // === UniformSet === //
 
-// Core
 transparent! {
-	#[derive_where(Debug)]
-	pub struct UniformSetLayout<T>(pub wgpu::PipelineLayout, PhantomInvariant<T>);
+	pub struct UniformSetLayout<T>(wgpu::PipelineLayout, T);  // where T: UniformSet
 }
 
-pub trait UniformSet: Sized {
-	type CtorContext<'a>;
-	type Config: 'static + Hash + Eq;
+pub trait UniformSet {
+	type Input<'a>;
 
-	fn create_layout(
-		device: &wgpu::Device,
-		context: Self::CtorContext<'_>,
-		config: &Self::Config,
-	) -> UniformSetLayout<Self>;
-
-	fn apply_to_pass<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>, config: &Self::Config);
+	fn bind_instances<'a>(
+		pipeline: &wgpu::RenderPipeline,
+		pass: &mut wgpu::RenderPass<'a>,
+		input: Self::Input<'a>,
+	);
 }
+
+// TODO
 
 // === BindUniform === //
 
