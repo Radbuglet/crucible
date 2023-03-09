@@ -4,7 +4,9 @@ use crucible_util::{lang::marker::PhantomInvariant, transparent};
 use derive_where::derive_where;
 
 use crate::{
-	uniform::{UniformSetInstanceGenerator, UniformSetKind, UniformSetLayout},
+	uniform::{
+		UniformSetInstanceApplicator, UniformSetInstanceCreator, UniformSetKind, UniformSetLayout,
+	},
 	vertex::{
 		VertexBufferSetInstanceGenerator, VertexBufferSetKind, VertexBufferSetLayoutGenerator,
 	},
@@ -189,10 +191,14 @@ transparent! {
 }
 
 impl<U, V> RenderPipeline<U, V> {
+	pub fn builder<'a>() -> RenderPipelineBuilder<'a, U, V> {
+		RenderPipelineBuilder::new()
+	}
+
 	pub fn bind<'a>(
 		&'a self,
 		pass: &mut wgpu::RenderPass<'a>,
-		uniforms: &'a impl UniformSetInstanceGenerator<U>,
+		uniforms: &'a impl UniformSetInstanceApplicator<U>,
 		buffers: &'a impl VertexBufferSetInstanceGenerator<V>,
 	) where
 		U: UniformSetKind,
@@ -207,10 +213,18 @@ impl<U, V> RenderPipeline<U, V> {
 		pass.set_pipeline(&self.raw);
 	}
 
+	pub fn create_uniforms<L>(&self, params: L) -> L::Output
+	where
+		L: UniformSetInstanceCreator<Kind = U>,
+		U: UniformSetKind,
+	{
+		params.create_uniform_instance_set(&self.raw)
+	}
+
 	pub fn bind_uniforms<'a>(
 		&self,
 		pass: &mut wgpu::RenderPass<'a>,
-		uniforms: &'a impl UniformSetInstanceGenerator<U>,
+		uniforms: &'a impl UniformSetInstanceApplicator<U>,
 	) where
 		U: UniformSetKind,
 	{

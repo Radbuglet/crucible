@@ -9,7 +9,7 @@ use crate::util::SlotAssigner;
 // Core
 transparent! {
 	#[derive_where(Debug)]
-	pub struct UniformSetLayout<T>(pub wgpu::PipelineLayout, T);
+	pub struct UniformSetLayout<T>(pub wgpu::PipelineLayout, PhantomProlong<T>);
 }
 
 pub trait UniformSetKind: Sized + 'static {}
@@ -20,8 +20,43 @@ pub trait UniformSetLayoutGenerator {
 	fn create_layout(&self, device: &wgpu::Device) -> UniformSetLayout<Self::Kind>;
 }
 
-pub trait UniformSetInstanceGenerator<K: UniformSetKind> {
+pub trait UniformSetInstanceApplicator<K: UniformSetKind> {
 	fn apply<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>);
+}
+
+pub trait UniformSetInstanceCreator {
+	type Kind: UniformSetKind;
+	type Output;
+
+	fn create_uniform_instance_set(self, pipeline: &wgpu::RenderPipeline) -> Self::Output;
+}
+
+pub trait BindUniformInstanceCreator {
+	type Output: 'static + BindUniform;
+
+	fn create_uniform_instance(
+		self,
+		layout: &wgpu::BindGroupLayout,
+	) -> BindUniformInstance<Self::Output>;
+}
+
+impl<F, O> BindUniformInstanceCreator for F
+where
+	F: FnOnce(&wgpu::BindGroupLayout) -> BindUniformInstance<O>,
+	O: 'static + BindUniform,
+{
+	type Output = O;
+
+	fn create_uniform_instance(
+		self,
+		layout: &wgpu::BindGroupLayout,
+	) -> BindUniformInstance<Self::Output> {
+		self(layout)
+	}
+}
+
+impl UniformSetInstanceApplicator<()> for () {
+	fn apply<'r>(&'r self, _pass: &mut wgpu::RenderPass<'r>) {}
 }
 
 // Untyped kind
@@ -38,7 +73,7 @@ impl UniformSetLayoutGenerator for wgpu::PipelineLayoutDescriptor<'_> {
 	}
 }
 
-impl UniformSetInstanceGenerator<UntypedUniformSetKind> for [&wgpu::BindGroup] {
+impl UniformSetInstanceApplicator<UntypedUniformSetKind> for [&wgpu::BindGroup] {
 	fn apply<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>) {
 		for (index, bind_group) in self.iter().enumerate() {
 			pass.set_bind_group(index as u32, bind_group, &[]);
@@ -46,7 +81,7 @@ impl UniformSetInstanceGenerator<UntypedUniformSetKind> for [&wgpu::BindGroup] {
 	}
 }
 
-impl UniformSetInstanceGenerator<UntypedUniformSetKind> for [(&wgpu::BindGroup, &[u32])] {
+impl UniformSetInstanceApplicator<UntypedUniformSetKind> for [(&wgpu::BindGroup, &[u32])] {
 	fn apply<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>) {
 		for (index, (bind_group, offsets)) in self.iter().enumerate() {
 			pass.set_bind_group(index as u32, bind_group, offsets);
@@ -71,8 +106,33 @@ macro_rules! impl_uniform_set {
 			}
 		}
 
+		impl<$($para: BindUniformInstanceCreator),*> UniformSetInstanceCreator for ($($para,)*) {
+			type Kind = ($($para::Output,)*);
+			type Output = ($(BindUniformInstance<$para::Output>,)*);
+
+			#[allow(unused)]
+			fn create_uniform_instance_set(
+				self,
+				pipeline: &wgpu::RenderPipeline,
+			) -> Self::Output {
+				let mut index = 0;
+
+				($(
+					self.$field.create_uniform_instance(&pipeline.get_bind_group_layout({
+						let old = index;
+						index += 1;
+						old
+					})),
+				)*)
+			}
+		}
+	};
+}
+
+macro_rules! impl_uniform_set_no_unit {
+	($($para:ident:$field:tt),*) => {
 		impl<$($para: 'static + BindUniform<DynamicOffsets = NoDynamicOffsets>),*>
-			UniformSetInstanceGenerator<($($para,)*)> for
+			UniformSetInstanceApplicator<($($para,)*)> for
 			($(&BindUniformInstance<$para>,)*)
 		{
 			#[allow(unused)]
@@ -84,13 +144,23 @@ macro_rules! impl_uniform_set {
 				})*
 			}
 		}
-	};
-}
 
-macro_rules! impl_uniform_set_no_unit {
-	($($para:ident:$field:tt),*) => {
+		impl<$($para: 'static + BindUniform<DynamicOffsets = NoDynamicOffsets>),*>
+			UniformSetInstanceApplicator<($($para,)*)> for
+			($(BindUniformInstance<$para>,)*)
+		{
+			#[allow(unused)]
+			fn apply<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>) {
+				let mut index = 0;
+				$({
+					pass.set_bind_group(index, &self.$field.raw, &[]);
+					index += 1;
+				})*
+			}
+		}
+
 		impl<$($para: 'static + BindUniform),*>
-			UniformSetInstanceGenerator<($($para,)*)> for
+			UniformSetInstanceApplicator<($($para,)*)> for
 			($((
 				&BindUniformInstance<$para>,
 				$para::DynamicOffsets,
