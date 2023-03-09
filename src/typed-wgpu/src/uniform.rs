@@ -1,6 +1,6 @@
-use crucible_util::{lang::marker::PhantomProlong, transparent};
+use crucible_util::{impl_tuples, lang::marker::PhantomProlong, transparent};
 use derive_where::derive_where;
-use std::{any::type_name, fmt, hash::Hash, num::NonZeroU32};
+use std::{any::type_name, borrow::Cow, fmt, hash::Hash, num::NonZeroU32};
 
 use crate::util::SlotAssigner;
 
@@ -8,10 +8,8 @@ use crate::util::SlotAssigner;
 
 // Core
 transparent! {
-	pub struct UniformSetLayout<T>(pub wgpu::PipelineLayout, T)
-	where {
-		T: UniformSetKind,
-	};
+	#[derive_where(Debug)]
+	pub struct UniformSetLayout<T>(pub wgpu::PipelineLayout, T);
 }
 
 pub trait UniformSetKind: Sized + 'static {}
@@ -57,7 +55,61 @@ impl UniformSetInstanceGenerator<UntypedUniformSetKind> for [(&wgpu::BindGroup, 
 }
 
 // Typed kinds
-// TODO
+macro_rules! impl_uniform_set {
+	($($para:ident:$field:tt),*) => {
+		impl<$($para: 'static + BindUniform),*> UniformSetKind for ($($para,)*) {}
+
+		impl<$($para: 'static + BindUniform),*> UniformSetLayoutGenerator for ($(&BindUniformLayout<$para>,)*) {
+			type Kind = ($($para,)*);
+
+			fn create_layout(&self, device: &wgpu::Device) -> UniformSetLayout<Self::Kind> {
+				device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+					label: Some(type_name::<Self::Kind>()),
+					bind_group_layouts: &[$(&self.$field.raw,)*],
+					push_constant_ranges: &[],
+				}).into()
+			}
+		}
+
+		impl<$($para: 'static + BindUniform<DynamicOffsets = NoDynamicOffsets>),*>
+			UniformSetInstanceGenerator<($($para,)*)> for
+			($(&BindUniformInstance<$para>,)*)
+		{
+			#[allow(unused)]
+			fn apply<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>) {
+				let mut index = 0;
+				$({
+					pass.set_bind_group(index, &self.$field.raw, &[]);
+					index += 1;
+				})*
+			}
+		}
+	};
+}
+
+macro_rules! impl_uniform_set_no_unit {
+	($($para:ident:$field:tt),*) => {
+		impl<$($para: 'static + BindUniform),*>
+			UniformSetInstanceGenerator<($($para,)*)> for
+			($((
+				&BindUniformInstance<$para>,
+				$para::DynamicOffsets,
+			),)*)
+		{
+			#[allow(unused)]
+			fn apply<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>) {
+				let mut index = 0;
+				$({
+					pass.set_bind_group(index, &self.$field.0.raw, &*self.$field.1.as_offset_set());
+					index += 1;
+				})*
+			}
+		}
+	};
+}
+
+impl_tuples!(impl_uniform_set);
+impl_tuples!(impl_uniform_set_no_unit; no_unit);
 
 // === BindUniform === //
 
@@ -71,6 +123,7 @@ transparent! {
 
 pub trait BindUniform: Sized {
 	type Config: 'static + Hash + Eq + Clone;
+	type DynamicOffsets: DynamicOffsetSet;
 
 	fn layout(builder: &mut impl BindUniformBuilder<Self>, config: &Self::Config);
 
@@ -687,6 +740,26 @@ impl<'a, T: ?Sized> BindUniformInstanceBuilder<'a, T> {
 		})
 	}
 }
+
+// === DynamicOffsetSet === //
+
+pub trait DynamicOffsetSet {
+	fn as_offset_set(&self) -> Cow<[wgpu::DynamicOffset]>;
+}
+
+impl DynamicOffsetSet for [wgpu::DynamicOffset] {
+	fn as_offset_set(&self) -> Cow<[wgpu::DynamicOffset]> {
+		self.into()
+	}
+}
+
+impl<const N: usize> DynamicOffsetSet for [wgpu::DynamicOffset; N] {
+	fn as_offset_set(&self) -> Cow<[wgpu::DynamicOffset]> {
+		self.as_slice().into()
+	}
+}
+
+pub type NoDynamicOffsets = [wgpu::DynamicOffset; 0];
 
 // === PushUniform === //
 
