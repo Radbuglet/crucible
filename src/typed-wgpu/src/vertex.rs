@@ -34,7 +34,7 @@ impl VertexBufferSetLayoutGenerator for [wgpu::VertexBufferLayout<'_>] {
 	}
 }
 
-impl VertexBufferSetInstanceGenerator<UntypedVertexBufferSetKind> for &[wgpu::BufferSlice<'_>] {
+impl VertexBufferSetInstanceGenerator<UntypedVertexBufferSetKind> for [wgpu::BufferSlice<'_>] {
 	fn apply<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
 		for (index, &buffer) in self.iter().enumerate() {
 			pass.set_vertex_buffer(index as u32, buffer);

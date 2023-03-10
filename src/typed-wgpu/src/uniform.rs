@@ -208,7 +208,7 @@ pub trait BindUniform: Sized {
 		builder.finish(device).into()
 	}
 
-	fn create_instance_given_layout(
+	fn create_instance(
 		&self,
 		device: &wgpu::Device,
 		layout: &wgpu::BindGroupLayout,

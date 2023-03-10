@@ -19,8 +19,10 @@ macro_rules! transparent {
 					$($lt,)*
 					$($para,)*
 				>)?
-				(pub(crate) $raw$(, $dummy)?)
+				(pub $raw$(, $dummy)?)
 				$( where { $($where_clause)* } )?;
+
+			;FORCE_NO_TRAIT
 		}
 
 		impl<$($($lt,)* $($para,)*)?> $crate::lang::transparent::macro_internal::From<$raw> for $name<$($($lt,)* $($para,)*)?>
@@ -51,7 +53,7 @@ macro_rules! transparent {
 			>)?
 			($rvis:vis $raw:ty$(, $dummy:ty)?)
 			$( where { $($where_clause:tt)* } )?;
-	)*) => {$(
+	)* $(;FORCE_NO_TRAIT)?) => {$(
 		$(#[$attr])*
 		#[repr(transparent)]
 		$vis struct $name<$($($lt,)* $($para,)*)?>
