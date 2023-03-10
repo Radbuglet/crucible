@@ -10,9 +10,7 @@ use crate::{buffer::BufferSlice, util::SlotAssigner};
 // Core
 pub trait VertexBufferSetKind: Sized + 'static {}
 
-pub trait VertexBufferSetLayoutGenerator {
-	type Kind: VertexBufferSetKind;
-
+pub trait VertexBufferSetLayoutGenerator<K: VertexBufferSetKind> {
 	fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]>;
 }
 
@@ -26,9 +24,9 @@ pub struct UntypedVertexBufferSetKind;
 
 impl VertexBufferSetKind for UntypedVertexBufferSetKind {}
 
-impl VertexBufferSetLayoutGenerator for [wgpu::VertexBufferLayout<'_>] {
-	type Kind = UntypedVertexBufferSetKind;
-
+impl VertexBufferSetLayoutGenerator<UntypedVertexBufferSetKind>
+	for [wgpu::VertexBufferLayout<'_>]
+{
 	fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
 		self.into()
 	}
@@ -43,13 +41,29 @@ impl VertexBufferSetInstanceGenerator<UntypedVertexBufferSetKind> for [wgpu::Buf
 }
 
 // Typed kinds
+impl VertexBufferSetKind for () {}
+
+impl VertexBufferSetLayoutGenerator<()> for () {
+	fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
+		Cow::Borrowed(&[])
+	}
+}
+
+impl VertexBufferSetInstanceGenerator<()> for () {
+	fn apply<'a>(&'a self, _pass: &mut wgpu::RenderPass<'a>) {}
+}
+
 macro_rules! impl_vertex_buffer_set {
 	($($para:ident:$field:tt),*) => {
 		impl<$($para: 'static),*> VertexBufferSetKind for ($($para,)*) {}
 
-		impl<'a, $($para: 'static),*> VertexBufferSetLayoutGenerator for ($(&'a VertexBufferLayout<$para>,)*) {
-			type Kind = ($($para,)*);
+		impl<'a, $($para: 'static),*> VertexBufferSetLayoutGenerator<($($para,)*)> for ($(&'a VertexBufferLayout<$para>,)*) {
+			fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
+				vec![$(self.$field.raw.as_wgpu()),*].into()
+			}
+		}
 
+		impl<'a, $($para: 'static),*> VertexBufferSetLayoutGenerator<($($para,)*)> for ($(VertexBufferLayout<$para>,)*) {
 			fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
 				vec![$(self.$field.raw.as_wgpu()),*].into()
 			}
@@ -68,7 +82,7 @@ macro_rules! impl_vertex_buffer_set {
 	};
 }
 
-impl_tuples!(impl_vertex_buffer_set);
+impl_tuples!(impl_vertex_buffer_set; no_unit);
 
 // === VertexBufferLayout === //
 

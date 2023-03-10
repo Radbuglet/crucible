@@ -1,11 +1,12 @@
-use std::{borrow::Cow, marker::PhantomData, num::NonZeroU32};
+use std::{any::type_name, borrow::Cow, marker::PhantomData, num::NonZeroU32};
 
 use crucible_util::{lang::marker::PhantomInvariant, transparent};
 use derive_where::derive_where;
 
 use crate::{
 	uniform::{
-		UniformSetInstanceApplicator, UniformSetInstanceCreator, UniformSetKind, UniformSetLayout,
+		BindUniform, BindUniformInstance, TypedUniformSetKind, UniformSetInstanceApplicator,
+		UniformSetKind, UniformSetLayout,
 	},
 	vertex::{
 		VertexBufferSetInstanceGenerator, VertexBufferSetKind, VertexBufferSetLayoutGenerator,
@@ -59,8 +60,11 @@ impl<'a, U, V> RenderPipelineBuilder<'a, U, V> {
 		mut self,
 		module: &'a wgpu::ShaderModule,
 		entry: &'a str,
-		buffers: &'a impl VertexBufferSetLayoutGenerator<Kind = V>,
-	) -> Self {
+		buffers: &'a impl VertexBufferSetLayoutGenerator<V>,
+	) -> Self
+	where
+		V: VertexBufferSetKind,
+	{
 		self.vertex_shader = Some((module, entry, buffers.layouts(), PhantomData));
 		self
 	}
@@ -213,12 +217,22 @@ impl<U, V> RenderPipeline<U, V> {
 		pass.set_pipeline(&self.raw);
 	}
 
-	pub fn create_uniforms<L>(&self, params: L) -> L::Output
+	pub fn create_bind_uniform<L: 'static + BindUniform>(
+		&self,
+		f: impl FnOnce(&wgpu::BindGroupLayout) -> BindUniformInstance<L>,
+	) -> BindUniformInstance<L>
 	where
-		L: UniformSetInstanceCreator<Kind = U>,
-		U: UniformSetKind,
+		U: TypedUniformSetKind,
 	{
-		params.create_uniform_instance_set(&self.raw)
+		let index = U::index_of_binding::<L>().unwrap_or_else(|| {
+			panic!(
+				"Pipeline with uniforms {} does not contain uniform with type {}",
+				type_name::<U>(),
+				type_name::<L>()
+			)
+		});
+
+		f(&self.raw.get_bind_group_layout(index))
 	}
 
 	pub fn bind_uniforms<'a>(

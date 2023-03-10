@@ -1,6 +1,12 @@
 use crucible_util::{impl_tuples, lang::marker::PhantomProlong, transparent};
 use derive_where::derive_where;
-use std::{any::type_name, borrow::Cow, fmt, hash::Hash, num::NonZeroU32};
+use std::{
+	any::{type_name, TypeId},
+	borrow::Cow,
+	fmt,
+	hash::Hash,
+	num::NonZeroU32,
+};
 
 use crate::util::SlotAssigner;
 
@@ -14,6 +20,10 @@ transparent! {
 
 pub trait UniformSetKind: Sized + 'static {}
 
+pub trait TypedUniformSetKind: UniformSetKind {
+	fn index_of_binding<T: 'static + BindUniform>() -> Option<u32>;
+}
+
 pub trait UniformSetLayoutGenerator {
 	type Kind: UniformSetKind;
 
@@ -22,41 +32,6 @@ pub trait UniformSetLayoutGenerator {
 
 pub trait UniformSetInstanceApplicator<K: UniformSetKind> {
 	fn apply<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>);
-}
-
-pub trait UniformSetInstanceCreator {
-	type Kind: UniformSetKind;
-	type Output;
-
-	fn create_uniform_instance_set(self, pipeline: &wgpu::RenderPipeline) -> Self::Output;
-}
-
-pub trait BindUniformInstanceCreator {
-	type Output: 'static + BindUniform;
-
-	fn create_uniform_instance(
-		self,
-		layout: &wgpu::BindGroupLayout,
-	) -> BindUniformInstance<Self::Output>;
-}
-
-impl<F, O> BindUniformInstanceCreator for F
-where
-	F: FnOnce(&wgpu::BindGroupLayout) -> BindUniformInstance<O>,
-	O: 'static + BindUniform,
-{
-	type Output = O;
-
-	fn create_uniform_instance(
-		self,
-		layout: &wgpu::BindGroupLayout,
-	) -> BindUniformInstance<Self::Output> {
-		self(layout)
-	}
-}
-
-impl UniformSetInstanceApplicator<()> for () {
-	fn apply<'r>(&'r self, _pass: &mut wgpu::RenderPass<'r>) {}
 }
 
 // Untyped kind
@@ -90,9 +65,35 @@ impl UniformSetInstanceApplicator<UntypedUniformSetKind> for [(&wgpu::BindGroup,
 }
 
 // Typed kinds
+impl UniformSetKind for () {}
+
+// N.B. `UniformSetLayoutGenerator` intentionally omitted because we never need to generate these.
+
+impl UniformSetInstanceApplicator<()> for () {
+	fn apply<'r>(&'r self, _pass: &mut wgpu::RenderPass<'r>) {}
+}
+
 macro_rules! impl_uniform_set {
 	($($para:ident:$field:tt),*) => {
 		impl<$($para: 'static + BindUniform),*> UniformSetKind for ($($para,)*) {}
+
+		// TODO: Resolve this statically
+		impl<$($para: 'static + BindUniform),*> TypedUniformSetKind for ($($para,)*) {
+			fn index_of_binding<T: 'static + BindUniform>() -> Option<u32> {
+				let index = 0;
+
+				$(
+					if TypeId::of::<T>() == TypeId::of::<$para>() {
+						return Some(index);
+					}
+
+					let index = index + 1;
+				)*
+
+				let _ = index;
+				None
+			}
+		}
 
 		impl<$($para: 'static + BindUniform),*> UniformSetLayoutGenerator for ($(&BindUniformLayout<$para>,)*) {
 			type Kind = ($($para,)*);
@@ -106,31 +107,6 @@ macro_rules! impl_uniform_set {
 			}
 		}
 
-		impl<$($para: BindUniformInstanceCreator),*> UniformSetInstanceCreator for ($($para,)*) {
-			type Kind = ($($para::Output,)*);
-			type Output = ($(BindUniformInstance<$para::Output>,)*);
-
-			#[allow(unused)]
-			fn create_uniform_instance_set(
-				self,
-				pipeline: &wgpu::RenderPipeline,
-			) -> Self::Output {
-				let mut index = 0;
-
-				($(
-					self.$field.create_uniform_instance(&pipeline.get_bind_group_layout({
-						let old = index;
-						index += 1;
-						old
-					})),
-				)*)
-			}
-		}
-	};
-}
-
-macro_rules! impl_uniform_set_no_unit {
-	($($para:ident:$field:tt),*) => {
 		impl<$($para: 'static + BindUniform<DynamicOffsets = NoDynamicOffsets>),*>
 			UniformSetInstanceApplicator<($($para,)*)> for
 			($(&BindUniformInstance<$para>,)*)
@@ -178,8 +154,7 @@ macro_rules! impl_uniform_set_no_unit {
 	};
 }
 
-impl_tuples!(impl_uniform_set);
-impl_tuples!(impl_uniform_set_no_unit; no_unit);
+impl_tuples!(impl_uniform_set; no_unit);
 
 // === BindUniform === //
 

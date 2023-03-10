@@ -26,7 +26,10 @@ macro_rules! transparent {
 		}
 
 		impl<$($($lt,)* $($para,)*)?> $crate::lang::transparent::macro_internal::From<$raw> for $name<$($($lt,)* $($para,)*)?>
-		$(where $($where_clause)*)?
+		where
+			for<'trivial> <$name<$($($lt,)* $($para,)*)?> as $crate::lang::transparent::macro_internal::TrivialBounds<'trivial>>::Of: Sized,
+			for<'trivial> <$raw as $crate::lang::transparent::macro_internal::TrivialBounds<'trivial>>::Of: Sized,
+			$($($where_clause)*)?
 		{
 			fn from(raw: $raw) -> Self {
 				Self::wrap(raw)
@@ -34,10 +37,29 @@ macro_rules! transparent {
 		}
 
 		impl<$($($lt,)* $($para,)*)?> $crate::lang::transparent::macro_internal::From<$name<$($($lt,)* $($para,)*)?>> for $raw
-		$(where $($where_clause)*)?
+		where
+			for<'trivial> <$name<$($($lt,)* $($para,)*)?> as $crate::lang::transparent::macro_internal::TrivialBounds<'trivial>>::Of: Sized,
+			for<'trivial> <$raw as $crate::lang::transparent::macro_internal::TrivialBounds<'trivial>>::Of: Sized,
+			$($($where_clause)*)?
 		{
 			fn from(me: $name<$($($lt,)* $($para,)*)?>) -> $raw {
 				me.raw
+			}
+		}
+
+		impl<$($($lt,)* $($para,)*)?> $crate::lang::transparent::macro_internal::Borrow<$raw> for $name<$($($lt,)* $($para,)*)?>
+		$(where $($where_clause)*)?
+		{
+			fn borrow(&self) -> &$raw {
+				&self.raw
+			}
+		}
+
+		impl<$($($lt,)* $($para,)*)?> $crate::lang::transparent::macro_internal::BorrowMut<$raw> for $name<$($($lt,)* $($para,)*)?>
+		$(where $($where_clause)*)?
+		{
+			fn borrow_mut(&mut self) -> &mut $raw {
+				&mut self.raw
 			}
 		}
 	)*};
@@ -70,6 +92,7 @@ macro_rules! transparent {
 			$rvis const fn wrap(raw: $raw) -> Self
 			where
 				for<'trivial> <$raw as $crate::lang::transparent::macro_internal::TrivialBounds<'trivial>>::Of: Sized,
+				for<'trivial> <Self as $crate::lang::transparent::macro_internal::TrivialBounds<'trivial>>::Of: Sized,
 			{
 				Self {
 					$(ty: $crate::lang::transparent::macro_internal::PhantomData::<$dummy>,)?
@@ -92,7 +115,9 @@ pub use transparent;
 
 #[doc(hidden)]
 pub mod macro_internal {
-	pub use core::{convert::From, marker::PhantomData, mem::transmute};
+	pub use core::{
+		borrow::Borrow, borrow::BorrowMut, convert::From, marker::PhantomData, mem::transmute,
+	};
 
 	pub trait TrivialBounds<'a> {
 		type Of: ?Sized;
