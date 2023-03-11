@@ -140,7 +140,7 @@ impl VertexBufferLayoutBuilder {
 		self.attributes.push(wgpu::VertexAttribute {
 			format,
 			// Vertex attributes are packed in wgpu. See the source of `wgpu::vertex_attr_array` for
-			// details. FIXME: This isn't true and `wgpu` is a liar!
+			// details. FIXME: ...but if we lay things out in std430, there will be padding!
 			offset: self.next_offset,
 			shader_location: self.location.next(),
 		});

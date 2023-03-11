@@ -426,6 +426,7 @@ version = "0.1.0"
 dependencies = [
  "bort",
  "crucible-util",
+ "derive-where",
  "hashbrown 0.13.2",
  "log",
  "num-traits",

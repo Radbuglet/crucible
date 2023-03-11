@@ -1,7 +1,8 @@
-use crucible_common::voxel::math::{AaQuad, BlockFace, Sign, Vec3Ext};
 use crucible_util::mem::c_enum::CEnum;
 use derive_where::derive_where;
 use typed_glam::glam::Vec3;
+
+use super::math::{AaQuad, BlockFace, Sign, Vec3Ext};
 
 #[derive(Debug, Clone)]
 #[derive_where(Default)]

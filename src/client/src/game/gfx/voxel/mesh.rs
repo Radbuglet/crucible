@@ -3,10 +3,11 @@ use std::time::{Duration, Instant};
 use bort::{storage, CompRef, Entity};
 use crevice::std430::AsStd430;
 use crucible_common::{
-	game::material::MaterialRegistry,
-	voxel::{
+	entity::material::MaterialRegistry,
+	world::{
 		data::{VoxelWorldData, AIR_MATERIAL_SLOT},
 		math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, WorldVec, WorldVecExt, QUAD_UVS},
+		mesh::QuadMeshLayer,
 	},
 };
 use crucible_util::{
@@ -20,10 +21,7 @@ use hashbrown::HashSet;
 use typed_glam::glam::{UVec2, Vec3};
 use wgpu::util::DeviceExt;
 
-use crate::{
-	engine::{gfx::atlas::AtlasTexture, io::gfx::GfxContext},
-	game::gfx::mesh::store::QuadMeshLayer,
-};
+use crate::engine::{gfx::atlas::AtlasTexture, io::gfx::GfxContext};
 
 use super::pipeline::{VoxelUniforms, VoxelVertex};
 
@@ -101,7 +99,9 @@ impl VoxelWorldMesh {
 										break 'a false;
 									};
 
-									world.chunk_state(neighbor).block_state(neighbor_block.wrap())
+									world
+										.chunk_state(neighbor)
+										.block_state(neighbor_block.wrap())
 								};
 
 								if state.material == AIR_MATERIAL_SLOT {

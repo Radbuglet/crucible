@@ -24,7 +24,7 @@ impl MaterialRegistry {
 			log::error!("Registered duplicate material with id {:?}.", e.entry.key());
 		}
 
-		// Attach `BaseMaterialState`
+		// Attach `MaterialDescriptorBase`
 		descriptor_ref.insert(MaterialDescriptorBase {
 			id: Some(id_clone),
 			slot,

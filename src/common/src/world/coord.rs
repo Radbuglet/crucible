@@ -9,7 +9,7 @@ use crucible_util::{
 use smallvec::SmallVec;
 use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 
-use crate::voxel::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt};
+use crate::world::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt};
 
 use super::{
 	data::{BlockState, VoxelWorldData, AIR_MATERIAL_SLOT},
@@ -458,21 +458,4 @@ pub fn move_rigid_body(
 	}
 
 	aabb.origin
-}
-
-pub fn move_rigid_body_relative(
-	world: &VoxelWorldData,
-	origin: EntityVec,
-	origin_offset: EntityVec,
-	size: EntityVec,
-	delta: EntityVec,
-) -> EntityVec {
-	move_rigid_body(
-		world,
-		Aabb3 {
-			origin: origin - origin_offset,
-			size,
-		},
-		delta,
-	) + origin_offset
 }

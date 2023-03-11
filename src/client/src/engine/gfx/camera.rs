@@ -1,4 +1,4 @@
-use crucible_common::voxel::math::{Angle3D, Angle3DExt};
+use crucible_common::world::math::{Angle3D, Angle3DExt};
 use typed_glam::glam::{Mat4, Vec3};
 
 #[derive(Debug, Default)]

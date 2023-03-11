@@ -1,2 +1,2 @@
-pub mod game;
-pub mod voxel;
+pub mod entity;
+pub mod world;

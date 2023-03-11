@@ -1,10 +1,10 @@
 use bort::{Entity, OwnedEntity};
 use crucible_common::{
-	game::{
+	entity::{
 		actor::ActorManager,
 		material::{MaterialDescriptorBase, MaterialRegistry},
 	},
-	voxel::{
+	world::{
 		coord::BlockLocation,
 		data::{BlockState, VoxelWorldData},
 		math::{Aabb3, BlockFace, ChunkVec, WorldVec},

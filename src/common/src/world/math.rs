@@ -970,6 +970,13 @@ pub struct Aabb3<V> {
 }
 
 impl<V: SignedNumericVector3> Aabb3<V> {
+	pub fn translated(&self, by: V) -> Self {
+		Self {
+			origin: self.origin + by,
+			size: self.size,
+		}
+	}
+
 	pub fn positive_corner(&self) -> V {
 		self.origin + self.size
 	}
