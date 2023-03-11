@@ -19,5 +19,6 @@ image = "0.24.5"
 log = "0.4.17"
 thiserror = "1.0.31"
 typed-glam = { path = "../typed-glam" }
+typed-wgpu = { path = "../typed-wgpu" }
 wgpu = { version = "0.15.1", features = ["expose-ids"] }
 winit = "0.28.1"

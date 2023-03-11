@@ -3,14 +3,71 @@ use std::borrow::Cow;
 use bort::CompRef;
 use crevice::std430::AsStd430;
 use typed_glam::glam;
-
-use crate::engine::{
-	assets::AssetManager,
-	gfx::pipeline::{load_pipeline_layout, BindUniform, BindUniformBuilder},
-	io::gfx::GfxContext,
+use typed_wgpu::{
+	buffer::BufferBinding,
+	pipeline::RenderPipeline,
+	uniform::{
+		BindUniform, BindUniformBuilder, BindUniformInstance, NoDynamicOffsets,
+		UniformSetLayoutGenerator,
+	},
+	vertex::VertexBufferLayout,
 };
 
-// === OpaqueBlockShader === //
+use crate::engine::{assets::AssetManager, io::gfx::GfxContext};
+
+// === Uniforms === //
+
+#[derive(Debug)]
+pub struct VoxelRenderingBindUniform<'a> {
+	pub uniforms: BufferBinding<'a, VoxelRenderingUniformBuffer>,
+	pub texture: &'a wgpu::TextureView,
+}
+
+#[derive(Debug, AsStd430)]
+pub struct VoxelRenderingUniformBuffer {
+	pub camera: glam::Mat4,
+}
+
+impl BindUniform for VoxelRenderingBindUniform<'_> {
+	type Config = ();
+	type DynamicOffsets = NoDynamicOffsets;
+
+	fn layout(builder: &mut impl BindUniformBuilder<Self>, (): &Self::Config) {
+		builder
+			.with_uniform_buffer(wgpu::ShaderStages::VERTEX, false, |c| {
+				c.uniforms.raw.clone()
+			})
+			.with_texture(
+				wgpu::ShaderStages::FRAGMENT,
+				wgpu::TextureSampleType::Float { filterable: false },
+				wgpu::TextureViewDimension::D2,
+				false,
+				|c| c.texture,
+			);
+	}
+}
+
+// === Vertices === //
+
+#[derive(AsStd430)]
+pub struct VoxelVertex {
+	pub position: glam::Vec3,
+	pub uv: glam::Vec2,
+}
+
+impl VoxelVertex {
+	pub fn layout() -> VertexBufferLayout<Self> {
+		VertexBufferLayout::builder()
+			// FIXME: Padding should be inserted automatically (`wgpu::vertex_attr_array` is a lie!)
+			.with_attribute(wgpu::VertexFormat::Float32x3) // position
+			.with_offset(16)
+			.with_attribute(wgpu::VertexFormat::Float32x2) // uv
+			.with_padding_to_size(Self::std430_size_static() as wgpu::BufferAddress)
+			.finish(wgpu::VertexStepMode::Vertex)
+	}
+}
+
+// === Pipeline === //
 
 pub fn load_opaque_block_shader(
 	assets: &mut AssetManager,
@@ -27,165 +84,79 @@ pub fn load_opaque_block_shader(
 	})
 }
 
-// === VoxelRenderingPipeline === //
+pub type OpaqueBlockPipeline =
+	RenderPipeline<(VoxelRenderingBindUniform<'static>,), (VoxelVertex,)>;
 
-#[derive(Debug)]
-pub struct VoxelRenderingUniforms<'a> {
-	pub camera: wgpu::BufferBinding<'a>,
-	pub texture: &'a wgpu::TextureView,
+pub fn load_opaque_block_pipeline(
+	assets: &mut AssetManager,
+	gfx: &GfxContext,
+	surface_format: wgpu::TextureFormat,
+	depth_format: wgpu::TextureFormat,
+) -> CompRef<OpaqueBlockPipeline> {
+	assets.cache(&(surface_format, depth_format), |assets| {
+		let shader = load_opaque_block_shader(assets, gfx);
+
+		OpaqueBlockPipeline::builder()
+			// TODO: Integrate with asset loader
+			.with_uniforms(
+				&(&VoxelRenderingBindUniform::create_layout(&gfx.device, &()),)
+					.create_layout(&gfx.device),
+			)
+			.with_vertex_shader(&shader, "vs_main", &(dbg!(VoxelVertex::layout()),))
+			.with_fragment_shader(&shader, "fs_main", surface_format)
+			.with_cull_mode(wgpu::Face::Back)
+			.with_depth_stencil(wgpu::DepthStencilState {
+				format: depth_format,
+				depth_write_enabled: true,
+				depth_compare: wgpu::CompareFunction::Less,
+				bias: Default::default(),
+				stencil: Default::default(),
+			})
+			.finish(&gfx.device)
+	})
 }
 
-impl BindUniform for VoxelRenderingUniforms<'_> {
-	type Config = ();
-
-	fn layout(builder: &mut impl BindUniformBuilder<Self>, _config: Self::Config) {
-		builder
-			.with_uniform_buffer(wgpu::ShaderStages::VERTEX, false, |me| me.camera.clone())
-			.with_texture(
-				wgpu::ShaderStages::FRAGMENT,
-				wgpu::TextureSampleType::Float { filterable: false },
-				wgpu::TextureViewDimension::D2,
-				false,
-				|me| me.texture,
-			);
-	}
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct VoxelRenderingPipelineDesc {
-	pub surface_format: wgpu::TextureFormat,
-	pub depth_format: wgpu::TextureFormat,
-	pub is_wireframe: bool,
-	pub back_face_culling: bool,
-}
-
-impl VoxelRenderingPipelineDesc {
-	pub fn load(
-		&self,
-		assets: &mut AssetManager,
-		gfx: &GfxContext,
-	) -> CompRef<wgpu::RenderPipeline> {
-		assets.cache(self, move |assets| {
-			let shader = load_opaque_block_shader(assets, gfx);
-			let layout = VoxelRenderingUniforms::load_layout(assets, gfx, ());
-			let layout = load_pipeline_layout(assets, gfx, [&layout], []);
-
-			gfx.device
-				.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-					label: Some("opaque voxel pipeline"),
-					layout: Some(&layout),
-					vertex: wgpu::VertexState {
-						module: &shader,
-						entry_point: "vs_main",
-						buffers: &[wgpu::VertexBufferLayout {
-							array_stride: VoxelVertex::std430_size_static() as wgpu::BufferAddress,
-							step_mode: wgpu::VertexStepMode::Vertex,
-							attributes: &[
-								wgpu::VertexAttribute {
-									shader_location: 0,
-									offset: 0,
-									format: wgpu::VertexFormat::Float32x3,
-								},
-								wgpu::VertexAttribute {
-									shader_location: 1,
-									offset: 16,
-									format: wgpu::VertexFormat::Float32x2,
-								},
-							],
-						}],
-					},
-					primitive: wgpu::PrimitiveState {
-						topology: wgpu::PrimitiveTopology::TriangleList,
-						strip_index_format: None,
-						front_face: wgpu::FrontFace::Ccw,
-						cull_mode: if self.back_face_culling {
-							Some(wgpu::Face::Back)
-						} else {
-							None
-						},
-						unclipped_depth: false,
-						polygon_mode: if self.is_wireframe {
-							wgpu::PolygonMode::Line
-						} else {
-							wgpu::PolygonMode::Fill
-						},
-						conservative: false,
-					},
-					depth_stencil: Some(wgpu::DepthStencilState {
-						format: self.depth_format,
-						depth_write_enabled: true,
-						depth_compare: wgpu::CompareFunction::Less,
-						stencil: wgpu::StencilState::default(),
-						bias: wgpu::DepthBiasState::default(),
-					}),
-					multisample: wgpu::MultisampleState {
-						count: 1,
-						mask: !0,
-						alpha_to_coverage_enabled: false,
-					},
-					fragment: Some(wgpu::FragmentState {
-						module: &shader,
-						entry_point: "fs_main",
-						targets: &[Some(wgpu::ColorTargetState {
-							format: self.surface_format,
-							blend: None,
-							write_mask: wgpu::ColorWrites::all(),
-						})],
-					}),
-					multiview: None,
-				})
-		})
-	}
-}
-
-// // === VoxelUniforms === //
+// === Uniform Management === //
 
 #[derive(Debug)]
 pub struct VoxelUniforms {
-	bind_group: wgpu::BindGroup,
+	bind_group: BindUniformInstance<VoxelRenderingBindUniform<'static>>,
 	buffer: wgpu::Buffer,
 }
 
 impl VoxelUniforms {
-	pub fn new(assets: &mut AssetManager, gfx: &GfxContext, texture: &wgpu::TextureView) -> Self {
+	pub fn new(gfx: &GfxContext, texture: &wgpu::TextureView) -> Self {
 		let buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("uniform buffer"),
 			mapped_at_creation: false,
-			size: ShaderUniformBuffer::std430_size_static() as u64,
+			size: VoxelRenderingUniformBuffer::std430_size_static() as u64,
 			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
 		});
 
-		let bind_group = VoxelRenderingUniforms {
-			camera: buffer.as_entire_buffer_binding(),
+		let bind_group = VoxelRenderingBindUniform {
+			uniforms: buffer.as_entire_buffer_binding().into(),
 			texture,
 		}
-		.create_instance(assets, gfx, ());
+		.create_instance(
+			&gfx.device,
+			&VoxelRenderingBindUniform::create_layout(&gfx.device, &()).raw,
+			&(),
+		);
 
 		Self { bind_group, buffer }
 	}
 
 	pub fn write_pass_state<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-		pass.set_bind_group(0, &self.bind_group, &[]);
+		OpaqueBlockPipeline::bind_uniform(pass, &self.bind_group, &[]);
 	}
 
 	pub fn set_camera_matrix(&self, gfx: &GfxContext, proj: glam::Mat4) {
 		gfx.queue.write_buffer(
 			&self.buffer,
 			0,
-			ShaderUniformBuffer { camera: proj }.as_std430().as_bytes(),
+			VoxelRenderingUniformBuffer { camera: proj }
+				.as_std430()
+				.as_bytes(),
 		)
 	}
-}
-
-#[derive(AsStd430)]
-struct ShaderUniformBuffer {
-	pub camera: glam::Mat4,
-}
-
-// === VoxelVertex === //
-
-#[derive(AsStd430)]
-pub struct VoxelVertex {
-	pub position: glam::Vec3,
-	pub uv: glam::Vec2,
 }

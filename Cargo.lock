@@ -415,6 +415,7 @@ dependencies = [
  "log",
  "thiserror",
  "typed-glam",
+ "typed-wgpu",
  "wgpu",
  "winit",
 ]

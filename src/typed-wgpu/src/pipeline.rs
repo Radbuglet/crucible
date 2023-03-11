@@ -5,8 +5,8 @@ use derive_where::derive_where;
 
 use crate::{
 	uniform::{
-		BindUniform, BindUniformInstance, TypedUniformSetKind, UniformSetInstanceApplicator,
-		UniformSetKind, UniformSetLayout,
+		BindUniform, BindUniformInstance, DynamicOffsetSet, TypedUniformSetKind,
+		UniformSetInstanceApplicator, UniformSetKind, UniformSetLayout,
 	},
 	vertex::{
 		VertexBufferSetInstanceGenerator, VertexBufferSetKind, VertexBufferSetLayoutGenerator,
@@ -209,12 +209,20 @@ impl<U, V> RenderPipeline<U, V> {
 		V: VertexBufferSetKind,
 	{
 		self.bind_pipeline(pass);
-		self.bind_uniforms(pass, uniforms);
-		self.bind_vertex_buffers(pass, buffers);
+		Self::bind_uniforms(pass, uniforms);
+		Self::bind_vertex_buffers(pass, buffers);
 	}
 
 	pub fn bind_pipeline<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
 		pass.set_pipeline(&self.raw);
+	}
+
+	fn missing_uniform<L: 'static + BindUniform, R>() -> R {
+		panic!(
+			"Pipeline with uniforms {} does not contain uniform with type {}",
+			type_name::<U>(),
+			type_name::<L>()
+		)
 	}
 
 	pub fn create_bind_uniform<L: 'static + BindUniform>(
@@ -224,19 +232,24 @@ impl<U, V> RenderPipeline<U, V> {
 	where
 		U: TypedUniformSetKind,
 	{
-		let index = U::index_of_binding::<L>().unwrap_or_else(|| {
-			panic!(
-				"Pipeline with uniforms {} does not contain uniform with type {}",
-				type_name::<U>(),
-				type_name::<L>()
-			)
-		});
+		let index = U::index_of_binding::<L>().unwrap_or_else(Self::missing_uniform::<L, _>);
 
 		f(&self.raw.get_bind_group_layout(index))
 	}
 
+	pub fn bind_uniform<'a, L: 'static + BindUniform>(
+		pass: &mut wgpu::RenderPass<'a>,
+		uniform: &'a BindUniformInstance<L>,
+		offsets: &L::DynamicOffsets,
+	) where
+		U: TypedUniformSetKind,
+	{
+		let index = U::index_of_binding::<L>().unwrap_or_else(Self::missing_uniform::<L, _>);
+
+		pass.set_bind_group(index, &uniform.raw, &offsets.as_offset_set());
+	}
+
 	pub fn bind_uniforms<'a>(
-		&self,
 		pass: &mut wgpu::RenderPass<'a>,
 		uniforms: &'a impl UniformSetInstanceApplicator<U>,
 	) where
@@ -246,7 +259,6 @@ impl<U, V> RenderPipeline<U, V> {
 	}
 
 	pub fn bind_vertex_buffers<'a>(
-		&self,
 		pass: &mut wgpu::RenderPass<'a>,
 		buffers: &'a impl VertexBufferSetInstanceGenerator<V>,
 	) where

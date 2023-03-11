@@ -29,7 +29,7 @@ use super::{
 	actors::player::{spawn_local_player, update_local_players, PlayerInputController},
 	gfx::voxel::{
 		mesh::{BlockDescriptorVisual, VoxelWorldMesh},
-		pipeline::{VoxelRenderingPipelineDesc, VoxelUniforms},
+		pipeline::{load_opaque_block_pipeline, VoxelUniforms},
 	},
 };
 
@@ -113,7 +113,6 @@ impl GameSceneState {
 	fn new(engine: Entity, main_viewport: Entity) -> Self {
 		// Acquire services
 		let gfx = &*engine.get::<GfxContext>();
-		let mut assets = engine.get_mut::<AssetManager>();
 
 		// Create block registry
 		let block_atlas = AtlasTexture::new(UVec2::new(100, 100), UVec2::new(16, 16));
@@ -126,7 +125,7 @@ impl GameSceneState {
 
 		// Create voxel uniforms
 		let block_atlas_gfx = AtlasTextureGfx::new(gfx, &block_atlas, Some("block atlas"));
-		let voxel_uniforms = VoxelUniforms::new(&mut assets, gfx, &block_atlas_gfx.view);
+		let voxel_uniforms = VoxelUniforms::new(gfx, &block_atlas_gfx.view);
 
 		// Create state
 		Self {
@@ -225,13 +224,12 @@ impl GameSceneState {
 
 		// Encode rendering commands
 		{
-			let pipeline = VoxelRenderingPipelineDesc {
-				surface_format: viewport.curr_config().format,
-				depth_format: depth_texture_format,
-				is_wireframe: false,
-				back_face_culling: true,
-			}
-			.load(&mut assets, gfx);
+			let pipeline = load_opaque_block_pipeline(
+				&mut assets,
+				gfx,
+				viewport.curr_config().format,
+				depth_texture_format,
+			);
 
 			let chunk_pass = world_mesh.prepare_chunk_draw_pass();
 
@@ -263,7 +261,7 @@ impl GameSceneState {
 
 			// Setup pipeline
 			{
-				pass.set_pipeline(&pipeline);
+				pipeline.bind_pipeline(&mut pass);
 
 				let aspect = viewport.curr_surface_aspect().unwrap();
 				let xform = camera.get_camera_xform(aspect);

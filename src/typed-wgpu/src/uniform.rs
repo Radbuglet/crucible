@@ -20,6 +20,7 @@ transparent! {
 
 pub trait UniformSetKind: Sized + 'static {}
 
+// TODO: Resolve these statically
 pub trait TypedUniformSetKind: UniformSetKind {
 	fn index_of_binding<T: 'static + BindUniform>() -> Option<u32>;
 }
@@ -139,6 +140,23 @@ macro_rules! impl_uniform_set {
 			UniformSetInstanceApplicator<($($para,)*)> for
 			($((
 				&BindUniformInstance<$para>,
+				$para::DynamicOffsets,
+			),)*)
+		{
+			#[allow(unused)]
+			fn apply<'r>(&'r self, pass: &mut wgpu::RenderPass<'r>) {
+				let mut index = 0;
+				$({
+					pass.set_bind_group(index, &self.$field.0.raw, &*self.$field.1.as_offset_set());
+					index += 1;
+				})*
+			}
+		}
+
+		impl<$($para: 'static + BindUniform),*>
+			UniformSetInstanceApplicator<($($para,)*)> for
+			($((
+				BindUniformInstance<$para>,
 				$para::DynamicOffsets,
 			),)*)
 		{
