@@ -216,8 +216,6 @@ impl<'a, U: PipelineSet, V: PipelineSet> RenderPipelineBuilder<'a, U, V> {
 		self
 	}
 
-	// TODO: More config stuff
-
 	pub fn finish(self, device: &wgpu::Device) -> RenderPipeline<U, V> {
 		device
 			.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -256,7 +254,10 @@ impl<'a, U: PipelineSet, V: PipelineSet> RenderPipelineBuilder<'a, U, V> {
 
 transparent! {
 	#[derive_where(Debug)]
-	pub struct RenderPipeline<U, V>(pub wgpu::RenderPipeline, (U, V)) where {
+	pub struct RenderPipeline<U = UntypedPipelineSet, V = UntypedPipelineSet>(
+		pub wgpu::RenderPipeline,
+		(U, V),
+	) where {
 		U: PipelineSet,
 		V: PipelineSet,
 	};

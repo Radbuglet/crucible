@@ -666,7 +666,3 @@ impl<const N: usize> DynamicOffsetSet for [wgpu::DynamicOffset; N] {
 }
 
 pub type NoDynamicOffsets = [wgpu::DynamicOffset; 0];
-
-// === PushConstant === //
-
-// TODO

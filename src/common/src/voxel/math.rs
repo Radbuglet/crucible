@@ -617,6 +617,10 @@ pub struct Line3 {
 }
 
 impl Line3 {
+	pub fn new(start: EntityVec, end: EntityVec) -> Self {
+		Self { start, end }
+	}
+
 	pub fn new_origin_delta(start: EntityVec, delta: EntityVec) -> Self {
 		Self {
 			start,
@@ -1010,5 +1014,33 @@ impl WorldAabb {
 			self.size.z() as u32,
 		])
 		.map(move |[x, y, z]| self.origin + WorldVec::new(x as i32, y as i32, z as i32))
+	}
+}
+
+// === Color3 === //
+
+pub type Color3 = TypedVector<Color3Flavor>;
+
+#[non_exhaustive]
+pub struct Color3Flavor;
+
+impl VecFlavor for Color3Flavor {
+	type Backing = glam::Vec3;
+
+	const DEBUG_NAME: &'static str = "Color3";
+}
+
+impl FlavorCastFrom<f32> for Color3Flavor {
+	fn cast_from(vec: f32) -> Color3
+	where
+		Self: VecFlavor,
+	{
+		Color3::splat(vec)
+	}
+}
+
+impl FlavorCastFrom<glam::Vec3> for Color3Flavor {
+	fn cast_from(v: glam::Vec3) -> Color3 {
+		Color3::from_glam(v)
 	}
 }

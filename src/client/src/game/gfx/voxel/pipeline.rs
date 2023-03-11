@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use bort::CompRef;
 use crevice::std430::AsStd430;
 use typed_glam::glam;
@@ -74,13 +72,13 @@ pub fn load_opaque_block_shader(
 	assets: &mut AssetManager,
 	gfx: &GfxContext,
 ) -> CompRef<wgpu::ShaderModule> {
-	assets.cache((), move |_| {
+	assets.cache((), |_| {
 		gfx.device
 			.create_shader_module(wgpu::ShaderModuleDescriptor {
 				label: Some("opaque_block.wgsl"),
-				source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-					"shaders/opaque_block.wgsl"
-				))),
+				source: wgpu::ShaderSource::Wgsl(
+					include_str!("../res/shaders/opaque_block.wgsl").into(),
+				),
 			})
 	})
 }

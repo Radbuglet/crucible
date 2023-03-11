@@ -44,10 +44,10 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 		.with(PlayerInputController::default())
 		.with(VoxelWorldData::default())
 		.with(VoxelWorldMesh::default())
-		.with(SceneUpdateHandler::new(move |me| {
+		.with(SceneUpdateHandler::new(|me| {
 			me.get_mut::<GameSceneState>().update(me);
 		}))
-		.with(SceneRenderHandler::new(move |me, frame| {
+		.with(SceneRenderHandler::new(|me, frame| {
 			me.get_mut::<GameSceneState>().render(me, frame);
 		}));
 
@@ -55,9 +55,11 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 	let mut scene_state = scene.get_mut::<GameSceneState>();
 	let material = scene_state.register_block_material(
 		"crucible_prototyping:one".to_string(),
-		&image::load_from_memory(include_bytes!("gfx/res/placeholder_material_1.png"))
-			.unwrap_pretty()
-			.into_rgba32f(),
+		&image::load_from_memory(include_bytes!(
+			"gfx/res/textures/placeholder_material_1.png"
+		))
+		.unwrap_pretty()
+		.into_rgba32f(),
 	);
 	scene_state.upload_atlases(&engine.get::<GfxContext>());
 

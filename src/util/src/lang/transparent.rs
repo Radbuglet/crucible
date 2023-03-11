@@ -6,10 +6,10 @@ macro_rules! transparent {
 			$(<
 				$($lt:lifetime),*
 				$(,)?
-				$($para:ident),*
+				$($para:ident $(= $para_default:ty)?),*
 				$(,)?
 			>)?
-			(pub $raw:ty$(, $dummy:ty)?)
+			(pub $raw:ty$(, $dummy:ty)? $(,)?)
 			$( where { $($where_clause:tt)* } )?;
 	)*) => {$(
 		$crate::transparent! {
@@ -17,7 +17,7 @@ macro_rules! transparent {
 			$vis struct $name
 				$(<
 					$($lt,)*
-					$($para,)*
+					$($para $(= $para_default)?,)*
 				>)?
 				(pub $raw$(, $dummy)?)
 				$( where { $($where_clause)* } )?;
@@ -70,15 +70,15 @@ macro_rules! transparent {
 			$(<
 				$($lt:lifetime),*
 				$(,)?
-				$($para:ident),*
+				$($para:ident $(= $para_default:ty)?),*
 				$(,)?
 			>)?
-			($rvis:vis $raw:ty$(, $dummy:ty)?)
+			($rvis:vis $raw:ty$(, $dummy:ty)? $(,)?)
 			$( where { $($where_clause:tt)* } )?;
 	)* $(;FORCE_NO_TRAIT)?) => {$(
 		$(#[$attr])*
 		#[repr(transparent)]
-		$vis struct $name<$($($lt,)* $($para,)*)?>
+		$vis struct $name<$($($lt,)* $($para $(= $para_default)?,)*)?>
 		$(where $($where_clause)*)?
 		{
 			$($rvis ty: $crate::lang::transparent::macro_internal::PhantomData<$dummy>,)?

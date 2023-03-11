@@ -15,9 +15,7 @@ pub trait BindGroupExt: BindGroup {
 		gfx: &GfxContext,
 		config: &Self::Config,
 	) -> CompRef<wgpu::BindGroupLayout> {
-		assets.cache(config, move |_| {
-			Self::create_layout(&gfx.device, config).raw
-		})
+		assets.cache(config, |_| Self::create_layout(&gfx.device, config).raw)
 	}
 
 	fn load_layout(
@@ -57,7 +55,7 @@ pub fn load_untyped_pipeline_layout<const N: usize, const M: usize>(
 ) -> CompRef<wgpu::PipelineLayout> {
 	let bind_ids = map_arr(bind_groups, |v| v.global_id());
 
-	assets.cache((&bind_ids, PreOwned(push_constants.clone())), move |_| {
+	assets.cache((&bind_ids, PreOwned(push_constants.clone())), |_| {
 		gfx.device
 			.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
 				label: None,
