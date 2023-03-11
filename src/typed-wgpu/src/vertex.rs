@@ -3,7 +3,11 @@ use std::borrow::Cow;
 use crucible_util::{impl_tuples, lang::marker::PhantomProlong, transparent};
 use derive_where::derive_where;
 
-use crate::{buffer::BufferSlice, pipeline::PipelineSet, util::SlotAssigner};
+use crate::{
+	buffer::BufferSlice,
+	pipeline::{PipelineSet, UntypedPipelineSet},
+	util::SlotAssigner,
+};
 
 // === VertexBufferSet generators === //
 
@@ -13,6 +17,12 @@ pub trait VertexBufferSetLayoutGenerator<K: PipelineSet> {
 
 pub trait VertexBufferSetInstanceGenerator<K: PipelineSet> {
 	fn apply<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>);
+}
+
+impl VertexBufferSetLayoutGenerator<UntypedPipelineSet> for [wgpu::VertexBufferLayout<'_>] {
+	fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
+		self.into()
+	}
 }
 
 macro_rules! impl_vertex_buffer_set {
@@ -130,7 +140,7 @@ impl VertexBufferLayoutBuilder {
 		self.attributes.push(wgpu::VertexAttribute {
 			format,
 			// Vertex attributes are packed in wgpu. See the source of `wgpu::vertex_attr_array` for
-			// details.
+			// details. FIXME: This isn't true and `wgpu` is a liar!
 			offset: self.next_offset,
 			shader_location: self.location.next(),
 		});

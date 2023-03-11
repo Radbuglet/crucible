@@ -113,6 +113,7 @@ impl GameSceneState {
 	fn new(engine: Entity, main_viewport: Entity) -> Self {
 		// Acquire services
 		let gfx = &*engine.get::<GfxContext>();
+		let assets = &mut *engine.get_mut::<AssetManager>();
 
 		// Create block registry
 		let block_atlas = AtlasTexture::new(UVec2::new(100, 100), UVec2::new(16, 16));
@@ -125,7 +126,7 @@ impl GameSceneState {
 
 		// Create voxel uniforms
 		let block_atlas_gfx = AtlasTextureGfx::new(gfx, &block_atlas, Some("block atlas"));
-		let voxel_uniforms = VoxelUniforms::new(gfx, &block_atlas_gfx.view);
+		let voxel_uniforms = VoxelUniforms::new(assets, gfx, &block_atlas_gfx.view);
 
 		// Create state
 		Self {

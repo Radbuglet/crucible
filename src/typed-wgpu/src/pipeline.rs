@@ -5,17 +5,28 @@ use derive_where::derive_where;
 
 use crate::{
 	buffer::BufferSlice,
-	uniform::{BindUniform, BindUniformInstance, DynamicOffsetSet, UniformSetLayout},
+	uniform::{BindGroup, BindGroupInstance, DynamicOffsetSet, PipelineLayout},
 	vertex::{VertexBufferSetInstanceGenerator, VertexBufferSetLayoutGenerator},
 };
 
 // === PipelineSet === //
 
-pub trait PipelineSet: 'static {
+pub trait PipelineSet: Sized + 'static {}
+
+#[non_exhaustive]
+pub struct UntypedPipelineSet;
+
+impl PipelineSet for UntypedPipelineSet {}
+
+impl<T: StaticPipelineSet> PipelineSet for T {}
+
+// === StaticPipelineSet === //
+
+pub trait StaticPipelineSet: 'static {
 	fn index_of_dyn<T: 'static>() -> Option<u32>;
 }
 
-pub trait PipelineSetHas<T: 'static, D>: PipelineSet {
+pub trait StaticPipelineSetHas<T: 'static, D>: StaticPipelineSet {
 	fn index() -> u32 {
 		Self::index_of_dyn::<T>().unwrap()
 	}
@@ -23,7 +34,7 @@ pub trait PipelineSetHas<T: 'static, D>: PipelineSet {
 
 macro_rules! impl_pipeline_set {
 	($($para:ident:$field:tt),*) => {
-		impl<$($para: 'static),*> PipelineSet for ($($para,)*) {
+		impl<$($para: 'static),*> StaticPipelineSet for ($($para,)*) {
 			fn index_of_dyn<T: 'static>() -> Option<u32> {
 				let index = 0;
 
@@ -44,7 +55,7 @@ macro_rules! impl_pipeline_set {
 		#[allow(unused_macros)]
 		macro_rules! hack {
 			($the_para:ident) => {
-				impl<$($para: 'static),*> PipelineSetHas<$the_para, disambiguators::$the_para> for ($($para,)*) {}
+				impl<$($para: 'static),*> StaticPipelineSetHas<$the_para, disambiguators::$the_para> for ($($para,)*) {}
 			}
 		}
 
@@ -70,12 +81,12 @@ impl_tuples!(impl_pipeline_set);
 // === RenderPipelineBuilder === //
 
 #[derive_where(Default)]
-pub struct RenderPipelineBuilder<'a, U = (), V = ()> {
+pub struct RenderPipelineBuilder<'a, U: PipelineSet, V: PipelineSet> {
 	// Debug config
 	label: Option<&'a str>,
 
 	// Vertex shader config
-	uniforms: Option<&'a UniformSetLayout<U>>,
+	layout: Option<&'a PipelineLayout<U>>,
 	vertex_shader: Option<(
 		&'a wgpu::ShaderModule,
 		&'a str,
@@ -95,7 +106,7 @@ pub struct RenderPipelineBuilder<'a, U = (), V = ()> {
 	multiview: Option<NonZeroU32>,
 }
 
-impl<'a, U, V> RenderPipelineBuilder<'a, U, V> {
+impl<'a, U: PipelineSet, V: PipelineSet> RenderPipelineBuilder<'a, U, V> {
 	pub fn new() -> Self {
 		Self::default()
 	}
@@ -105,8 +116,8 @@ impl<'a, U, V> RenderPipelineBuilder<'a, U, V> {
 		self
 	}
 
-	pub fn with_uniforms(mut self, set: &'a UniformSetLayout<U>) -> Self {
-		self.uniforms = Some(set);
+	pub fn with_layout(mut self, set: &'a PipelineLayout<U>) -> Self {
+		self.layout = Some(set);
 		self
 	}
 
@@ -117,7 +128,7 @@ impl<'a, U, V> RenderPipelineBuilder<'a, U, V> {
 		buffers: &'a impl VertexBufferSetLayoutGenerator<V>,
 	) -> Self
 	where
-		V: PipelineSet,
+		V: StaticPipelineSet,
 	{
 		self.vertex_shader = Some((module, entry, buffers.layouts(), PhantomData));
 		self
@@ -211,7 +222,7 @@ impl<'a, U, V> RenderPipelineBuilder<'a, U, V> {
 		device
 			.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
 				label: self.label,
-				layout: self.uniforms.map(|u| &u.raw),
+				layout: self.layout.map(|u| &u.raw),
 				vertex: {
 					let (module, entry_point, buffers, _) = self
 						.vertex_shader
@@ -245,10 +256,13 @@ impl<'a, U, V> RenderPipelineBuilder<'a, U, V> {
 
 transparent! {
 	#[derive_where(Debug)]
-	pub struct RenderPipeline<U, V>(pub wgpu::RenderPipeline, (U, V));
+	pub struct RenderPipeline<U, V>(pub wgpu::RenderPipeline, (U, V)) where {
+		U: PipelineSet,
+		V: PipelineSet,
+	};
 }
 
-impl<U, V> RenderPipeline<U, V> {
+impl<U: PipelineSet, V: PipelineSet> RenderPipeline<U, V> {
 	pub fn builder<'a>() -> RenderPipelineBuilder<'a, U, V> {
 		RenderPipelineBuilder::new()
 	}
@@ -257,32 +271,32 @@ impl<U, V> RenderPipeline<U, V> {
 		pass.set_pipeline(&self.raw);
 	}
 
-	pub fn create_bind_uniform<L, D>(
+	pub fn create_bind_group<L, D>(
 		&self,
-		f: impl FnOnce(&wgpu::BindGroupLayout) -> BindUniformInstance<L>,
-	) -> BindUniformInstance<L>
+		f: impl FnOnce(&wgpu::BindGroupLayout) -> BindGroupInstance<L>,
+	) -> BindGroupInstance<L>
 	where
-		L: 'static + BindUniform,
-		U: PipelineSetHas<L, D>,
+		L: 'static + BindGroup,
+		U: StaticPipelineSetHas<L, D>,
 	{
 		f(&self.raw.get_bind_group_layout(U::index()))
 	}
 
-	pub fn bind_uniform<'a, L, D>(
+	pub fn bind_group<'a, L, D>(
 		pass: &mut wgpu::RenderPass<'a>,
-		uniform: &'a BindUniformInstance<L>,
+		group: &'a BindGroupInstance<L>,
 		offsets: &L::DynamicOffsets,
 	) where
-		L: 'static + BindUniform,
-		U: PipelineSetHas<L, D>,
+		L: 'static + BindGroup,
+		U: StaticPipelineSetHas<L, D>,
 	{
-		pass.set_bind_group(U::index(), &uniform.raw, &offsets.as_offset_set());
+		pass.set_bind_group(U::index(), &group.raw, &offsets.as_offset_set());
 	}
 
 	pub fn bind_vertex_buffer<'a, T, D>(pass: &mut wgpu::RenderPass<'a>, buffer: BufferSlice<'a, T>)
 	where
 		T: 'static,
-		V: PipelineSetHas<T, D>,
+		V: StaticPipelineSetHas<T, D>,
 	{
 		pass.set_vertex_buffer(V::index(), buffer.raw);
 	}
@@ -291,7 +305,7 @@ impl<U, V> RenderPipeline<U, V> {
 		pass: &mut wgpu::RenderPass<'a>,
 		buffers: &'a impl VertexBufferSetInstanceGenerator<V>,
 	) where
-		V: PipelineSet,
+		V: StaticPipelineSet,
 	{
 		buffers.apply(pass);
 	}

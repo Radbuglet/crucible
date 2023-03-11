@@ -2,34 +2,40 @@ use crucible_util::{lang::marker::PhantomProlong, transparent};
 use derive_where::derive_where;
 use std::{any::type_name, borrow::Cow, fmt, hash::Hash, num::NonZeroU32};
 
-use crate::util::SlotAssigner;
+use crate::{pipeline::PipelineSet, util::SlotAssigner};
 
-// === UniformSet === //
-
-transparent! {
-	#[derive_where(Debug)]
-	pub struct UniformSetLayout<T>(pub wgpu::PipelineLayout, PhantomProlong<T>);
-}
-
-// === BindUniform === //
+// === PipelineLayout === //
 
 transparent! {
 	#[derive_where(Debug)]
-	pub struct BindUniformLayout<T>(pub wgpu::BindGroupLayout, PhantomProlong<T>);
-
-	#[derive_where(Debug)]
-	pub struct BindUniformInstance<T>(pub wgpu::BindGroup, PhantomProlong<T>);
+	pub struct PipelineLayout<T>(pub wgpu::PipelineLayout, PhantomProlong<T>) where {
+		T: PipelineSet,
+	};
 }
 
-pub trait BindUniform: Sized {
+// === BindGroup === //
+
+transparent! {
+	#[derive_where(Debug)]
+	pub struct BindGroupLayout<T>(pub wgpu::BindGroupLayout, PhantomProlong<T>) where {
+		T: BindGroup,
+	};
+
+	#[derive_where(Debug)]
+	pub struct BindGroupInstance<T>(pub wgpu::BindGroup, PhantomProlong<T>) where {
+		T: BindGroup,
+	};
+}
+
+pub trait BindGroup: Sized {
 	type Config: 'static + Hash + Eq + Clone;
 	type DynamicOffsets: DynamicOffsetSet;
 
-	fn layout(builder: &mut impl BindUniformBuilder<Self>, config: &Self::Config);
+	fn layout(builder: &mut impl BindGroupBuilder<Self>, config: &Self::Config);
 
-	fn create_layout(device: &wgpu::Device, config: &Self::Config) -> BindUniformLayout<Self> {
-		let mut builder = BindUniformLayoutBuilder::default();
-		<BindUniformLayoutBuilder as BindUniformBuilder<Self>>::with_label(
+	fn create_layout(device: &wgpu::Device, config: &Self::Config) -> BindGroupLayout<Self> {
+		let mut builder = BindGroupLayoutBuilder::default();
+		<BindGroupLayoutBuilder as BindGroupBuilder<Self>>::with_label(
 			&mut builder,
 			type_name::<Self>(),
 		);
@@ -43,15 +49,15 @@ pub trait BindUniform: Sized {
 		device: &wgpu::Device,
 		layout: &wgpu::BindGroupLayout,
 		config: &Self::Config,
-	) -> BindUniformInstance<Self> {
-		let mut builder = BindUniformInstanceBuilder::new(self);
+	) -> BindGroupInstance<Self> {
+		let mut builder = BindGroupInstanceBuilder::new(self);
 		Self::layout(&mut builder, config);
 
 		builder.finish(device, layout).into()
 	}
 }
 
-pub trait BindUniformBuilder<T: ?Sized>: fmt::Debug {
+pub trait BindGroupBuilder<T: ?Sized>: fmt::Debug {
 	fn with_label(&mut self, label: &str) -> &mut Self;
 
 	fn with_binding(&mut self, loc: u32) -> &mut Self;
@@ -163,13 +169,13 @@ pub trait BindUniformBuilder<T: ?Sized>: fmt::Debug {
 }
 
 #[derive(Debug, Default)]
-struct BindUniformLayoutBuilder {
+struct BindGroupLayoutBuilder {
 	label: Option<String>,
 	binding: SlotAssigner,
 	entries: Vec<wgpu::BindGroupLayoutEntry>,
 }
 
-impl<T: ?Sized> BindUniformBuilder<T> for BindUniformLayoutBuilder {
+impl<T: ?Sized> BindGroupBuilder<T> for BindGroupLayoutBuilder {
 	fn with_label(&mut self, label: &str) -> &mut Self {
 		self.label = Some(label.to_string());
 		self
@@ -418,7 +424,7 @@ impl<T: ?Sized> BindUniformBuilder<T> for BindUniformLayoutBuilder {
 	}
 }
 
-impl BindUniformLayoutBuilder {
+impl BindGroupLayoutBuilder {
 	pub fn finish(self, device: &wgpu::Device) -> wgpu::BindGroupLayout {
 		device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
 			label: self.label.as_deref(),
@@ -428,14 +434,14 @@ impl BindUniformLayoutBuilder {
 }
 
 #[derive_where(Debug)]
-struct BindUniformInstanceBuilder<'a, T: ?Sized> {
+struct BindGroupInstanceBuilder<'a, T: ?Sized> {
 	#[derive_where(skip)]
 	me: &'a T,
 	binding: SlotAssigner,
 	entries: Vec<wgpu::BindGroupEntry<'a>>,
 }
 
-impl<'a, T: ?Sized> BindUniformInstanceBuilder<'a, T> {
+impl<'a, T: ?Sized> BindGroupInstanceBuilder<'a, T> {
 	pub fn new(me: &'a T) -> Self {
 		Self {
 			me,
@@ -445,7 +451,7 @@ impl<'a, T: ?Sized> BindUniformInstanceBuilder<'a, T> {
 	}
 }
 
-impl<'a, T: ?Sized> BindUniformBuilder<T> for BindUniformInstanceBuilder<'a, T> {
+impl<'a, T: ?Sized> BindGroupBuilder<T> for BindGroupInstanceBuilder<'a, T> {
 	fn with_label(&mut self, _label: &str) -> &mut Self {
 		self
 	}
@@ -631,7 +637,7 @@ impl<'a, T: ?Sized> BindUniformBuilder<T> for BindUniformInstanceBuilder<'a, T> 
 	}
 }
 
-impl<'a, T: ?Sized> BindUniformInstanceBuilder<'a, T> {
+impl<'a, T: ?Sized> BindGroupInstanceBuilder<'a, T> {
 	pub fn finish(self, device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> wgpu::BindGroup {
 		device.create_bind_group(&wgpu::BindGroupDescriptor {
 			label: None,
@@ -661,6 +667,6 @@ impl<const N: usize> DynamicOffsetSet for [wgpu::DynamicOffset; N] {
 
 pub type NoDynamicOffsets = [wgpu::DynamicOffset; 0];
 
-// === PushUniform === //
+// === PushConstant === //
 
 // TODO

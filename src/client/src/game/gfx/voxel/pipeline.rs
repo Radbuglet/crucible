@@ -6,11 +6,15 @@ use typed_glam::glam;
 use typed_wgpu::{
 	buffer::BufferBinding,
 	pipeline::RenderPipeline,
-	uniform::{BindUniform, BindUniformBuilder, BindUniformInstance, NoDynamicOffsets},
+	uniform::{BindGroup, BindGroupBuilder, BindGroupInstance, NoDynamicOffsets, PipelineLayout},
 	vertex::VertexBufferLayout,
 };
 
-use crate::engine::{assets::AssetManager, io::gfx::GfxContext};
+use crate::engine::{
+	assets::AssetManager,
+	gfx::pipeline::{BindGroupExt, PipelineLayoutExt},
+	io::gfx::GfxContext,
+};
 
 // === Uniforms === //
 
@@ -25,11 +29,11 @@ pub struct VoxelRenderingUniformBuffer {
 	pub camera: glam::Mat4,
 }
 
-impl BindUniform for VoxelRenderingBindUniform<'_> {
+impl BindGroup for VoxelRenderingBindUniform<'_> {
 	type Config = ();
 	type DynamicOffsets = NoDynamicOffsets;
 
-	fn layout(builder: &mut impl BindUniformBuilder<Self>, (): &Self::Config) {
+	fn layout(builder: &mut impl BindGroupBuilder<Self>, (): &Self::Config) {
 		builder
 			.with_uniform_buffer(wgpu::ShaderStages::VERTEX, false, |c| {
 				c.uniforms.raw.clone()
@@ -94,9 +98,8 @@ pub fn load_opaque_block_pipeline(
 		let shader = load_opaque_block_shader(assets, gfx);
 
 		OpaqueBlockPipeline::builder()
-			// TODO: Integrate with asset loader
-			.with_uniforms(todo!())
-			.with_vertex_shader(&shader, "vs_main", &(dbg!(VoxelVertex::layout()),))
+			.with_layout(&PipelineLayout::load_default(assets, gfx))
+			.with_vertex_shader(&shader, "vs_main", &(VoxelVertex::layout(),))
 			.with_fragment_shader(&shader, "fs_main", surface_format)
 			.with_cull_mode(wgpu::Face::Back)
 			.with_depth_stencil(wgpu::DepthStencilState {
@@ -114,12 +117,12 @@ pub fn load_opaque_block_pipeline(
 
 #[derive(Debug)]
 pub struct VoxelUniforms {
-	bind_group: BindUniformInstance<VoxelRenderingBindUniform<'static>>,
+	bind_group: BindGroupInstance<VoxelRenderingBindUniform<'static>>,
 	buffer: wgpu::Buffer,
 }
 
 impl VoxelUniforms {
-	pub fn new(gfx: &GfxContext, texture: &wgpu::TextureView) -> Self {
+	pub fn new(assets: &mut AssetManager, gfx: &GfxContext, texture: &wgpu::TextureView) -> Self {
 		let buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("uniform buffer"),
 			mapped_at_creation: false,
@@ -131,17 +134,13 @@ impl VoxelUniforms {
 			uniforms: buffer.as_entire_buffer_binding().into(),
 			texture,
 		}
-		.create_instance(
-			&gfx.device,
-			&VoxelRenderingBindUniform::create_layout(&gfx.device, &()).raw,
-			&(),
-		);
+		.load_instance(assets, gfx, &());
 
 		Self { bind_group, buffer }
 	}
 
 	pub fn write_pass_state<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-		OpaqueBlockPipeline::bind_uniform(pass, &self.bind_group, &[]);
+		OpaqueBlockPipeline::bind_group(pass, &self.bind_group, &[]);
 	}
 
 	pub fn set_camera_matrix(&self, gfx: &GfxContext, proj: glam::Mat4) {
