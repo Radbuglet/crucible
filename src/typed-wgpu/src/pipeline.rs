@@ -1,17 +1,71 @@
-use std::{any::type_name, borrow::Cow, marker::PhantomData, num::NonZeroU32};
+use std::{any::TypeId, borrow::Cow, marker::PhantomData, num::NonZeroU32};
 
-use crucible_util::{lang::marker::PhantomInvariant, transparent};
+use crucible_util::{impl_tuples, lang::marker::PhantomInvariant, transparent};
 use derive_where::derive_where;
 
 use crate::{
-	uniform::{
-		BindUniform, BindUniformInstance, DynamicOffsetSet, TypedUniformSetKind,
-		UniformSetInstanceApplicator, UniformSetKind, UniformSetLayout,
-	},
-	vertex::{
-		VertexBufferSetInstanceGenerator, VertexBufferSetKind, VertexBufferSetLayoutGenerator,
-	},
+	buffer::BufferSlice,
+	uniform::{BindUniform, BindUniformInstance, DynamicOffsetSet, UniformSetLayout},
+	vertex::{VertexBufferSetInstanceGenerator, VertexBufferSetLayoutGenerator},
 };
+
+// === PipelineSet === //
+
+pub trait PipelineSet: 'static {
+	fn index_of_dyn<T: 'static>() -> Option<u32>;
+}
+
+pub trait PipelineSetHas<T: 'static, D>: PipelineSet {
+	fn index() -> u32 {
+		Self::index_of_dyn::<T>().unwrap()
+	}
+}
+
+macro_rules! impl_pipeline_set {
+	($($para:ident:$field:tt),*) => {
+		impl<$($para: 'static),*> PipelineSet for ($($para,)*) {
+			fn index_of_dyn<T: 'static>() -> Option<u32> {
+				let index = 0;
+
+				$(
+					if TypeId::of::<T>() == TypeId::of::<$para>() {
+						return Some(index);
+					}
+
+					let index = index + 1;
+				)*
+
+				let _ = index;
+
+				None
+			}
+		}
+
+		#[allow(unused_macros)]
+		macro_rules! hack {
+			($the_para:ident) => {
+				impl<$($para: 'static),*> PipelineSetHas<$the_para, disambiguators::$the_para> for ($($para,)*) {}
+			}
+		}
+
+		$(hack!($para);)*
+	};
+}
+
+#[allow(dead_code)]
+mod disambiguators {
+	use super::*;
+
+	macro_rules! make_disambiguators {
+		($($para:ident:$field:tt),*) => {
+			$(pub struct $para;)*
+		};
+	}
+
+	impl_tuples!(make_disambiguators; only_full);
+}
+
+impl_tuples!(impl_pipeline_set);
 
 // === RenderPipelineBuilder === //
 
@@ -63,7 +117,7 @@ impl<'a, U, V> RenderPipelineBuilder<'a, U, V> {
 		buffers: &'a impl VertexBufferSetLayoutGenerator<V>,
 	) -> Self
 	where
-		V: VertexBufferSetKind,
+		V: PipelineSet,
 	{
 		self.vertex_shader = Some((module, entry, buffers.layouts(), PhantomData));
 		self
@@ -199,70 +253,45 @@ impl<U, V> RenderPipeline<U, V> {
 		RenderPipelineBuilder::new()
 	}
 
-	pub fn bind<'a>(
-		&'a self,
-		pass: &mut wgpu::RenderPass<'a>,
-		uniforms: &'a impl UniformSetInstanceApplicator<U>,
-		buffers: &'a impl VertexBufferSetInstanceGenerator<V>,
-	) where
-		U: UniformSetKind,
-		V: VertexBufferSetKind,
-	{
-		self.bind_pipeline(pass);
-		Self::bind_uniforms(pass, uniforms);
-		Self::bind_vertex_buffers(pass, buffers);
-	}
-
 	pub fn bind_pipeline<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
 		pass.set_pipeline(&self.raw);
 	}
 
-	fn missing_uniform<L: 'static + BindUniform, R>() -> R {
-		panic!(
-			"Pipeline with uniforms {} does not contain uniform with type {}",
-			type_name::<U>(),
-			type_name::<L>()
-		)
-	}
-
-	pub fn create_bind_uniform<L: 'static + BindUniform>(
+	pub fn create_bind_uniform<L, D>(
 		&self,
 		f: impl FnOnce(&wgpu::BindGroupLayout) -> BindUniformInstance<L>,
 	) -> BindUniformInstance<L>
 	where
-		U: TypedUniformSetKind,
+		L: 'static + BindUniform,
+		U: PipelineSetHas<L, D>,
 	{
-		let index = U::index_of_binding::<L>().unwrap_or_else(Self::missing_uniform::<L, _>);
-
-		f(&self.raw.get_bind_group_layout(index))
+		f(&self.raw.get_bind_group_layout(U::index()))
 	}
 
-	pub fn bind_uniform<'a, L: 'static + BindUniform>(
+	pub fn bind_uniform<'a, L, D>(
 		pass: &mut wgpu::RenderPass<'a>,
 		uniform: &'a BindUniformInstance<L>,
 		offsets: &L::DynamicOffsets,
 	) where
-		U: TypedUniformSetKind,
+		L: 'static + BindUniform,
+		U: PipelineSetHas<L, D>,
 	{
-		let index = U::index_of_binding::<L>().unwrap_or_else(Self::missing_uniform::<L, _>);
-
-		pass.set_bind_group(index, &uniform.raw, &offsets.as_offset_set());
+		pass.set_bind_group(U::index(), &uniform.raw, &offsets.as_offset_set());
 	}
 
-	pub fn bind_uniforms<'a>(
-		pass: &mut wgpu::RenderPass<'a>,
-		uniforms: &'a impl UniformSetInstanceApplicator<U>,
-	) where
-		U: UniformSetKind,
+	pub fn bind_vertex_buffer<'a, T, D>(pass: &mut wgpu::RenderPass<'a>, buffer: BufferSlice<'a, T>)
+	where
+		T: 'static,
+		V: PipelineSetHas<T, D>,
 	{
-		uniforms.apply(pass);
+		pass.set_vertex_buffer(V::index(), buffer.raw);
 	}
 
 	pub fn bind_vertex_buffers<'a>(
 		pass: &mut wgpu::RenderPass<'a>,
 		buffers: &'a impl VertexBufferSetInstanceGenerator<V>,
 	) where
-		V: VertexBufferSetKind,
+		V: PipelineSet,
 	{
 		buffers.apply(pass);
 	}

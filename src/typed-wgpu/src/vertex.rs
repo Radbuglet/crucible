@@ -3,60 +3,20 @@ use std::borrow::Cow;
 use crucible_util::{impl_tuples, lang::marker::PhantomProlong, transparent};
 use derive_where::derive_where;
 
-use crate::{buffer::BufferSlice, util::SlotAssigner};
+use crate::{buffer::BufferSlice, pipeline::PipelineSet, util::SlotAssigner};
 
-// === VertexBufferSet === //
+// === VertexBufferSet generators === //
 
-// Core
-pub trait VertexBufferSetKind: Sized + 'static {}
-
-pub trait VertexBufferSetLayoutGenerator<K: VertexBufferSetKind> {
+pub trait VertexBufferSetLayoutGenerator<K: PipelineSet> {
 	fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]>;
 }
 
-pub trait VertexBufferSetInstanceGenerator<K: VertexBufferSetKind> {
+pub trait VertexBufferSetInstanceGenerator<K: PipelineSet> {
 	fn apply<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>);
-}
-
-// Untyped kind
-#[non_exhaustive]
-pub struct UntypedVertexBufferSetKind;
-
-impl VertexBufferSetKind for UntypedVertexBufferSetKind {}
-
-impl VertexBufferSetLayoutGenerator<UntypedVertexBufferSetKind>
-	for [wgpu::VertexBufferLayout<'_>]
-{
-	fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
-		self.into()
-	}
-}
-
-impl VertexBufferSetInstanceGenerator<UntypedVertexBufferSetKind> for [wgpu::BufferSlice<'_>] {
-	fn apply<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-		for (index, &buffer) in self.iter().enumerate() {
-			pass.set_vertex_buffer(index as u32, buffer);
-		}
-	}
-}
-
-// Typed kinds
-impl VertexBufferSetKind for () {}
-
-impl VertexBufferSetLayoutGenerator<()> for () {
-	fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
-		Cow::Borrowed(&[])
-	}
-}
-
-impl VertexBufferSetInstanceGenerator<()> for () {
-	fn apply<'a>(&'a self, _pass: &mut wgpu::RenderPass<'a>) {}
 }
 
 macro_rules! impl_vertex_buffer_set {
 	($($para:ident:$field:tt),*) => {
-		impl<$($para: 'static),*> VertexBufferSetKind for ($($para,)*) {}
-
 		impl<'a, $($para: 'static),*> VertexBufferSetLayoutGenerator<($($para,)*)> for ($(&'a VertexBufferLayout<$para>,)*) {
 			fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
 				vec![$(self.$field.raw.as_wgpu()),*].into()

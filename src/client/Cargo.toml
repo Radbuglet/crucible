@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.58"
+anyhow = "1.0.69"
 bort = { git = "https://github.com/Radbuglet/bort.git", rev = "631b4dd36b537231e12588729b8f258f88cf5650" }
 bytemuck = "1.10.0"
 crevice = { version = "0.11.0", features = ["glam"] }
@@ -12,8 +12,8 @@ crucible-common = { path = "../common" }
 crucible-util = { path = "../util" }
 derive-where = "1.1.0"
 env_logger = "0.10.0"
-fastrand = "1.8.0"
-futures = "0.3.25"
+fastrand = "1.9.0"
+futures = "0.3.26"
 hashbrown = "0.13.2"
 image = "0.24.5"
 log = "0.4.17"
@@ -21,4 +21,4 @@ thiserror = "1.0.31"
 typed-glam = { path = "../typed-glam" }
 typed-wgpu = { path = "../typed-wgpu" }
 wgpu = { version = "0.15.1", features = ["expose-ids"] }
-winit = "0.28.1"
+winit = "0.28.2"

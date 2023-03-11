@@ -6,10 +6,7 @@ use typed_glam::glam;
 use typed_wgpu::{
 	buffer::BufferBinding,
 	pipeline::RenderPipeline,
-	uniform::{
-		BindUniform, BindUniformBuilder, BindUniformInstance, NoDynamicOffsets,
-		UniformSetLayoutGenerator,
-	},
+	uniform::{BindUniform, BindUniformBuilder, BindUniformInstance, NoDynamicOffsets},
 	vertex::VertexBufferLayout,
 };
 
@@ -98,10 +95,7 @@ pub fn load_opaque_block_pipeline(
 
 		OpaqueBlockPipeline::builder()
 			// TODO: Integrate with asset loader
-			.with_uniforms(
-				&(&VoxelRenderingBindUniform::create_layout(&gfx.device, &()),)
-					.create_layout(&gfx.device),
-			)
+			.with_uniforms(todo!())
 			.with_vertex_shader(&shader, "vs_main", &(dbg!(VoxelVertex::layout()),))
 			.with_fragment_shader(&shader, "fs_main", surface_format)
 			.with_cull_mode(wgpu::Face::Back)
