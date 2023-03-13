@@ -2,7 +2,7 @@ use bort::storage;
 use typed_glam::traits::NumericVector;
 
 use crate::{
-	entity::actor::{ActorManager, Tag},
+	actor::manager::{ActorManager, Tag},
 	world::{
 		coord::move_rigid_body,
 		data::VoxelWorldData,

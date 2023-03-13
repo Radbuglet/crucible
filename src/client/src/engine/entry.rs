@@ -50,7 +50,7 @@ pub fn main() -> anyhow::Result<()> {
 			Some(main_surface),
 			wgpu::SurfaceConfiguration {
 				usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-				format: wgpu::TextureFormat::Bgra8UnormSrgb,
+				format: wgpu::TextureFormat::Bgra8Unorm,
 				width: 0,
 				height: 0,
 				present_mode: wgpu::PresentMode::default(),

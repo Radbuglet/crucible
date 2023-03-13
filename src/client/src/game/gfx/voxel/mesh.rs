@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use bort::{storage, CompRef, Entity};
 use crevice::std430::AsStd430;
 use crucible_common::{
-	entity::material::MaterialRegistry,
+	actor::material::MaterialRegistry,
 	world::{
 		data::{VoxelWorldData, AIR_MATERIAL_SLOT},
 		math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, WorldVec, WorldVecExt, QUAD_UVS},

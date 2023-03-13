@@ -1,10 +1,10 @@
 use bort::{storage, Entity, OwnedEntity};
 use crucible_common::{
-	entity::actor::{ActorManager, Tag},
+	actor::manager::{ActorManager, Tag},
 	world::{
-		coord::move_rigid_body,
+		coord::{cast_volume, move_rigid_body, DEFAULT_COLLISION_TOLERANCE},
 		data::VoxelWorldData,
-		math::{Aabb3, Angle3D, Angle3DExt, EntityVec},
+		math::{Aabb3, Angle3D, Angle3DExt, BlockFace, EntityVec},
 	},
 };
 use crucible_util::debug::error::{ErrorFormatExt, ResultExt};
@@ -22,15 +22,21 @@ use crate::engine::{
 
 // === Constants === //
 
-const PLAYER_SPEED: f64 = 0.04;
-const PLAYER_GRAVITY: f64 = 0.02;
-const PLAYER_FRICTION_COEF: f64 = 0.9;
+const TICKS_TO_FRAMES: f64 = 20.0 / 60.0;
+const TICKS_TO_FRAMES_SQ: f64 = TICKS_TO_FRAMES * TICKS_TO_FRAMES;
+
+// See: https://web.archive.org/web/20230313061131/https://www.mcpk.wiki/wiki/Jumping
+const PLAYER_SPEED: f64 = 0.13 * TICKS_TO_FRAMES_SQ;
+const PLAYER_GRAVITY: f64 = 0.08 * TICKS_TO_FRAMES_SQ;
+const PLAYER_AIR_FRICTION_COEF: f64 = 0.98;
+const PLAYER_BLOCK_FRICTION_COEF: f64 = 0.91;
+const PLAYER_JUMP_IMPULSE: f64 = 0.42 * TICKS_TO_FRAMES;
+
 const PLAYER_WIDTH: f64 = 0.8;
 const PLAYER_HEIGHT: f64 = 1.8;
 const PLAYER_EYE_LEVEL: f64 = 1.6;
-const PLAYER_JUMP_IMPULSE: f64 = 0.2;
 
-// === Factory === //
+// === Factories === //
 
 #[non_exhaustive]
 pub struct LocalPlayerTag;
@@ -46,8 +52,19 @@ pub fn spawn_local_player(actors: &mut ActorManager) -> Entity {
 				pos: EntityVec::ZERO,
 				vel: EntityVec::ZERO,
 				rot: Angle3D::ZERO,
+				was_on_ground: true,
 			}),
 	)
+}
+
+// === Components === //
+
+#[derive(Debug)]
+pub struct LocalPlayerState {
+	pos: EntityVec,
+	vel: EntityVec,
+	rot: Angle3D,
+	was_on_ground: bool,
 }
 
 // === Systems === //
@@ -58,20 +75,35 @@ pub fn update_local_players(actors: &ActorManager, world: &VoxelWorldData) {
 	for player in actors.tagged::<LocalPlayerTag>() {
 		let player_state = &mut *states.get_mut(player);
 
+		// Construct player AABB
+		let center_offset = EntityVec::new(PLAYER_WIDTH / 2.0, 0.0, PLAYER_WIDTH / 2.0);
+		let aabb = Aabb3 {
+			origin: player_state.pos - center_offset,
+			size: EntityVec::new(PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_WIDTH),
+		};
+
+		// Check whether we're on the ground
+		let on_ground = cast_volume(
+			world,
+			aabb.quad(BlockFace::NegativeY),
+			0.01,
+			DEFAULT_COLLISION_TOLERANCE,
+		) == 0.0;
+
 		// Update velocity
-		player_state.vel += EntityVec::NEG_Y * PLAYER_GRAVITY;
-		player_state.vel *= PLAYER_FRICTION_COEF;
+		if !on_ground {
+			player_state.vel += EntityVec::NEG_Y * PLAYER_GRAVITY;
+		} else if player_state.vel.y() < 0.0 {
+			*player_state.vel.y_mut() = 0.0;
+		}
+
+		player_state.was_on_ground = on_ground;
+		player_state.vel *= PLAYER_AIR_FRICTION_COEF;
+		player_state.vel *=
+			EntityVec::new(PLAYER_BLOCK_FRICTION_COEF, 1.0, PLAYER_BLOCK_FRICTION_COEF);
 
 		// Update position
-		let center_offset = EntityVec::new(PLAYER_WIDTH / 2.0, 0.0, PLAYER_WIDTH / 2.0);
-		player_state.pos = move_rigid_body(
-			world,
-			Aabb3 {
-				origin: player_state.pos - center_offset,
-				size: EntityVec::new(PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_WIDTH),
-			},
-			player_state.vel,
-		) + center_offset;
+		player_state.pos = move_rigid_body(world, aabb, player_state.vel) + center_offset;
 	}
 }
 
@@ -79,6 +111,7 @@ pub fn update_local_players(actors: &ActorManager, world: &VoxelWorldData) {
 pub struct PlayerInputController {
 	has_focus: bool,
 	local_player: Option<Entity>,
+	fly_mode: bool,
 }
 
 impl PlayerInputController {
@@ -181,9 +214,21 @@ impl PlayerInputController {
 				// Accelerate in that direction
 				player_state.vel += heading * PLAYER_SPEED;
 
+				// Process fly mode
+				if input_manager.key(VirtualKeyCode::F).recently_pressed() {
+					self.fly_mode = !self.fly_mode;
+				}
+
 				// Handle jumps
-				// TODO: Prevent air jumps
-				if input_manager.key(VirtualKeyCode::Space).recently_pressed() {
+				let should_jump = match self.fly_mode {
+					true => input_manager.key(VirtualKeyCode::Space).state(),
+					false => {
+						input_manager.key(VirtualKeyCode::Space).recently_pressed()
+							&& player_state.was_on_ground
+					}
+				};
+
+				if should_jump {
 					*player_state.vel.y_mut() = PLAYER_JUMP_IMPULSE;
 				}
 			}
@@ -193,20 +238,11 @@ impl PlayerInputController {
 				player_state.pos.as_glam().as_vec3() + Vec3::Y * PLAYER_EYE_LEVEL as f32,
 				player_state.rot,
 				CameraSettings::Perspective {
-					fov: 70f32.to_radians(),
+					fov: 110f32.to_radians(),
 					near: 0.1,
 					far: 100.0,
 				},
 			);
 		}
 	}
-}
-
-// === Components === //
-
-#[derive(Debug)]
-pub struct LocalPlayerState {
-	pos: EntityVec,
-	vel: EntityVec,
-	rot: Angle3D,
 }

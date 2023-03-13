@@ -1,7 +1,7 @@
 use bort::{Entity, OwnedEntity};
 use crucible_common::{
-	entity::{
-		actor::ActorManager,
+	actor::{
+		manager::ActorManager,
 		material::{MaterialDescriptorBase, MaterialRegistry},
 	},
 	world::{
@@ -76,6 +76,10 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 		size: WorldVec::splat(10),
 	};
 	for face in BlockFace::variants() {
+		if face == BlockFace::PositiveY {
+			continue;
+		}
+
 		for pos in the_box.quad(face).extrude_hv(1).iter_blocks() {
 			BlockLocation::new(&world_data, pos).set_state_or_create(
 				&mut world_data,
