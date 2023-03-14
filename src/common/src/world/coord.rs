@@ -12,7 +12,8 @@ use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 use crate::world::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt};
 
 use super::{
-	data::{BlockState, VoxelWorldData, AIR_MATERIAL_SLOT},
+	data::{BlockState, VoxelWorldData},
+	material::AIR_MATERIAL_SLOT,
 	math::{AaQuad, Aabb3, ChunkVec, EntityAabb, EntityVec, WorldVec},
 };
 

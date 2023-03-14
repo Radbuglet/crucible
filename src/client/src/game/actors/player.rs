@@ -1,6 +1,12 @@
 use bort::{storage, Entity, OwnedEntity};
 use crucible_common::{
-	actor::manager::{ActorManager, Tag},
+	actor::{
+		kinematic::{
+			tick_friction_coef_to_coef_qty, update_kinematic, GRAVITY_VEC, MC_TICKS_TO_SECS,
+			MC_TICKS_TO_SECS_SQUARED,
+		},
+		manager::{ActorManager, Tag},
+	},
 	world::{
 		coord::{cast_volume, move_rigid_body, DEFAULT_COLLISION_TOLERANCE},
 		data::VoxelWorldData,
@@ -22,15 +28,13 @@ use crate::engine::{
 
 // === Constants === //
 
-const TICKS_TO_FRAMES: f64 = 20.0 / 60.0;
-const TICKS_TO_FRAMES_SQ: f64 = TICKS_TO_FRAMES * TICKS_TO_FRAMES;
-
 // See: https://web.archive.org/web/20230313061131/https://www.mcpk.wiki/wiki/Jumping
-const PLAYER_SPEED: f64 = 0.13 * TICKS_TO_FRAMES_SQ;
-const PLAYER_GRAVITY: f64 = 0.08 * TICKS_TO_FRAMES_SQ;
+const PLAYER_SPEED: f64 = 0.13 * MC_TICKS_TO_SECS_SQUARED;
 const PLAYER_AIR_FRICTION_COEF: f64 = 0.98;
 const PLAYER_BLOCK_FRICTION_COEF: f64 = 0.91;
-const PLAYER_JUMP_IMPULSE: f64 = 0.42 * TICKS_TO_FRAMES;
+
+const PLAYER_JUMP_IMPULSE: f64 = 0.42 * MC_TICKS_TO_SECS;
+const PLAYER_JUMP_COOL_DOWN: u64 = 30;
 
 const PLAYER_WIDTH: f64 = 0.8;
 const PLAYER_HEIGHT: f64 = 1.8;
@@ -52,6 +56,7 @@ pub fn spawn_local_player(actors: &mut ActorManager) -> Entity {
 				pos: EntityVec::ZERO,
 				vel: EntityVec::ZERO,
 				rot: Angle3D::ZERO,
+				accel: EntityVec::ZERO,
 				was_on_ground: true,
 			}),
 	)
@@ -64,6 +69,7 @@ pub struct LocalPlayerState {
 	pos: EntityVec,
 	vel: EntityVec,
 	rot: Angle3D,
+	accel: EntityVec,
 	was_on_ground: bool,
 }
 
@@ -90,28 +96,39 @@ pub fn update_local_players(actors: &ActorManager, world: &VoxelWorldData) {
 			DEFAULT_COLLISION_TOLERANCE,
 		) == 0.0;
 
-		// Update velocity
-		if !on_ground {
-			player_state.vel += EntityVec::NEG_Y * PLAYER_GRAVITY;
-		} else if player_state.vel.y() < 0.0 {
+		player_state.was_on_ground = on_ground;
+
+		// Handle collisions
+		if on_ground && player_state.vel.y() < 0.0 {
 			*player_state.vel.y_mut() = 0.0;
 		}
 
-		player_state.was_on_ground = on_ground;
-		player_state.vel *= PLAYER_AIR_FRICTION_COEF;
-		player_state.vel *=
-			EntityVec::new(PLAYER_BLOCK_FRICTION_COEF, 1.0, PLAYER_BLOCK_FRICTION_COEF);
+		// Update velocity and position
+		let (delta_pos, velocity) = update_kinematic(
+			player_state.vel,
+			GRAVITY_VEC + player_state.accel,
+			tick_friction_coef_to_coef_qty(
+				EntityVec::new(
+					PLAYER_AIR_FRICTION_COEF * PLAYER_BLOCK_FRICTION_COEF,
+					PLAYER_AIR_FRICTION_COEF,
+					PLAYER_AIR_FRICTION_COEF * PLAYER_BLOCK_FRICTION_COEF,
+				),
+				60.0,
+			),
+			1.0 / 60.0,
+		);
 
-		// Update position
-		player_state.pos = move_rigid_body(world, aabb, player_state.vel) + center_offset;
+		player_state.vel = velocity;
+		player_state.pos = move_rigid_body(world, aabb, delta_pos) + center_offset;
 	}
 }
 
 #[derive(Debug, Default)]
 pub struct PlayerInputController {
-	has_focus: bool,
 	local_player: Option<Entity>,
+	has_focus: bool,
 	fly_mode: bool,
+	jump_cool_down: u64,
 }
 
 impl PlayerInputController {
@@ -212,7 +229,7 @@ impl PlayerInputController {
 				);
 
 				// Accelerate in that direction
-				player_state.vel += heading * PLAYER_SPEED;
+				player_state.accel = heading * PLAYER_SPEED;
 
 				// Process fly mode
 				if input_manager.key(VirtualKeyCode::F).recently_pressed() {
@@ -220,15 +237,25 @@ impl PlayerInputController {
 				}
 
 				// Handle jumps
+				let space_pressed = input_manager.key(VirtualKeyCode::Space).state();
+
+				if !space_pressed {
+					self.jump_cool_down = 0;
+				}
+
+				if self.jump_cool_down > 0 {
+					self.jump_cool_down -= 1;
+				}
+
 				let should_jump = match self.fly_mode {
-					true => input_manager.key(VirtualKeyCode::Space).state(),
+					true => space_pressed,
 					false => {
-						input_manager.key(VirtualKeyCode::Space).recently_pressed()
-							&& player_state.was_on_ground
+						space_pressed && self.jump_cool_down == 0 && player_state.was_on_ground
 					}
 				};
 
 				if should_jump {
+					self.jump_cool_down = PLAYER_JUMP_COOL_DOWN;
 					*player_state.vel.y_mut() = PLAYER_JUMP_IMPULSE;
 				}
 			}

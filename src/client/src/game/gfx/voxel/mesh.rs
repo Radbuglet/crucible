@@ -2,13 +2,11 @@ use std::time::{Duration, Instant};
 
 use bort::{storage, CompRef, Entity};
 use crevice::std430::AsStd430;
-use crucible_common::{
-	actor::material::MaterialRegistry,
-	world::{
-		data::{VoxelWorldData, AIR_MATERIAL_SLOT},
-		math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, WorldVec, WorldVecExt, QUAD_UVS},
-		mesh::QuadMeshLayer,
-	},
+use crucible_common::world::{
+	data::VoxelWorldData,
+	material::{MaterialRegistry, AIR_MATERIAL_SLOT},
+	math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, WorldVec, WorldVecExt, QUAD_UVS},
+	mesh::QuadMeshLayer,
 };
 use crucible_util::{
 	lang::polyfill::OptionPoly,

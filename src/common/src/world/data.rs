@@ -190,8 +190,6 @@ impl VoxelChunkDataViewMut<'_> {
 
 // === Block State Manipulation === //
 
-pub const AIR_MATERIAL_SLOT: u16 = 0;
-
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Default)]
 pub struct BlockState {
 	pub material: u16,

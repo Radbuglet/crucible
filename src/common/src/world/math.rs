@@ -337,10 +337,14 @@ impl FlavorCastFrom<WorldVec> for EntityVecFlavor {
 }
 
 pub trait EntityVecExt {
+	const HORIZONTAL: Self;
+
 	fn block_pos(self) -> WorldVec;
 }
 
 impl EntityVecExt for EntityVec {
+	const HORIZONTAL: Self = Self::from_glam(DVec3::new(1.0, 0.0, 1.0));
+
 	fn block_pos(self) -> WorldVec {
 		self.map_glam(|raw| raw.floor().as_ivec3())
 	}
