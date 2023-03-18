@@ -1,6 +1,6 @@
 use bort::{Entity, OwnedEntity};
 use crucible_common::{
-	actor::manager::ActorManager,
+	actor::{kinds::spatial::update_kinematic_spatials, manager::ActorManager},
 	world::{
 		coord::BlockLocation,
 		data::{BlockState, VoxelWorldData},
@@ -24,7 +24,9 @@ use crate::engine::{
 };
 
 use super::{
-	actors::player::{spawn_local_player, update_local_players, PlayerInputController},
+	actors::player::{
+		reset_kinematic_accelerations_to_gravity, spawn_local_player, PlayerInputController,
+	},
 	gfx::voxel::{
 		mesh::{BlockDescriptorVisual, VoxelWorldMesh},
 		pipeline::{load_opaque_block_pipeline, VoxelUniforms},
@@ -174,11 +176,10 @@ impl GameSceneState {
 		// Reset camera
 		camera.unset();
 
-		// Process player inputs
-		player_inputs.update(self.main_viewport, &mut camera, &mut world_data);
-
 		// Process actors
-		update_local_players(&actors, &world_data);
+		reset_kinematic_accelerations_to_gravity(&actors);
+		player_inputs.update(self.main_viewport, &mut camera, &mut world_data);
+		update_kinematic_spatials(&actors, &world_data, 1.0 / 60.0);
 
 		// Update chunk meshes
 		for chunk in world_data.flush_flagged() {

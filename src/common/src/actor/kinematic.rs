@@ -1,7 +1,5 @@
 use std::f64::consts::E;
 
-use typed_glam::glam::DVec3;
-
 use crate::world::math::EntityVec;
 
 // === Parameters === //
@@ -11,17 +9,6 @@ pub const MC_TICKS_TO_SECS: f64 = 20.0;
 
 /// A conversion coefficient from `(Minecraft tick)^-2` to `second^-2` (`20 ticks` = `1 sec`).
 pub const MC_TICKS_TO_SECS_SQUARED: f64 = MC_TICKS_TO_SECS * MC_TICKS_TO_SECS;
-
-/// The global acceleration due to gravity in `blocks * second^-2`. Like in real life, weight factors
-/// into an object's net downwards acceleration through air friction—not differences in gravitational
-/// acceleration.
-///
-/// This coefficient is the same as it is in Minecraft, and was sourced from [the Minecraft Parkour
-/// Wiki](https://web.archive.org/web/20220729231203/https://www.mcpk.wiki/wiki/Vertical_Movement_Formulas).
-pub const GRAVITY: f64 = 0.08 * MC_TICKS_TO_SECS_SQUARED;
-
-/// A standard acceleration due to gravity vector in `blocks * second^-2`.
-pub const GRAVITY_VEC: EntityVec = EntityVec::from_glam(DVec3::new(0.0, -GRAVITY, 0.0));
 
 // === Kinematic core === //
 

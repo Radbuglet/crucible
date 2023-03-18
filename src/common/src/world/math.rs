@@ -981,6 +981,10 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 		}
 	}
 
+	pub fn centered_at(&self, percent: V) -> Self {
+		self.translated(-self.size * percent)
+	}
+
 	pub fn positive_corner(&self) -> V {
 		self.origin + self.size
 	}

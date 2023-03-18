@@ -342,7 +342,7 @@ impl<'a> ContextualIter<(&'a VoxelWorldData, &'a mut RayCast)> for ContextualRay
 
 // === Collisions === //
 
-pub const DEFAULT_COLLISION_TOLERANCE: f64 = 0.0005;
+pub const COLLISION_TOLERANCE: f64 = 0.0005;
 
 pub fn cast_volume(
 	world: &VoxelWorldData,
@@ -447,12 +447,7 @@ pub fn move_rigid_body(
 		let face = BlockFace::compose(axis, sign);
 
 		// Determine how far we can move
-		let actual_delta = cast_volume(
-			world,
-			aabb.quad(face),
-			unsigned_delta,
-			DEFAULT_COLLISION_TOLERANCE,
-		);
+		let actual_delta = cast_volume(world, aabb.quad(face), unsigned_delta, COLLISION_TOLERANCE);
 
 		// Commit the movement
 		aabb.origin += face.unit_typed::<EntityVec>() * actual_delta;
