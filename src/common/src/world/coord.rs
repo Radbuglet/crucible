@@ -1,9 +1,8 @@
-use bort::{Entity, OwnedEntity};
+use std::borrow::BorrowMut;
+
+use bort::Entity;
 use crucible_util::{
-	lang::{
-		iter::{ContextualIter, WithContext},
-		polyfill::OptionPoly,
-	},
+	lang::{iter::ContextualIter, polyfill::OptionPoly},
 	mem::c_enum::CEnum,
 };
 use smallvec::SmallVec;
@@ -14,7 +13,7 @@ use crate::world::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, W
 use super::{
 	data::{BlockState, VoxelWorldData},
 	material::AIR_MATERIAL_SLOT,
-	math::{AaQuad, Aabb3, ChunkVec, EntityAabb, EntityVec, WorldVec},
+	math::{AaQuad, Aabb3, EntityAabb, EntityVec, WorldVec},
 };
 
 // === Location === //
@@ -37,7 +36,7 @@ where
 	pub fn new(world: &VoxelWorldData, pos: V) -> Self {
 		Self {
 			pos,
-			chunk_cache: world.get_chunk(WorldVec::cast_from(pos).chunk()),
+			chunk_cache: world.try_get_chunk(WorldVec::cast_from(pos).chunk()),
 		}
 	}
 
@@ -49,7 +48,7 @@ where
 	}
 
 	pub fn refresh(&mut self, world: &VoxelWorldData) {
-		self.chunk_cache = world.get_chunk(WorldVec::cast_from(self.pos).chunk());
+		self.chunk_cache = world.try_get_chunk(WorldVec::cast_from(self.pos).chunk());
 	}
 
 	pub fn pos(&self) -> V {
@@ -132,7 +131,7 @@ where
 		})
 	}
 
-	pub fn set_state(&mut self, world: &mut VoxelWorldData, state: BlockState) {
+	pub fn set_state_in_world(&mut self, world: &mut VoxelWorldData, state: BlockState) {
 		let chunk = match self.chunk(world) {
 			Some(chunk) => chunk,
 			None => {
@@ -146,20 +145,13 @@ where
 			.set_block_state(WorldVec::cast_from(self.pos).block(), state);
 	}
 
-	pub fn set_state_or_create(
-		&mut self,
-		world: &mut VoxelWorldData,
-		factory: impl FnOnce(ChunkVec) -> OwnedEntity,
-		state: BlockState,
-	) {
+	pub fn set_state_or_create(&mut self, world: &mut VoxelWorldData, state: BlockState) {
 		// Fetch chunk
 		let chunk = match self.chunk(world) {
 			Some(chunk) => chunk,
 			None => {
 				let pos = WorldVec::cast_from(self.pos).chunk();
-				let (chunk, chunk_ref) = factory(pos).split_guard();
-				world.add_chunk(pos, chunk);
-				chunk_ref
+				world.get_chunk_or_create(pos)
 			}
 		};
 
@@ -273,8 +265,12 @@ impl RayCast {
 		intersections
 	}
 
-	pub fn step_for<'a>(&'a mut self, world: &'a VoxelWorldData, max_dist: f64) -> RayCastIter<'a> {
-		ContextualRayCastIter::new(max_dist).with_context((world, self))
+	pub fn into_iter(self, dist: f64) -> RayCastIter<Self> {
+		RayCastIter::new(self, dist)
+	}
+
+	pub fn step_for(&mut self, dist: f64) -> RayCastIter<&'_ mut Self> {
+		RayCastIter::new(self, dist)
 	}
 }
 
@@ -287,44 +283,40 @@ pub struct RayCastIntersection {
 	pub distance: f64,
 }
 
-pub type RayCastIter<'a> =
-	WithContext<(&'a VoxelWorldData, &'a mut RayCast), ContextualRayCastIter>;
-
-#[derive(Debug, Clone)]
-pub struct ContextualRayCastIter {
+#[derive(Debug)]
+pub struct RayCastIter<R> {
+	pub ray: R,
 	pub max_dist: f64,
 	back_log: SmallVec<[RayCastIntersection; 3]>,
 }
 
-impl ContextualRayCastIter {
-	pub fn new(max_dist: f64) -> Self {
+impl<R> RayCastIter<R> {
+	pub fn new(ray: R, max_dist: f64) -> Self {
 		Self {
+			ray,
 			max_dist,
 			back_log: Default::default(),
 		}
 	}
 }
 
-impl<'a> ContextualIter<(&'a VoxelWorldData, &'a mut RayCast)> for ContextualRayCastIter {
+impl<'a, R: BorrowMut<RayCast>> ContextualIter<&'a VoxelWorldData> for RayCastIter<R> {
 	type Item = RayCastIntersection;
 
-	fn next_on_ref(
-		&mut self,
-		(world, ray): &mut (&'a VoxelWorldData, &'a mut RayCast),
-	) -> Option<Self::Item> {
+	fn next_on_ref(&mut self, world: &mut &'a VoxelWorldData) -> Option<Self::Item> {
 		let world = *world;
 
 		let next = if !self.back_log.is_empty() {
 			self.back_log.remove(0)
-		} else if ray.dist() < self.max_dist {
-			self.back_log = ray.step(world);
+		} else if self.ray.borrow().dist() < self.max_dist {
+			self.back_log = self.ray.borrow_mut().step(world);
 
 			// It is possible that the ray needs to travel more than 1 unit to get out of a block.
 			// The furthest it can travel is `sqrt(3 * 1^2) ~= 1.7` so we have to call this method
 			// at most twice. Also, yes, this handles a zero-vector direction because rays with no
 			// direction automatically get infinite distance.
 			if self.back_log.is_empty() {
-				self.back_log = ray.step(world);
+				self.back_log = self.ray.borrow_mut().step(world);
 			}
 
 			self.back_log.remove(0)

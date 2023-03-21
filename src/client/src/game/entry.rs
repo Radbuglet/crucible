@@ -3,9 +3,9 @@ use crucible_common::{
 	actor::{kinds::spatial::update_kinematic_spatials, manager::ActorManager},
 	world::{
 		coord::BlockLocation,
-		data::{BlockState, VoxelWorldData},
+		data::{BlockState, VoxelChunkFactory, VoxelWorldData},
 		material::{MaterialDescriptorBase, MaterialRegistry},
-		math::{Aabb3, BlockFace, ChunkVec, WorldVec},
+		math::{Aabb3, BlockFace, WorldVec},
 	},
 };
 use crucible_util::{debug::error::ResultExt, mem::c_enum::CEnum};
@@ -42,7 +42,9 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 		.with(CameraManager::default())
 		.with(ActorManager::default())
 		.with(PlayerInputController::default())
-		.with(VoxelWorldData::default())
+		.with(VoxelWorldData::new(VoxelChunkFactory::new(|pos| {
+			OwnedEntity::new().with_debug_label(format_args!("chunk at {pos:?}"))
+		})))
 		.with(VoxelWorldMesh::default())
 		.with(SceneUpdateHandler::new(|me| {
 			me.get_mut::<GameSceneState>().update(me);
@@ -83,7 +85,6 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 		for pos in the_box.quad(face).extrude_hv(1).iter_blocks() {
 			BlockLocation::new(&world_data, pos).set_state_or_create(
 				&mut world_data,
-				create_chunk,
 				BlockState {
 					material,
 					..Default::default()
@@ -93,10 +94,6 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 	}
 
 	scene
-}
-
-pub fn create_chunk(pos: ChunkVec) -> OwnedEntity {
-	OwnedEntity::new().with_debug_label(format_args!("chunk at {pos:?}"))
 }
 
 // === Components === //

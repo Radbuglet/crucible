@@ -6,11 +6,16 @@ use crucible_common::{
 		manager::{ActorManager, Tag},
 	},
 	world::{
-		data::VoxelWorldData,
+		coord::{EntityLocation, RayCast},
+		data::{BlockState, VoxelWorldData},
+		material::AIR_MATERIAL_SLOT,
 		math::{Aabb3, Angle3D, Angle3DExt, BlockFace, EntityVec},
 	},
 };
-use crucible_util::debug::error::{ErrorFormatExt, ResultExt};
+use crucible_util::{
+	debug::error::{ErrorFormatExt, ResultExt},
+	lang::{iter::ContextualIter, polyfill::OptionPoly},
+};
 use typed_glam::glam::{DVec3, Vec3};
 use winit::{
 	dpi::PhysicalPosition,
@@ -33,7 +38,7 @@ const PLAYER_SPEED: f64 = 0.13 * MC_TICKS_TO_SECS_SQUARED;
 const PLAYER_AIR_FRICTION_COEF: f64 = 0.98;
 const PLAYER_BLOCK_FRICTION_COEF: f64 = 0.91;
 
-const PLAYER_JUMP_IMPULSE: f64 = 0.42 * MC_TICKS_TO_SECS;
+const PLAYER_JUMP_IMPULSE: f64 = 0.43 * MC_TICKS_TO_SECS;
 const PLAYER_JUMP_COOL_DOWN: u64 = 30;
 
 const PLAYER_WIDTH: f64 = 0.8;
@@ -69,6 +74,8 @@ pub fn spawn_local_player(actors: &mut ActorManager) -> Entity {
 	)
 }
 
+// === Systems === //
+
 // TODO: This belongs somewhere else.
 pub fn reset_kinematic_accelerations_to_gravity(actors: &ActorManager) {
 	let kinematics = storage::<KinematicSpatial>();
@@ -101,7 +108,7 @@ impl PlayerInputController {
 		&mut self,
 		main_viewport: Entity,
 		camera: &mut CameraManager,
-		_world: &mut VoxelWorldData,
+		world: &mut VoxelWorldData,
 	) {
 		// Acquire context
 		let viewport = main_viewport.get::<Viewport>();
@@ -213,6 +220,67 @@ impl PlayerInputController {
 					{
 						self.jump_cool_down = PLAYER_JUMP_COOL_DOWN;
 						*player_kinematic.velocity.y_mut() = PLAYER_JUMP_IMPULSE;
+					}
+				}
+
+				// Handle block placement
+				if input_manager.button(MouseButton::Right).recently_pressed() {
+					let mut ray_iter = RayCast::new_at(
+						EntityLocation::new(
+							world,
+							player_spatial.position + EntityVec::Y * PLAYER_EYE_LEVEL,
+						),
+						player_spatial.facing(),
+					)
+					.into_iter(7.0);
+
+					while let Some(intersection) = ray_iter.next(world) {
+						if intersection
+							.block
+							.clone()
+							.state(world)
+							.p_is_some_and(|v| v.material != AIR_MATERIAL_SLOT)
+						{
+							intersection
+								.block
+								.at_neighbor(world, intersection.face.invert())
+								.set_state_or_create(
+									world,
+									BlockState {
+										material: 1,
+										..Default::default()
+									},
+								);
+							break;
+						}
+					}
+				} else if input_manager.button(MouseButton::Left).recently_pressed() {
+					let mut ray_iter = RayCast::new_at(
+						EntityLocation::new(
+							world,
+							player_spatial.position + EntityVec::Y * PLAYER_EYE_LEVEL,
+						),
+						player_spatial.facing(),
+					)
+					.into_iter(7.0);
+
+					while let Some(intersection) = ray_iter.next(world) {
+						if intersection
+							.block
+							.clone()
+							.state(world)
+							.p_is_some_and(|v| v.material != AIR_MATERIAL_SLOT)
+						{
+							intersection.block.clone().set_state_in_world(
+								world,
+								BlockState {
+									material: AIR_MATERIAL_SLOT,
+									variant: 0,
+									light_level: 0,
+								},
+							);
+							break;
+						}
 					}
 				}
 			}

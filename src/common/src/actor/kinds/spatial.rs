@@ -63,7 +63,14 @@ impl KinematicSpatial {
 		aabb: Aabb3<EntityVec>,
 		face: BlockFace,
 	) -> bool {
-		cast_volume(world, aabb.quad(face), 0.01, COLLISION_TOLERANCE) == 0.0
+		let additional_margin = COLLISION_TOLERANCE;
+
+		cast_volume(
+			world,
+			aabb.quad(face),
+			additional_margin,
+			COLLISION_TOLERANCE,
+		) < additional_margin / 2.0
 	}
 
 	pub fn is_face_touching_now(
@@ -115,14 +122,20 @@ pub fn update_kinematic_spatials(actors: &ActorManager, world: &VoxelWorldData, 
 		kinematic.update_face_touching_mask(world, spatial);
 
 		for axis in Axis3::variants() {
-			let vel = kinematic.velocity.comp_mut(axis);
-			let sign = Sign::of(*vel).unwrap_or(Sign::Positive);
-			let face = BlockFace::compose(axis, sign);
+			// N.B. we do these separetly because a player could be accelerating in
+			// the opposite direction than which they are moving.
 
-			if kinematic.collision_mask[face] {
-				*vel = 0.0;
-				*kinematic.acceleration.comp_mut(axis) = 0.0;
-			}
+			let clip_comp = |comp: &mut f64| {
+				let sign = Sign::of(*comp).unwrap_or(Sign::Positive);
+				let face = BlockFace::compose(axis, sign);
+
+				if kinematic.collision_mask[face] {
+					*comp = 0.0;
+				}
+			};
+
+			clip_comp(kinematic.velocity.comp_mut(axis));
+			clip_comp(kinematic.acceleration.comp_mut(axis));
 		}
 
 		// Update velocity and position

@@ -6,6 +6,7 @@ use std::{
 
 use bort::{storage, Entity, OwnedEntity, Storage};
 use crucible_util::{
+	delegate,
 	lang::view::View,
 	mem::c_enum::{CEnum, CEnumMap},
 };
@@ -15,9 +16,14 @@ use super::math::{BlockFace, BlockVec, BlockVecExt, ChunkVec, CHUNK_VOLUME};
 
 // === World === //
 
+delegate! {
+	pub fn VoxelChunkFactory(pos: ChunkVec) -> OwnedEntity
+}
+
 #[derive(Debug)]
 pub struct VoxelWorldData {
 	data_store: &'static Storage<VoxelChunkData>,
+	chunk_factory: VoxelChunkFactory,
 	pos_map: HashMap<ChunkVec, OwnedEntity>,
 	flag_list: VoxelWorldFlagList,
 }
@@ -28,7 +34,7 @@ struct VoxelWorldFlagList {
 }
 
 impl VoxelWorldFlagList {
-	fn flag_chunk(&mut self, chunk_data: &mut VoxelChunkData, chunk: Entity) {
+	fn add(&mut self, chunk_data: &mut VoxelChunkData, chunk: Entity) {
 		if chunk_data.flagged.is_none() {
 			chunk_data.flagged = Some(self.flagged.len());
 			self.flagged.push(chunk);
@@ -36,24 +42,30 @@ impl VoxelWorldFlagList {
 	}
 }
 
-impl Default for VoxelWorldData {
-	fn default() -> Self {
+impl VoxelWorldData {
+	pub fn new(chunk_factory: VoxelChunkFactory) -> Self {
 		Self {
-			data_store: storage::<VoxelChunkData>(),
-			pos_map: Default::default(),
-			flag_list: Default::default(),
+			data_store: storage(),
+			chunk_factory,
+			pos_map: HashMap::default(),
+			flag_list: VoxelWorldFlagList::default(),
 		}
 	}
-}
 
-impl VoxelWorldData {
-	pub fn add_chunk(&mut self, pos: ChunkVec, chunk: OwnedEntity) {
-		debug_assert!(!self.pos_map.contains_key(&pos));
+	pub fn try_get_chunk(&self, pos: ChunkVec) -> Option<Entity> {
+		self.pos_map.get(&pos).map(OwnedEntity::entity)
+	}
+
+	pub fn get_chunk_or_create(&mut self, pos: ChunkVec) -> Entity {
+		// Return the chunk if it already exists
+		if let Some(chunk) = self.pos_map.get(&pos) {
+			return chunk.entity();
+		}
 
 		// Register chunk
-		let (chunk, chunk_ref) = chunk.split_guard();
+		let (chunk, chunk_ref) = (self.chunk_factory)(pos).split_guard();
 		self.data_store.insert(
-			chunk.entity(),
+			chunk_ref,
 			VoxelChunkData {
 				pos,
 				flagged: None,
@@ -76,10 +88,11 @@ impl VoxelWorldData {
 			chunk_data.neighbors[face] = Some(neighbor);
 			neighbor.get_mut::<VoxelChunkData>().neighbors[face.invert()] = Some(chunk_ref);
 		}
-	}
 
-	pub fn get_chunk(&self, pos: ChunkVec) -> Option<Entity> {
-		self.pos_map.get(&pos).map(OwnedEntity::entity)
+		// Add the new chunk to the dirty queue
+		self.flag_list.add(&mut chunk_data, chunk_ref);
+
+		chunk_ref
 	}
 
 	pub fn remove_chunk(&mut self, pos: ChunkVec) {
@@ -183,7 +196,7 @@ impl VoxelChunkDataViewMut<'_> {
 
 		if *state != new {
 			*state = new;
-			self.flag_list.flag_chunk(&mut self.data, self.chunk);
+			self.flag_list.add(&mut self.data, self.chunk);
 		}
 	}
 }
