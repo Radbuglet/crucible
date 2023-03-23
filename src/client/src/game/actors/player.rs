@@ -5,10 +5,10 @@ use crucible_common::{
 		kinematic::{tick_friction_coef_to_coef_qty, MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
 		manager::{ActorManager, Tag},
 	},
+	material::AIR_MATERIAL_SLOT,
 	world::{
-		coord::{EntityLocation, RayCast},
-		data::{BlockState, VoxelWorldData},
-		material::AIR_MATERIAL_SLOT,
+		collision::RayCast,
+		data::{BlockState, EntityLocation, VoxelWorldData},
 		math::{Aabb3, Angle3D, Angle3DExt, BlockFace, EntityVec},
 	},
 };

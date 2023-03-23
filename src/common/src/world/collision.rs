@@ -1,170 +1,99 @@
-use std::borrow::BorrowMut;
+use std::{borrow::BorrowMut, iter};
 
-use bort::Entity;
+use bort::{CompRef, Entity, Storage};
 use crucible_util::{
+	choice_iter,
 	lang::{iter::ContextualIter, polyfill::OptionPoly},
+	match_unwrap,
 	mem::c_enum::CEnum,
 };
 use smallvec::SmallVec;
-use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 
-use crate::world::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt};
-
-use super::{
-	data::{BlockState, VoxelWorldData},
-	material::AIR_MATERIAL_SLOT,
-	math::{AaQuad, Aabb3, EntityAabb, EntityVec, WorldVec},
+use crate::{
+	material::{MaterialRegistry, AIR_MATERIAL_SLOT},
+	world::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt},
 };
 
-// === Location === //
+use super::{
+	data::{BlockLocation, EntityLocation, VoxelWorldData},
+	math::{AaQuad, Aabb3, EntityAabb, EntityVec},
+	mesh::{QuadMeshLayer, StyledQuad},
+};
 
-pub type BlockLocation = Location<WorldVec>;
-pub type EntityLocation = Location<EntityVec>;
+// === Colliders === //
 
 #[derive(Debug, Copy, Clone)]
-pub struct Location<V> {
-	pos: V,
-	chunk_cache: Option<Entity>,
+pub enum ColliderMeta {
+	None,
+	Entity(Entity),
 }
 
-impl<V> Location<V>
-where
-	WorldVec: CastVecFrom<V>,
-	V: CastVecFrom<WorldVec>,
-	V: SignedNumericVector3,
-{
-	pub fn new(world: &VoxelWorldData, pos: V) -> Self {
-		Self {
-			pos,
-			chunk_cache: world.try_get_chunk(WorldVec::cast_from(pos).chunk()),
+#[derive(Debug, Clone)]
+pub enum MaterialColliderDescriptor {
+	Transparent,
+	Cubic(ColliderMeta),
+	Mesh(QuadMeshLayer<ColliderMeta>),
+}
+
+pub fn collect_colliders(
+	collider_descs: &'static Storage<MaterialColliderDescriptor>,
+	world: &VoxelWorldData,
+	registry: &MaterialRegistry,
+	block: &mut BlockLocation,
+) -> impl Iterator<Item = (AaQuad<EntityVec>, ColliderMeta)> {
+	choice_iter!(Iter: Empty, Fixed, Registry);
+
+	// Decode the block state
+	let Some(state) = block.state(world).filter(|state| state.material != AIR_MATERIAL_SLOT) else {
+		return Iter::Empty(iter::empty());
+	};
+
+	let descriptor = registry.resolve_slot(state.material);
+	let descriptor = collider_descs.get(descriptor);
+
+	// Determine an offset from block-relative coordinates to world coordinates
+	let quad_offset = block.pos().negative_most_corner();
+
+	// Iterate quads from the block collision descriptor
+	match &*descriptor {
+		MaterialColliderDescriptor::Transparent => Iter::Empty(iter::empty()),
+		MaterialColliderDescriptor::Cubic(meta) => {
+			let meta = *meta;
+			Iter::Fixed(BlockFace::variants().map(move |face| {
+				(
+					AaQuad::new_given_volume(quad_offset, face, EntityVec::ONE),
+					meta,
+				)
+			}))
 		}
-	}
+		MaterialColliderDescriptor::Mesh(_) => {
+			let mesh = CompRef::map(descriptor, |descriptor| {
+				match_unwrap!(MaterialColliderDescriptor::Mesh(mesh) = descriptor);
+				mesh
+			});
+			let mut i = 0;
 
-	pub fn new_uncached(pos: V) -> Self {
-		Self {
-			pos,
-			chunk_cache: None,
-		}
-	}
+			Iter::Registry(iter::from_fn(move || {
+				let StyledQuad {
+					quad: AaQuad {
+						origin,
+						face,
+						size: (sx, sy),
+					},
+					material: face_meta,
+				} = *mesh.quads.get(i)?;
 
-	pub fn refresh(&mut self, world: &VoxelWorldData) {
-		self.chunk_cache = world.try_get_chunk(WorldVec::cast_from(self.pos).chunk());
-	}
+				i += 1;
 
-	pub fn pos(&self) -> V {
-		self.pos
-	}
-
-	pub fn set_pos_within_chunk(&mut self, pos: V) {
-		debug_assert_eq!(
-			WorldVec::cast_from(pos).chunk(),
-			WorldVec::cast_from(self.pos).chunk()
-		);
-
-		self.pos = pos;
-	}
-
-	pub fn chunk(&mut self, world: &VoxelWorldData) -> Option<Entity> {
-		match self.chunk_cache {
-			Some(chunk) => Some(chunk),
-			None => {
-				self.refresh(world);
-				self.chunk_cache
-			}
-		}
-	}
-
-	pub fn move_to_neighbor(&mut self, world: &VoxelWorldData, face: BlockFace) {
-		// Update position
-		let old_pos = self.pos;
-		self.pos += face.unit_typed::<V>();
-
-		// Update chunk cache
-		if WorldVec::cast_from(old_pos).chunk() != WorldVec::cast_from(self.pos).chunk() {
-			if let Some(chunk) = self.chunk_cache {
-				self.chunk_cache = world.chunk_state(chunk).neighbor(face);
-			} else {
-				self.refresh(world);
-			}
-		}
-	}
-
-	pub fn at_neighbor(mut self, world: &VoxelWorldData, face: BlockFace) -> Self {
-		self.move_to_neighbor(world, face);
-		self
-	}
-
-	pub fn move_to(&mut self, world: &VoxelWorldData, new_pos: V) {
-		let chunk_delta =
-			WorldVec::cast_from(new_pos).chunk() - WorldVec::cast_from(self.pos).chunk();
-
-		if let (Some(chunk), Some(face)) =
-			(self.chunk_cache, BlockFace::from_vec(chunk_delta.to_glam()))
-		{
-			self.pos = new_pos;
-			self.chunk_cache = world.chunk_state(chunk).neighbor(face);
-		} else {
-			self.pos = new_pos;
-			self.refresh(world);
-		}
-	}
-
-	pub fn at_absolute(mut self, world: &VoxelWorldData, new_pos: V) -> Self {
-		self.move_to(world, new_pos);
-		self
-	}
-
-	pub fn move_relative(&mut self, world: &VoxelWorldData, delta: V) {
-		self.move_to(world, self.pos + delta);
-	}
-
-	pub fn at_relative(mut self, world: &VoxelWorldData, delta: V) -> Self {
-		self.move_relative(world, delta);
-		self
-	}
-
-	pub fn state(&mut self, world: &VoxelWorldData) -> Option<BlockState> {
-		self.chunk(world).map(|chunk| {
-			world
-				.chunk_state(chunk)
-				.block_state(WorldVec::cast_from(self.pos).block())
-		})
-	}
-
-	pub fn set_state_in_world(&mut self, world: &mut VoxelWorldData, state: BlockState) {
-		let chunk = match self.chunk(world) {
-			Some(chunk) => chunk,
-			None => {
-				log::warn!("`set_state` called on `BlockLocation` outside of the world.");
-				return;
-			}
-		};
-
-		world
-			.chunk_state_mut(chunk)
-			.set_block_state(WorldVec::cast_from(self.pos).block(), state);
-	}
-
-	pub fn set_state_or_create(&mut self, world: &mut VoxelWorldData, state: BlockState) {
-		// Fetch chunk
-		let chunk = match self.chunk(world) {
-			Some(chunk) => chunk,
-			None => {
-				let pos = WorldVec::cast_from(self.pos).chunk();
-				world.get_chunk_or_create(pos)
-			}
-		};
-
-		// Set block state
-		world
-			.chunk_state_mut(chunk)
-			.set_block_state(WorldVec::cast_from(self.pos).block(), state);
-	}
-
-	pub fn as_block_location(&self) -> BlockLocation {
-		BlockLocation {
-			chunk_cache: self.chunk_cache,
-			pos: WorldVec::cast_from(self.pos),
+				Some((
+					AaQuad {
+						origin: quad_offset + origin.as_dvec3(),
+						face,
+						size: (sx.into(), sy.into()),
+					},
+					face_meta,
+				))
+			}))
 		}
 	}
 }

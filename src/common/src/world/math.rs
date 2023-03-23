@@ -773,6 +773,14 @@ impl<V: NumericVector3> AaQuad<V> {
 		}
 	}
 
+	pub fn translated(&self, by: V) -> Self {
+		Self {
+			origin: self.origin + by,
+			face: self.face,
+			size: self.size,
+		}
+	}
+
 	pub fn size_deltas(&self) -> (V, V) {
 		let (h, v) = self.face.axis().ortho_hv();
 		let (sh, sv) = self.size;

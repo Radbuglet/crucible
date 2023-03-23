@@ -1,3 +1,5 @@
+use std::iter::empty;
+
 use crate::mem::array::map_arr;
 
 // === ContextualIter === //
@@ -113,8 +115,42 @@ impl<const N: usize> Iterator for VolumetricIter<N> {
 	}
 }
 
+// === choice_iter === //
+
+#[doc(hidden)]
+pub mod macro_internals {
+	pub use Iterator;
+}
+
+#[macro_export]
+macro_rules! choice_iter {
+	($vis:vis $name:ident : $($variant:ident),*$(,)?) => {
+		$vis enum $name<$($variant),*> {
+			$($variant($variant)),*
+		}
+
+		impl<__Item, $($variant),*> $crate::lang::iter::macro_internals::Iterator for $name<$($variant),*>
+		where
+			$($variant: $crate::lang::iter::macro_internals::Iterator<Item = __Item>),*
+		{
+			type Item = __Item;
+
+			fn next(&mut self) -> Option<Self::Item> {
+				match self {
+					$(Self::$variant(v) => v.next()),*
+				}
+			}
+		}
+	};
+}
+
 // === optionally_iter === //
 
+choice_iter!(pub Either : Left, Right);
+
 pub fn optionally_iter<I: Iterator>(iter: Option<I>) -> impl Iterator<Item = I::Item> {
-	iter.into_iter().flatten()
+	match iter {
+		Some(iter) => Either::Left(iter),
+		None => Either::Right(empty()),
+	}
 }

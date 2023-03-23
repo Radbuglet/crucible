@@ -1,3 +1,4 @@
+pub mod control;
 pub mod delegate;
 pub mod iter;
 pub mod lifetime;
