@@ -1,46 +1,50 @@
 use std::{borrow::BorrowMut, iter};
 
-use bort::{CompRef, Entity, Storage};
-use crucible_util::{
-	choice_iter,
-	lang::{iter::ContextualIter, polyfill::OptionPoly},
-	match_unwrap,
-	mem::c_enum::CEnum,
-};
+use bort::{storage, CompRef, Entity, Storage};
+use crucible_util::{choice_iter, lang::iter::ContextualIter, match_unwrap, mem::c_enum::CEnum};
 use smallvec::SmallVec;
+use typed_glam::glam::DVec2;
 
 use crate::{
 	material::{MaterialRegistry, AIR_MATERIAL_SLOT},
-	world::math::{Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt},
+	world::math::{Aabb3, Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt},
 };
 
 use super::{
 	data::{BlockLocation, EntityLocation, VoxelWorldData},
-	math::{AaQuad, Aabb3, EntityAabb, EntityVec},
+	math::{AaQuad, EntityAabb, EntityVec},
 	mesh::{QuadMeshLayer, StyledQuad},
 };
 
 // === Colliders === //
 
 #[derive(Debug, Copy, Clone)]
-pub enum ColliderMeta {
-	None,
-	Entity(Entity),
+pub struct CollisionMeta {
+	pub mask: u64,
+	pub meta: Option<Entity>,
+}
+
+impl CollisionMeta {
+	pub const OPAQUE: Self = Self {
+		mask: u64::MAX,
+		meta: None,
+	};
 }
 
 #[derive(Debug, Clone)]
 pub enum MaterialColliderDescriptor {
 	Transparent,
-	Cubic(ColliderMeta),
-	Mesh(QuadMeshLayer<ColliderMeta>),
+	Cubic(CollisionMeta),
+	Mesh(QuadMeshLayer<CollisionMeta>),
 }
 
-pub fn collect_colliders(
+pub fn colliders_in_block(
 	collider_descs: &'static Storage<MaterialColliderDescriptor>,
 	world: &VoxelWorldData,
 	registry: &MaterialRegistry,
 	block: &mut BlockLocation,
-) -> impl Iterator<Item = (AaQuad<EntityVec>, ColliderMeta)> {
+	face: BlockFace,
+) -> impl Iterator<Item = (AaQuad<EntityVec>, CollisionMeta)> {
 	choice_iter!(Iter: Empty, Fixed, Registry);
 
 	// Decode the block state
@@ -57,23 +61,21 @@ pub fn collect_colliders(
 	// Iterate quads from the block collision descriptor
 	match &*descriptor {
 		MaterialColliderDescriptor::Transparent => Iter::Empty(iter::empty()),
-		MaterialColliderDescriptor::Cubic(meta) => {
-			let meta = *meta;
-			Iter::Fixed(BlockFace::variants().map(move |face| {
-				(
-					AaQuad::new_given_volume(quad_offset, face, EntityVec::ONE),
-					meta,
-				)
-			}))
-		}
+		MaterialColliderDescriptor::Cubic(meta) => Iter::Fixed(iter::once((
+			Aabb3 {
+				origin: quad_offset,
+				size: EntityVec::ONE,
+			}
+			.quad(face),
+			*meta,
+		))),
 		MaterialColliderDescriptor::Mesh(_) => {
 			let mesh = CompRef::map(descriptor, |descriptor| {
 				match_unwrap!(MaterialColliderDescriptor::Mesh(mesh) = descriptor);
 				mesh
 			});
 			let mut i = 0;
-
-			Iter::Registry(iter::from_fn(move || {
+			let iter = iter::from_fn(move || {
 				let StyledQuad {
 					quad: AaQuad {
 						origin,
@@ -93,9 +95,15 @@ pub fn collect_colliders(
 					},
 					face_meta,
 				))
-			}))
+			});
+
+			Iter::Registry(iter.filter(move |(quad, _)| quad.face == face))
 		}
 	}
+}
+
+pub fn filter_all_colliders() -> impl FnMut(CollisionMeta) -> bool {
+	|_| true
 }
 
 // === RayCast === //
@@ -267,10 +275,14 @@ pub const COLLISION_TOLERANCE: f64 = 0.0005;
 
 pub fn cast_volume(
 	world: &VoxelWorldData,
+	registry: &MaterialRegistry,
 	quad: AaQuad<EntityVec>,
 	delta: f64,
 	tolerance: f64,
+	mut filter: impl FnMut(CollisionMeta) -> bool,
 ) -> f64 {
+	let collider_descs = storage();
+
 	// N.B. to ensure that `tolerance` is respected, we have to increase our check volume by
 	// `tolerance` so that we catch blocks that are outside the check volume but may nonetheless
 	// wish to enforce a tolerance margin of their own.
@@ -296,32 +308,32 @@ pub fn cast_volume(
 	let cached_loc = BlockLocation::new(world, check_aabb.origin);
 
 	// Return the allowed delta.
-	check_aabb
-		.iter_blocks()
-		// See how far we can travel
-		.map(|pos| {
-			// First, determine whether this block is an occluder.
-			if cached_loc
-				.at_absolute(world, pos)
-				.state(world)
-				.p_is_none_or(|v| v.material == AIR_MATERIAL_SLOT)
-			{
-				// If it isn't, allow unobstructed movement.
-				delta
-			} else {
-				// Otherwise...
+	let mut max_delta = delta;
 
-				// Determine the AABB of the block being intersected
-				let block_aabb = Aabb3 {
-					origin: pos.negative_most_corner(),
-					size: EntityVec::ONE,
-				};
+	for pos in check_aabb.iter_blocks() {
+		for (occluder_quad, occluder_meta) in colliders_in_block(
+			collider_descs,
+			world,
+			registry,
+			&mut cached_loc.at_absolute(world, pos),
+			quad.face.invert(),
+		) {
+			// Filter occluders by whether we are affected by them.
+			if !filter(occluder_meta) {
+				continue;
+			}
 
-				// Get the quad of the face closest to our moving plane
-				let closest_face = block_aabb.quad(quad.face.invert());
+			// Determine the maximum distance allowed by this occluder
+			let new_max_delta = {
+				if !occluder_quad
+					.as_rect::<DVec2>()
+					.intersects(quad.as_rect::<DVec2>())
+				{
+					continue;
+				}
 
 				// Find its depth along the axis of movement
-				let my_depth = closest_face.origin.comp(quad.face.axis());
+				let my_depth = occluder_quad.origin.comp(quad.face.axis());
 
 				// And compare that to the starting depth to find the maximum allowable distance.
 				// FIXME: We may be comparing against faces behind us!
@@ -340,25 +352,28 @@ pub fn cast_volume(
 				if rel_depth < -tolerance / 2.0 {
 					log::trace!(
 						"cast_volume(quad: {quad:?}, delta: {delta}, tolerance: {tolerance}) could \
-						 not keep collider within tolerance. Bypass depth: {}",
-						 -rel_depth,
+						not keep collider within tolerance. Bypass depth: {}",
+						-rel_depth,
 					);
 				}
 
 				// We still clamp this to `[0..)`.
 				rel_depth.max(0.0)
-			}
-		})
-		// And take the minimum distance
-		.min_by(f64::total_cmp)
-		// This is safe to unwrap because all entity AABBs will cover at least one block.
-		.unwrap()
+			};
+
+			max_delta = max_delta.min(new_max_delta);
+		}
+	}
+
+	max_delta
 }
 
 pub fn move_rigid_body(
 	world: &VoxelWorldData,
+	registry: &MaterialRegistry,
 	mut aabb: EntityAabb,
 	delta: EntityVec,
+	mut filter: impl FnMut(CollisionMeta) -> bool,
 ) -> EntityVec {
 	for axis in Axis3::variants() {
 		// Decompose the movement part
@@ -368,7 +383,14 @@ pub fn move_rigid_body(
 		let face = BlockFace::compose(axis, sign);
 
 		// Determine how far we can move
-		let actual_delta = cast_volume(world, aabb.quad(face), unsigned_delta, COLLISION_TOLERANCE);
+		let actual_delta = cast_volume(
+			world,
+			registry,
+			aabb.quad(face),
+			unsigned_delta,
+			COLLISION_TOLERANCE,
+			&mut filter,
+		);
 
 		// Commit the movement
 		aabb.origin += face.unit_typed::<EntityVec>() * actual_delta;

@@ -3,13 +3,15 @@ use crucible_common::{
 	actor::{kinds::spatial::update_kinematic_spatials, manager::ActorManager},
 	material::{MaterialDescriptorBase, MaterialRegistry},
 	world::{
+		collision::{CollisionMeta, MaterialColliderDescriptor},
 		data::{BlockLocation, BlockState, VoxelChunkFactory, VoxelWorldData},
 		math::{Aabb3, BlockFace, WorldVec},
+		mesh::QuadMeshLayer,
 	},
 };
 use crucible_util::{debug::error::ResultExt, mem::c_enum::CEnum};
 use image::Rgba32FImage;
-use typed_glam::glam::UVec2;
+use typed_glam::glam::{UVec2, Vec3};
 
 use crate::engine::{
 	assets::AssetManager,
@@ -54,14 +56,45 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 
 	// Register materials
 	let mut scene_state = scene.get_mut::<GameSceneState>();
-	let material = scene_state.register_block_material(
-		"crucible_prototyping:one".to_string(),
-		&image::load_from_memory(include_bytes!(
-			"gfx/res/textures/placeholder_material_1.png"
-		))
-		.unwrap_pretty()
-		.into_rgba32f(),
-	);
+	let material;
+	{
+		let atlas_tile = scene_state.block_atlas.add(
+			&image::load_from_memory(include_bytes!(
+				"gfx/res/textures/placeholder_material_1.png"
+			))
+			.unwrap_pretty()
+			.into_rgba32f(),
+		);
+
+		material = scene_state.block_registry.register(
+			"crucible_prototyping:one",
+			OwnedEntity::new()
+				.with(MaterialDescriptorBase::default())
+				.with(BlockDescriptorVisual::cubic_simple(atlas_tile))
+				.with(MaterialColliderDescriptor::Cubic(CollisionMeta::OPAQUE)),
+		);
+
+		scene_state.block_registry.register(
+			"crucible_prototyping:two",
+			OwnedEntity::new()
+				.with(MaterialDescriptorBase::default())
+				.with(BlockDescriptorVisual::Mesh {
+					mesh: QuadMeshLayer::default().with_cube(
+						Vec3::ZERO,
+						Vec3::new(1.0, 0.5, 1.0),
+						atlas_tile,
+					),
+				})
+				.with(MaterialColliderDescriptor::Mesh(
+					QuadMeshLayer::default().with_cube(
+						Vec3::ZERO,
+						Vec3::new(1.0, 0.5, 1.0),
+						CollisionMeta::OPAQUE,
+					),
+				)),
+		);
+	}
+
 	scene_state.upload_atlases(&engine.get::<GfxContext>());
 
 	// Spawn local player
@@ -148,7 +181,8 @@ impl GameSceneState {
 			id,
 			OwnedEntity::new()
 				.with(MaterialDescriptorBase::default())
-				.with(BlockDescriptorVisual::cubic_simple(atlas_tile)),
+				.with(BlockDescriptorVisual::cubic_simple(atlas_tile))
+				.with(MaterialColliderDescriptor::Cubic(CollisionMeta::OPAQUE)),
 		)
 	}
 
@@ -161,7 +195,7 @@ impl GameSceneState {
 	}
 
 	pub fn update(&mut self, me: Entity) {
-		// Decompose self
+		// Acquire context
 		let gfx = &*self.engine.get::<GfxContext>();
 		let actors = me.get::<ActorManager>();
 		let mut world_data = me.get_mut::<VoxelWorldData>();
@@ -175,7 +209,7 @@ impl GameSceneState {
 		// Process actors
 		reset_kinematic_accelerations_to_gravity(&actors);
 		player_inputs.update(self.main_viewport, &mut camera, &mut world_data);
-		update_kinematic_spatials(&actors, &world_data, 1.0 / 60.0);
+		update_kinematic_spatials(&actors, &world_data, &self.block_registry, 1.0 / 60.0);
 
 		// Update chunk meshes
 		for chunk in world_data.flush_flagged() {

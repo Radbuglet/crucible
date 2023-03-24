@@ -247,7 +247,7 @@ impl PlayerInputController {
 								.set_state_or_create(
 									world,
 									BlockState {
-										material: 1,
+										material: 2,
 										..Default::default()
 									},
 								);

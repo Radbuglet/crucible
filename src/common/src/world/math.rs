@@ -74,7 +74,7 @@ use num_traits::Signed;
 use typed_glam::{
 	ext::VecExt,
 	glam::{self, DVec3, IVec2, IVec3, Mat4, Vec2, Vec3},
-	traits::{NumericVector2, NumericVector3, SignedNumericVector3},
+	traits::{NumericVector2, NumericVector3, SignedNumericVector2, SignedNumericVector3},
 	typed::{FlavorCastFrom, TypedVector, VecFlavor},
 };
 
@@ -790,6 +790,16 @@ impl<V: NumericVector3> AaQuad<V> {
 		)
 	}
 
+	pub fn as_rect<U: SignedNumericVector2<Comp = V::Comp>>(&self) -> Aabb2<U> {
+		let (h, v) = self.face.axis().ortho_hv();
+		let (sh, sv) = self.size;
+
+		Aabb2 {
+			origin: U::new(self.origin.comp(h), self.origin.comp(v)),
+			size: U::new(sh, sv),
+		}
+	}
+
 	pub fn as_quad_ccw(&self) -> Quad<V> {
 		let (axis, sign) = self.face.decompose();
 		let (w, h) = self.size;
@@ -967,6 +977,35 @@ impl<V> Quad<V> {
 
 	pub fn map<R>(self, f: impl FnMut(V) -> R) -> Quad<R> {
 		Quad(map_arr(self.0, f))
+	}
+}
+
+// === Aabb2 === //
+
+#[derive(Debug, Copy, Clone)]
+pub struct Aabb2<V> {
+	pub origin: V,
+	pub size: V,
+}
+
+impl<V: SignedNumericVector2> Aabb2<V> {
+	pub fn contains(&self, point: V) -> bool
+	where
+		V::Comp: PartialOrd,
+	{
+		(self.origin.x() <= point.x() && point.x() < self.origin.x() + self.size.x())
+			&& (self.origin.y() <= point.y() && point.y() < self.origin.y() + self.size.y())
+	}
+
+	pub fn intersects(&self, other: Self) -> bool
+	where
+		V::Comp: PartialOrd,
+	{
+		Aabb2 {
+			origin: self.origin - other.size,
+			size: self.size + other.size,
+		}
+		.contains(other.origin)
 	}
 }
 

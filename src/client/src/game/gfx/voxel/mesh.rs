@@ -153,6 +153,9 @@ impl VoxelWorldMesh {
 						for styled_quad in &mesh.quads {
 							let quad = styled_quad.quad;
 
+							// Translate the quad relative to the block
+							let quad = quad.translated(center_origin);
+
 							// Decode the texture bounds
 							let (uv_origin, uv_size) = atlas.decode_uv_bounds(styled_quad.material);
 

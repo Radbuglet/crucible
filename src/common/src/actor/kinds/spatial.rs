@@ -7,8 +7,9 @@ use crate::{
 		kinematic::update_kinematic,
 		manager::{ActorManager, Tag},
 	},
+	material::MaterialRegistry,
 	world::{
-		collision::{cast_volume, move_rigid_body, COLLISION_TOLERANCE},
+		collision::{cast_volume, filter_all_colliders, move_rigid_body, COLLISION_TOLERANCE},
 		data::VoxelWorldData,
 		math::{Aabb3, Angle3D, Angle3DExt, Axis3, BlockFace, EntityVec, Sign, Vec3Ext},
 	},
@@ -60,6 +61,7 @@ impl KinematicSpatial {
 
 	fn is_face_touching_now_inner(
 		world: &VoxelWorldData,
+		registry: &MaterialRegistry,
 		aabb: Aabb3<EntityVec>,
 		face: BlockFace,
 	) -> bool {
@@ -67,26 +69,34 @@ impl KinematicSpatial {
 
 		cast_volume(
 			world,
+			registry,
 			aabb.quad(face),
 			additional_margin,
 			COLLISION_TOLERANCE,
+			filter_all_colliders(),
 		) < additional_margin / 2.0
 	}
 
 	pub fn is_face_touching_now(
 		&self,
 		world: &VoxelWorldData,
+		registry: &MaterialRegistry,
 		spatial: &Spatial,
 		face: BlockFace,
 	) -> bool {
-		Self::is_face_touching_now_inner(world, self.current_collider(spatial), face)
+		Self::is_face_touching_now_inner(world, registry, self.current_collider(spatial), face)
 	}
 
-	pub fn update_face_touching_mask(&mut self, world: &VoxelWorldData, spatial: &Spatial) {
+	pub fn update_face_touching_mask(
+		&mut self,
+		world: &VoxelWorldData,
+		registry: &MaterialRegistry,
+		spatial: &Spatial,
+	) {
 		let aabb = self.current_collider(spatial);
 
 		for (face, state) in self.collision_mask.iter_mut() {
-			*state = Self::is_face_touching_now_inner(world, aabb, face);
+			*state = Self::is_face_touching_now_inner(world, registry, aabb, face);
 		}
 	}
 
@@ -110,7 +120,12 @@ pub struct KinematicUpdateTag;
 
 impl Tag for KinematicUpdateTag {}
 
-pub fn update_kinematic_spatials(actors: &ActorManager, world: &VoxelWorldData, time: f64) {
+pub fn update_kinematic_spatials(
+	actors: &ActorManager,
+	world: &VoxelWorldData,
+	registry: &MaterialRegistry,
+	time: f64,
+) {
 	let spatials = storage::<Spatial>();
 	let kinematics = storage::<KinematicSpatial>();
 
@@ -119,11 +134,11 @@ pub fn update_kinematic_spatials(actors: &ActorManager, world: &VoxelWorldData, 
 		let kinematic = &mut *kinematics.get_mut(player);
 
 		// Clip velocities and accelerations into obstructed faces
-		kinematic.update_face_touching_mask(world, spatial);
+		kinematic.update_face_touching_mask(world, registry, spatial);
 
 		for axis in Axis3::variants() {
-			// N.B. we do these separetly because a player could be accelerating in
-			// the opposite direction than which they are moving.
+			// N.B. we do these separately because a player could be accelerating in the opposite
+			// direction than which they are moving.
 
 			let clip_comp = |comp: &mut f64| {
 				let sign = Sign::of(*comp).unwrap_or(Sign::Positive);
@@ -149,7 +164,8 @@ pub fn update_kinematic_spatials(actors: &ActorManager, world: &VoxelWorldData, 
 
 		kinematic.velocity = velocity;
 
-		let new_pos = move_rigid_body(world, aabb, delta_pos) - kinematic.collider.origin;
+		let new_pos = move_rigid_body(world, registry, aabb, delta_pos, filter_all_colliders())
+			- kinematic.collider.origin;
 		spatial.position = new_pos;
 	}
 }
