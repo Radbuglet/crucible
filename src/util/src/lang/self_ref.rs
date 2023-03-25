@@ -1,3 +1,6 @@
+// TODO: Make this effectively zero-cost once `waker_getters` is stabilized.
+//  See https://godbolt.org/z/a6Efch3oP for details
+
 #[doc(hidden)]
 pub mod macro_internals {
 	use std::{
