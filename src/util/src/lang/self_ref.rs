@@ -116,15 +116,22 @@ pub mod macro_internals {
 
 #[macro_export]
 macro_rules! self_ref {
-    ($ty:ty ; $future_lifetime:lifetime) => {
-		$crate::macro_internals::SelfRef<
-			dyn for<'a> $crate::macro_internals::SelfRefOutput<'a, Type = $ty>,
-			impl $crate::macro_internals::re_export::Future<Output = ()> + $future_lifetime,
+    (type $ty:ty $(; $future_lifetime:lifetime)?) => {
+		$crate::lang::self_ref::macro_internals::SelfRef<
+			dyn for<'a> $crate::lang::self_ref::macro_internals::SelfRefOutput<'a, Type = $ty>,
+			impl $crate::lang::self_ref::macro_internals::re_export::Future<Output = ()> $(+ $future_lifetime)?,
 		>
 	};
-	($($setup_expr:tt)*) => {
-		$crate::macro_internals::SelfRef::new_actually_very_unsafe(|__provider| async move {
-			__provider.provide_actually_very_unsafe({ $($setup_expr)* }).await;
+	(do {$($setup:tt)*} => $expr:expr) => {
+		$crate::lang::self_ref::macro_internals::SelfRef::new_actually_very_unsafe(|__provider| async move {
+			$($setup)*
+			__provider.provide_actually_very_unsafe($expr).await;
 		})
+	};
+	($expr:expr) => {
+		$crate::lang::self_ref::self_ref! {
+			do {}
+			=> $expr
+		}
 	};
 }
