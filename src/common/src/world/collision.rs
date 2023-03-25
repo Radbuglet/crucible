@@ -1,9 +1,14 @@
 use std::{borrow::BorrowMut, iter};
 
 use bort::{storage, CompRef, Entity, Storage};
-use crucible_util::{choice_iter, lang::iter::ContextualIter, match_unwrap, mem::c_enum::CEnum};
+use crucible_util::{
+	choice_iter,
+	lang::iter::{iter_wrapped_slice, ContextualIter},
+	match_unwrap,
+	mem::c_enum::CEnum,
+};
 use smallvec::SmallVec;
-use typed_glam::glam::DVec2;
+use typed_glam::{glam::DVec2, traits::NumericVector};
 
 use crate::{
 	material::{MaterialRegistry, AIR_MATERIAL_SLOT},
@@ -13,7 +18,7 @@ use crate::{
 use super::{
 	data::{BlockLocation, EntityLocation, VoxelWorldData},
 	math::{AaQuad, EntityAabb, EntityVec},
-	mesh::{QuadMeshLayer, StyledQuad},
+	mesh::{QuadMeshLayer, StyledQuad, VolumetricMeshLayer},
 };
 
 // === Colliders === //
@@ -35,10 +40,25 @@ impl CollisionMeta {
 pub enum MaterialColliderDescriptor {
 	Transparent,
 	Cubic(CollisionMeta),
-	Mesh(QuadMeshLayer<CollisionMeta>),
+	Custom(CustomMaterialColliderDescriptor),
 }
 
-pub fn colliders_in_block(
+impl MaterialColliderDescriptor {
+	pub fn custom_from_volumes(volumes: VolumetricMeshLayer<CollisionMeta>) -> Self {
+		Self::Custom(CustomMaterialColliderDescriptor {
+			volumes,
+			extra_quads: QuadMeshLayer::default(),
+		})
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct CustomMaterialColliderDescriptor {
+	pub volumes: VolumetricMeshLayer<CollisionMeta>,
+	pub extra_quads: QuadMeshLayer<CollisionMeta>,
+}
+
+pub fn occluding_faces_in_block(
 	collider_descs: &'static Storage<MaterialColliderDescriptor>,
 	world: &VoxelWorldData,
 	registry: &MaterialRegistry,
@@ -69,35 +89,54 @@ pub fn colliders_in_block(
 			.quad(face),
 			*meta,
 		))),
-		MaterialColliderDescriptor::Mesh(_) => {
+		MaterialColliderDescriptor::Custom(_) => {
 			let mesh = CompRef::map(descriptor, |descriptor| {
-				match_unwrap!(MaterialColliderDescriptor::Mesh(mesh) = descriptor);
+				match_unwrap!(MaterialColliderDescriptor::Custom(mesh) = descriptor);
 				mesh
 			});
-			let mut i = 0;
-			let iter = iter::from_fn(move || {
-				let StyledQuad {
-					quad: AaQuad {
-						origin,
-						face,
-						size: (sx, sy),
-					},
-					material: face_meta,
-				} = *mesh.quads.get(i)?;
 
-				i += 1;
-
-				Some((
-					AaQuad {
-						origin: quad_offset + origin.as_dvec3(),
-						face,
-						size: (sx.into(), sy.into()),
-					},
-					face_meta,
-				))
+			let aabb_iter = iter_wrapped_slice(CompRef::map(CompRef::clone(&mesh), |v| {
+				v.volumes.aabbs.as_slice()
+			}))
+			.map(move |(rel_aabb, meta)| {
+				(
+					Aabb3 {
+						origin: rel_aabb.origin.cast::<EntityVec>() + quad_offset,
+						size: rel_aabb.size.cast(),
+					}
+					.quad(face),
+					meta,
+				)
 			});
 
-			Iter::Registry(iter.filter(move |(quad, _)| quad.face == face))
+			let quad_iter = iter_wrapped_slice(CompRef::map(CompRef::clone(&mesh), |v| {
+				v.extra_quads.quads.as_slice()
+			}))
+			.filter_map(move |styled_quad| {
+				if styled_quad.quad.face == face {
+					let StyledQuad {
+						quad: AaQuad {
+							origin,
+							size: (sx, sy),
+							..
+						},
+						material,
+					} = styled_quad;
+
+					Some((
+						AaQuad {
+							origin: origin.cast(),
+							size: (sx.into(), sy.into()),
+							face,
+						},
+						material,
+					))
+				} else {
+					None
+				}
+			});
+
+			Iter::Registry(aabb_iter.chain(quad_iter))
 		}
 	}
 }
@@ -220,6 +259,8 @@ pub struct RayCastIntersection {
 	pub distance: f64,
 }
 
+impl RayCastIntersection {}
+
 #[derive(Debug)]
 pub struct RayCastIter<R> {
 	pub ray: R,
@@ -311,7 +352,7 @@ pub fn cast_volume(
 	let mut max_delta = delta;
 
 	for pos in check_aabb.iter_blocks() {
-		for (occluder_quad, occluder_meta) in colliders_in_block(
+		for (occluder_quad, occluder_meta) in occluding_faces_in_block(
 			collider_descs,
 			world,
 			registry,

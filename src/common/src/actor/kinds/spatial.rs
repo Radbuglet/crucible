@@ -25,7 +25,7 @@ pub struct Spatial {
 
 impl Spatial {
 	pub fn facing(&self) -> EntityVec {
-		self.rotation.forward().as_dvec3().cast()
+		self.rotation.forward().cast()
 	}
 }
 

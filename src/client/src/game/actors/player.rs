@@ -189,8 +189,7 @@ impl PlayerInputController {
 					player_spatial
 						.rotation
 						.as_matrix_horizontal()
-						.transform_vector3(heading)
-						.as_dvec3(),
+						.transform_vector3(heading),
 				);
 
 				// Accelerate in that direction

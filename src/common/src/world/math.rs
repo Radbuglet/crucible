@@ -318,6 +318,12 @@ impl VecFlavor for EntityVecFlavor {
 	const DEBUG_NAME: &'static str = "EntityVec";
 }
 
+impl FlavorCastFrom<glam::Vec3> for EntityVecFlavor {
+	fn cast_from(v: glam::Vec3) -> EntityVec {
+		EntityVec::from_glam(v.as_dvec3())
+	}
+}
+
 impl FlavorCastFrom<glam::DVec3> for EntityVecFlavor {
 	fn cast_from(v: glam::DVec3) -> EntityVec {
 		EntityVec::from_glam(v)

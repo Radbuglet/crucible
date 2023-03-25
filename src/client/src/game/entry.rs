@@ -6,7 +6,7 @@ use crucible_common::{
 		collision::{CollisionMeta, MaterialColliderDescriptor},
 		data::{BlockLocation, BlockState, VoxelChunkFactory, VoxelWorldData},
 		math::{Aabb3, BlockFace, WorldVec},
-		mesh::QuadMeshLayer,
+		mesh::{QuadMeshLayer, VolumetricMeshLayer},
 	},
 };
 use crucible_util::{debug::error::ResultExt, mem::c_enum::CEnum};
@@ -80,15 +80,19 @@ pub fn make_game_scene(engine: Entity, main_viewport: Entity) -> OwnedEntity {
 				.with(MaterialDescriptorBase::default())
 				.with(BlockDescriptorVisual::Mesh {
 					mesh: QuadMeshLayer::default().with_cube(
-						Vec3::ZERO,
-						Vec3::new(1.0, 0.5, 1.0),
+						Aabb3 {
+							origin: Vec3::ZERO,
+							size: Vec3::new(1.0, 0.5, 1.0),
+						},
 						atlas_tile,
 					),
 				})
-				.with(MaterialColliderDescriptor::Mesh(
-					QuadMeshLayer::default().with_cube(
-						Vec3::ZERO,
-						Vec3::new(1.0, 0.5, 1.0),
+				.with(MaterialColliderDescriptor::custom_from_volumes(
+					VolumetricMeshLayer::default().with_aabb(
+						Aabb3 {
+							origin: Vec3::ZERO,
+							size: Vec3::new(1.0, 0.5, 1.0),
+						},
 						CollisionMeta::OPAQUE,
 					),
 				)),
