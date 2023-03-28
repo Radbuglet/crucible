@@ -1,4 +1,4 @@
-use std::{iter, ops::Deref};
+use std::iter;
 
 use crate::mem::array::map_arr;
 
@@ -153,20 +153,4 @@ pub fn optionally_iter<I: Iterator>(iter: Option<I>) -> impl Iterator<Item = I::
 		Some(iter) => Either::Left(iter),
 		None => Either::Right(iter::empty()),
 	}
-}
-
-// === Smart Pointer Iteration === //
-
-pub fn iter_wrapped_slice<'a, P, T>(ptr: P) -> impl Iterator<Item = T> + 'a
-where
-	P: Deref<Target = [T]> + 'a,
-	T: Clone,
-{
-	let mut i = 0;
-
-	iter::from_fn(move || {
-		let v = ptr.get(i)?;
-		i += 1;
-		Some(v.clone())
-	})
 }

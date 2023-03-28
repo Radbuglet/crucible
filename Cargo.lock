@@ -431,6 +431,7 @@ dependencies = [
  "log",
  "num-traits",
  "smallvec",
+ "soot",
  "typed-glam",
 ]
 
@@ -1654,6 +1655,11 @@ dependencies = [
  "wayland-cursor",
  "wayland-protocols",
 ]
+
+[[package]]
+name = "soot"
+version = "0.1.0"
+source = "git+https://github.com/Radbuglet/soot.git?rev=20b039f995f984950dec7a9e4369619bd50ac545#20b039f995f984950dec7a9e4369619bd50ac545"
 
 [[package]]
 name = "spin"

@@ -5,7 +5,6 @@ use crucible_common::{
 		kinematic::{tick_friction_coef_to_coef_qty, MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
 		manager::{ActorManager, Tag},
 	},
-	material::AIR_MATERIAL_SLOT,
 	world::{
 		collision::RayCast,
 		data::{BlockState, EntityLocation, VoxelWorldData},
@@ -238,7 +237,7 @@ impl PlayerInputController {
 							.block
 							.clone()
 							.state(world)
-							.p_is_some_and(|v| v.material != AIR_MATERIAL_SLOT)
+							.p_is_some_and(|state| state.is_not_air())
 						{
 							intersection
 								.block
@@ -268,16 +267,12 @@ impl PlayerInputController {
 							.block
 							.clone()
 							.state(world)
-							.p_is_some_and(|v| v.material != AIR_MATERIAL_SLOT)
+							.p_is_some_and(|state| state.is_not_air())
 						{
-							intersection.block.clone().set_state_in_world(
-								world,
-								BlockState {
-									material: AIR_MATERIAL_SLOT,
-									variant: 0,
-									light_level: 0,
-								},
-							);
+							intersection
+								.block
+								.clone()
+								.set_state_in_world(world, BlockState::AIR);
 							break;
 						}
 					}

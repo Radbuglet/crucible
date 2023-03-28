@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use bort::{storage, CompRef, Entity};
 use crevice::std430::AsStd430;
 use crucible_common::{
-	material::{MaterialRegistry, AIR_MATERIAL_SLOT},
+	material::MaterialRegistry,
 	world::{
 		data::VoxelWorldData,
 		math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, WorldVec, WorldVecExt, QUAD_UVS},
@@ -104,7 +104,7 @@ impl VoxelWorldMesh {
 										.block_state(neighbor_block.wrap())
 								};
 
-								if state.material == AIR_MATERIAL_SLOT {
+								if state.is_air() {
 									break 'a false;
 								}
 
@@ -150,14 +150,12 @@ impl VoxelWorldMesh {
 					}
 					BlockDescriptorVisual::Mesh { mesh } => {
 						// Push the mesh
-						for styled_quad in &mesh.quads {
-							let quad = styled_quad.quad;
-
+						for (quad, material) in mesh.iter_cloned() {
 							// Translate the quad relative to the block
 							let quad = quad.translated(center_origin);
 
 							// Decode the texture bounds
-							let (uv_origin, uv_size) = atlas.decode_uv_bounds(styled_quad.material);
+							let (uv_origin, uv_size) = atlas.decode_uv_bounds(material);
 
 							// Give it UVs
 							let quad = quad

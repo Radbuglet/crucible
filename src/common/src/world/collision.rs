@@ -1,24 +1,23 @@
-use std::{borrow::BorrowMut, iter};
+use std::{borrow::BorrowMut, iter, pin::pin};
 
-use bort::{storage, CompRef, Entity, Storage};
-use crucible_util::{
-	choice_iter,
-	lang::iter::{iter_wrapped_slice, ContextualIter},
-	match_unwrap,
-	mem::c_enum::CEnum,
-};
+use bort::{storage, Entity, Storage};
+use crucible_util::{choice_iter, lang::iter::ContextualIter, mem::c_enum::CEnum};
 use smallvec::SmallVec;
+use soot::self_ref;
 use typed_glam::{glam::DVec2, traits::NumericVector};
 
 use crate::{
-	material::{MaterialRegistry, AIR_MATERIAL_SLOT},
-	world::math::{Aabb3, Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt},
+	material::MaterialRegistry,
+	world::{
+		data::BlockState,
+		math::{Aabb3, Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt},
+	},
 };
 
 use super::{
 	data::{BlockLocation, EntityLocation, VoxelWorldData},
 	math::{AaQuad, EntityAabb, EntityVec},
-	mesh::{QuadMeshLayer, StyledQuad, VolumetricMeshLayer},
+	mesh::{QuadMeshLayer, VolumetricMeshLayer},
 };
 
 // === Colliders === //
@@ -58,87 +57,113 @@ pub struct CustomMaterialColliderDescriptor {
 	pub extra_quads: QuadMeshLayer<CollisionMeta>,
 }
 
-pub fn occluding_faces_in_block(
+pub fn occluding_volumes_in_block<'a>(
 	collider_descs: &'static Storage<MaterialColliderDescriptor>,
-	world: &VoxelWorldData,
-	registry: &MaterialRegistry,
-	block: &mut BlockLocation,
-	face: BlockFace,
-) -> impl Iterator<Item = (AaQuad<EntityVec>, CollisionMeta)> {
-	choice_iter!(Iter: Empty, Fixed, Registry);
+	world: &'a VoxelWorldData,
+	registry: &'a MaterialRegistry,
+	block: &'a mut BlockLocation,
+) -> self_ref![iter for<'b> (Aabb3<EntityVec>, CollisionMeta); 'a] {
+	self_ref!(use iter t in {
+		choice_iter!(Iter: Empty, Fixed, Registry);
 
-	// Decode the block state
-	let Some(state) = block.state(world).filter(|state| state.material != AIR_MATERIAL_SLOT) else {
-		return Iter::Empty(iter::empty());
-	};
+		let descriptor;
+		let mut t = 'a: {
+			// Decode descriptor
+			let Some(state) = block.state(world).filter(BlockState::is_not_air) else {
+				break 'a Iter::Empty(iter::empty());
+			};
 
-	let descriptor = registry.resolve_slot(state.material);
-	let descriptor = collider_descs.get(descriptor);
+			let descriptor_ent = registry.resolve_slot(state.material);
+			descriptor = collider_descs.get(descriptor_ent);
 
-	// Determine an offset from block-relative coordinates to world coordinates
-	let quad_offset = block.pos().negative_most_corner();
-
-	// Iterate quads from the block collision descriptor
-	match &*descriptor {
-		MaterialColliderDescriptor::Transparent => Iter::Empty(iter::empty()),
-		MaterialColliderDescriptor::Cubic(meta) => Iter::Fixed(iter::once((
-			Aabb3 {
-				origin: quad_offset,
-				size: EntityVec::ONE,
-			}
-			.quad(face),
-			*meta,
-		))),
-		MaterialColliderDescriptor::Custom(_) => {
-			let mesh = CompRef::map(descriptor, |descriptor| {
-				match_unwrap!(MaterialColliderDescriptor::Custom(mesh) = descriptor);
-				mesh
-			});
-
-			let aabb_iter = iter_wrapped_slice(CompRef::map(CompRef::clone(&mesh), |v| {
-				v.volumes.aabbs.as_slice()
-			}))
-			.map(move |(rel_aabb, meta)| {
-				(
+			// Determine collision volumes
+			match &*descriptor {
+				MaterialColliderDescriptor::Transparent => Iter::Empty(iter::empty()),
+				MaterialColliderDescriptor::Cubic(meta) => Iter::Fixed([(
 					Aabb3 {
-						origin: rel_aabb.origin.cast::<EntityVec>() + quad_offset,
-						size: rel_aabb.size.cast(),
+						origin: block.pos().negative_most_corner(),
+						size: EntityVec::ONE,
+					},
+					*meta
+				)].into_iter()),
+				MaterialColliderDescriptor::Custom(descriptor) => Iter::Registry(
+					descriptor.volumes.aabbs.iter().map(|(aabb, meta)| (
+						Aabb3 {
+							origin: aabb.origin.cast::<EntityVec>() +
+								block.pos().negative_most_corner(),
+							size: aabb.size.cast(),
+						},
+						*meta
+					))
+				),
+			}
+		};
+	})
+}
+
+pub fn occluding_faces_in_block<'a>(
+	collider_descs: &'static Storage<MaterialColliderDescriptor>,
+	world: &'a VoxelWorldData,
+	registry: &'a MaterialRegistry,
+	block: &'a mut BlockLocation,
+	face: BlockFace,
+) -> self_ref![iter for<'b> (AaQuad<EntityVec>, CollisionMeta); 'a] {
+	self_ref!(use iter t in {
+		choice_iter!(Iter: Empty, Fixed, Registry);
+
+		let descriptor;
+		let mut t = 'a: {
+			// Decode descriptor
+			let Some(state) = block.state(world).filter(BlockState::is_not_air) else {
+				break 'a Iter::Empty(iter::empty());
+			};
+
+			let descriptor_ent = registry.resolve_slot(state.material);
+			descriptor = collider_descs.get(descriptor_ent);
+
+			// Determine an offset from block-relative coordinates to world coordinates
+			let quad_offset = block.pos().negative_most_corner();
+
+			// Determine collision volumes
+			match &*descriptor {
+				MaterialColliderDescriptor::Transparent => Iter::Empty(iter::empty()),
+				MaterialColliderDescriptor::Cubic(meta) => Iter::Fixed(iter::once((
+					Aabb3 {
+						origin: quad_offset,
+						size: EntityVec::ONE,
 					}
 					.quad(face),
-					meta,
-				)
-			});
-
-			let quad_iter = iter_wrapped_slice(CompRef::map(CompRef::clone(&mesh), |v| {
-				v.extra_quads.quads.as_slice()
-			}))
-			.filter_map(move |styled_quad| {
-				if styled_quad.quad.face == face {
-					let StyledQuad {
-						quad: AaQuad {
-							origin,
-							size: (sx, sy),
-							..
-						},
-						material,
-					} = styled_quad;
-
-					Some((
-						AaQuad {
-							origin: origin.cast(),
-							size: (sx.into(), sy.into()),
-							face,
-						},
-						material,
+					*meta,
+				))),
+				MaterialColliderDescriptor::Custom(descriptor) => Iter::Registry(
+					descriptor.volumes.aabbs.iter().map(move |(aabb, meta)| (
+						Aabb3 {
+							origin: aabb.origin.cast::<EntityVec>() + quad_offset,
+							size: aabb.size.cast(),
+						}
+						.quad(face),
+						*meta,
 					))
-				} else {
-					None
-				}
-			});
+					.chain(descriptor.extra_quads.iter_cloned().filter_map(move |(quad, material)| {
+						let AaQuad { origin, face: quad_face, size: (sx, sy) } = quad;
 
-			Iter::Registry(aabb_iter.chain(quad_iter))
-		}
-	}
+						if quad_face == face {
+							Some((
+								AaQuad {
+									origin: origin.cast::<EntityVec>() + quad_offset,
+									face,
+									size: (sx.into(), sy.into()),
+								},
+								material,
+							))
+						} else {
+							None
+						}
+					}))
+				),
+			}
+		};
+	})
 }
 
 pub fn filter_all_colliders() -> impl FnMut(CollisionMeta) -> bool {
@@ -352,13 +377,15 @@ pub fn cast_volume(
 	let mut max_delta = delta;
 
 	for pos in check_aabb.iter_blocks() {
-		for (occluder_quad, occluder_meta) in occluding_faces_in_block(
+		for (occluder_quad, occluder_meta) in pin!(occluding_faces_in_block(
 			collider_descs,
 			world,
 			registry,
 			&mut cached_loc.at_absolute(world, pos),
 			quad.face.invert(),
-		) {
+		))
+		.get()
+		{
 			// Filter occluders by whether we are affected by them.
 			if !filter(occluder_meta) {
 				continue;

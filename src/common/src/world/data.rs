@@ -13,7 +13,7 @@ use crucible_util::{
 use hashbrown::HashMap;
 use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 
-use crate::world::math::WorldVecExt;
+use crate::{material::AIR_MATERIAL_SLOT, world::math::WorldVecExt};
 
 use super::math::{BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, WorldVec, CHUNK_VOLUME};
 
@@ -222,6 +222,12 @@ pub struct BlockState {
 // (u16)               | (u8)      | (u8)      |
 // ```
 impl BlockState {
+	pub const AIR: Self = Self {
+		material: AIR_MATERIAL_SLOT,
+		light_level: 0,
+		variant: 0,
+	};
+
 	pub fn decode(word: u32) -> Self {
 		let material = word as u16;
 		let variant = word.to_le_bytes()[2];
@@ -247,6 +253,14 @@ impl BlockState {
 		enc += (self.variant as u32) << 16;
 		enc += (self.light_level as u32) << (16 + 8);
 		enc
+	}
+
+	pub fn is_air(&self) -> bool {
+		self.material == AIR_MATERIAL_SLOT
+	}
+
+	pub fn is_not_air(&self) -> bool {
+		!self.is_air()
 	}
 }
 

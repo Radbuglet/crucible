@@ -22,23 +22,20 @@ impl<M> VolumetricMeshLayer<M> {
 		self
 	}
 
-	pub fn quads(&self) -> impl Iterator<Item = StyledQuad<&M>> + '_ {
+	pub fn quads(&self) -> impl Iterator<Item = (AaQuad<Vec3>, &M)> + '_ {
 		self.aabbs
 			.iter()
 			.map(|(aabb, material)| {
-				BlockFace::variants().map(move |face| StyledQuad {
-					quad: aabb.quad(face),
-					material,
-				})
+				BlockFace::variants().map(move |face| (aabb.quad(face), material))
 			})
 			.flatten()
 	}
 
-	pub fn quads_cloned(&self) -> impl Iterator<Item = StyledQuad<M>> + '_
+	pub fn quads_cloned(&self) -> impl Iterator<Item = (AaQuad<Vec3>, M)> + '_
 	where
 		M: Clone,
 	{
-		self.quads().map(|v| v.cloned())
+		self.quads().map(|(quad, mat)| (quad, mat.clone()))
 	}
 
 	pub fn as_mesh_layer(&self) -> QuadMeshLayer<M>
@@ -47,51 +44,25 @@ impl<M> VolumetricMeshLayer<M> {
 	{
 		QuadMeshLayer::from_iter(self.quads_cloned())
 	}
+
+	pub fn iter(&self) -> impl Iterator<Item = (Aabb3<Vec3>, &M)> + '_ {
+		self.aabbs.iter().map(|(aabb, material)| (*aabb, material))
+	}
+
+	pub fn iter_cloned(&self) -> impl Iterator<Item = (Aabb3<Vec3>, M)> + '_
+	where
+		M: Clone,
+	{
+		self.aabbs.iter().cloned()
+	}
 }
 
 // === Quads === //
 
-#[derive(Debug, Copy, Clone)]
-pub struct StyledQuad<M> {
-	pub quad: AaQuad<Vec3>,
-	pub material: M,
-}
-
-impl<M> StyledQuad<M> {
-	pub fn as_ref(&self) -> StyledQuad<&M> {
-		StyledQuad {
-			quad: self.quad,
-			material: &self.material,
-		}
-	}
-}
-
-impl<M> StyledQuad<&'_ M> {
-	pub fn cloned(&self) -> StyledQuad<M>
-	where
-		M: Clone,
-	{
-		StyledQuad {
-			quad: self.quad,
-			material: self.material.clone(),
-		}
-	}
-
-	pub fn copied(&self) -> StyledQuad<M>
-	where
-		M: Copy,
-	{
-		StyledQuad {
-			quad: self.quad,
-			material: *self.material,
-		}
-	}
-}
-
 #[derive(Debug, Clone)]
 #[derive_where(Default)]
 pub struct QuadMeshLayer<M> {
-	pub quads: Vec<StyledQuad<M>>,
+	pub quads: Vec<(AaQuad<Vec3>, M)>,
 }
 
 impl<M> QuadMeshLayer<M> {
@@ -99,7 +70,7 @@ impl<M> QuadMeshLayer<M> {
 		Self::default()
 	}
 
-	pub fn from_iter(iter: impl IntoIterator<Item = StyledQuad<M>>) -> Self {
+	pub fn from_iter(iter: impl IntoIterator<Item = (AaQuad<Vec3>, M)>) -> Self {
 		Self {
 			quads: Vec::from_iter(iter),
 		}
@@ -110,44 +81,52 @@ impl<M> QuadMeshLayer<M> {
 		I: IntoIterator<Item = (BlockFace, M)>,
 	{
 		for (face, material) in faces {
-			self.quads.push(StyledQuad {
-				quad: aabb.quad(face),
-				material,
-			});
+			self.quads.push((aabb.quad(face), material));
 		}
 	}
 
 	pub fn push_cube_faces<I>(&mut self, aabb: Aabb3<Vec3>, material: M, faces: I)
 	where
-		M: Copy,
+		M: Clone,
 		I: IntoIterator<Item = BlockFace>,
 	{
-		self.push_cube_faces_hetero(aabb, faces.into_iter().map(|face| (face, material)));
+		self.push_cube_faces_hetero(aabb, faces.into_iter().map(|face| (face, material.clone())));
 	}
 
 	pub fn push_cube(&mut self, aabb: Aabb3<Vec3>, material: M)
 	where
-		M: Copy,
+		M: Clone,
 	{
 		self.push_cube_faces(aabb, material, BlockFace::variants());
 	}
 
 	pub fn with_cube(mut self, aabb: Aabb3<Vec3>, material: M) -> Self
 	where
-		M: Copy,
+		M: Clone,
 	{
 		self.push_cube(aabb, material);
 		self
 	}
 
-	pub fn with_quads(mut self, iter: impl IntoIterator<Item = StyledQuad<M>>) -> Self {
+	pub fn with_quads(mut self, iter: impl IntoIterator<Item = (AaQuad<Vec3>, M)>) -> Self {
 		self.extend(iter);
 		self
 	}
+
+	pub fn iter(&self) -> impl Iterator<Item = (AaQuad<Vec3>, &M)> + '_ {
+		self.quads.iter().map(|(quad, mat)| (*quad, mat))
+	}
+
+	pub fn iter_cloned(&self) -> impl Iterator<Item = (AaQuad<Vec3>, M)> + '_
+	where
+		M: Clone,
+	{
+		self.quads.iter().cloned()
+	}
 }
 
-impl<M> Extend<StyledQuad<M>> for QuadMeshLayer<M> {
-	fn extend<T: IntoIterator<Item = StyledQuad<M>>>(&mut self, iter: T) {
+impl<M> Extend<(AaQuad<Vec3>, M)> for QuadMeshLayer<M> {
+	fn extend<T: IntoIterator<Item = (AaQuad<Vec3>, M)>>(&mut self, iter: T) {
 		self.quads.extend(iter);
 	}
 }
