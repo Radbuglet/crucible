@@ -1,9 +1,12 @@
-use std::{borrow::BorrowMut, iter, pin::pin};
+use std::{borrow::BorrowMut, pin::pin};
 
 use bort::{storage, Entity, Storage};
-use crucible_util::{choice_iter, lang::iter::ContextualIter, mem::c_enum::CEnum};
+use crucible_util::{
+	lang::{generator::Yield, iter::ContextualIter},
+	mem::c_enum::CEnum,
+	use_generator,
+};
 use smallvec::SmallVec;
-use soot::self_ref;
 use typed_glam::{glam::DVec2, traits::NumericVector};
 
 use crate::{
@@ -35,6 +38,10 @@ impl CollisionMeta {
 	};
 }
 
+pub fn filter_all_colliders() -> impl FnMut(CollisionMeta) -> bool {
+	|_| true
+}
+
 // === Block Collisions === //
 
 #[derive(Debug, Clone)]
@@ -56,117 +63,169 @@ impl MaterialColliderDescriptor {
 	}
 }
 
-pub fn occluding_volumes_in_block<'a>(
+pub async fn occluding_volumes_in_block<'a>(
+	y: &'a Yield<(EntityAabb, CollisionMeta)>,
 	collider_descs: &'static Storage<MaterialColliderDescriptor>,
 	world: &'a VoxelWorldData,
 	registry: &'a MaterialRegistry,
 	mut block: BlockLocation,
-) -> self_ref![iter for<'b> (EntityAabb, CollisionMeta); 'a] {
-	self_ref!(use iter t in {
-		choice_iter!(Iter: Empty, Fixed, Registry);
-
-		let descriptor;
-		let mut t = 'a: {
-			// Decode descriptor
-			let Some(state) = block.state(world).filter(BlockState::is_not_air) else {
-				break 'a Iter::Empty(iter::empty());
-			};
-
-			let descriptor_ent = registry.resolve_slot(state.material);
-			descriptor = collider_descs.get(descriptor_ent);
-
-			// Determine collision volumes
-			match &*descriptor {
-				MaterialColliderDescriptor::Transparent => Iter::Empty(iter::empty()),
-				MaterialColliderDescriptor::Cubic(meta) => Iter::Fixed([(
-					Aabb3 {
-						origin: block.pos().negative_most_corner(),
-						size: EntityVec::ONE,
-					},
-					*meta
-				)].into_iter()),
-				MaterialColliderDescriptor::Custom { volumes, .. } => Iter::Registry(
-					volumes.iter_cloned().map(|(aabb, meta)| (
-						Aabb3 {
-							origin: aabb.origin.cast::<EntityVec>() +
-								block.pos().negative_most_corner(),
-							size: aabb.size.cast(),
-						},
-						meta
-					))
-				),
-			}
+) {
+	// Decode descriptor
+	let Some(state) = block.state(world).filter(BlockState::is_not_air) else {
+			return;
 		};
-	})
+
+	let descriptor = registry.resolve_slot(state.material);
+	let descriptor = collider_descs.get(descriptor);
+
+	// Determine collision volumes
+	match &*descriptor {
+		MaterialColliderDescriptor::Transparent => {}
+		MaterialColliderDescriptor::Cubic(meta) => {
+			y.produce((
+				Aabb3 {
+					origin: block.pos().negative_most_corner(),
+					size: EntityVec::ONE,
+				},
+				*meta,
+			))
+			.await;
+		}
+		MaterialColliderDescriptor::Custom { volumes, .. } => {
+			y.produce_many(volumes.iter_cloned().map(|(aabb, meta)| {
+				(
+					Aabb3 {
+						origin: aabb.origin.cast::<EntityVec>()
+							+ block.pos().negative_most_corner(),
+						size: aabb.size.cast(),
+					},
+					meta,
+				)
+			}))
+			.await;
+		}
+	}
 }
 
-pub fn occluding_faces_in_block<'a>(
+pub async fn occluding_faces_in_block<'a>(
+	y: &'a Yield<(AaQuad<EntityVec>, CollisionMeta)>,
 	collider_descs: &'static Storage<MaterialColliderDescriptor>,
 	world: &'a VoxelWorldData,
 	registry: &'a MaterialRegistry,
 	mut block: BlockLocation,
 	face: BlockFace,
-) -> self_ref![iter for<'b> (AaQuad<EntityVec>, CollisionMeta); 'a] {
-	self_ref!(use iter t in {
-		choice_iter!(Iter: Empty, Fixed, Registry);
+) {
+	// Decode descriptor
+	let Some(state) = block.state(world).filter(BlockState::is_not_air) else {
+		return;
+	};
 
-		let descriptor;
-		let mut t = 'a: {
-			// Decode descriptor
-			let Some(state) = block.state(world).filter(BlockState::is_not_air) else {
-				break 'a Iter::Empty(iter::empty());
-			};
+	let descriptor = registry.resolve_slot(state.material);
+	let descriptor = collider_descs.get(descriptor);
 
-			let descriptor_ent = registry.resolve_slot(state.material);
-			descriptor = collider_descs.get(descriptor_ent);
+	// Determine an offset from block-relative coordinates to world coordinates
+	let quad_offset = block.pos().negative_most_corner();
 
-			// Determine an offset from block-relative coordinates to world coordinates
-			let quad_offset = block.pos().negative_most_corner();
-
-			// Determine collision volumes
-			match &*descriptor {
-				MaterialColliderDescriptor::Transparent => Iter::Empty(iter::empty()),
-				MaterialColliderDescriptor::Cubic(meta) => Iter::Fixed(iter::once((
+	// Determine collision volumes
+	match &*descriptor {
+		MaterialColliderDescriptor::Transparent => {}
+		MaterialColliderDescriptor::Cubic(meta) => {
+			y.produce((
+				Aabb3 {
+					origin: quad_offset,
+					size: EntityVec::ONE,
+				}
+				.quad(face),
+				*meta,
+			))
+			.await;
+		}
+		MaterialColliderDescriptor::Custom {
+			volumes,
+			extra_quads,
+		} => {
+			// Yield faces from volumes
+			for (aabb, meta) in volumes.iter_cloned() {
+				y.produce((
 					Aabb3 {
-						origin: quad_offset,
-						size: EntityVec::ONE,
+						origin: aabb.origin.cast::<EntityVec>() + quad_offset,
+						size: aabb.size.cast(),
 					}
 					.quad(face),
-					*meta,
-				))),
-				MaterialColliderDescriptor::Custom { volumes, extra_quads } => Iter::Registry(
-					volumes.iter_cloned().map(move |(aabb, meta)| (
-						Aabb3 {
-							origin: aabb.origin.cast::<EntityVec>() + quad_offset,
-							size: aabb.size.cast(),
-						}
-						.quad(face),
-						meta,
-					))
-					.chain(extra_quads.iter_cloned().filter_map(move |(quad, material)| {
-						let AaQuad { origin, face: quad_face, size: (sx, sy) } = quad;
-
-						if quad_face == face {
-							Some((
-								AaQuad {
-									origin: origin.cast::<EntityVec>() + quad_offset,
-									face,
-									size: (sx.into(), sy.into()),
-								},
-								material,
-							))
-						} else {
-							None
-						}
-					}))
-				),
+					meta,
+				))
+				.await;
 			}
-		};
-	})
+
+			// Yield additional faces
+			for (quad, material) in extra_quads
+				.iter_cloned()
+				.filter(|(quad, _)| quad.face == face)
+			{
+				let AaQuad {
+					origin,
+					size: (sx, sy),
+					..
+				} = quad;
+
+				y.produce((
+					AaQuad {
+						origin: origin.cast::<EntityVec>() + quad_offset,
+						face,
+						size: (sx.into(), sy.into()),
+					},
+					material,
+				))
+				.await;
+			}
+		}
+	}
 }
 
-pub fn filter_all_colliders() -> impl FnMut(CollisionMeta) -> bool {
-	|_| true
+#[derive(Debug, Copy, Clone)]
+pub struct IntersectingFaceInBlock {
+	pub pos: EntityVec,
+	pub dist_along_ray: f64,
+	pub meta: CollisionMeta,
+}
+
+pub async fn intersecting_faces_in_block<'a>(
+	y: &'a Yield<IntersectingFaceInBlock>,
+	collider_descs: &'static Storage<MaterialColliderDescriptor>,
+	world: &'a VoxelWorldData,
+	registry: &'a MaterialRegistry,
+	block: BlockLocation,
+	line: Line3,
+) {
+	let delta = line.signed_delta();
+
+	for axis in Axis3::variants() {
+		let Some(sign) = Sign::of(delta.comp(axis)) else {
+			continue;
+		};
+		let face = BlockFace::compose(axis, sign);
+		use_generator!(let iter[y] = occluding_faces_in_block(
+			y,
+			collider_descs,
+			world,
+			registry,
+			block,
+			face
+		));
+
+		for (quad, meta) in iter {
+			let Some((dist, pos)) = quad.intersection(line) else {
+				continue
+			};
+
+			y.produce(IntersectingFaceInBlock {
+				pos,
+				dist_along_ray: dist,
+				meta,
+			})
+			.await;
+		}
+	}
 }
 
 // === Volumetric Collisions === //
@@ -207,94 +266,95 @@ pub fn cast_volume(
 	let check_aabb = quad.extrude_hv(delta + tolerance).as_blocks();
 	let cached_loc = BlockLocation::new(world, check_aabb.origin);
 
-	// Return the allowed delta.
-	let mut max_delta = delta;
+	// Find the maximum allowed delta
+	use_generator!(let iter[y] = async {
+		for pos in check_aabb.iter_blocks() {
+			use_generator!(let iter[y] = occluding_faces_in_block(
+				y,
+				collider_descs,
+				world,
+				registry,
+				cached_loc.at_absolute(world, pos),
+				quad.face.invert(),
+			));
 
-	for pos in check_aabb.iter_blocks() {
-		for (occluder_quad, occluder_meta) in pin!(occluding_faces_in_block(
-			collider_descs,
-			world,
-			registry,
-			cached_loc.at_absolute(world, pos),
-			quad.face.invert(),
-		))
-		.get()
-		{
-			// Filter occluders by whether we are affected by them.
-			if !filter(occluder_meta) {
-				continue;
-			}
-
-			// Determine the maximum distance allowed by this occluder
-			let new_max_delta = {
-				if !occluder_quad
-					.as_rect::<DVec2>()
-					.intersects(quad.as_rect::<DVec2>())
-				{
+			for (occluder_quad, occluder_meta) in iter {
+				// Filter occluders by whether we are affected by them.
+				if !filter(occluder_meta) {
 					continue;
 				}
 
-				// Find its depth along the axis of movement
-				let my_depth = occluder_quad.origin.comp(quad.face.axis());
+				// Determine the maximum distance allowed by this occluder
+				let max_delta = {
+					if !occluder_quad
+						.as_rect::<DVec2>()
+						.intersects(quad.as_rect::<DVec2>())
+					{
+						continue;
+					}
 
-				// And compare that to the starting depth to find the maximum allowable distance.
-				// FIXME: We may be comparing against faces behind us!
-				let rel_depth = (my_depth - quad.origin.comp(quad.face.axis())).abs();
+					// Find its depth along the axis of movement
+					let my_depth = occluder_quad.origin.comp(quad.face.axis());
 
-				// Now, provide `tolerance`.
-				// This step also ensures that, if the block plus its tolerance is outside of our delta,
-				// it will have essentially zero effect on collision detection.
-				let rel_depth = rel_depth - tolerance;
+					// And compare that to the starting depth to find the maximum allowable distance.
+					// FIXME: We may be comparing against faces behind us!
+					let rel_depth = (my_depth - quad.origin.comp(quad.face.axis())).abs();
 
-				// If `rel_depth` is negative, we were not within tolerance to begin with. We trace
-				// this scenario for debug purposes.
+					// Now, provide `tolerance`.
+					// This step also ensures that, if the block plus its tolerance is outside of our delta,
+					// it will have essentially zero effect on collision detection.
+					let rel_depth = rel_depth - tolerance;
 
-				// It has to be a somewhat big bypass to be reported. Floating point errors are
-				// expected—after all, that's why we have a tolerance in the first place.
-				if rel_depth < -tolerance / 2.0 {
-					log::trace!(
-						"cast_volume(quad: {quad:?}, delta: {delta}, tolerance: {tolerance}) could \
-						not keep collider within tolerance. Bypass depth: {}",
-						-rel_depth,
-					);
-				}
+					// If `rel_depth` is negative, we were not within tolerance to begin with. We trace
+					// this scenario for debug purposes.
 
-				// We still clamp this to `[0..)`.
-				rel_depth.max(0.0)
-			};
+					// It has to be a somewhat big bypass to be reported. Floating point errors are
+					// expected—after all, that's why we have a tolerance in the first place.
+					if rel_depth < -tolerance / 2.0 {
+						log::trace!(
+							"cast_volume(quad: {quad:?}, delta: {delta}, tolerance: {tolerance}) could \
+							not keep collider within tolerance. Bypass depth: {}",
+							-rel_depth,
+						);
+					}
 
-			max_delta = max_delta.min(new_max_delta);
+					// We still clamp this to `[0..)`.
+					rel_depth.max(0.0)
+				};
+
+				y.produce(max_delta).await;
+			}
 		}
-	}
+	});
 
-	max_delta
+	iter.min_by(f64::total_cmp).unwrap_or(0.0)
 }
 
-pub fn check_volume<'a>(
+pub async fn check_volume<'a>(
+	y: &'a Yield<(BlockLocation, CollisionMeta)>,
 	collider_descs: &'static Storage<MaterialColliderDescriptor>,
 	world: &'a VoxelWorldData,
 	registry: &'a MaterialRegistry,
 	aabb: EntityAabb,
-) -> Option<(BlockLocation, CollisionMeta)> {
+) {
 	let cached_loc = BlockLocation::new(world, aabb.origin.block_pos());
 
 	for block_pos in aabb.as_blocks().iter_blocks() {
 		let block = cached_loc.at_absolute(world, block_pos);
-		for (block_aabb, meta) in pin!(occluding_volumes_in_block(
+		use_generator!(let iter[y] = occluding_volumes_in_block(
+			y,
 			collider_descs,
 			world,
 			registry,
 			block,
-		))
-		.get()
-		{
+		));
+
+		for (block_aabb, meta) in iter {
 			if aabb.intersects(block_aabb) {
-				return Some((block, meta));
+				y.produce((block, meta)).await;
 			}
 		}
 	}
-
-	None
 }
 
 // === RayCast === //
@@ -341,6 +401,10 @@ impl RayCast {
 		self.dist
 	}
 
+	pub fn step_line(&self) -> Line3 {
+		Line3::new_origin_delta(self.pos(), self.dir)
+	}
+
 	pub fn step(&mut self, world: &VoxelWorldData) -> SmallVec<[RayCastIntersection; 3]> {
 		// Construct a buffer to hold our `RayCastIntersection`s. There should be at most three of
 		// these and, therefore, we should never allocate anything on the heap.
@@ -353,7 +417,7 @@ impl RayCast {
 		// Collect intersections
 		{
 			// Construct a line from our active `loc` to its end after we performed a step.
-			let step_line = Line3::new_origin_delta(self.pos(), self.dir);
+			let step_line = self.step_line();
 
 			// Bump our location by this delta.
 			self.loc.move_relative(world, self.dir);
@@ -436,8 +500,6 @@ pub struct RayCastIntersection {
 	pub distance: f64,
 }
 
-impl RayCastIntersection {}
-
 #[derive(Debug)]
 pub struct RayCastIter<R> {
 	pub ray: R,
@@ -469,7 +531,8 @@ impl<'a, R: BorrowMut<RayCast>> ContextualIter<&'a VoxelWorldData> for RayCastIt
 			// It is possible that the ray needs to travel more than 1 unit to get out of a block.
 			// The furthest it can travel is `sqrt(3 * 1^2) ~= 1.7` so we have to call this method
 			// at most twice. Also, yes, this handles a zero-vector direction because rays with no
-			// direction automatically get infinite distance.
+			// direction automatically get infinite distance and will therefore fail to trigger this
+			// case unless `max_dist` is also set to `infinity`.
 			if self.back_log.is_empty() {
 				self.back_log = self.ray.borrow_mut().step(world);
 			}

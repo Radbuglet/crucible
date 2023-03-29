@@ -431,7 +431,6 @@ dependencies = [
  "log",
  "num-traits",
  "smallvec",
- "soot",
  "typed-glam",
 ]
 
@@ -441,6 +440,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "derive-where",
+ "dummy-waker",
  "log",
 ]
 
@@ -498,6 +498,12 @@ name = "downcast-rs"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
+
+[[package]]
+name = "dummy-waker"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ea6672d73216c05740850c789368d371ca226dc8104d5f2e30c74252d5d6e5e"
 
 [[package]]
 name = "either"
@@ -1655,11 +1661,6 @@ dependencies = [
  "wayland-cursor",
  "wayland-protocols",
 ]
-
-[[package]]
-name = "soot"
-version = "0.1.0"
-source = "git+https://github.com/Radbuglet/soot.git?rev=20b039f995f984950dec7a9e4369619bd50ac545#20b039f995f984950dec7a9e4369619bd50ac545"
 
 [[package]]
 name = "spin"

@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.69"
 derive-where = "1.1.0"
+dummy-waker = "1.1.0"
 log = "0.4.17"

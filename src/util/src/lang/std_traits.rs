@@ -1,5 +1,6 @@
 use std::{
-	borrow::{Borrow, BorrowMut},
+	borrow::BorrowMut,
+	cmp::Ordering,
 	ops::{Index, IndexMut},
 };
 
@@ -47,21 +48,29 @@ impl<T, E> ResultLike for Result<T, E> {
 	}
 }
 
+// === SliceLike === //
+
+pub trait SliceLike:
+	BorrowMut<[Self::Elem]> + AsMut<[Self::Elem]> + Index<usize, Output = Self::Elem> + IndexMut<usize>
+{
+	type Elem;
+
+	fn sort_by<F>(&mut self, compare: F)
+	where
+		F: FnMut(&Self::Elem, &Self::Elem) -> Ordering,
+	{
+		self.borrow_mut().sort_by(compare)
+	}
+
+	fn len(&self) -> usize {
+		self.borrow().len()
+	}
+}
+
 // === ArrayLike === //
 
-pub trait ArrayLike:
-	Sized
-	+ Borrow<[Self::Elem]>
-	+ BorrowMut<[Self::Elem]>
-	+ AsRef<[Self::Elem]>
-	+ AsMut<[Self::Elem]>
-	+ Index<usize, Output = Self::Elem>
-	+ IndexMut<usize>
-	+ IntoIterator<Item = Self::Elem>
-{
+pub trait ArrayLike: Sized + SliceLike + IntoIterator<Item = Self::Elem> {
 	const DIM: usize;
-
-	type Elem;
 
 	fn from_iter<I: IntoIterator<Item = Self::Elem>>(iter: I) -> Self;
 
@@ -74,12 +83,36 @@ pub trait ArrayLike:
 	}
 }
 
+impl<T, const N: usize> SliceLike for [T; N] {
+	type Elem = T;
+}
+
 impl<T, const N: usize> ArrayLike for [T; N] {
 	const DIM: usize = N;
 
-	type Elem = T;
-
 	fn from_iter<I: IntoIterator<Item = Self::Elem>>(iter: I) -> Self {
 		arr_from_iter(iter)
+	}
+}
+
+// === VecLike === //
+
+pub trait VecLike: SliceLike + IntoIterator<Item = Self::Elem> + Extend<Self::Elem> {
+	fn push(&mut self, value: Self::Elem);
+
+	fn pop(&mut self) -> Option<Self::Elem>;
+}
+
+impl<T> SliceLike for Vec<T> {
+	type Elem = T;
+}
+
+impl<T> VecLike for Vec<T> {
+	fn push(&mut self, value: Self::Elem) {
+		self.push(value)
+	}
+
+	fn pop(&mut self) -> Option<Self::Elem> {
+		self.pop()
 	}
 }

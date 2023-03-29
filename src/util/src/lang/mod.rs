@@ -1,5 +1,6 @@
 pub mod control;
 pub mod delegate;
+pub mod generator;
 pub mod iter;
 pub mod lifetime;
 pub mod marker;

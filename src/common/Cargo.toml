@@ -11,5 +11,4 @@ hashbrown = "0.13.2"
 log = "0.4.17"
 num-traits = "0.2.15"
 smallvec = "1.9.0"
-soot = { git = "https://github.com/Radbuglet/soot.git", rev = "20b039f995f984950dec7a9e4369619bd50ac545" }
 typed-glam = { path = "../typed-glam" }
