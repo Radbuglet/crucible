@@ -8,15 +8,15 @@ use typed_glam::{glam::DVec2, traits::NumericVector};
 
 use crate::{
 	material::MaterialRegistry,
-	world::{
-		data::BlockState,
-		math::{Aabb3, Axis3, BlockFace, EntityVecExt, Line3, Sign, Vec3Ext, WorldVecExt},
+	math::{
+		AaQuad, Aabb3, Axis3, BlockFace, EntityAabb, EntityVec, EntityVecExt, Line3, Sign,
+		VecCompExt, WorldVecExt,
 	},
+	world::data::BlockState,
 };
 
 use super::{
 	data::{BlockLocation, EntityLocation, VoxelWorldData},
-	math::{AaQuad, EntityAabb, EntityVec},
 	mesh::{QuadMeshLayer, VolumetricMeshLayer},
 };
 
@@ -302,29 +302,23 @@ pub fn check_volume<'a>(
 #[derive(Debug, Clone)]
 pub struct RayCast {
 	loc: EntityLocation,
-	step_delta: EntityVec,
+	dir: EntityVec,
 	dist: f64,
 }
 
 impl RayCast {
-	const STEP_SIZE: f64 = 1.95; // This can be at most `2`.
-
 	pub fn new_at(loc: EntityLocation, dir: EntityVec) -> Self {
 		let (dir, dist) = {
 			let dir_len_recip = dir.length_recip();
 
 			if dir_len_recip.is_finite() && dir_len_recip > 0.0 {
-				(dir * dir_len_recip * Self::STEP_SIZE, 0.)
+				(dir * dir_len_recip, 0.)
 			} else {
 				(EntityVec::ZERO, f64::INFINITY)
 			}
 		};
 
-		Self {
-			loc,
-			step_delta: dir,
-			dist,
-		}
+		Self { loc, dir, dist }
 	}
 
 	pub fn new_uncached(pos: EntityVec, dir: EntityVec) -> Self {
@@ -340,11 +334,7 @@ impl RayCast {
 	}
 
 	pub fn dir(&self) -> EntityVec {
-		self.step_delta.normalize_or_zero()
-	}
-
-	pub fn step_delta(&self) -> EntityVec {
-		self.step_delta
+		self.dir
 	}
 
 	pub fn dist(&self) -> f64 {
@@ -363,17 +353,17 @@ impl RayCast {
 		// Collect intersections
 		{
 			// Construct a line from our active `loc` to its end after we performed a step.
-			let step_line = Line3::new_origin_delta(self.pos(), self.step_delta);
+			let step_line = Line3::new_origin_delta(self.pos(), self.dir);
 
 			// Bump our location by this delta.
-			self.loc.move_relative(world, self.step_delta);
+			self.loc.move_relative(world, self.dir);
 
 			// Determine the delta in blocks that we committed by taking this step. This is not
 			// necessarily from one neighbor to the other in the case where we cast along the
 			// diagonal of a block. However, we do know that we will step along each axis at most
-			// once. This is why it's important that our step delta remains less than or equal to `2`:
+			// once. This is why it's important that our step delta remains less than or equal to `1`:
 			// in the worst case scenario where our step delta is axis-aligned, a delta greater than
-			// `2` could skip entirely past a block!
+			// `1` could skip entirely past a block!
 			let start_block = step_line.start.block_pos();
 			let end_block = step_line.end.block_pos();
 			let block_delta = end_block - start_block;
@@ -423,7 +413,7 @@ impl RayCast {
 		// Finally, we update distance accumulator.
 		// N.B. the direction is either normalized, in which case the step was of length 1, or we're
 		// traveling with direction zero, in which case the distance is already infinite.
-		self.dist += Self::STEP_SIZE;
+		self.dist += 1.0;
 
 		intersections
 	}

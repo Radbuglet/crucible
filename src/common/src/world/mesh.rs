@@ -2,7 +2,7 @@ use crucible_util::mem::c_enum::CEnum;
 use derive_where::derive_where;
 use typed_glam::glam::Vec3;
 
-use super::math::{AaQuad, Aabb3, BlockFace};
+use crate::math::{AaQuad, Aabb3, BlockFace};
 
 // === Volumetric === //
 

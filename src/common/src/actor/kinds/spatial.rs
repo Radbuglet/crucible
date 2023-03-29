@@ -8,10 +8,10 @@ use crate::{
 		manager::{ActorManager, Tag},
 	},
 	material::MaterialRegistry,
+	math::{Aabb3, Angle3D, Angle3DExt, Axis3, BlockFace, EntityVec, Sign, VecCompExt},
 	world::{
 		collision::{cast_volume, filter_all_colliders, move_rigid_body, COLLISION_TOLERANCE},
 		data::VoxelWorldData,
-		math::{Aabb3, Angle3D, Angle3DExt, Axis3, BlockFace, EntityVec, Sign, Vec3Ext},
 	},
 };
 

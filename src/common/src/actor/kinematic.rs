@@ -1,6 +1,6 @@
 use std::f64::consts::E;
 
-use crate::world::math::EntityVec;
+use crate::math::EntityVec;
 
 // === Parameters === //
 

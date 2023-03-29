@@ -2,10 +2,10 @@ use bort::{Entity, OwnedEntity};
 use crucible_common::{
 	actor::{kinds::spatial::update_kinematic_spatials, manager::ActorManager},
 	material::{MaterialDescriptorBase, MaterialRegistry},
+	math::{Aabb3, BlockFace, WorldVec},
 	world::{
 		collision::{CollisionMeta, MaterialColliderDescriptor},
 		data::{BlockLocation, BlockState, VoxelChunkFactory, VoxelWorldData},
-		math::{Aabb3, BlockFace, WorldVec},
 		mesh::{QuadMeshLayer, VolumetricMeshLayer},
 	},
 };

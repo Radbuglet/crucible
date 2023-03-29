@@ -1,5 +1,5 @@
 use crevice::std430::AsStd430;
-use crucible_common::world::math::{BlockFace, Color3, EntityAabb, EntityVec, Line3, Quad};
+use crucible_common::math::{BlockFace, Color3, EntityAabb, EntityVec, Line3, Quad};
 use crucible_util::mem::c_enum::CEnum;
 use wgpu::util::DeviceExt;
 

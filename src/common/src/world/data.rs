@@ -13,9 +13,12 @@ use crucible_util::{
 use hashbrown::HashMap;
 use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 
-use crate::{material::AIR_MATERIAL_SLOT, world::math::WorldVecExt};
-
-use super::math::{BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, WorldVec, CHUNK_VOLUME};
+use crate::{
+	material::AIR_MATERIAL_SLOT,
+	math::{
+		BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, WorldVec, WorldVecExt, CHUNK_VOLUME,
+	},
+};
 
 // === World === //
 

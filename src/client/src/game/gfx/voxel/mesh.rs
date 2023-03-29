@@ -4,11 +4,8 @@ use bort::{storage, CompRef, Entity};
 use crevice::std430::AsStd430;
 use crucible_common::{
 	material::MaterialRegistry,
-	world::{
-		data::VoxelWorldData,
-		math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, WorldVec, WorldVecExt, QUAD_UVS},
-		mesh::QuadMeshLayer,
-	},
+	math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, WorldVec, WorldVecExt, QUAD_UVS},
+	world::{data::VoxelWorldData, mesh::QuadMeshLayer},
 };
 use crucible_util::{
 	lang::polyfill::OptionPoly,

@@ -5,10 +5,10 @@ use crucible_common::{
 		kinematic::{tick_friction_coef_to_coef_qty, MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
 		manager::{ActorManager, Tag},
 	},
+	math::{Aabb3, Angle3D, Angle3DExt, BlockFace, EntityVec},
 	world::{
 		collision::RayCast,
 		data::{BlockState, EntityLocation, VoxelWorldData},
-		math::{Aabb3, Angle3D, Angle3DExt, BlockFace, EntityVec},
 	},
 };
 use crucible_util::{
