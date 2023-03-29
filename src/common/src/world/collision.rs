@@ -268,6 +268,7 @@ pub fn cast_volume(
 
 	// Find the maximum allowed delta
 	use_generator!(let iter[y] = async {
+		// For every block in the volume of potential occluders...
 		for pos in check_aabb.iter_blocks() {
 			use_generator!(let iter[y] = occluding_faces_in_block(
 				y,
@@ -278,56 +279,52 @@ pub fn cast_volume(
 				quad.face.invert(),
 			));
 
+			// For every occluder produced by that block...
 			for (occluder_quad, occluder_meta) in iter {
 				// Filter occluders by whether we are affected by them.
 				if !filter(occluder_meta) {
 					continue;
 				}
 
-				// Determine the maximum distance allowed by this occluder
-				let max_delta = {
-					if !occluder_quad
-						.as_rect::<DVec2>()
-						.intersects(quad.as_rect::<DVec2>())
-					{
-						continue;
-					}
+				if !occluder_quad
+					.as_rect::<DVec2>()
+					.intersects(quad.as_rect::<DVec2>())
+				{
+					continue;
+				}
 
-					// Find its depth along the axis of movement
-					let my_depth = occluder_quad.origin.comp(quad.face.axis());
+				// Find its depth along the axis of movement
+				let my_depth = occluder_quad.origin.comp(quad.face.axis());
 
-					// And compare that to the starting depth to find the maximum allowable distance.
-					// FIXME: We may be comparing against faces behind us!
-					let rel_depth = (my_depth - quad.origin.comp(quad.face.axis())).abs();
+				// And compare that to the starting depth to find the maximum allowable distance.
+				// FIXME: We may be comparing against faces behind us!
+				let rel_depth = (my_depth - quad.origin.comp(quad.face.axis())).abs();
 
-					// Now, provide `tolerance`.
-					// This step also ensures that, if the block plus its tolerance is outside of our delta,
-					// it will have essentially zero effect on collision detection.
-					let rel_depth = rel_depth - tolerance;
+				// Now, provide `tolerance`.
+				// This step also ensures that, if the block plus its tolerance is outside of our delta,
+				// it will have essentially zero effect on collision detection.
+				let rel_depth = rel_depth - tolerance;
 
-					// If `rel_depth` is negative, we were not within tolerance to begin with. We trace
-					// this scenario for debug purposes.
+				// If `rel_depth` is negative, we were not within tolerance to begin with. We trace
+				// this scenario for debug purposes.
 
-					// It has to be a somewhat big bypass to be reported. Floating point errors are
-					// expected—after all, that's why we have a tolerance in the first place.
-					if rel_depth < -tolerance / 2.0 {
-						log::trace!(
-							"cast_volume(quad: {quad:?}, delta: {delta}, tolerance: {tolerance}) could \
-							not keep collider within tolerance. Bypass depth: {}",
-							-rel_depth,
-						);
-					}
+				// It has to be a somewhat big bypass to be reported. Floating point errors are
+				// expected—after all, that's why we have a tolerance in the first place.
+				if rel_depth < -tolerance / 2.0 {
+					log::trace!(
+						"cast_volume(quad: {quad:?}, delta: {delta}, tolerance: {tolerance}) could \
+						not keep collider within tolerance. Bypass depth: {}",
+						-rel_depth,
+					);
+				}
 
-					// We still clamp this to `[0..)`.
-					rel_depth.max(0.0)
-				};
-
-				y.produce(max_delta).await;
+				// We still clamp this to `[0..)`.
+				y.produce(rel_depth.max(0.0)).await;
 			}
 		}
 	});
 
-	iter.min_by(f64::total_cmp).unwrap_or(0.0)
+	iter.min_by(f64::total_cmp).unwrap_or(delta).min(delta)
 }
 
 pub async fn check_volume<'a>(
