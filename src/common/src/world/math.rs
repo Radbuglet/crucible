@@ -129,7 +129,7 @@ pub trait WorldVecExt: Sized {
 	fn chunk(self) -> ChunkVec;
 	fn block(self) -> BlockVec;
 	fn negative_most_corner(self) -> EntityVec;
-	fn block_interface_layer(self, face: BlockFace) -> f64;
+	fn face_plane(self, face: BlockFace) -> AaPlane;
 }
 
 impl WorldVecExt for WorldVec {
@@ -163,14 +163,17 @@ impl WorldVecExt for WorldVec {
 		self.map_glam(|raw| raw.as_dvec3())
 	}
 
-	fn block_interface_layer(self, face: BlockFace) -> f64 {
+	fn face_plane(self, face: BlockFace) -> AaPlane {
 		let corner = self.negative_most_corner();
 		let (axis, sign) = face.decompose();
 
-		if sign == Sign::Positive {
-			corner.comp(axis) + 1.
-		} else {
-			corner.comp(axis)
+		AaPlane {
+			origin: if sign == Sign::Positive {
+				corner.comp(axis) + 1.
+			} else {
+				corner.comp(axis)
+			},
+			normal: face,
 		}
 	}
 }
@@ -580,11 +583,6 @@ impl Axis3 {
 
 		target
 	}
-
-	pub fn plane_intersect(self, layer: f64, line: Line3) -> (f64, EntityVec) {
-		let lerp = lerp_percent_at(layer, line.start.comp(self), line.end.comp(self));
-		(lerp, line.start.lerp(line.end, lerp))
-	}
 }
 
 // Sign
@@ -636,6 +634,10 @@ impl Line3 {
 			start,
 			end: start + delta,
 		}
+	}
+
+	pub fn signed_delta(&self) -> EntityVec {
+		self.end - self.start
 	}
 }
 
@@ -749,6 +751,25 @@ impl Angle3DExt for Angle3D {
 
 	fn clamp_y_90(&self) -> Self {
 		self.clamp_y(-HALF_PI, HALF_PI)
+	}
+}
+
+// === AaPlane === //
+
+#[derive(Debug, Copy, Clone)]
+pub struct AaPlane {
+	pub origin: f64,
+	pub normal: BlockFace,
+}
+
+impl AaPlane {
+	pub fn intersection(self, line: Line3) -> (f64, EntityVec) {
+		let lerp = lerp_percent_at(
+			self.origin,
+			line.start.comp(self.normal.axis()),
+			line.end.comp(self.normal.axis()),
+		);
+		(lerp, line.start.lerp(line.end, lerp))
 	}
 }
 
@@ -1058,6 +1079,26 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 		};
 
 		AaQuad::new_given_volume(origin, face, self.size)
+	}
+
+	pub fn contains(&self, point: V) -> bool
+	where
+		V::Comp: PartialOrd,
+	{
+		(self.origin.x() <= point.x() && point.x() < self.origin.x() + self.size.x())
+			&& (self.origin.y() <= point.y() && point.y() < self.origin.y() + self.size.y())
+			&& (self.origin.z() <= point.z() && point.z() < self.origin.z() + self.size.z())
+	}
+
+	pub fn intersects(&self, other: Self) -> bool
+	where
+		V::Comp: PartialOrd,
+	{
+		Aabb3 {
+			origin: self.origin - other.size,
+			size: self.size + other.size,
+		}
+		.contains(other.origin)
 	}
 }
 
