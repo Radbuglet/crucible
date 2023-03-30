@@ -1,12 +1,12 @@
 use bort::{storage, Entity, Storage};
 use crucible_util::{
 	lang::{
-		generator::{ContinuationSigIn, Yield},
+		generator::{ContinuationSig, Yield},
 		iter::ContextualIter,
 		std_traits::VecLike,
 	},
 	mem::c_enum::CEnum,
-	use_generator,
+	use_generator, yielder,
 };
 use smallvec::SmallVec;
 use typed_glam::{glam::DVec2, traits::NumericVector};
@@ -187,6 +187,7 @@ pub async fn occluding_faces_in_block<'a>(
 #[derive(Debug, Copy, Clone)]
 pub struct IntersectingFaceInBlock {
 	pub pos: EntityVec,
+	pub face: BlockFace,
 	pub dist_along_ray: f64,
 	pub meta: CollisionMeta,
 }
@@ -216,13 +217,16 @@ pub async fn intersecting_faces_in_block<'a>(
 		));
 
 		for (quad, meta) in iter.with_context(()) {
-			let Some((dist, pos)) = quad.intersection(line) else {
+			let Some((lerp, pos)) = quad.intersection(line) else {
 				continue
 			};
 
 			y.produce(IntersectingFaceInBlock {
 				pos,
-				dist_along_ray: dist,
+				face,
+				// N.B. This lerp value is the actual length along the ray because the ray is a
+				// unit vector.
+				dist_along_ray: lerp,
 				meta,
 			})
 			.await;
@@ -461,6 +465,8 @@ impl RayCast {
 				intersections.push(RayCastIntersection {
 					block: block_loc, // This will be updated in a bit.
 					face,
+					// N.B. This lerp value is the actual length along the ray because the ray is a
+					// unit vector.
 					distance: self.dist + isect_lerp,
 					pos: isect_pos,
 				});
@@ -491,7 +497,7 @@ impl RayCast {
 		collider_descs: &'static Storage<MaterialColliderDescriptor>,
 		world: &VoxelWorldData,
 		registry: &MaterialRegistry,
-		isect_buffer: &mut impl VecLike<Elem = RayCastBlockQuadIntersection>,
+		isect_buffer: &mut impl VecLike<Elem = (RayCastIntersection, CollisionMeta)>,
 	) {
 		let start_dist = self.dist();
 		let line = self.step_line();
@@ -511,43 +517,62 @@ impl RayCast {
 				line,
 			));
 
-			for face_isect in iter.with_context(()) {
-				isect_buffer.push(RayCastBlockQuadIntersection {
-					block: block_isect.block,
-					pos: face_isect.pos,
-					distance: start_dist + face_isect.dist_along_ray,
-					meta: face_isect.meta,
-				});
+			for face_isect in iter
+				.with_context(())
+				.filter(|isect| (0.0..=1.0).contains(&isect.dist_along_ray))
+			{
+				isect_buffer.push((
+					RayCastIntersection {
+						block: block_isect.block,
+						face: face_isect.face,
+						pos: face_isect.pos,
+						distance: start_dist + face_isect.dist_along_ray,
+					},
+					face_isect.meta,
+				));
 			}
 		}
 
 		// Sort intersections
-		isect_buffer.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+		isect_buffer.sort_by(|a, b| a.0.distance.total_cmp(&b.0.distance));
 	}
 
 	pub async fn step_for(
 		&mut self,
-		y: &Yield<
-			RayCastIntersection,
-			dyn for<'a> ContinuationSigIn<
-				'a,
-				Input = &'a VoxelWorldData,
-				Output = SmallVec<[RayCastIntersection; 3]>,
-			>,
-		>,
+		y: &yielder![RayCastIntersection; for<'a> &'a VoxelWorldData],
 		max_dist: f64,
 	) {
-		loop {
-			if self.dist() > max_dist {
-				return;
-			}
-
+		while self.dist() <= max_dist {
 			for isect in y.ask(|world| self.step(world)).await {
 				if isect.distance > max_dist {
 					continue;
 				}
 
 				y.produce(isect).await;
+			}
+		}
+	}
+
+	pub async fn step_intersect_for(
+		&mut self,
+		y: &yielder![(RayCastIntersection, CollisionMeta); for<'a> (&'a VoxelWorldData, &'a MaterialRegistry)],
+		collider_descs: &'static Storage<MaterialColliderDescriptor>,
+		max_dist: f64,
+	) {
+		let mut isect_buffer = SmallVec::<[_; 4]>::new();
+
+		while self.dist() <= max_dist {
+			y.ask(|(world, registry)| {
+				self.step_intersect(collider_descs, world, registry, &mut isect_buffer)
+			})
+			.await;
+
+			for (isect, meta) in &isect_buffer {
+				if isect.distance > max_dist {
+					return;
+				}
+
+				y.produce((isect.clone(), *meta)).await;
 			}
 		}
 	}
@@ -560,15 +585,6 @@ pub struct RayCastIntersection {
 	pub face: BlockFace,
 	pub pos: EntityVec,
 	pub distance: f64,
-}
-
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct RayCastBlockQuadIntersection {
-	pub block: BlockLocation,
-	pub pos: EntityVec,
-	pub distance: f64,
-	pub meta: CollisionMeta,
 }
 
 // === Rigid Body === //

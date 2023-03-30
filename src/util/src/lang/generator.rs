@@ -19,17 +19,13 @@ mod sealed {
 	pub trait CannotBeImplemented {}
 }
 
-pub trait ContinuationSig: sealed::CannotBeImplemented {
-	type Output;
-}
-
-pub trait ContinuationSigIn<'a>: ContinuationSig {
+pub trait ContinuationSig<'a>: sealed::CannotBeImplemented {
 	type Input;
 }
 
-type FeedIn<'a, C> = <C as ContinuationSigIn<'a>>::Input;
+type Feed<'a, C> = <C as ContinuationSig<'a>>::Input;
 
-pub type EmptyContinuator = dyn for<'a> ContinuationSigIn<'a, Input = (), Output = ()>;
+pub type EmptyContinuator = dyn for<'a> ContinuationSig<'a, Input = ()>;
 
 // === LoanedFunc === //
 
@@ -64,23 +60,23 @@ impl<F> Drop for LoanedFunc<F> {
 // LoanedFuncRef
 pub struct LoanedFuncRef<C>
 where
-	C: ?Sized + for<'a> ContinuationSigIn<'a>,
+	C: ?Sized + for<'a> ContinuationSig<'a>,
 {
 	// Function Pointer Safety: for this function to be safe to call, the caller must assert that
 	// the first pointer has a type appropriate for closure being executed (enforced by the
 	// structure's invariants) and that the pointer remains alive for the duration of the
 	// invocation.
-	handler: unsafe fn(*mut (), &mut FeedIn<'_, C>) -> C::Output,
+	handler: unsafe fn(*mut (), &mut Feed<'_, C>),
 	data: *mut (),
 }
 
 impl<C> LoanedFuncRef<C>
 where
-	C: ?Sized + for<'a> ContinuationSigIn<'a>,
+	C: ?Sized + for<'a> ContinuationSig<'a>,
 {
 	pub fn new<F>(func: Pin<&mut LoanedFunc<F>>) -> Self
 	where
-		F: FnMut(&mut FeedIn<'_, C>) -> C::Output,
+		F: FnMut(&mut Feed<'_, C>),
 	{
 		let func = unsafe {
 			// Safety: TODO
@@ -88,14 +84,14 @@ where
 		};
 
 		// Construct a trampoline to execute our loaned function
-		unsafe fn handler<C, F>(data: *mut (), input: &mut FeedIn<'_, C>) -> C::Output
+		unsafe fn handler<C, F>(data: *mut (), input: &mut Feed<'_, C>)
 		where
-			C: ?Sized + for<'a> ContinuationSigIn<'a>,
-			F: FnMut(&mut FeedIn<'_, C>) -> C::Output,
+			C: ?Sized + for<'a> ContinuationSig<'a>,
+			F: FnMut(&mut Feed<'_, C>),
 		{
 			// Safety: provided by caller
 			let data = &mut *(data as *mut LoanedFunc<F>);
-			(data.func)(input)
+			(data.func)(input);
 		}
 
 		// Mark ourselves as the referencer of this function.
@@ -109,7 +105,7 @@ where
 		}
 	}
 
-	pub fn call(&mut self, input: &mut FeedIn<'_, C>) -> C::Output {
+	pub fn call(&mut self, input: &mut Feed<'_, C>) {
 		unsafe {
 			// Safety: the function pointer contract requires that we prove that `self.data` has
 			// the appropriate type and that the pointee will remain valid (i.e. not dropped or
@@ -124,14 +120,14 @@ where
 			// b) if the `LoanedFunc` destructor is called and the `is_referenced` flag is still
 			//    set—a flag which will only get unset when we get `Drop`'ed—the process will
 			//    abort, preventing the memory from ever being invalidated.
-			(self.handler)(self.data, input)
+			(self.handler)(self.data, input);
 		}
 	}
 }
 
 impl<C> Drop for LoanedFuncRef<C>
 where
-	C: ?Sized + for<'a> ContinuationSigIn<'a>,
+	C: ?Sized + for<'a> ContinuationSig<'a>,
 {
 	fn drop(&mut self) {
 		unsafe {
@@ -143,21 +139,20 @@ where
 
 // === Yield === //
 
-pub struct Yield<T, C: ?Sized + for<'a> ContinuationSigIn<'a> = EmptyContinuator> {
+pub struct Yield<T, C: ?Sized + for<'a> ContinuationSig<'a> = EmptyContinuator> {
 	state: Cell<YieldState<T, C>>,
 }
 
 #[derive_where(Default)]
-enum YieldState<T, C: ?Sized + for<'a> ContinuationSigIn<'a>> {
+enum YieldState<T, C: ?Sized + for<'a> ContinuationSig<'a>> {
 	#[derive_where(default)]
 	Meaningless,
 	Polling,
 	AwaitingContinuation(LoanedFuncRef<C>),
-	ResolvedContinuation(C::Output),
 	ResolvedValue(T),
 }
 
-impl<T, C: ?Sized + for<'a> ContinuationSigIn<'a>> Default for Yield<T, C> {
+impl<T, C: ?Sized + for<'a> ContinuationSig<'a>> Default for Yield<T, C> {
 	fn default() -> Self {
 		Self {
 			state: Cell::new(YieldState::Polling),
@@ -165,19 +160,21 @@ impl<T, C: ?Sized + for<'a> ContinuationSigIn<'a>> Default for Yield<T, C> {
 	}
 }
 
-impl<T, C: ?Sized + for<'a> ContinuationSigIn<'a>> Yield<T, C> {
+impl<T, C: ?Sized + for<'a> ContinuationSig<'a>> Yield<T, C> {
 	pub fn new() -> Self {
 		Self::default()
 	}
 
-	pub async fn ask<F>(&self, continuator: F) -> C::Output
+	pub async fn ask<F, O>(&self, continuator: F) -> O
 	where
-		F: FnOnce(&'_ mut FeedIn<'_, C>) -> C::Output,
+		F: FnOnce(&'_ mut Feed<'_, C>) -> O,
 	{
 		// Construct the continuator function
 		let mut continuator = Some(continuator);
-		let continuator = pin!(LoanedFunc::new(move |input: &'_ mut FeedIn<'_, C>| {
-			(continuator.take().unwrap())(input)
+		let output = &Cell::new(None);
+
+		let continuator = pin!(LoanedFunc::new(move |input: &'_ mut Feed<'_, C>| {
+			output.set(Some((continuator.take().unwrap())(input)));
 		}));
 
 		// Exchange `Polling` for `AwaitingContinuation`
@@ -197,10 +194,10 @@ impl<T, C: ?Sized + for<'a> ContinuationSigIn<'a>> Yield<T, C> {
 		}
 
 		// Wait until `AwaitingContinuation` gets replaced with `ResolvedContinuation`
-		poll_fn(|_| match self.state.take() {
-			YieldState::ResolvedContinuation(value) => {
-				self.state.set(YieldState::Polling);
-				Poll::Ready(value)
+		poll_fn(move |_| match self.state.take() {
+			state @ YieldState::Polling => {
+				self.state.set(state);
+				Poll::Ready(output.take().unwrap())
 			}
 			state @ YieldState::AwaitingContinuation { .. } => {
 				self.state.set(state);
@@ -255,7 +252,7 @@ impl<T, C: ?Sized + for<'a> ContinuationSigIn<'a>> Yield<T, C> {
 	pub fn next(
 		&self,
 		mut future: Pin<&mut impl Future>,
-		input: &mut <C as ContinuationSigIn<'_>>::Input,
+		input: &mut <C as ContinuationSig<'_>>::Input,
 	) -> FlowResult<T> {
 		let waker = dummy_waker();
 		let mut context = Context::from_waker(&waker);
@@ -289,10 +286,7 @@ impl<T, C: ?Sized + for<'a> ContinuationSigIn<'a>> Yield<T, C> {
 				}
 
 				// Handle inert polling states
-				(
-					Poll::Pending,
-					state @ YieldState::Polling | state @ YieldState::ResolvedContinuation(_),
-				) => {
+				(Poll::Pending, state @ YieldState::Polling) => {
 					// We're still polling for updates. Continue the loop.
 					self.state.set(state);
 					continue;
@@ -306,8 +300,9 @@ impl<T, C: ?Sized + for<'a> ContinuationSigIn<'a>> Yield<T, C> {
 					// Call the `continuator` on the input to get a continuation. If we panic,
 					// we'll unwind the `continuator` before we unwind the actual dangerous future,
 					// avoid an abort.
-					let resolved = continuator.call(input);
-					self.state.set(YieldState::ResolvedContinuation(resolved));
+					continuator.call(input);
+
+					self.state.set(YieldState::Polling);
 				}
 
 				// Handle illegal states
@@ -323,9 +318,6 @@ impl<T, C: ?Sized + for<'a> ContinuationSigIn<'a>> Yield<T, C> {
 					panic!(
 						"Generator is waiting for a continuator despite having finished polling."
 					);
-				}
-				(Poll::Ready(_), YieldState::ResolvedContinuation(_)) => {
-					panic!("Provided a continuation value that was somehow never consumed by the generator.");
 				}
 				(_, YieldState::Meaningless) => {
 					panic!("Encountered a meaningless state while polling. An internal error must have occurred.");
@@ -354,20 +346,20 @@ impl<T> Yield<T> {
 
 // === YieldIter === //
 
-pub struct YieldIterator<'a, F, T, C: ?Sized + for<'b> ContinuationSigIn<'b>> {
+pub struct YieldIterator<'a, F, T, C: ?Sized + for<'b> ContinuationSig<'b>> {
 	yielder: &'a Yield<T, C>,
 	future: Pin<&'a mut F>,
 	is_done: bool,
 }
 
-impl<'a, 'b, F, T, C> ContextualIter<FeedIn<'b, C>> for YieldIterator<'a, F, T, C>
+impl<'a, 'b, F, T, C> ContextualIter<Feed<'b, C>> for YieldIterator<'a, F, T, C>
 where
 	F: Future,
-	C: ?Sized + for<'c> ContinuationSigIn<'c>,
+	C: ?Sized + for<'c> ContinuationSig<'c>,
 {
 	type Item = T;
 
-	fn next_on_ref(&mut self, context: &mut FeedIn<'b, C>) -> Option<Self::Item> {
+	fn next_on_ref(&mut self, context: &mut Feed<'b, C>) -> Option<Self::Item> {
 		if self.is_done {
 			return None;
 		}
@@ -385,7 +377,10 @@ where
 
 #[doc(hidden)]
 pub mod macro_internals {
-	pub use {super::Yield, core::pin::pin};
+	pub use {
+		super::{ContinuationSig, Yield},
+		core::pin::pin,
+	};
 }
 
 #[macro_export]
@@ -397,5 +392,15 @@ macro_rules! use_generator {
 			$fn
 		});
 		let mut $name = y.iter(future);
+	};
+}
+
+#[macro_export]
+macro_rules! yielder {
+	($out:ty$(; for<$lt:lifetime> $in:ty)?) => {
+		$crate::lang::generator::macro_internals::Yield<
+			$out
+			$(,dyn for<$lt> ContinuationSig<$lt, Input = $in>,)?
+		>
 	};
 }

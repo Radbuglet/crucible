@@ -442,6 +442,7 @@ dependencies = [
  "derive-where",
  "dummy-waker",
  "log",
+ "smallvec",
 ]
 
 [[package]]

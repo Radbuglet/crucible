@@ -212,7 +212,12 @@ impl GameSceneState {
 
 		// Process actors
 		reset_kinematic_accelerations_to_gravity(&actors);
-		player_inputs.update(self.main_viewport, &mut camera, &mut world_data);
+		player_inputs.update(
+			self.main_viewport,
+			&mut camera,
+			&mut world_data,
+			&self.block_registry,
+		);
 		update_kinematic_spatials(&actors, &world_data, &self.block_registry, 1.0 / 60.0);
 
 		// Update chunk meshes

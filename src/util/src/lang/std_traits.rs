@@ -126,3 +126,21 @@ impl<T> VecLike for Vec<T> {
 		self.clear()
 	}
 }
+
+impl<A: smallvec::Array> SliceLike for smallvec::SmallVec<A> {
+	type Elem = A::Item;
+}
+
+impl<A: smallvec::Array> VecLike for smallvec::SmallVec<A> {
+	fn push(&mut self, value: Self::Elem) {
+		self.push(value)
+	}
+
+	fn pop(&mut self) -> Option<Self::Elem> {
+		self.pop()
+	}
+
+	fn clear(&mut self) {
+		self.clear()
+	}
+}

@@ -30,6 +30,14 @@ impl Line3 {
 	pub fn signed_delta(&self) -> EntityVec {
 		self.end - self.start
 	}
+
+	pub fn length(&self) -> f64 {
+		self.signed_delta().length()
+	}
+
+	pub fn length_squared(&self) -> f64 {
+		self.signed_delta().length_squared()
+	}
 }
 
 // === AaPlane === //

@@ -5,6 +5,7 @@ use crucible_common::{
 		kinematic::{tick_friction_coef_to_coef_qty, MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
 		manager::{ActorManager, Tag},
 	},
+	material::MaterialRegistry,
 	math::{Aabb3, Angle3D, Angle3DExt, BlockFace, EntityVec},
 	world::{
 		collision::RayCast,
@@ -109,6 +110,7 @@ impl PlayerInputController {
 		main_viewport: Entity,
 		camera: &mut CameraManager,
 		world: &mut VoxelWorldData,
+		registry: &MaterialRegistry,
 	) {
 		// Acquire context
 		let viewport = main_viewport.get::<Viewport>();
@@ -231,18 +233,18 @@ impl PlayerInputController {
 						),
 						player_spatial.facing(),
 					);
-					use_generator!(let ray_iter[y] = ray.step_for(y, 7.0));
+					use_generator!(let ray_iter[y] = ray.step_intersect_for(y, storage(), 7.0));
 
-					while let Some(intersection) = ray_iter.next(world) {
-						if intersection
+					while let Some((isect, _)) = ray_iter.next((world, registry)) {
+						if isect
 							.block
 							.clone()
 							.state(world)
 							.p_is_some_and(|state| state.is_not_air())
 						{
-							intersection
+							isect
 								.block
-								.at_neighbor(world, intersection.face.invert())
+								.at_neighbor(world, isect.face.invert())
 								.set_state_or_create(
 									world,
 									BlockState {
@@ -261,16 +263,16 @@ impl PlayerInputController {
 						),
 						player_spatial.facing(),
 					);
-					use_generator!(let ray_iter[y] = ray.step_for(y, 7.0));
+					use_generator!(let ray_iter[y] = ray.step_intersect_for(y, storage(), 7.0));
 
-					while let Some(intersection) = ray_iter.next(world) {
-						if intersection
+					while let Some((isect, _)) = ray_iter.next((world, registry)) {
+						if isect
 							.block
 							.clone()
 							.state(world)
 							.p_is_some_and(|state| state.is_not_air())
 						{
-							intersection
+							isect
 								.block
 								.clone()
 								.set_state_in_world(world, BlockState::AIR);
