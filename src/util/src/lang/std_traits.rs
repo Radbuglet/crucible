@@ -65,6 +65,10 @@ pub trait SliceLike:
 	fn len(&self) -> usize {
 		self.borrow().len()
 	}
+
+	fn is_empty(&self) -> bool {
+		self.borrow().is_empty()
+	}
 }
 
 // === ArrayLike === //
@@ -101,6 +105,8 @@ pub trait VecLike: SliceLike + IntoIterator<Item = Self::Elem> + Extend<Self::El
 	fn push(&mut self, value: Self::Elem);
 
 	fn pop(&mut self) -> Option<Self::Elem>;
+
+	fn clear(&mut self);
 }
 
 impl<T> SliceLike for Vec<T> {
@@ -114,5 +120,9 @@ impl<T> VecLike for Vec<T> {
 
 	fn pop(&mut self) -> Option<Self::Elem> {
 		self.pop()
+	}
+
+	fn clear(&mut self) {
+		self.clear()
 	}
 }

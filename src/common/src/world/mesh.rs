@@ -23,12 +23,9 @@ impl<M> VolumetricMeshLayer<M> {
 	}
 
 	pub fn quads(&self) -> impl Iterator<Item = (AaQuad<Vec3>, &M)> + '_ {
-		self.aabbs
-			.iter()
-			.map(|(aabb, material)| {
-				BlockFace::variants().map(move |face| (aabb.quad(face), material))
-			})
-			.flatten()
+		self.aabbs.iter().flat_map(|(aabb, material)| {
+			BlockFace::variants().map(move |face| (aabb.quad(face), material))
+		})
 	}
 
 	pub fn quads_cloned(&self) -> impl Iterator<Item = (AaQuad<Vec3>, M)> + '_
@@ -68,12 +65,6 @@ pub struct QuadMeshLayer<M> {
 impl<M> QuadMeshLayer<M> {
 	pub fn new() -> Self {
 		Self::default()
-	}
-
-	pub fn from_iter(iter: impl IntoIterator<Item = (AaQuad<Vec3>, M)>) -> Self {
-		Self {
-			quads: Vec::from_iter(iter),
-		}
 	}
 
 	pub fn push_cube_faces_hetero<I>(&mut self, aabb: Aabb3<Vec3>, faces: I)
@@ -122,6 +113,14 @@ impl<M> QuadMeshLayer<M> {
 		M: Clone,
 	{
 		self.quads.iter().cloned()
+	}
+}
+
+impl<M> FromIterator<(AaQuad<Vec3>, M)> for QuadMeshLayer<M> {
+	fn from_iter<T: IntoIterator<Item = (AaQuad<Vec3>, M)>>(iter: T) -> Self {
+		Self {
+			quads: Vec::from_iter(iter),
+		}
 	}
 }
 

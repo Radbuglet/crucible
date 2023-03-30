@@ -2,7 +2,7 @@ use std::{borrow::BorrowMut, pin::pin};
 
 use bort::{storage, Entity, Storage};
 use crucible_util::{
-	lang::{generator::Yield, iter::ContextualIter},
+	lang::{generator::Yield, iter::ContextualIter, std_traits::VecLike},
 	mem::c_enum::CEnum,
 	use_generator,
 };
@@ -268,6 +268,8 @@ pub fn cast_volume(
 
 	// Find the maximum allowed delta
 	use_generator!(let iter[y] = async {
+		y.set_empty_continuator();
+
 		// For every block in the volume of potential occluders...
 		for pos in check_aabb.iter_blocks() {
 			use_generator!(let iter[y] = occluding_faces_in_block(
@@ -479,6 +481,45 @@ impl RayCast {
 		intersections
 	}
 
+	pub fn step_intersect(
+		&mut self,
+		collider_descs: &'static Storage<MaterialColliderDescriptor>,
+		world: &VoxelWorldData,
+		registry: &MaterialRegistry,
+		isect_buffer: &mut impl VecLike<Elem = RayCastBlockQuadIntersection>,
+	) {
+		let start_dist = self.dist();
+		let line = self.step_line();
+		let block_isects = self.step(world);
+
+		// Clear scratch buffer
+		isect_buffer.clear();
+
+		// Collect intersections
+		for block_isect in block_isects {
+			use_generator!(let iter[y] = intersecting_faces_in_block(
+				y,
+				collider_descs,
+				world,
+				registry,
+				block_isect.block,
+				line,
+			));
+
+			for face_isect in iter {
+				isect_buffer.push(RayCastBlockQuadIntersection {
+					block: block_isect.block,
+					pos: face_isect.pos,
+					distance: start_dist + face_isect.dist_along_ray,
+					meta: face_isect.meta,
+				});
+			}
+		}
+
+		// Sort intersections
+		isect_buffer.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+	}
+
 	pub fn into_iter(self, dist: f64) -> RayCastIter<Self> {
 		RayCastIter::new(self, dist)
 	}
@@ -495,6 +536,15 @@ pub struct RayCastIntersection {
 	pub face: BlockFace,
 	pub pos: EntityVec,
 	pub distance: f64,
+}
+
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct RayCastBlockQuadIntersection {
+	pub block: BlockLocation,
+	pub pos: EntityVec,
+	pub distance: f64,
+	pub meta: CollisionMeta,
 }
 
 #[derive(Debug)]

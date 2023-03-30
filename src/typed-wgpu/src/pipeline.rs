@@ -242,7 +242,7 @@ impl<'a, U: PipelineSet, V: PipelineSet> RenderPipelineBuilder<'a, U, V> {
 					.map(|(module, entry_point, targets)| wgpu::FragmentState {
 						module,
 						entry_point,
-						targets: &targets,
+						targets,
 					}),
 				multiview: self.multiview,
 			})
