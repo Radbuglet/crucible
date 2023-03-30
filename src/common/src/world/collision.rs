@@ -1,8 +1,10 @@
-use std::{borrow::BorrowMut, pin::pin};
-
 use bort::{storage, Entity, Storage};
 use crucible_util::{
-	lang::{generator::Yield, iter::ContextualIter, std_traits::VecLike},
+	lang::{
+		generator::{ContinuationSigIn, Yield},
+		iter::ContextualIter,
+		std_traits::VecLike,
+	},
 	mem::c_enum::CEnum,
 	use_generator,
 };
@@ -523,12 +525,31 @@ impl RayCast {
 		isect_buffer.sort_by(|a, b| a.distance.total_cmp(&b.distance));
 	}
 
-	pub fn into_iter(self, dist: f64) -> RayCastIter<Self> {
-		RayCastIter::new(self, dist)
-	}
+	pub async fn step_for(
+		&mut self,
+		y: &Yield<
+			RayCastIntersection,
+			dyn for<'a> ContinuationSigIn<
+				'a,
+				Input = &'a VoxelWorldData,
+				Output = SmallVec<[RayCastIntersection; 3]>,
+			>,
+		>,
+		max_dist: f64,
+	) {
+		loop {
+			if self.dist() > max_dist {
+				return;
+			}
 
-	pub fn step_for(&mut self, dist: f64) -> RayCastIter<&'_ mut Self> {
-		RayCastIter::new(self, dist)
+			for isect in y.ask(|world| self.step(world)).await {
+				if isect.distance > max_dist {
+					continue;
+				}
+
+				y.produce(isect).await;
+			}
+		}
 	}
 }
 
@@ -548,56 +569,6 @@ pub struct RayCastBlockQuadIntersection {
 	pub pos: EntityVec,
 	pub distance: f64,
 	pub meta: CollisionMeta,
-}
-
-#[derive(Debug)]
-pub struct RayCastIter<R> {
-	pub ray: R,
-	pub max_dist: f64,
-	back_log: SmallVec<[RayCastIntersection; 3]>,
-}
-
-impl<R> RayCastIter<R> {
-	pub fn new(ray: R, max_dist: f64) -> Self {
-		Self {
-			ray,
-			max_dist,
-			back_log: Default::default(),
-		}
-	}
-}
-
-impl<'a, R: BorrowMut<RayCast>> ContextualIter<&'a VoxelWorldData> for RayCastIter<R> {
-	type Item = RayCastIntersection;
-
-	fn next_on_ref(&mut self, world: &mut &'a VoxelWorldData) -> Option<Self::Item> {
-		let world = *world;
-
-		let next = if !self.back_log.is_empty() {
-			self.back_log.remove(0)
-		} else if self.ray.borrow().dist() < self.max_dist {
-			self.back_log = self.ray.borrow_mut().step(world);
-
-			// It is possible that the ray needs to travel more than 1 unit to get out of a block.
-			// The furthest it can travel is `sqrt(3 * 1^2) ~= 1.7` so we have to call this method
-			// at most twice. Also, yes, this handles a zero-vector direction because rays with no
-			// direction automatically get infinite distance and will therefore fail to trigger this
-			// case unless `max_dist` is also set to `infinity`.
-			if self.back_log.is_empty() {
-				self.back_log = self.ray.borrow_mut().step(world);
-			}
-
-			self.back_log.remove(0)
-		} else {
-			return None;
-		};
-
-		if next.distance <= self.max_dist {
-			Some(next)
-		} else {
-			None
-		}
-	}
 }
 
 // === Rigid Body === //

@@ -14,6 +14,7 @@ use crucible_common::{
 use crucible_util::{
 	debug::error::{ErrorFormatExt, ResultExt},
 	lang::{iter::ContextualIter, polyfill::OptionPoly},
+	use_generator,
 };
 use typed_glam::glam::{DVec3, Vec3};
 use winit::{
@@ -223,14 +224,14 @@ impl PlayerInputController {
 
 				// Handle block placement
 				if input_manager.button(MouseButton::Right).recently_pressed() {
-					let mut ray_iter = RayCast::new_at(
+					let mut ray = RayCast::new_at(
 						EntityLocation::new(
 							world,
 							player_spatial.position + EntityVec::Y * PLAYER_EYE_LEVEL,
 						),
 						player_spatial.facing(),
-					)
-					.into_iter(7.0);
+					);
+					use_generator!(let ray_iter[y] = ray.step_for(y, 7.0));
 
 					while let Some(intersection) = ray_iter.next(world) {
 						if intersection
@@ -253,14 +254,14 @@ impl PlayerInputController {
 						}
 					}
 				} else if input_manager.button(MouseButton::Left).recently_pressed() {
-					let mut ray_iter = RayCast::new_at(
+					let mut ray = RayCast::new_at(
 						EntityLocation::new(
 							world,
 							player_spatial.position + EntityVec::Y * PLAYER_EYE_LEVEL,
 						),
 						player_spatial.facing(),
-					)
-					.into_iter(7.0);
+					);
+					use_generator!(let ray_iter[y] = ray.step_for(y, 7.0));
 
 					while let Some(intersection) = ray_iter.next(world) {
 						if intersection

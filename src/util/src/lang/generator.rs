@@ -391,11 +391,11 @@ pub mod macro_internals {
 #[macro_export]
 macro_rules! use_generator {
 	(let $name:ident[$yielder:ident] = $fn:expr) => {
-		let y = &$crate::lang::generator::Yield::new();
-		let future = pin!({
+		let y = &$crate::lang::generator::macro_internals::Yield::new();
+		let future = $crate::lang::generator::macro_internals::pin!({
 			let $yielder = y;
 			$fn
 		});
-		let $name = y.iter(future);
+		let mut $name = y.iter(future);
 	};
 }
