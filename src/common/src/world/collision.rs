@@ -213,7 +213,7 @@ pub async fn intersecting_faces_in_block<'a>(
 			face
 		));
 
-		for (quad, meta) in iter {
+		for (quad, meta) in iter.with_context(()) {
 			let Some((dist, pos)) = quad.intersection(line) else {
 				continue
 			};
@@ -268,7 +268,7 @@ pub fn cast_volume(
 
 	// Find the maximum allowed delta
 	use_generator!(let iter[y] = async {
-		y.set_empty_continuator();
+		y.bind_empty_context();
 
 		// For every block in the volume of potential occluders...
 		for pos in check_aabb.iter_blocks() {
@@ -282,7 +282,7 @@ pub fn cast_volume(
 			));
 
 			// For every occluder produced by that block...
-			for (occluder_quad, occluder_meta) in iter {
+			for (occluder_quad, occluder_meta) in iter.with_context(()) {
 				// Filter occluders by whether we are affected by them.
 				if !filter(occluder_meta) {
 					continue;
@@ -326,7 +326,10 @@ pub fn cast_volume(
 		}
 	});
 
-	iter.min_by(f64::total_cmp).unwrap_or(delta).min(delta)
+	iter.with_context(())
+		.min_by(f64::total_cmp)
+		.unwrap_or(delta)
+		.min(delta)
 }
 
 pub async fn check_volume<'a>(
@@ -348,7 +351,7 @@ pub async fn check_volume<'a>(
 			block,
 		));
 
-		for (block_aabb, meta) in iter {
+		for (block_aabb, meta) in iter.with_context(()) {
 			if aabb.intersects(block_aabb) {
 				y.produce((block, meta)).await;
 			}
@@ -506,7 +509,7 @@ impl RayCast {
 				line,
 			));
 
-			for face_isect in iter {
+			for face_isect in iter.with_context(()) {
 				isect_buffer.push(RayCastBlockQuadIntersection {
 					block: block_isect.block,
 					pos: face_isect.pos,

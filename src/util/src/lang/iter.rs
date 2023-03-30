@@ -38,6 +38,15 @@ where
 	}
 }
 
+// === FlowIter === //
+
+#[derive(Debug, Copy, Clone)]
+pub enum FlowResult<T> {
+	Proceed(T),
+	FinishedWith(T),
+	Finished,
+}
+
 // === choice_iter === //
 
 #[doc(hidden)]
