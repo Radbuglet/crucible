@@ -203,10 +203,18 @@ pub async fn intersecting_faces_in_block<'a>(
 	let delta = line.signed_delta();
 
 	for axis in Axis3::variants() {
-		let Some(sign) = Sign::of(delta.comp(axis)) else {
-			continue;
+		// Determine the block face normal the line is passing through.
+		let face = {
+			let Some(sign) = Sign::of(delta.comp(axis)) else {
+				continue;
+			};
+
+			// N.B. we invert this because, if the ray is traveling down, e.g., the +Z axis, only
+			// quads facing towards the -Z axis can intercept it.
+			BlockFace::compose(axis, sign).invert()
 		};
-		let face = BlockFace::compose(axis, sign);
+
+		// For every occluding quad of the block pointing towards our ray...
 		use_generator!(let iter[y] = occluding_faces_in_block(
 			y,
 			collider_descs,
@@ -217,16 +225,16 @@ pub async fn intersecting_faces_in_block<'a>(
 		));
 
 		for (quad, meta) in iter.with_context(()) {
+			// Search for an intersection
 			let Some((lerp, pos)) = quad.intersection(line) else {
 				continue
 			};
 
+			// Yield the intersection
 			y.produce(IntersectingFaceInBlock {
 				pos,
 				face,
-				// N.B. This lerp value is the actual length along the ray because the ray is a
-				// unit vector.
-				dist_along_ray: lerp,
+				dist_along_ray: lerp * delta.length(),
 				meta,
 			})
 			.await;
@@ -499,6 +507,7 @@ impl RayCast {
 		registry: &MaterialRegistry,
 		isect_buffer: &mut impl VecLike<Elem = (RayCastIntersection, CollisionMeta)>,
 	) {
+		// Step the ray forward, keeping track of its old state.
 		let start_dist = self.dist();
 		let line = self.step_line();
 		let block_isects = self.step(world);
@@ -519,7 +528,9 @@ impl RayCast {
 
 			for face_isect in iter
 				.with_context(())
-				.filter(|isect| (0.0..=1.0).contains(&isect.dist_along_ray))
+				// N.B. we don't limit the maximum distance because a ray can only be within a given
+				// block once.
+				.filter(|isect| isect.dist_along_ray > 0.0)
 			{
 				isect_buffer.push((
 					RayCastIntersection {
@@ -562,11 +573,13 @@ impl RayCast {
 		let mut isect_buffer = SmallVec::<[_; 4]>::new();
 
 		while self.dist() <= max_dist {
+			// Collect intersections into the `isect_buffer`...
 			y.ask(|(world, registry)| {
 				self.step_intersect(collider_descs, world, registry, &mut isect_buffer)
 			})
 			.await;
 
+			// Yield intersections below the max distance limit.
 			for (isect, meta) in &isect_buffer {
 				if isect.distance > max_dist {
 					return;

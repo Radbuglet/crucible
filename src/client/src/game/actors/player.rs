@@ -244,7 +244,7 @@ impl PlayerInputController {
 						{
 							isect
 								.block
-								.at_neighbor(world, isect.face.invert())
+								.at_neighbor(world, isect.face)
 								.set_state_or_create(
 									world,
 									BlockState {
