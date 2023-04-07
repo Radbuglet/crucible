@@ -1,2 +1,2 @@
-pub mod debug;
+pub mod immediate;
 pub mod voxel;

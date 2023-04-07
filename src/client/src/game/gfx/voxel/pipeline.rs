@@ -5,7 +5,7 @@ use typed_wgpu::{
 	buffer::BufferBinding,
 	pipeline::RenderPipeline,
 	uniform::{BindGroup, BindGroupBuilder, BindGroupInstance, NoDynamicOffsets, PipelineLayout},
-	vertex::VertexBufferLayout,
+	vertex::{Std430VertexFormat, VertexBufferLayout},
 };
 
 use crate::engine::{
@@ -57,11 +57,8 @@ pub struct VoxelVertex {
 impl VoxelVertex {
 	pub fn layout() -> VertexBufferLayout<Self> {
 		VertexBufferLayout::builder()
-			// FIXME: Padding should be inserted automatically (`wgpu::vertex_attr_array` is a lie!)
-			.with_attribute(wgpu::VertexFormat::Float32x3) // position
-			.with_offset(16)
-			.with_attribute(wgpu::VertexFormat::Float32x2) // uv
-			.with_padding_to_size(Self::std430_size_static() as wgpu::BufferAddress)
+			.with_attribute(Std430VertexFormat::F32x3) // position
+			.with_attribute(Std430VertexFormat::F32x2) // uv
 			.finish(wgpu::VertexStepMode::Vertex)
 	}
 }

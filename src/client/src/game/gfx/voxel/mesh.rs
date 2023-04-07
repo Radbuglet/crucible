@@ -4,7 +4,7 @@ use bort::{storage, CompRef, Entity};
 use crevice::std430::AsStd430;
 use crucible_common::{
 	material::MaterialRegistry,
-	math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, WorldVec, WorldVecExt, QUAD_UVS},
+	math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, Tri, WorldVec, WorldVecExt, QUAD_UVS},
 	world::{data::VoxelWorldData, mesh::QuadMeshLayer},
 };
 use crucible_util::{
@@ -133,7 +133,7 @@ impl VoxelWorldMesh {
 									.as_quad_ccw()
 									.zip(QUAD_UVS.map(|v| uv_origin + v * uv_size));
 
-								let [[a, b, c], [d, e, f]] = quad.to_tris();
+								let [Tri([a, b, c]), Tri([d, e, f])] = quad.to_tris();
 								let quad_vertices = [a, b, c, d, e, f];
 
 								// Write the quad
@@ -160,7 +160,7 @@ impl VoxelWorldMesh {
 								.zip(QUAD_UVS.map(|v| uv_origin + v * uv_size));
 
 							// Convert to triangles
-							let [[a, b, c], [d, e, f]] = quad.to_tris();
+							let [Tri([a, b, c]), Tri([d, e, f])] = quad.to_tris();
 							let quad_vertices = [a, b, c, d, e, f];
 
 							// Convert to std340

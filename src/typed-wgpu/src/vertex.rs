@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 
-use crucible_util::{impl_tuples, lang::marker::PhantomProlong, transparent};
+use crucible_util::{
+	c_enum, impl_tuples, lang::marker::PhantomProlong, mem::number::round_up_u64, transparent,
+};
 use derive_where::derive_where;
 
 use crate::{
@@ -64,6 +66,7 @@ transparent! {
 #[derive(Debug, Clone, Default)]
 pub struct RawVertexBufferLayout {
 	pub stride: wgpu::BufferAddress,
+	pub align: wgpu::BufferAddress,
 	pub step_mode: wgpu::VertexStepMode,
 	pub attributes: Vec<wgpu::VertexAttribute>,
 }
@@ -82,6 +85,7 @@ impl RawVertexBufferLayout {
 pub struct VertexBufferLayoutBuilder {
 	location: SlotAssigner,
 	size: wgpu::BufferAddress,
+	align: wgpu::BufferAddress,
 	next_offset: wgpu::BufferAddress,
 	attributes: Vec<wgpu::VertexAttribute>,
 }
@@ -118,6 +122,10 @@ impl VertexBufferLayoutBuilder {
 		self.size
 	}
 
+	pub fn alignment(&self) -> wgpu::BufferAddress {
+		self.align
+	}
+
 	pub fn next_offset(&self) -> wgpu::BufferAddress {
 		self.next_offset
 	}
@@ -136,22 +144,40 @@ impl VertexBufferLayoutBuilder {
 		self.size = self.size.max(self.next_offset);
 	}
 
-	pub fn push_attribute(&mut self, format: wgpu::VertexFormat) {
+	pub fn push_alignment(&mut self, align: wgpu::BufferAddress) {
+		assert!(align.is_power_of_two());
+
+		// Update structure alignment
+		self.align = self.align.max(align);
+
+		// Update offset to be properly aligned
+		self.set_offset(round_up_u64(self.next_offset(), align));
+	}
+
+	pub fn push_attribute(&mut self, attr: impl AsVertexAttribute) {
+		let (format, size, align) = attr.format_size_align();
+
+		// Align offset
+		self.push_alignment(align);
+
+		// Push attribute
 		self.attributes.push(wgpu::VertexAttribute {
 			format,
-			// Vertex attributes are packed in wgpu. See the source of `wgpu::vertex_attr_array` for
-			// details. FIXME: ...but if we lay things out in std430, there will be padding!
 			offset: self.next_offset,
 			shader_location: self.location.next(),
 		});
+
+		// Set offset to end of item
 		self.set_offset(
 			self.next_offset
-				.checked_add(format.size())
+				.checked_add(size)
 				.expect(Self::OVERFLOW_ERR),
 		);
 	}
 
 	pub fn push_sub_layout(&mut self, layout: &RawVertexBufferLayout) {
+		self.push_alignment(layout.align);
+
 		for attrib in &layout.attributes {
 			self.attributes.push(wgpu::VertexAttribute {
 				format: attrib.format,
@@ -185,8 +211,13 @@ impl VertexBufferLayoutBuilder {
 		self
 	}
 
-	pub fn with_attribute(mut self, format: wgpu::VertexFormat) -> Self {
-		self.push_attribute(format);
+	pub fn with_alignment(mut self, align: wgpu::BufferAddress) -> Self {
+		self.push_alignment(align);
+		self
+	}
+
+	pub fn with_attribute(mut self, attr: impl AsVertexAttribute) -> Self {
+		self.push_attribute(attr);
 		self
 	}
 
@@ -200,12 +231,77 @@ impl VertexBufferLayoutBuilder {
 		self
 	}
 
-	pub fn finish<T>(self, step_mode: wgpu::VertexStepMode) -> VertexBufferLayout<T> {
+	pub fn finish<T>(mut self, step_mode: wgpu::VertexStepMode) -> VertexBufferLayout<T> {
+		self.push_alignment(self.align);
+
 		RawVertexBufferLayout {
 			stride: self.size,
+			align: self.align,
 			step_mode,
 			attributes: self.attributes,
 		}
 		.into()
+	}
+}
+
+pub trait AsVertexAttribute {
+	fn format_size_align(self) -> (wgpu::VertexFormat, wgpu::BufferAddress, wgpu::BufferAddress);
+}
+
+impl AsVertexAttribute for wgpu::VertexFormat {
+	fn format_size_align(self) -> (wgpu::VertexFormat, wgpu::BufferAddress, wgpu::BufferAddress) {
+		(self, self.size(), 1)
+	}
+}
+
+c_enum! {
+	pub enum Std430VertexFormat {
+		F32,
+		F32x2,
+		F32x3,
+		F32x4,
+
+		F64,
+		F64x2,
+		F64x3,
+		F64x4,
+
+		I32,
+		I32x2,
+		I32x3,
+		I32x4,
+
+		U32,
+		U32x2,
+		U32x3,
+		U32x4,
+	}
+}
+
+impl AsVertexAttribute for Std430VertexFormat {
+	fn format_size_align(self) -> (wgpu::VertexFormat, wgpu::BufferAddress, wgpu::BufferAddress) {
+		let (format, align) = match self {
+			Std430VertexFormat::F32 => (wgpu::VertexFormat::Float32, 4),
+			Std430VertexFormat::F32x2 => (wgpu::VertexFormat::Float32x2, 8),
+			Std430VertexFormat::F32x3 => (wgpu::VertexFormat::Float32x3, 16),
+			Std430VertexFormat::F32x4 => (wgpu::VertexFormat::Float32x4, 16),
+
+			Std430VertexFormat::F64 => (wgpu::VertexFormat::Float64, 8),
+			Std430VertexFormat::F64x2 => (wgpu::VertexFormat::Float64x2, 16),
+			Std430VertexFormat::F64x3 => (wgpu::VertexFormat::Float64x3, 32),
+			Std430VertexFormat::F64x4 => (wgpu::VertexFormat::Float64x4, 32),
+
+			Std430VertexFormat::I32 => (wgpu::VertexFormat::Sint32, 4),
+			Std430VertexFormat::I32x2 => (wgpu::VertexFormat::Sint32x2, 8),
+			Std430VertexFormat::I32x3 => (wgpu::VertexFormat::Sint32x3, 16),
+			Std430VertexFormat::I32x4 => (wgpu::VertexFormat::Sint32x4, 16),
+
+			Std430VertexFormat::U32 => (wgpu::VertexFormat::Uint32, 4),
+			Std430VertexFormat::U32x2 => (wgpu::VertexFormat::Uint32x2, 8),
+			Std430VertexFormat::U32x3 => (wgpu::VertexFormat::Uint32x3, 16),
+			Std430VertexFormat::U32x4 => (wgpu::VertexFormat::Uint32x4, 16),
+		};
+
+		(format, format.size(), align)
 	}
 }

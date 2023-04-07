@@ -18,6 +18,10 @@ c_enum! {
 }
 
 impl Sign {
+	pub fn is_negative(self) -> bool {
+		matches!(self, Self::Negative)
+	}
+
 	pub fn of<T: Signed>(val: T) -> Option<Self> {
 		if val.is_positive() {
 			Some(Self::Positive)
@@ -410,4 +414,39 @@ impl BlockFace {
 			v
 		}
 	}
+}
+
+// === f32 utils === //
+
+/// How many bits are actually used to store a mantissa.
+///
+/// Because the leading digit of our mantissa is always an implied one, this is just one less than
+/// [`f32::MANTISSA_DIGITS`], which measures the logical number of digits.
+pub const MANTISSA_BITS: u32 = f32::MANTISSA_DIGITS - 1;
+
+/// The maximum value a mantissa could be when represented as a pure `u32`.
+pub const MAX_MANTISSA_EXCLUSIVE: u32 = 1 << MANTISSA_BITS;
+
+/// A bitmask for the bits used in a floating-point mantissa.
+pub const MANTISSA_MASK: u32 = MAX_MANTISSA_EXCLUSIVE - 1;
+
+/// The floating-point exponent for the range `0` to `1`.
+pub const ZERO_TO_ONE_EXPONENT: u8 = 0b01111111;
+
+pub fn compose_f32(sign: Sign, exp: u8, mantissa: u32) -> f32 {
+	debug_assert!(mantissa < MAX_MANTISSA_EXCLUSIVE);
+	let bits = mantissa +  // Bits 0 to `MANTISSA_DIGITS - 2`
+		((exp as u32) << (f32::MANTISSA_DIGITS - 1)) +  // Bits `MANTISSA_DIGITS - 1` to `MANTISSA_DIGITS - 1 + 8`
+		((sign.is_negative() as u32) << 31); // Bit 31
+
+	f32::from_bits(bits)
+}
+
+pub fn allocate_unit_depth(depth: &mut u32) -> (f32, bool) {
+	*depth += 1;
+	*depth |= MANTISSA_MASK;
+	(
+		compose_f32(Sign::Positive, ZERO_TO_ONE_EXPONENT, *depth),
+		*depth == 0,
+	)
 }

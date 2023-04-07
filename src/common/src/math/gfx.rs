@@ -54,7 +54,7 @@ impl<V> Quad<V> {
 		Self([b, a, d, c])
 	}
 
-	pub fn to_tris(self) -> [[V; 3]; 2]
+	pub fn to_tris(self) -> [Tri<V>; 2]
 	where
 		V: Copy,
 	{
@@ -85,7 +85,7 @@ impl<V> Quad<V> {
 		//  |/
 		//  a
 		// 1
-		[[a, b, c], [a, c, d]]
+		[Tri([a, b, c]), Tri([a, c, d])]
 	}
 
 	pub fn zip<R>(self, rhs: Quad<R>) -> Quad<(V, R)> {
@@ -96,6 +96,13 @@ impl<V> Quad<V> {
 		Quad(map_arr(self.0, f))
 	}
 }
+
+// === Tri === //
+
+#[derive(Debug, Copy, Clone)]
+pub struct Tri<V>(pub [V; 3]);
+
+// === AaQuad Extensions === //
 
 impl<V: SignedNumericVector3> AaQuad<V> {
 	pub fn as_quad_ccw(&self) -> Quad<V> {

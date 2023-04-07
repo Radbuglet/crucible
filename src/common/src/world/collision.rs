@@ -458,21 +458,22 @@ impl RayCast {
 					continue;
 				};
 
-				let face = BlockFace::compose(axis, sign);
+				let exit_face = BlockFace::compose(axis, sign);
 
 				// Determine the plane of intersection.
 				// N.B., because this step can only go through each axis at most once, taking the
 				// plane w.r.t the `start_block` is identical to taking the plane w.r.t the actual
 				// block from which the ray is traveling.
-				let isect_plane = start_block.face_plane(face);
+				let isect_plane = start_block.face_plane(exit_face);
 
 				// Now, we just have to determine the point of intersection and commit it to the
 				// buffer.
 				let (isect_lerp, isect_pos) = isect_plane.intersection(step_line);
 
 				intersections.push(RayCastIntersection {
-					block: block_loc, // This will be updated in a bit.
-					face,
+					// This will be updated in a bit.
+					block: block_loc,
+					face: exit_face.invert(),
 					// N.B. This lerp value is the actual length along the ray because the ray is a
 					// unit vector.
 					distance: self.dist + isect_lerp,
@@ -488,7 +489,7 @@ impl RayCast {
 		// Update block positions by accumulating face traversals onto `block_loc`—which is currently
 		// just the position of our ray before the step began.
 		for isect in &mut intersections {
-			isect.block = block_loc.at_neighbor(world, isect.face);
+			isect.block = block_loc.at_neighbor(world, isect.face.invert());
 			block_loc = isect.block;
 		}
 
