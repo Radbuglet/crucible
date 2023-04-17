@@ -200,7 +200,7 @@ dependencies = [
 [[package]]
 name = "bort"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/bort.git?rev=631b4dd36b537231e12588729b8f258f88cf5650#631b4dd36b537231e12588729b8f258f88cf5650"
+source = "git+https://github.com/Radbuglet/bort.git?rev=c5015bdb065b6f113f7413dfbbe73b0925af9455#c5015bdb065b6f113f7413dfbbe73b0925af9455"
 dependencies = [
  "hashbrown 0.13.2",
  "rustc-hash",

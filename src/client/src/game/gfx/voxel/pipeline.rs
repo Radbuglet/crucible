@@ -57,8 +57,8 @@ pub struct VoxelVertex {
 impl VoxelVertex {
 	pub fn layout() -> VertexBufferLayout<Self> {
 		VertexBufferLayout::builder()
-			.with_attribute(Std430VertexFormat::F32x3) // position
-			.with_attribute(Std430VertexFormat::F32x2) // uv
+			.with_attribute(Std430VertexFormat::Float32x3) // position
+			.with_attribute(Std430VertexFormat::Float32x2) // uv
 			.finish(wgpu::VertexStepMode::Vertex)
 	}
 }
@@ -97,13 +97,7 @@ pub fn load_opaque_block_pipeline(
 			.with_vertex_shader(&shader, "vs_main", &(VoxelVertex::layout(),))
 			.with_fragment_shader(&shader, "fs_main", surface_format)
 			.with_cull_mode(wgpu::Face::Back)
-			.with_depth_stencil(wgpu::DepthStencilState {
-				format: depth_format,
-				depth_write_enabled: true,
-				depth_compare: wgpu::CompareFunction::Less,
-				bias: Default::default(),
-				stencil: Default::default(),
-			})
+			.with_depth(depth_format, true, wgpu::CompareFunction::Less)
 			.finish(&gfx.device)
 	})
 }

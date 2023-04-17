@@ -18,10 +18,7 @@ struct VertexOutput {
 
 // Entry points
 @vertex
-fn vs_main(
-	@builtin(vertex_index) vertex_index: u32,
-	in: VertexInput,
-) -> VertexOutput {
+fn vs_main(in: VertexInput) -> VertexOutput {
 	var out: VertexOutput;
 
 	out.clip_position = camera * vec4<f32>(in.position, 1.0);

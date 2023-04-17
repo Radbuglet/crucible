@@ -206,6 +206,21 @@ impl<'a, U: PipelineSet, V: PipelineSet> RenderPipelineBuilder<'a, U, V> {
 		self
 	}
 
+	pub fn with_depth(
+		self,
+		format: wgpu::TextureFormat,
+		depth_write_enabled: bool,
+		depth_compare: wgpu::CompareFunction,
+	) -> Self {
+		self.with_depth_stencil(wgpu::DepthStencilState {
+			format,
+			depth_write_enabled,
+			depth_compare,
+			stencil: wgpu::StencilState::default(),
+			bias: wgpu::DepthBiasState::default(),
+		})
+	}
+
 	pub fn with_depth_stencil(mut self, state: wgpu::DepthStencilState) -> Self {
 		self.depth_stencil = Some(state);
 		self

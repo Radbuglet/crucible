@@ -67,7 +67,7 @@ impl MaterialColliderDescriptor {
 
 pub async fn occluding_volumes_in_block<'a>(
 	y: &'a Yield<(EntityAabb, CollisionMeta)>,
-	collider_descs: &'static Storage<MaterialColliderDescriptor>,
+	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a VoxelWorldData,
 	registry: &'a MaterialRegistry,
 	mut block: BlockLocation,
@@ -111,7 +111,7 @@ pub async fn occluding_volumes_in_block<'a>(
 
 pub async fn occluding_faces_in_block<'a>(
 	y: &'a Yield<(AaQuad<EntityVec>, CollisionMeta)>,
-	collider_descs: &'static Storage<MaterialColliderDescriptor>,
+	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a VoxelWorldData,
 	registry: &'a MaterialRegistry,
 	mut block: BlockLocation,
@@ -194,7 +194,7 @@ pub struct IntersectingFaceInBlock {
 
 pub async fn intersecting_faces_in_block<'a>(
 	y: &'a Yield<IntersectingFaceInBlock>,
-	collider_descs: &'static Storage<MaterialColliderDescriptor>,
+	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a VoxelWorldData,
 	registry: &'a MaterialRegistry,
 	block: BlockLocation,
@@ -348,7 +348,7 @@ pub fn cast_volume(
 
 pub async fn check_volume<'a>(
 	y: &'a Yield<(BlockLocation, CollisionMeta)>,
-	collider_descs: &'static Storage<MaterialColliderDescriptor>,
+	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a VoxelWorldData,
 	registry: &'a MaterialRegistry,
 	aabb: EntityAabb,
@@ -503,7 +503,7 @@ impl RayCast {
 
 	pub fn step_intersect(
 		&mut self,
-		collider_descs: &'static Storage<MaterialColliderDescriptor>,
+		collider_descs: Storage<MaterialColliderDescriptor>,
 		world: &VoxelWorldData,
 		registry: &MaterialRegistry,
 		isect_buffer: &mut impl VecLike<Elem = (RayCastIntersection, CollisionMeta)>,
@@ -568,7 +568,7 @@ impl RayCast {
 	pub async fn step_intersect_for(
 		&mut self,
 		y: &yielder![(RayCastIntersection, CollisionMeta); for<'a> (&'a VoxelWorldData, &'a MaterialRegistry)],
-		collider_descs: &'static Storage<MaterialColliderDescriptor>,
+		collider_descs: Storage<MaterialColliderDescriptor>,
 		max_dist: f64,
 	) {
 		let mut isect_buffer = SmallVec::<[_; 4]>::new();

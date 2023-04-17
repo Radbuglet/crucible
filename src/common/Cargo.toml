@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bort = { git = "https://github.com/Radbuglet/bort.git", rev = "631b4dd36b537231e12588729b8f258f88cf5650" }
+bort = { git = "https://github.com/Radbuglet/bort.git", rev = "c5015bdb065b6f113f7413dfbbe73b0925af9455" }
 crucible-util = { path = "../util" }
 derive-where = "1.1.0"
 hashbrown = "0.13.2"

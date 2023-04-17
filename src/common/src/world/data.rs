@@ -28,7 +28,7 @@ delegate! {
 
 #[derive(Debug)]
 pub struct VoxelWorldData {
-	data_store: &'static Storage<VoxelChunkData>,
+	data_store: Storage<VoxelChunkData>,
 	chunk_factory: VoxelChunkFactory,
 	pos_map: HashMap<ChunkVec, OwnedEntity>,
 	flag_list: VoxelWorldFlagList,

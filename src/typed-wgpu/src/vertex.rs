@@ -256,50 +256,50 @@ impl AsVertexAttribute for wgpu::VertexFormat {
 
 c_enum! {
 	pub enum Std430VertexFormat {
-		F32,
-		F32x2,
-		F32x3,
-		F32x4,
+		Float32,
+		Float32x2,
+		Float32x3,
+		Float32x4,
 
-		F64,
-		F64x2,
-		F64x3,
-		F64x4,
+		Float64,
+		Float64x2,
+		Float64x3,
+		Float64x4,
 
-		I32,
-		I32x2,
-		I32x3,
-		I32x4,
+		Sint32,
+		Sint32x2,
+		Sint32x3,
+		Sint32x4,
 
-		U32,
-		U32x2,
-		U32x3,
-		U32x4,
+		Uint32,
+		Uint32x2,
+		Uint32x3,
+		Uint32x4,
 	}
 }
 
 impl AsVertexAttribute for Std430VertexFormat {
 	fn format_size_align(self) -> (wgpu::VertexFormat, wgpu::BufferAddress, wgpu::BufferAddress) {
 		let (format, align) = match self {
-			Std430VertexFormat::F32 => (wgpu::VertexFormat::Float32, 4),
-			Std430VertexFormat::F32x2 => (wgpu::VertexFormat::Float32x2, 8),
-			Std430VertexFormat::F32x3 => (wgpu::VertexFormat::Float32x3, 16),
-			Std430VertexFormat::F32x4 => (wgpu::VertexFormat::Float32x4, 16),
+			Std430VertexFormat::Float32 => (wgpu::VertexFormat::Float32, 4),
+			Std430VertexFormat::Float32x2 => (wgpu::VertexFormat::Float32x2, 8),
+			Std430VertexFormat::Float32x3 => (wgpu::VertexFormat::Float32x3, 16),
+			Std430VertexFormat::Float32x4 => (wgpu::VertexFormat::Float32x4, 16),
 
-			Std430VertexFormat::F64 => (wgpu::VertexFormat::Float64, 8),
-			Std430VertexFormat::F64x2 => (wgpu::VertexFormat::Float64x2, 16),
-			Std430VertexFormat::F64x3 => (wgpu::VertexFormat::Float64x3, 32),
-			Std430VertexFormat::F64x4 => (wgpu::VertexFormat::Float64x4, 32),
+			Std430VertexFormat::Float64 => (wgpu::VertexFormat::Float64, 8),
+			Std430VertexFormat::Float64x2 => (wgpu::VertexFormat::Float64x2, 16),
+			Std430VertexFormat::Float64x3 => (wgpu::VertexFormat::Float64x3, 32),
+			Std430VertexFormat::Float64x4 => (wgpu::VertexFormat::Float64x4, 32),
 
-			Std430VertexFormat::I32 => (wgpu::VertexFormat::Sint32, 4),
-			Std430VertexFormat::I32x2 => (wgpu::VertexFormat::Sint32x2, 8),
-			Std430VertexFormat::I32x3 => (wgpu::VertexFormat::Sint32x3, 16),
-			Std430VertexFormat::I32x4 => (wgpu::VertexFormat::Sint32x4, 16),
+			Std430VertexFormat::Sint32 => (wgpu::VertexFormat::Sint32, 4),
+			Std430VertexFormat::Sint32x2 => (wgpu::VertexFormat::Sint32x2, 8),
+			Std430VertexFormat::Sint32x3 => (wgpu::VertexFormat::Sint32x3, 16),
+			Std430VertexFormat::Sint32x4 => (wgpu::VertexFormat::Sint32x4, 16),
 
-			Std430VertexFormat::U32 => (wgpu::VertexFormat::Uint32, 4),
-			Std430VertexFormat::U32x2 => (wgpu::VertexFormat::Uint32x2, 8),
-			Std430VertexFormat::U32x3 => (wgpu::VertexFormat::Uint32x3, 16),
-			Std430VertexFormat::U32x4 => (wgpu::VertexFormat::Uint32x4, 16),
+			Std430VertexFormat::Uint32 => (wgpu::VertexFormat::Uint32, 4),
+			Std430VertexFormat::Uint32x2 => (wgpu::VertexFormat::Uint32x2, 8),
+			Std430VertexFormat::Uint32x3 => (wgpu::VertexFormat::Uint32x3, 16),
+			Std430VertexFormat::Uint32x4 => (wgpu::VertexFormat::Uint32x4, 16),
 		};
 
 		(format, format.size(), align)

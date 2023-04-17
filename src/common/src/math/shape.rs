@@ -170,6 +170,12 @@ pub struct Aabb2<V> {
 }
 
 impl<V: SignedNumericVector2> Aabb2<V> {
+	pub fn new(x: V::Comp, y: V::Comp, w: V::Comp, h: V::Comp) -> Self {
+		Self {
+			origin: V::new(x, y),
+			size: V::new(w, h),
+		}
+	}
 	pub fn contains(&self, point: V) -> bool
 	where
 		V::Comp: PartialOrd,

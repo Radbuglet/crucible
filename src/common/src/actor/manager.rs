@@ -1,12 +1,12 @@
 use std::{iter, marker::PhantomData};
 
-use bort::{storage, CompRef, Entity, OwnedEntity};
+use bort::{storage, CompRef, Entity, OwnedEntity, OwnedObj};
 use crucible_util::{debug::type_id::NamedTypeId, impl_tuples};
 use hashbrown::HashMap;
 
 #[derive(Debug, Default)]
 pub struct ActorManager {
-	archetypes: HashMap<NamedTypeId, OwnedEntity>,
+	archetypes: HashMap<NamedTypeId, OwnedObj<ActorArchetype>>,
 	tags: HashMap<NamedTypeId, Vec<Entity>>,
 }
 
@@ -43,7 +43,7 @@ impl ActorManager {
 			.entry(NamedTypeId::of::<T>())
 			.or_insert_with(|| {
 				// Create the archetype
-				let arch = OwnedEntity::new().with(ActorArchetype::default());
+				let arch = OwnedObj::new(ActorArchetype::default());
 
 				// Register it into the appropriate tag lists
 				T::for_each_tag(|tag| self.tags.entry(tag).or_default().push(arch.entity()));
@@ -51,7 +51,7 @@ impl ActorManager {
 				arch
 			});
 
-		let mut arch_state = arch.get_mut::<ActorArchetype>();
+		let mut arch_state = arch.get_mut();
 
 		// Register the entities
 		let actors = storage::<Actor>();
@@ -107,7 +107,7 @@ impl ActorManager {
 		let arch_states = storage::<ActorArchetype>();
 		let mut tagged_arches = tagged_arches
 			.iter()
-			.map(|tagged| arch_states.get(*tagged))
+			.map(move |tagged| arch_states.get(*tagged))
 			.map(|arch| CompRef::map(arch, |arch| arch.entities.as_slice()));
 
 		let mut curr_slice: Option<CompRef<[OwnedEntity]>> = Some(tagged_arches.next().unwrap());
