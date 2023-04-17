@@ -313,6 +313,10 @@ where
 	pub fn dot(self, rhs: Self) -> B::Comp {
 		self.to_glam().dot(rhs.to_glam())
 	}
+
+	pub fn dot_into_vec(self, rhs: Self) -> Self {
+		self.map_glam(|v| v.dot_into_vec(rhs.to_glam()))
+	}
 }
 
 // IntegerVector
@@ -356,6 +360,14 @@ where
 
 	pub fn signum(self) -> Self {
 		self.map_glam(|raw| raw.signum())
+	}
+
+	pub fn is_negative_bitmask(self) -> u32 {
+		self.to_glam().is_negative_bitmask()
+	}
+
+	fn copysign(self, rhs: Self) -> Self {
+		self.map_glam(|v| v.copysign(rhs.to_glam()))
 	}
 }
 

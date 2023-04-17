@@ -145,6 +145,7 @@ pub trait NumericVector:
 
 	// Woo! Inner products!
 	fn dot(self, rhs: Self) -> Self::Comp;
+	fn dot_into_vec(self, rhs: Self) -> Self;
 
 	// Typed-glam extensions
 	fn cast<V: CastVecFrom<Self>>(self) -> V {
@@ -170,6 +171,8 @@ pub trait SignedVector: NumericVector + Neg<Output = Self> {
 
 	fn abs(self) -> Self;
 	fn signum(self) -> Self;
+	fn is_negative_bitmask(self) -> u32;
+	fn copysign(self, rhs: Self) -> Self;
 }
 
 pub trait FloatingVector: SignedVector {
@@ -429,6 +432,10 @@ macro_rules! numeric_vector_forwards {
 		fn dot(self, rhs: Self) -> Self::Comp {
 			self.dot(rhs)
 		}
+
+		fn dot_into_vec(self, rhs: Self) -> Self {
+			self.dot_into_vec(rhs)
+		}
 	};
 }
 
@@ -503,6 +510,14 @@ macro_rules! signed_vector_forwards {
 
 		fn signum(self) -> Self {
 			self.signum()
+		}
+
+		fn is_negative_bitmask(self) -> u32 {
+			self.is_negative_bitmask()
+		}
+
+		fn copysign(self, rhs: Self) -> Self {
+			self.copysign(rhs)
 		}
 	};
 }

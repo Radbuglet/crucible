@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 crucible-util = { path = "../util" }
-glam = "0.21.3"
+glam = "0.23.0"
 num-traits = "0.2.15"
