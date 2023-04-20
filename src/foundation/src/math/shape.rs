@@ -208,6 +208,16 @@ pub struct Aabb3<V> {
 }
 
 impl<V: SignedNumericVector3> Aabb3<V> {
+	pub fn from_corners(a: V, b: V) -> Self {
+		let min = a.min(b);
+		let max = a.max(b);
+
+		Self {
+			origin: min,
+			size: max - min,
+		}
+	}
+
 	pub fn translated(&self, by: V) -> Self {
 		Self {
 			origin: self.origin + by,
@@ -219,7 +229,7 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 		self.translated(-self.size * percent)
 	}
 
-	pub fn positive_corner(&self) -> V {
+	pub fn max_corner(&self) -> V {
 		self.origin + self.size
 	}
 
@@ -264,7 +274,7 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 
 impl EntityAabb {
 	pub fn as_blocks(&self) -> WorldAabb {
-		Aabb3::from_blocks_corners(self.origin.block_pos(), self.positive_corner().block_pos())
+		Aabb3::from_blocks_corners(self.origin.block_pos(), self.max_corner().block_pos())
 	}
 }
 
