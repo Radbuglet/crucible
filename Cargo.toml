@@ -7,3 +7,22 @@ members = [
 	"src/typed-wgpu",
 	"src/util",
 ]
+
+[workspace.dependencies]
+# Workspace crates
+crucible-client = { path = "src/client" }
+crucible-common = { path = "src/common" }
+crucible-util = { path = "src/util" }
+typed-glam = { path = "src/typed-glam" }
+typed-wgpu = { path = "src/typed-wgpu" }
+
+# Interface dependencies (i.e. dependencies that leak out into the public interface)
+bort = { git = "https://github.com/Radbuglet/bort.git", rev = "01695bb1963cd29e0f8e4a7c6081305573e66e36" }
+hashbrown = "0.13.2"
+log = "0.4.17"
+wgpu = "0.16.0"
+
+# Internal dependencies (i.e. dependencies that are only used as implementation details)
+anyhow = "1.0.70"
+derive-where = "1.2.1"
+num-traits = "0.2.15" # These act mostly like trait aliases and should not be weakened over time.

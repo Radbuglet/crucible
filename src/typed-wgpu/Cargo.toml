@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-crucible-util = { path = "../util" }
-derive-where = "1.1.0"
-wgpu = { version = "0.15.1", default-features = false }
+crucible-util = { workspace = true }
+derive-where = { workspace = true }
+wgpu = { workspace = true, default-features = false }

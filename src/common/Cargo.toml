@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bort = { git = "https://github.com/Radbuglet/bort.git", rev = "c5015bdb065b6f113f7413dfbbe73b0925af9455" }
-crucible-util = { path = "../util" }
-derive-where = "1.1.0"
-hashbrown = "0.13.2"
-log = "0.4.17"
-num-traits = "0.2.15"
+bort = { workspace = true }
+crucible-util = { workspace = true }
+derive-where = { workspace = true }
+hashbrown = { workspace = true }
+log = { workspace = true }
+num-traits = { workspace = true }
 smallvec = "1.10.0"
-typed-glam = { path = "../typed-glam" }
+typed-glam = { workspace = true }

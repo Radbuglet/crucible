@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 // === Injectors === //
 
 pub trait FuncMethodInjectorRef<T: ?Sized> {
@@ -255,7 +257,5 @@ macro_rules! delegate {
 		}
 	};
 }
-
-use std::ops::{Deref, DerefMut};
 
 pub use delegate;

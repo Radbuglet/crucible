@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.69"
-derive-where = "1.1.0"
+anyhow = { workspace = true }
+derive-where = { workspace = true }
 dummy-waker = "1.1.0"
-log = "0.4.17"
+log = { workspace = true }
 smallvec = "1.10.0"

@@ -1,7 +1,4 @@
-use std::{
-	borrow::{Borrow, Cow},
-	num::NonZeroU8,
-};
+use std::borrow::{Borrow, Cow};
 
 use bort::CompRef;
 use crucible_util::debug::label::{DebugLabel, ReifiedDebugLabel};
@@ -130,7 +127,7 @@ pub struct SamplerAssetDescriptor {
 	pub min_filter: wgpu::FilterMode,
 	pub mipmap_filter: wgpu::FilterMode,
 	pub compare: Option<wgpu::CompareFunction>,
-	pub anisotropy_clamp: Option<NonZeroU8>,
+	pub anisotropy_clamp: u16,
 	pub border_color: Option<wgpu::SamplerBorderColor>,
 }
 
@@ -144,7 +141,7 @@ impl SamplerAssetDescriptor {
 		min_filter: wgpu::FilterMode::Nearest,
 		mipmap_filter: wgpu::FilterMode::Nearest,
 		compare: None,
-		anisotropy_clamp: None,
+		anisotropy_clamp: 0,
 		border_color: None,
 	};
 }

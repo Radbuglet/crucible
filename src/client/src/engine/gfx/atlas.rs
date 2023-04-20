@@ -1,5 +1,3 @@
-use std::num::NonZeroU32;
-
 use crucible_util::lang::iter::VolumetricIter;
 use hashbrown::HashSet;
 use image::{imageops, Rgba32FImage};
@@ -142,7 +140,7 @@ impl AtlasTextureGfx {
 			bytemuck::cast_slice(atlas.texture()),
 			wgpu::ImageDataLayout {
 				offset: 0,
-				bytes_per_row: Some(NonZeroU32::new(dim.x * 4 * 4).unwrap()),
+				bytes_per_row: Some(dim.x * 4 * 4),
 				rows_per_image: None,
 			},
 			wgpu::Extent3d {
