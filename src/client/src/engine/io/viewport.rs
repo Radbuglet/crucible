@@ -1,6 +1,5 @@
 use bort::{Entity, OwnedEntity};
-use crucible_util::mem::manually_bind::ManuallyBind;
-use hashbrown::HashMap;
+use crucible_util::mem::{hash::FxHashMap, manually_bind::ManuallyBind};
 use thiserror::Error;
 use typed_glam::glam::UVec2;
 use winit::window::{Window, WindowId};
@@ -13,7 +12,7 @@ pub const FALLBACK_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bg
 
 #[derive(Debug, Default)]
 pub struct ViewportManager {
-	window_map: HashMap<WindowId, OwnedEntity>,
+	window_map: FxHashMap<WindowId, OwnedEntity>,
 }
 
 impl ViewportManager {
@@ -26,7 +25,7 @@ impl ViewportManager {
 		self.window_map.get(&id).map(OwnedEntity::entity)
 	}
 
-	pub fn window_map(&self) -> &HashMap<WindowId, OwnedEntity> {
+	pub fn window_map(&self) -> &FxHashMap<WindowId, OwnedEntity> {
 		&self.window_map
 	}
 

@@ -7,5 +7,7 @@ edition = "2021"
 anyhow = { workspace = true }
 derive-where = { workspace = true }
 dummy-waker = "1.1.0"
+fxhash = "0.2.1"
+hashbrown = { workspace = true }
 log = { workspace = true }
 smallvec = "1.10.0"

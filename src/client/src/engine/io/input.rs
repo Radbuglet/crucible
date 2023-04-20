@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-use hashbrown::HashMap;
+use crucible_util::mem::hash::FxHashMap;
 use typed_glam::glam::Vec2;
 use winit::dpi::PhysicalPosition;
 use winit::event::{
@@ -10,8 +10,8 @@ use winit::event::{
 /// Tracks keyboard and mouse input states.
 #[derive(Debug)]
 pub struct InputManager {
-	keys: HashMap<VirtualKeyCode, BoolAction>,
-	mouse_buttons: HashMap<MouseButton, BoolAction>,
+	keys: FxHashMap<VirtualKeyCode, BoolAction>,
+	mouse_buttons: FxHashMap<MouseButton, BoolAction>,
 	mouse_pos: Option<PhysicalPosition<f64>>,
 	mouse_delta: Vec2,
 	has_focus: bool,
@@ -31,7 +31,7 @@ impl Default for InputManager {
 
 impl InputManager {
 	pub fn handle_window_event(&mut self, event: &WindowEvent) {
-		fn set_state_in_map<K: Hash + Eq>(map: &mut HashMap<K, BoolAction>, key: K, value: bool) {
+		fn set_state_in_map<K: Hash + Eq>(map: &mut FxHashMap<K, BoolAction>, key: K, value: bool) {
 			let action = map.entry(key).or_insert_with(Default::default);
 			action.set_state(value);
 		}

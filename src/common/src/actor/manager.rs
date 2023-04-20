@@ -1,13 +1,12 @@
 use std::{iter, marker::PhantomData};
 
 use bort::{storage, CompRef, Entity, OwnedEntity, OwnedObj};
-use crucible_util::{debug::type_id::NamedTypeId, impl_tuples};
-use hashbrown::HashMap;
+use crucible_util::{debug::type_id::NamedTypeId, impl_tuples, mem::hash::FxHashMap};
 
 #[derive(Debug, Default)]
 pub struct ActorManager {
-	archetypes: HashMap<NamedTypeId, OwnedObj<ActorArchetype>>,
-	tags: HashMap<NamedTypeId, Vec<Entity>>,
+	archetypes: FxHashMap<NamedTypeId, OwnedObj<ActorArchetype>>,
+	tags: FxHashMap<NamedTypeId, Vec<Entity>>,
 }
 
 #[derive(Debug, Default)]

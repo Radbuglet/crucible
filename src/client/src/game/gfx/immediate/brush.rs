@@ -1,8 +1,7 @@
 use std::cell::RefCell;
 
 use bort::OwnedEntity;
-use crucible_util::debug::type_id::NamedTypeId;
-use hashbrown::HashMap;
+use crucible_util::{debug::type_id::NamedTypeId, mem::hash::FxHashMap};
 use typed_glam::glam;
 
 #[derive(Debug)]
@@ -11,7 +10,7 @@ pub struct ImmContext(RefCell<ImmContextInner>);
 #[derive(Debug)]
 struct ImmContextInner {
 	depth: u32,
-	pipelines: HashMap<NamedTypeId, OwnedEntity>,
+	pipelines: FxHashMap<NamedTypeId, OwnedEntity>,
 }
 
 #[derive(Debug)]

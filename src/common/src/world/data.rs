@@ -8,9 +8,11 @@ use bort::{storage, Entity, OwnedEntity, Storage};
 use crucible_util::{
 	delegate,
 	lang::view::View,
-	mem::c_enum::{CEnum, CEnumMap},
+	mem::{
+		c_enum::{CEnum, CEnumMap},
+		hash::FxHashMap,
+	},
 };
-use hashbrown::HashMap;
 use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 
 use crate::{
@@ -30,7 +32,7 @@ delegate! {
 pub struct VoxelWorldData {
 	data_store: Storage<VoxelChunkData>,
 	chunk_factory: VoxelChunkFactory,
-	pos_map: HashMap<ChunkVec, OwnedEntity>,
+	pos_map: FxHashMap<ChunkVec, OwnedEntity>,
 	flag_list: VoxelWorldFlagList,
 }
 
@@ -53,7 +55,7 @@ impl VoxelWorldData {
 		Self {
 			data_store: storage(),
 			chunk_factory,
-			pos_map: HashMap::default(),
+			pos_map: FxHashMap::default(),
 			flag_list: VoxelWorldFlagList::default(),
 		}
 	}

@@ -1,15 +1,14 @@
 use std::borrow::Cow;
 
 use bort::{Entity, OwnedEntity};
-use crucible_util::mem::free_list::FreeList;
-use hashbrown::HashMap;
+use crucible_util::mem::{free_list::FreeList, hash::FxHashMap};
 
 pub const AIR_MATERIAL_SLOT: u16 = 0;
 
 #[derive(Debug, Default)]
 pub struct MaterialRegistry {
 	slots: FreeList<OwnedEntity, u16>,
-	id_map: HashMap<Cow<'static, str>, u16>,
+	id_map: FxHashMap<Cow<'static, str>, u16>,
 }
 
 impl MaterialRegistry {
