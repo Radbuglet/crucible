@@ -3,13 +3,13 @@ use crucible_util::mem::c_enum::{CEnum, CEnumMap};
 use typed_glam::traits::NumericVector;
 
 use crate::{
-	actor::{
-		kinematic::update_kinematic,
-		manager::{ActorManager, Tag},
-	},
+	actor::manager::{ActorManager, Tag},
 	material::MaterialRegistry,
-	math::{Aabb3, Angle3D, Angle3DExt, Axis3, BlockFace, EntityVec, Sign, VecCompExt},
-	world::{
+	math::{
+		kinematic::update_kinematic, Aabb3, Angle3D, Angle3DExt, Axis3, BlockFace, EntityVec, Sign,
+		VecCompExt,
+	},
+	voxel::{
 		collision::{cast_volume, filter_all_colliders, move_rigid_body, COLLISION_TOLERANCE},
 		data::VoxelWorldData,
 	},

@@ -17,7 +17,7 @@ use crate::{
 		AaQuad, Aabb3, Axis3, BlockFace, EntityAabb, EntityVec, EntityVecExt, Line3, Sign,
 		VecCompExt, WorldVecExt,
 	},
-	world::data::BlockState,
+	voxel::data::BlockState,
 };
 
 use super::{

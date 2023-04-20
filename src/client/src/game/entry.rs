@@ -1,9 +1,9 @@
 use bort::{Entity, OwnedEntity};
-use crucible_common::{
+use crucible_foundation::{
 	actor::{kinds::spatial::update_kinematic_spatials, manager::ActorManager},
 	material::{MaterialDescriptorBase, MaterialRegistry},
 	math::{Aabb3, BlockFace, WorldVec},
-	world::{
+	voxel::{
 		collision::{CollisionMeta, MaterialColliderDescriptor},
 		data::{BlockLocation, BlockState, VoxelChunkFactory, VoxelWorldData},
 		mesh::{QuadMeshLayer, VolumetricMeshLayer},

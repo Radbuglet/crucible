@@ -8,7 +8,7 @@ anyhow = { workspace = true }
 bort = { workspace = true }
 bytemuck = "1.10.0"
 crevice = { version = "0.13.0", features = ["glam"] }
-crucible-common = { workspace = true }
+crucible-foundation = { workspace = true }
 crucible-util = { workspace = true }
 derive-where = { workspace = true }
 env_logger = "0.10.0"

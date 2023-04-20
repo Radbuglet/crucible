@@ -410,7 +410,7 @@ dependencies = [
  "bort",
  "bytemuck",
  "crevice",
- "crucible-common",
+ "crucible-foundation",
  "crucible-util",
  "derive-where",
  "env_logger",
@@ -427,7 +427,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "crucible-common"
+name = "crucible-foundation"
 version = "0.1.0"
 dependencies = [
  "bort",

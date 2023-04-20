@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
 	"src/client",
-	"src/common",
+	"src/foundation",
 	"src/typed-glam",
 	"src/typed-wgpu",
 	"src/util",
@@ -11,7 +11,7 @@ members = [
 [workspace.dependencies]
 # Workspace crates
 crucible-client = { path = "src/client" }
-crucible-common = { path = "src/common" }
+crucible-foundation = { path = "src/foundation" }
 crucible-util = { path = "src/util" }
 typed-glam = { path = "src/typed-glam" }
 typed-wgpu = { path = "src/typed-wgpu" }

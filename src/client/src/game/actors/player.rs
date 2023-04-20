@@ -1,13 +1,15 @@
 use bort::{storage, Entity, OwnedEntity};
-use crucible_common::{
+use crucible_foundation::{
 	actor::{
 		kinds::spatial::{KinematicSpatial, KinematicUpdateTag, Spatial},
-		kinematic::{tick_friction_coef_to_coef_qty, MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
 		manager::{ActorManager, Tag},
 	},
 	material::MaterialRegistry,
-	math::{Aabb3, Angle3D, Angle3DExt, BlockFace, EntityVec},
-	world::{
+	math::{
+		kinematic::{tick_friction_coef_to_coef_qty, MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
+		Aabb3, Angle3D, Angle3DExt, BlockFace, EntityVec,
+	},
+	voxel::{
 		collision::RayCast,
 		data::{BlockState, EntityLocation, VoxelWorldData},
 	},

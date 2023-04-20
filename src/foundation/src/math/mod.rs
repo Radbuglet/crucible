@@ -1,5 +1,6 @@
 mod coord;
 mod gfx;
+pub mod kinematic;
 mod shape;
 mod util;
 
