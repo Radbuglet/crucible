@@ -61,7 +61,7 @@ impl VoxelWorldMesh {
 			}
 
 			// Acquire dependencies
-			let chunk_data = world.chunk_state(chunk);
+			let chunk_data = world.chunk_state(chunk.obj());
 
 			// Mesh chunk
 			let mut vertices = Vec::new();

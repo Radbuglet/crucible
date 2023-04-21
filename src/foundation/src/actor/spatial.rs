@@ -104,7 +104,7 @@ impl SpatialManager {
 
 		// Update AABB
 		let old_chunk = spatial_chunk_for_aabb(target_data.aabb);
-		let new_chunk = spatial_chunk_for_aabb(target_data.aabb);
+		let new_chunk = spatial_chunk_for_aabb(aabb);
 		target_data.aabb = aabb;
 
 		// If we changed chunk, move ourselves into it.
