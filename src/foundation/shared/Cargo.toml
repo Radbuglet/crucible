@@ -1,5 +1,5 @@
 [package]
-name = "crucible-foundation"
+name = "crucible-foundation-shared"
 version = "0.1.0"
 edition = "2021"
 

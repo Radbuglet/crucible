@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use bort::{storage, CompRef, Entity};
 use crevice::std430::AsStd430;
-use crucible_foundation::{
+use crucible_foundation_shared::{
 	material::MaterialRegistry,
 	math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, Tri, WorldVec, WorldVecExt, QUAD_UVS},
 	voxel::{data::VoxelWorldData, mesh::QuadMeshLayer},

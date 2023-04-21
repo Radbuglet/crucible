@@ -1,20 +1,24 @@
 [workspace]
 resolver = "2"
 members = [
-	"src/client",
-	"src/foundation",
-	"src/typed-glam",
-	"src/typed-wgpu",
-	"src/util",
+	"src/foundation/client",
+	"src/foundation/shared",
+	"src/game/client",
+	"src/game/shared",
+	"src/util/typed-glam",
+	"src/util/typed-wgpu",
+	"src/util/util",
 ]
 
 [workspace.dependencies]
 # Workspace crates
-crucible-client = { path = "src/client" }
-crucible-foundation = { path = "src/foundation" }
-crucible-util = { path = "src/util" }
-typed-glam = { path = "src/typed-glam" }
-typed-wgpu = { path = "src/typed-wgpu" }
+crucible-foundation-client = { path = "src/foundation/client" }
+crucible-foundation-shared = { path = "src/foundation/shared" }
+crucible-client = { path = "src/game/client" }
+crucible-shared = { path = "src/game/shared" }
+crucible-util = { path = "src/util/util" }
+typed-glam = { path = "src/util/typed-glam" }
+typed-wgpu = { path = "src/util/typed-wgpu" }
 
 # Interface dependencies (i.e. dependencies that leak out into the public interface)
 bort = { git = "https://github.com/Radbuglet/bort.git", rev = "01695bb1963cd29e0f8e4a7c6081305573e66e36" }

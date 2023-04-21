@@ -405,12 +405,16 @@ dependencies = [
 [[package]]
 name = "crucible-client"
 version = "0.1.0"
+
+[[package]]
+name = "crucible-foundation-client"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "bort",
  "bytemuck",
  "crevice",
- "crucible-foundation",
+ "crucible-foundation-shared",
  "crucible-util",
  "derive-where",
  "env_logger",
@@ -427,7 +431,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "crucible-foundation"
+name = "crucible-foundation-shared"
 version = "0.1.0"
 dependencies = [
  "bort",
@@ -440,6 +444,10 @@ dependencies = [
  "smallvec",
  "typed-glam",
 ]
+
+[[package]]
+name = "crucible-shared"
+version = "0.1.0"
 
 [[package]]
 name = "crucible-util"
