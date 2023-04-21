@@ -1,17 +1,20 @@
 use std::{
 	cell::Cell,
 	future::{poll_fn, Future},
-	marker::PhantomPinned,
-	pin::pin,
 	pin::Pin,
-	process::abort,
+	ptr::NonNull,
 	task::{Context, Poll},
 };
 
 use derive_where::derive_where;
 use dummy_waker::dummy_waker;
 
-use crate::lang::iter::{ContextualIter, FlowResult};
+use crate::{
+	dynamic_value,
+	lang::iter::{ContextualIter, FlowResult},
+};
+
+use super::lifetime::DynamicRef;
 
 // === ContinuationSig === //
 
@@ -27,116 +30,6 @@ type Feed<'a, C> = <C as ContinuationSig<'a>>::Input;
 
 pub type EmptyContinuator = dyn for<'a> ContinuationSig<'a, Input = ()>;
 
-// === LoanedFunc === //
-
-// LoanedFunc
-#[repr(C)]
-pub struct LoanedFunc<F> {
-	// Although the function may, itself, support unpinning, we want to ensure that this
-	// structure remains in place so we can rely on references to `func` being pinned.
-	_pinned: PhantomPinned,
-	is_referenced: bool,
-	func: F,
-}
-
-impl<F> LoanedFunc<F> {
-	pub fn new(func: F) -> Self {
-		Self {
-			_pinned: PhantomPinned,
-			is_referenced: false,
-			func,
-		}
-	}
-}
-
-impl<F> Drop for LoanedFunc<F> {
-	fn drop(&mut self) {
-		if self.is_referenced {
-			abort();
-		}
-	}
-}
-
-// LoanedFuncRef
-pub struct LoanedFuncRef<C>
-where
-	C: ?Sized + for<'a> ContinuationSig<'a>,
-{
-	// Function Pointer Safety: for this function to be safe to call, the caller must assert that
-	// the first pointer has a type appropriate for closure being executed (enforced by the
-	// structure's invariants) and that the pointer remains alive for the duration of the
-	// invocation.
-	handler: unsafe fn(*mut (), &mut Feed<'_, C>),
-	data: *mut (),
-}
-
-impl<C> LoanedFuncRef<C>
-where
-	C: ?Sized + for<'a> ContinuationSig<'a>,
-{
-	pub fn new<F>(func: Pin<&mut LoanedFunc<F>>) -> Self
-	where
-		F: FnMut(&mut Feed<'_, C>),
-	{
-		let func = unsafe {
-			// Safety: TODO
-			func.get_unchecked_mut()
-		};
-
-		// Construct a trampoline to execute our loaned function
-		unsafe fn handler<C, F>(data: *mut (), input: &mut Feed<'_, C>)
-		where
-			C: ?Sized + for<'a> ContinuationSig<'a>,
-			F: FnMut(&mut Feed<'_, C>),
-		{
-			// Safety: provided by caller
-			let data = &mut *(data as *mut LoanedFunc<F>);
-			(data.func)(input);
-		}
-
-		// Mark ourselves as the referencer of this function.
-		assert!(!func.is_referenced);
-		func.is_referenced = true;
-
-		// Construct a loan
-		Self {
-			handler: handler::<C, F>,
-			data: func as *mut LoanedFunc<F> as *mut (),
-		}
-	}
-
-	pub fn call(&mut self, input: &mut Feed<'_, C>) {
-		unsafe {
-			// Safety: the function pointer contract requires that we prove that `self.data` has
-			// the appropriate type and that the pointee will remain valid (i.e. not dropped or
-			// invalidated) for the duration of the invocation.
-			//
-			// We already know that `self.data` has the appropriate type because this structure
-			// enforces that as an invariant.
-			//
-			// We know that `self.data` must be valid until the end of this function call because:
-			// a) it was `Pin`'ned, guaranteeing that its memory will not be invalidated until the
-			//    `LoanedFunc` destructor is called and
-			// b) if the `LoanedFunc` destructor is called and the `is_referenced` flag is still
-			//    set—a flag which will only get unset when we get `Drop`'ed—the process will
-			//    abort, preventing the memory from ever being invalidated.
-			(self.handler)(self.data, input);
-		}
-	}
-}
-
-impl<C> Drop for LoanedFuncRef<C>
-where
-	C: ?Sized + for<'a> ContinuationSig<'a>,
-{
-	fn drop(&mut self) {
-		unsafe {
-			// Safety: TODO
-			(*(self.data as *mut LoanedFunc<()>)).is_referenced = false;
-		}
-	}
-}
-
 // === Yield === //
 
 pub struct Yield<T, C: ?Sized + for<'a> ContinuationSig<'a> = EmptyContinuator> {
@@ -148,7 +41,7 @@ enum YieldState<T, C: ?Sized + for<'a> ContinuationSig<'a>> {
 	#[derive_where(default)]
 	Meaningless,
 	Polling,
-	AwaitingContinuation(LoanedFuncRef<C>),
+	AwaitingContinuation(DynamicRef<dyn Fn(&mut Feed<'_, C>)>),
 	ResolvedValue(T),
 }
 
@@ -170,20 +63,31 @@ impl<T, C: ?Sized + for<'a> ContinuationSig<'a>> Yield<T, C> {
 		F: FnOnce(&'_ mut Feed<'_, C>) -> O,
 	{
 		// Construct the continuator function
-		let mut continuator = Some(continuator);
-		let output = &Cell::new(None);
+		let continuator = &Cell::new(Some(continuator));
+		let p_continuator = NonNull::from(continuator).cast::<()>();
 
-		let continuator = pin!(LoanedFunc::new(move |input: &'_ mut Feed<'_, C>| {
-			output.set(Some((continuator.take().unwrap())(input)));
-		}));
+		let output = &Cell::new(None);
+		let p_output = NonNull::from(output).cast::<()>();
+
+		dynamic_value! {
+			let continuator: dyn Fn(&mut Feed<'_, C>) = move |input: &mut Feed<'_, C>| {
+				unsafe {
+					// Safety: `continuator` and `output` strictly outlive the `Dynamic` instance
+					// owning this closure.
+					let continuator = p_continuator.cast::<Cell<Option<F>>>().as_ref();
+					let output = p_output.cast::<Cell<Option<O>>>().as_ref();
+
+					output.set(Some((continuator.take().unwrap())(input)));
+				};
+
+			};
+		}
 
 		// Exchange `Polling` for `AwaitingContinuation`
 		match self.state.take() {
 			YieldState::Polling => {
 				self.state
-					.set(YieldState::AwaitingContinuation(LoanedFuncRef::new(
-						continuator,
-					)));
+					.set(YieldState::AwaitingContinuation(continuator));
 			}
 			state @ _ => {
 				self.state.set(state);
@@ -293,14 +197,14 @@ impl<T, C: ?Sized + for<'a> ContinuationSig<'a>> Yield<T, C> {
 				}
 
 				// Handle continuations
-				(Poll::Pending, YieldState::AwaitingContinuation(mut continuator)) => {
+				(Poll::Pending, YieldState::AwaitingContinuation(continuator)) => {
 					// This is redundant but makes the logic clearer.
 					self.state.set(YieldState::Meaningless);
 
 					// Call the `continuator` on the input to get a continuation. If we panic,
 					// we'll unwind the `continuator` before we unwind the actual dangerous future,
 					// avoid an abort.
-					continuator.call(input);
+					(continuator)(input);
 
 					self.state.set(YieldState::Polling);
 				}

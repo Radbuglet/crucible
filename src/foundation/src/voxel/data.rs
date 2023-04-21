@@ -1,6 +1,7 @@
 use std::{
 	cell::{Ref, RefMut},
 	mem,
+	ops::Deref,
 };
 
 use bort::{Obj, OwnedEntity, OwnedObj};
@@ -177,6 +178,14 @@ pub struct VoxelChunkDataViewMut<'a> {
 	chunk: Obj<VoxelChunkData>,
 	flag_list: &'a mut VoxelWorldFlagList,
 	data: RefMut<'a, VoxelChunkData>,
+}
+
+impl Deref for VoxelChunkDataViewMut<'_> {
+	type Target = VoxelChunkDataView;
+
+	fn deref(&self) -> &Self::Target {
+		VoxelChunkDataView::wrap_ref(&self.data)
+	}
 }
 
 impl VoxelChunkDataViewMut<'_> {

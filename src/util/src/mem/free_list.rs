@@ -79,7 +79,6 @@ impl<T, H: Handle> FreeList<T, H> {
 		H::slot_freed(&mut self.state, handle, meta);
 
 		// Add to the free list
-		// TODO: see if we can shrink the slot store
 		self.free.push(slot);
 
 		Some(value)
