@@ -6,6 +6,8 @@ use derive_where::derive_where;
 
 use crate::lang::std_traits::ResultLike;
 
+// === Error formatting === //
+
 pub trait ErrorFormatExt: Error {
 	fn format_error(&self) -> FormattedError<Self> {
 		FormattedError(self)
@@ -56,6 +58,8 @@ impl<T: ?Sized + Error> fmt::Display for FormattedError<'_, T> {
 		Ok(())
 	}
 }
+
+// === Result extensions === //
 
 pub trait ResultExt: ResultLike {
 	fn unwrap_pretty(self) -> Self::Success;

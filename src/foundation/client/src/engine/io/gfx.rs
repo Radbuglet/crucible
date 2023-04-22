@@ -1,38 +1,26 @@
 use anyhow::Context;
-use std::fmt::Display;
+use crucible_util::debug::label::{DebugLabel, ReifiedDebugLabel};
+use crucible_util::lang::format::display_from_fn;
 use winit::window::Window;
 
-use super::features::{FeatureDescriptor, FeatureList, FeatureScore};
+// === Core === //
 
 #[derive(Debug)]
 pub struct GfxContext {
-	/// Our WebGPU instance from which everything was derived.
 	pub instance: wgpu::Instance,
-
-	/// Our WebGPU device.
 	pub device: wgpu::Device,
-
-	/// Our WebGPU queue.
 	pub queue: wgpu::Queue,
-
-	/// Our WebGPU adapter from which our device and queue were derived.
 	pub adapter: wgpu::Adapter,
-
-	/// Our WebGPU adapter's real features and limits.
 	pub adapter_info: AdapterInfoBundle,
-
-	/// Our device's requested feature set.
 	pub requested_features: wgpu::Features,
-
-	/// Our device's requested limits.
 	pub requested_limits: wgpu::Limits,
 }
 
 impl GfxContext {
-	pub async fn init<D: ?Sized + GfxFeatureDetector>(
+	pub async fn new<T>(
 		main_window: &Window,
-		compat_detector: &mut D,
-	) -> anyhow::Result<(Self, D::Table, wgpu::Surface)> {
+		mut compat_detector: impl FnMut(&mut CompatQueryInfo) -> (Judgement, T),
+	) -> anyhow::Result<(Self, T, wgpu::Surface)> {
 		let backends = wgpu::Backends::PRIMARY;
 		let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
 			backends,
@@ -54,7 +42,7 @@ impl GfxContext {
 			adapter_info: AdapterInfoBundle,
 			descriptor: wgpu::DeviceDescriptor<'a>,
 			compat_table: T,
-			score: f32,
+			score: f64,
 		}
 
 		let req = instance
@@ -65,7 +53,7 @@ impl GfxContext {
 
 				// Query support and config
 				let mut descriptor = wgpu::DeviceDescriptor::default();
-				let (features, compat_table) = compat_detector.query_compat(&mut CompatQueryInfo {
+				let (judgement, compat_table) = (compat_detector)(&mut CompatQueryInfo {
 					descriptor: &mut descriptor,
 					instance: &instance,
 					main_surface: &main_surface,
@@ -73,26 +61,29 @@ impl GfxContext {
 					adapter_info: &adapter_info,
 				});
 
-				assert_eq!(features.did_pass(), compat_table.is_some());
-
 				// Log info
 				let wgpu::AdapterInfo { name, backend, .. } = &adapter_info.info;
-				let score = features.score();
+
 				log::info!(
 					"Found adapter {name:?} using backend {backend:?}. Score: {}",
-					match &score {
-						Some(score) => score as &dyn Display,
-						None => &"missing mandatory features" as &dyn Display,
-					}
+					display_from_fn(|f| {
+						match judgement.kind {
+							JudgementKind::Ok => f.write_str("perfect"),
+							JudgementKind::Penalized(penalty) => {
+								write!(f, "penalized: {penalty}")
+							}
+							JudgementKind::Err => f.write_str("incompatible"),
+						}
+					})
 				);
-				log::info!("Feature table: {:#?}", features);
+				log::info!("Feature table: {:#?}", judgement);
 
-				compat_table.map(|compat_table| ValidatedAdapter {
+				judgement.did_pass().then_some(ValidatedAdapter {
 					adapter,
 					adapter_info,
 					descriptor,
 					compat_table,
-					score: features.score().unwrap(),
+					score: judgement.score(),
 				})
 			})
 			.max_by(|a, b| a.score.total_cmp(&b.score))
@@ -143,102 +134,151 @@ impl AdapterInfoBundle {
 
 #[derive(Debug)]
 pub struct CompatQueryInfo<'a, 'l> {
-	/// The descriptor being modified by the [GfxFeatureDetector] to define our requested device.
 	pub descriptor: &'a mut wgpu::DeviceDescriptor<'l>,
-
-	/// Our WebGPU instance.
 	pub instance: &'a wgpu::Instance,
-
-	/// The main surface against which we're creating our [GfxContext].
 	pub main_surface: &'a wgpu::Surface,
-
-	/// The adapter against which we're trying to create our [GfxContext].
 	pub adapter: &'a wgpu::Adapter,
-
-	/// The adapter's limits and features.
 	pub adapter_info: &'a AdapterInfoBundle,
 }
 
-pub trait GfxFeatureDetector {
-	/// A userdata table describing the features the rest of the engine can depend upon.
-	type Table;
+// === Judgement === //
 
-	/// Queries the provided adapter for compatibility. Produces a [FeatureList] describing the
-	/// justification for which a given configuration is supported, partially supported, or rejected
-	/// as well as a userland table of type [GfxFeatureDetector::Table], which describes the actual
-	/// set of logical engine features which are supported is also returned. The userland table of
-	/// type [GfxFeatureDetector::Table] is `Some` if and only if the [FeatureList] passes
-	/// (i.e. the adapter is declared valid).
-	fn query_compat(&mut self, info: &mut CompatQueryInfo) -> (FeatureList, Option<Self::Table>);
+#[derive(Debug)]
+pub struct Judgement {
+	pub name: ReifiedDebugLabel,
+	pub kind: JudgementKind,
+	pub reason: Option<anyhow::Error>,
+	pub subs: Vec<Judgement>,
 }
 
-/// Asserts that the adapter must be capable of presenting to the primary surface.
-pub struct GfxFeatureNeedsScreen;
+#[derive(Debug, Copy, Clone)]
+pub enum JudgementKind {
+	Ok,
+	Err,
+	Penalized(f64),
+}
 
-impl GfxFeatureDetector for GfxFeatureNeedsScreen {
-	type Table = ();
+impl Judgement {
+	// === Constructors === //
 
-	fn query_compat(&mut self, info: &mut CompatQueryInfo) -> (FeatureList, Option<Self::Table>) {
-		let mut features = FeatureList::default();
+	pub fn new_ok(name: impl DebugLabel) -> Self {
+		Self {
+			name: name.reify(),
+			kind: JudgementKind::Ok,
+			reason: None,
+			subs: Vec::new(),
+		}
+	}
 
-		features.mandatory_feature(
-			FeatureDescriptor {
-				name: "Can display to screen",
-				description: "The specified driver must be capable of rendering to the main window",
-			},
-			if info.adapter.is_surface_supported(info.main_surface) {
-				FeatureScore::BinaryPass
-			} else {
-				FeatureScore::BinaryFail {
-					reason: "main surface is unsupported by adapter".to_string(),
+	pub fn new_err(name: impl DebugLabel, reason: anyhow::Error) -> Self {
+		Self {
+			name: name.reify(),
+			kind: JudgementKind::Err,
+			reason: Some(reason),
+			subs: Vec::new(),
+		}
+	}
+
+	pub fn from_result(name: impl DebugLabel, result: anyhow::Result<()>) -> Self {
+		match result {
+			Ok(()) => Self::new_ok(name),
+			Err(reason) => Self::new_err(name, reason),
+		}
+	}
+
+	pub fn new_penalty(name: impl DebugLabel, reason: anyhow::Error, penalty: f64) -> Self {
+		Self {
+			name: name.reify(),
+			kind: JudgementKind::Penalized(penalty),
+			reason: Some(reason),
+			subs: Vec::new(),
+		}
+	}
+
+	pub fn push_sub(&mut self, judgement: Judgement) {
+		// Merge kinds
+		match judgement.kind {
+			JudgementKind::Ok => { /* no-op */ }
+			JudgementKind::Err => {
+				self.kind = JudgementKind::Err;
+			}
+			JudgementKind::Penalized(penalty) => match &mut self.kind {
+				me @ JudgementKind::Ok => *me = JudgementKind::Penalized(penalty),
+				JudgementKind::Err => { /* no-op */ }
+				JudgementKind::Penalized(cumulative) => {
+					*cumulative += penalty;
 				}
 			},
-		);
+		}
 
-		features.wrap_user_table(())
+		// Push sub
+		self.subs.push(judgement);
+	}
+
+	pub fn sub(mut self, judgement: Judgement) -> Self {
+		self.push_sub(judgement);
+		self
+	}
+
+	// === Decoding === //
+
+	pub fn did_pass(&self) -> bool {
+		matches!(self.kind, JudgementKind::Ok | JudgementKind::Penalized(_))
+	}
+
+	pub fn score(&self) -> f64 {
+		match self.kind {
+			JudgementKind::Ok => 0.,
+			JudgementKind::Err => f64::NEG_INFINITY,
+			JudgementKind::Penalized(penalty) => -penalty,
+		}
+	}
+
+	// === Shorthand === //
+
+	pub fn with_table<T>(self, table: T) -> (Self, T) {
+		(self, table)
 	}
 }
 
-/// Asserts that the adapter must be have the proper power preference. This can be turned into a soft
-/// requirement by nesting `FeatureLists`.
-#[derive(Debug, Clone)]
-pub struct GfxFeaturePowerPreference(pub wgpu::PowerPreference);
+// === Foundational Feature Judgements === //
 
-impl GfxFeatureDetector for GfxFeaturePowerPreference {
-	type Table = ();
+pub fn feat_requires_screen(info: &mut CompatQueryInfo) -> (Judgement, ()) {
+	Judgement::from_result(
+		"The main window can be drawn to",
+		if info.adapter.is_surface_supported(info.main_surface) {
+			Ok(())
+		} else {
+			Err(anyhow::format_err!("whee"))
+		},
+	)
+	.with_table(())
+}
 
-	fn query_compat(&mut self, info: &mut CompatQueryInfo) -> (FeatureList, Option<Self::Table>) {
-		use wgpu::{DeviceType::*, PowerPreference::*};
-
-		let mut features = FeatureList::default();
-
+pub fn feat_requires_power_pref(
+	pref: wgpu::PowerPreference,
+) -> impl FnMut(&mut CompatQueryInfo) -> (Judgement, ()) {
+	move |info: &mut CompatQueryInfo| {
 		let mode = info.adapter_info.device_type();
-		let pref = self.0;
 		let matches = match mode {
-			Other => true,
-			IntegratedGpu => pref == LowPower,
-			DiscreteGpu => pref == HighPerformance,
-			VirtualGpu => pref == LowPower,
-			Cpu => pref == LowPower,
+			wgpu::DeviceType::Other => true,
+			wgpu::DeviceType::IntegratedGpu => pref == wgpu::PowerPreference::LowPower,
+			wgpu::DeviceType::DiscreteGpu => pref == wgpu::PowerPreference::HighPerformance,
+			wgpu::DeviceType::VirtualGpu => pref == wgpu::PowerPreference::LowPower,
+			wgpu::DeviceType::Cpu => pref == wgpu::PowerPreference::LowPower,
 		};
 
-		features.mandatory_feature(
-			FeatureDescriptor {
-				name: format_args!("GPU power preference"),
-				description: format_args!("For best performance, GPU must be {pref:?}."),
-			},
+		Judgement::from_result(
+			format_args!("GPU has {pref:?} power preference"),
 			if matches {
-				FeatureScore::BinaryPass
+				Ok(())
 			} else {
-				FeatureScore::BinaryFail {
-					reason: format!(
-						"expected GPU with {pref:?} power preference; got {mode:?} adapter type, which \
-					 	 has the opposite power preference"
-					),
-				}
+				Err(anyhow::format_err!(
+					"expected GPU with {pref:?} power preference; got {mode:?} adapter type, which \
+					  has the opposite power preference"
+				))
 			},
-		);
-
-		features.wrap_user_table(())
+		)
+		.with_table(())
 	}
 }

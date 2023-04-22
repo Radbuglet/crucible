@@ -4,3 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = { workspace = true }
+bort = { workspace = true }
+crucible-foundation-client = { workspace = true }
+crucible-util = { workspace = true }
+env_logger = "0.10.0"
+log = { workspace = true }
+wgpu = { workspace = true }
+winit = { workspace = true }

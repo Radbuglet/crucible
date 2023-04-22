@@ -25,6 +25,7 @@ bort = { git = "https://github.com/Radbuglet/bort.git", rev = "01695bb1963cd29e0
 hashbrown = "0.13.2"
 log = "0.4.17"
 wgpu = "0.16.0"
+winit = "0.28.3"
 
 # Internal dependencies (i.e. dependencies that are only used as implementation details)
 anyhow = "1.0.70"
