@@ -9,6 +9,7 @@ bort = { workspace = true }
 crucible-foundation-client = { workspace = true }
 crucible-util = { workspace = true }
 env_logger = "0.10.0"
+futures = "0.3.28"
 log = { workspace = true }
 wgpu = { workspace = true }
 winit = { workspace = true }

@@ -20,7 +20,7 @@ impl GfxContext {
 	pub async fn new<T>(
 		main_window: &Window,
 		mut compat_detector: impl FnMut(&mut CompatQueryInfo) -> (Judgement, T),
-	) -> anyhow::Result<(Self, T, wgpu::Surface)> {
+	) -> anyhow::Result<(Self, wgpu::Surface, T)> {
 		let backends = wgpu::Backends::PRIMARY;
 		let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
 			backends,
@@ -105,8 +105,8 @@ impl GfxContext {
 				requested_features: req.descriptor.features,
 				requested_limits: req.descriptor.limits,
 			},
-			req.compat_table,
 			main_surface,
+			req.compat_table,
 		))
 	}
 }

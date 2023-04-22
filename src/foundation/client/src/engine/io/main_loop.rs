@@ -12,7 +12,7 @@ use winit::{
 
 // === MainLoop === //
 
-pub type WinitUserdata = Box<dyn Any>;
+pub type WinitUserdata = Box<dyn Any + Send + Sync>;
 
 pub type WinitEventLoop = EventLoop<WinitUserdata>;
 
