@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 use bort::{storage, CompRef, Entity};
 use crevice::std430::AsStd430;
 use crucible_foundation_shared::{
-	material::MaterialRegistry,
+	material::{MaterialId, MaterialRegistry},
 	math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, Tri, WorldVec, WorldVecExt, QUAD_UVS},
-	voxel::{data::VoxelWorldData, mesh::QuadMeshLayer},
+	voxel::{data::WorldVoxelData, mesh::QuadMeshLayer},
 };
 use crucible_util::{
 	lang::polyfill::OptionPoly,
@@ -25,14 +25,14 @@ use super::pipeline::{VoxelUniforms, VoxelVertex};
 // === Services === //
 
 #[derive(Debug, Default)]
-pub struct VoxelWorldMesh {
+pub struct WorldVoxelMesh {
 	rendered_chunks: HashSet<Entity>,
 	dirty_queue: Vec<Entity>,
 }
 
-impl VoxelWorldMesh {
+impl WorldVoxelMesh {
 	pub fn flag_chunk(&mut self, chunk: Entity) {
-		if let Some(mut chunk_mesh) = chunk.try_get_mut::<VoxelChunkMesh>() {
+		if let Some(mut chunk_mesh) = chunk.try_get_mut::<ChunkVoxelMesh>() {
 			if chunk_mesh.still_dirty {
 				return;
 			}
@@ -44,7 +44,7 @@ impl VoxelWorldMesh {
 
 	pub fn update_chunks(
 		&mut self,
-		world: &VoxelWorldData,
+		world: &WorldVoxelData,
 		gfx: &GfxContext,
 		atlas: &AtlasTexture,
 		registry: &MaterialRegistry,
@@ -61,18 +61,18 @@ impl VoxelWorldMesh {
 			}
 
 			// Acquire dependencies
-			let chunk_data = world.chunk_state(chunk.obj());
+			let chunk_data = world.read_chunk(chunk.obj());
 
 			// Mesh chunk
 			let mut vertices = Vec::new();
 
 			for center_pos in BlockVec::iter() {
 				// Decode material
-				let material = chunk_data.block_state(center_pos).material;
-				if material == 0 {
+				let material = chunk_data.block_or_air(center_pos).material;
+				if material == MaterialId::AIR {
 					continue;
 				}
-				let material = registry.resolve_slot(material);
+				let material = registry.find_by_id(material);
 
 				// Determine the center block mesh origin
 				// (this is used by all three branches)
@@ -81,7 +81,7 @@ impl VoxelWorldMesh {
 					.as_vec3();
 
 				// Process material
-				match &*descriptors.get(material) {
+				match &*descriptors.get(material.descriptor) {
 					BlockDescriptorVisual::Cubic { textures } => {
 						// For every side of a solid block...
 						for face in BlockFace::variants() {
@@ -90,23 +90,23 @@ impl VoxelWorldMesh {
 							// If the neighbor isn't solid...
 							let is_solid = 'a: {
 								let state = if neighbor_block.is_valid() {
-									chunk_data.block_state(neighbor_block)
+									chunk_data.block_or_air(neighbor_block)
 								} else {
 									let Some(neighbor) = chunk_data.neighbor(face) else {
 										break 'a false;
 									};
 
 									world
-										.chunk_state(neighbor)
-										.block_state(neighbor_block.wrap())
+										.read_chunk(neighbor)
+										.block_or_air(neighbor_block.wrap())
 								};
 
 								if state.is_air() {
 									break 'a false;
 								}
 
-								let descriptor = registry.resolve_slot(state.material);
-								let descriptor = descriptors.get(descriptor);
+								let material = registry.find_by_id(state.material);
+								let descriptor = descriptors.get(material.descriptor);
 
 								matches!(&*descriptor, BlockDescriptorVisual::Cubic { .. })
 							};
@@ -190,7 +190,7 @@ impl VoxelWorldMesh {
 				None
 			};
 
-			chunk.insert(VoxelChunkMesh {
+			chunk.insert(ChunkVoxelMesh {
 				still_dirty: false,
 				vertex_count: vertices.len() as u32,
 				buffer,
@@ -219,7 +219,7 @@ impl VoxelWorldMesh {
 
 	#[must_use]
 	pub fn prepare_chunk_draw_pass(&self) -> ChunkRenderPass {
-		let meshes = storage::<VoxelChunkMesh>();
+		let meshes = storage::<ChunkVoxelMesh>();
 
 		ChunkRenderPass {
 			meshes: self
@@ -233,7 +233,7 @@ impl VoxelWorldMesh {
 
 #[derive(Debug)]
 pub struct ChunkRenderPass {
-	meshes: Vec<CompRef<VoxelChunkMesh>>,
+	meshes: Vec<CompRef<ChunkVoxelMesh>>,
 }
 
 impl ChunkRenderPass {
@@ -252,7 +252,7 @@ impl ChunkRenderPass {
 }
 
 #[derive(Debug, Default)]
-pub struct VoxelChunkMesh {
+pub struct ChunkVoxelMesh {
 	still_dirty: bool,
 	vertex_count: u32,
 	buffer: Option<wgpu::Buffer>,

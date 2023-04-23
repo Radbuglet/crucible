@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bort = { workspace = true }
+crucible-foundation-shared = { workspace = true }
+crucible-util = { workspace = true}
+semver = "1.0.17"
+smallvec = { workspace = true }

@@ -10,6 +10,5 @@ derive-where = { workspace = true }
 hashbrown = { workspace = true }
 log = { workspace = true }
 num-traits = { workspace = true }
-semver = "1.0.17"
-smallvec = "1.10.0"
+smallvec = { workspace = true }
 typed-glam = { workspace = true }

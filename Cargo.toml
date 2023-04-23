@@ -24,6 +24,7 @@ typed-wgpu = { path = "src/util/typed-wgpu" }
 bort = { git = "https://github.com/Radbuglet/bort.git", rev = "01695bb1963cd29e0f8e4a7c6081305573e66e36" }
 hashbrown = "0.13.2"
 log = "0.4.17"
+smallvec = "1.10.0"
 wgpu = "0.16.0"
 winit = "0.28.3"
 

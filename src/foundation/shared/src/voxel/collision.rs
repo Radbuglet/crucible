@@ -17,11 +17,11 @@ use crate::{
 		AaQuad, Aabb3, Axis3, BlockFace, EntityAabb, EntityVec, EntityVecExt, Line3, Sign,
 		VecCompExt, WorldVecExt,
 	},
-	voxel::data::BlockState,
+	voxel::data::Block,
 };
 
 use super::{
-	data::{BlockLocation, EntityLocation, VoxelWorldData},
+	data::{BlockVoxelPointer, EntityVoxelPointer, WorldVoxelData},
 	mesh::{QuadMeshLayer, VolumetricMeshLayer},
 };
 
@@ -68,17 +68,17 @@ impl MaterialColliderDescriptor {
 pub async fn occluding_volumes_in_block<'a>(
 	y: &'a Yield<(EntityAabb, CollisionMeta)>,
 	collider_descs: Storage<MaterialColliderDescriptor>,
-	world: &'a VoxelWorldData,
+	world: &'a WorldVoxelData,
 	registry: &'a MaterialRegistry,
-	mut block: BlockLocation,
+	mut block: BlockVoxelPointer,
 ) {
 	// Decode descriptor
-	let Some(state) = block.state(world).filter(BlockState::is_not_air) else {
+	let Some(state) = block.state(world).filter(Block::is_not_air) else {
 			return;
 		};
 
-	let descriptor = registry.resolve_slot(state.material);
-	let descriptor = collider_descs.get(descriptor);
+	let material = registry.find_by_id(state.material);
+	let descriptor = collider_descs.get(material.descriptor);
 
 	// Determine collision volumes
 	match &*descriptor {
@@ -112,18 +112,18 @@ pub async fn occluding_volumes_in_block<'a>(
 pub async fn occluding_faces_in_block<'a>(
 	y: &'a Yield<(AaQuad<EntityVec>, CollisionMeta)>,
 	collider_descs: Storage<MaterialColliderDescriptor>,
-	world: &'a VoxelWorldData,
+	world: &'a WorldVoxelData,
 	registry: &'a MaterialRegistry,
-	mut block: BlockLocation,
+	mut block: BlockVoxelPointer,
 	face: BlockFace,
 ) {
 	// Decode descriptor
-	let Some(state) = block.state(world).filter(BlockState::is_not_air) else {
+	let Some(state) = block.state(world).filter(Block::is_not_air) else {
 		return;
 	};
 
-	let descriptor = registry.resolve_slot(state.material);
-	let descriptor = collider_descs.get(descriptor);
+	let material = registry.find_by_id(state.material);
+	let descriptor = collider_descs.get(material.descriptor);
 
 	// Determine an offset from block-relative coordinates to world coordinates
 	let quad_offset = block.pos().negative_most_corner();
@@ -195,9 +195,9 @@ pub struct IntersectingFaceInBlock {
 pub async fn intersecting_faces_in_block<'a>(
 	y: &'a Yield<IntersectingFaceInBlock>,
 	collider_descs: Storage<MaterialColliderDescriptor>,
-	world: &'a VoxelWorldData,
+	world: &'a WorldVoxelData,
 	registry: &'a MaterialRegistry,
-	block: BlockLocation,
+	block: BlockVoxelPointer,
 	line: Line3,
 ) {
 	let delta = line.signed_delta();
@@ -247,7 +247,7 @@ pub async fn intersecting_faces_in_block<'a>(
 pub const COLLISION_TOLERANCE: f64 = 0.0005;
 
 pub fn cast_volume(
-	world: &VoxelWorldData,
+	world: &WorldVoxelData,
 	registry: &MaterialRegistry,
 	quad: AaQuad<EntityVec>,
 	delta: f64,
@@ -278,7 +278,7 @@ pub fn cast_volume(
 	// If these additional blocks don't contribute to collision detection with their tolerance, we'll
 	// just ignore them.
 	let check_aabb = quad.extrude_hv(delta + tolerance).as_blocks();
-	let cached_loc = BlockLocation::new(world, check_aabb.origin);
+	let cached_loc = BlockVoxelPointer::new(world, check_aabb.origin);
 
 	// Find the maximum allowed delta
 	use_generator!(let iter[y] = async {
@@ -291,7 +291,7 @@ pub fn cast_volume(
 				collider_descs,
 				world,
 				registry,
-				cached_loc.at_absolute(world, pos),
+				cached_loc.at_absolute(Some(world), pos),
 				quad.face.invert(),
 			));
 
@@ -347,16 +347,16 @@ pub fn cast_volume(
 }
 
 pub async fn check_volume<'a>(
-	y: &'a Yield<(BlockLocation, CollisionMeta)>,
+	y: &'a Yield<(BlockVoxelPointer, CollisionMeta)>,
 	collider_descs: Storage<MaterialColliderDescriptor>,
-	world: &'a VoxelWorldData,
+	world: &'a WorldVoxelData,
 	registry: &'a MaterialRegistry,
 	aabb: EntityAabb,
 ) {
-	let cached_loc = BlockLocation::new(world, aabb.origin.block_pos());
+	let cached_loc = BlockVoxelPointer::new(world, aabb.origin.block_pos());
 
 	for block_pos in aabb.as_blocks().iter_blocks() {
-		let block = cached_loc.at_absolute(world, block_pos);
+		let block = cached_loc.at_absolute(Some(world), block_pos);
 		use_generator!(let iter[y] = occluding_volumes_in_block(
 			y,
 			collider_descs,
@@ -377,13 +377,13 @@ pub async fn check_volume<'a>(
 
 #[derive(Debug, Clone)]
 pub struct RayCast {
-	loc: EntityLocation,
+	loc: EntityVoxelPointer,
 	dir: EntityVec,
 	dist: f64,
 }
 
 impl RayCast {
-	pub fn new_at(loc: EntityLocation, dir: EntityVec) -> Self {
+	pub fn new_at(loc: EntityVoxelPointer, dir: EntityVec) -> Self {
 		let (dir, dist) = {
 			let dir_len_recip = dir.length_recip();
 
@@ -398,10 +398,10 @@ impl RayCast {
 	}
 
 	pub fn new_uncached(pos: EntityVec, dir: EntityVec) -> Self {
-		Self::new_at(EntityLocation::new_uncached(pos), dir)
+		Self::new_at(EntityVoxelPointer::new_uncached(pos), dir)
 	}
 
-	pub fn loc(&mut self) -> &mut EntityLocation {
+	pub fn loc(&mut self) -> &mut EntityVoxelPointer {
 		&mut self.loc
 	}
 
@@ -421,7 +421,7 @@ impl RayCast {
 		Line3::new_origin_delta(self.pos(), self.dir)
 	}
 
-	pub fn step(&mut self, world: &VoxelWorldData) -> SmallVec<[RayCastIntersection; 3]> {
+	pub fn step(&mut self, world: &WorldVoxelData) -> SmallVec<[RayCastIntersection; 3]> {
 		// Construct a buffer to hold our `RayCastIntersection`s. There should be at most three of
 		// these and, therefore, we should never allocate anything on the heap.
 		let mut intersections = SmallVec::<[RayCastIntersection; 3]>::new();
@@ -436,7 +436,7 @@ impl RayCast {
 			let step_line = self.step_line();
 
 			// Bump our location by this delta.
-			self.loc.move_relative(world, self.dir);
+			self.loc.at_relative(Some(world), self.dir);
 
 			// Determine the delta in blocks that we committed by taking this step. This is not
 			// necessarily from one neighbor to the other in the case where we cast along the
@@ -489,7 +489,7 @@ impl RayCast {
 		// Update block positions by accumulating face traversals onto `block_loc`—which is currently
 		// just the position of our ray before the step began.
 		for isect in &mut intersections {
-			isect.block = block_loc.at_neighbor(world, isect.face.invert());
+			isect.block = block_loc.at_neighbor(Some(world), isect.face.invert());
 			block_loc = isect.block;
 		}
 
@@ -504,7 +504,7 @@ impl RayCast {
 	pub fn step_intersect(
 		&mut self,
 		collider_descs: Storage<MaterialColliderDescriptor>,
-		world: &VoxelWorldData,
+		world: &WorldVoxelData,
 		registry: &MaterialRegistry,
 		isect_buffer: &mut impl VecLike<Elem = (RayCastIntersection, CollisionMeta)>,
 	) {
@@ -551,7 +551,7 @@ impl RayCast {
 
 	pub async fn step_for(
 		&mut self,
-		y: &yielder![RayCastIntersection; for<'a> &'a VoxelWorldData],
+		y: &yielder![RayCastIntersection; for<'a> &'a WorldVoxelData],
 		max_dist: f64,
 	) {
 		while self.dist() <= max_dist {
@@ -567,7 +567,7 @@ impl RayCast {
 
 	pub async fn step_intersect_for(
 		&mut self,
-		y: &yielder![(RayCastIntersection, CollisionMeta); for<'a> (&'a VoxelWorldData, &'a MaterialRegistry)],
+		y: &yielder![(RayCastIntersection, CollisionMeta); for<'a> (&'a WorldVoxelData, &'a MaterialRegistry)],
 		collider_descs: Storage<MaterialColliderDescriptor>,
 		max_dist: f64,
 	) {
@@ -595,7 +595,7 @@ impl RayCast {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RayCastIntersection {
-	pub block: BlockLocation,
+	pub block: BlockVoxelPointer,
 	pub face: BlockFace,
 	pub pos: EntityVec,
 	pub distance: f64,
@@ -604,7 +604,7 @@ pub struct RayCastIntersection {
 // === Rigid Body === //
 
 pub fn move_rigid_body(
-	world: &VoxelWorldData,
+	world: &WorldVoxelData,
 	registry: &MaterialRegistry,
 	mut aabb: EntityAabb,
 	delta: EntityVec,

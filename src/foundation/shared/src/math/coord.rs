@@ -78,6 +78,10 @@ use super::{AaPlane, BlockFace, Sign, VecCompExt};
 
 // === Constants === //
 
+pub type BlockIndex = u16;
+
+const __ASSERT: () = assert!(CHUNK_VOLUME <= BlockIndex::MAX as i32);
+
 pub const CHUNK_EDGE: i32 = 16;
 pub const CHUNK_LAYER: i32 = CHUNK_EDGE.pow(2);
 pub const CHUNK_VOLUME: i32 = CHUNK_EDGE.pow(3);

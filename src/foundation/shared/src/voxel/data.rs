@@ -4,255 +4,285 @@ use std::{
 	ops::Deref,
 };
 
-use bort::{Obj, OwnedEntity, OwnedObj};
-use crucible_util::{
-	delegate,
-	mem::{
-		c_enum::{CEnum, CEnumMap},
-		hash::FxHashMap,
-	},
-	transparent,
-};
+use bort::{Obj, OwnedObj};
+use crucible_util::mem::{c_enum::CEnumMap, hash::FxHashMap};
 use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 
 use crate::{
-	material::AIR_MATERIAL_SLOT,
+	material::MaterialId,
 	math::{
 		BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, WorldVec, WorldVecExt, CHUNK_VOLUME,
 	},
 };
 
-// === World === //
-
-delegate! {
-	pub fn VoxelChunkFactory(pos: ChunkVec) -> OwnedEntity
-}
-
-#[derive(Debug)]
-pub struct VoxelWorldData {
-	chunk_factory: VoxelChunkFactory,
-	pos_map: FxHashMap<ChunkVec, OwnedObj<VoxelChunkData>>,
-	flag_list: VoxelWorldFlagList,
-}
+// === WorldVoxelData === //
 
 #[derive(Debug, Default)]
-struct VoxelWorldFlagList {
-	flagged: Vec<Obj<VoxelChunkData>>,
+pub struct WorldVoxelData {
+	// A map from chunk positions to chunk instances. We assume that these objects exhibit exterior
+	// mutability.
+	pos_map: FxHashMap<ChunkVec, OwnedObj<ChunkVoxelData>>,
+
+	// An unordered vector of all chunks that have been updated since the last flush. These never
+	// dangle.
+	dirty: Vec<Obj<ChunkVoxelData>>,
 }
 
-impl VoxelWorldFlagList {
-	fn add(&mut self, chunk_data: &mut VoxelChunkData, chunk: Obj<VoxelChunkData>) {
-		if chunk_data.flagged.is_none() {
-			chunk_data.flagged = Some(self.flagged.len());
-			self.flagged.push(chunk);
-		}
-	}
-}
+impl WorldVoxelData {
+	// === Core Methods === //
 
-impl VoxelWorldData {
-	pub fn new(chunk_factory: VoxelChunkFactory) -> Self {
-		Self {
-			chunk_factory,
-			pos_map: FxHashMap::default(),
-			flag_list: VoxelWorldFlagList::default(),
+	pub fn insert_chunk(
+		&mut self,
+		pos: ChunkVec,
+		chunk: OwnedObj<ChunkVoxelData>,
+	) -> Option<OwnedObj<ChunkVoxelData>> {
+		// Insert the new chunk into the map and unregister the old one.
+		let (chunk_guard, chunk) = chunk.split_guard();
+		let old = self.pos_map.insert(pos, chunk_guard);
+
+		if let Some(old) = &old {
+			// While, yes, we could reuse the old chunk's neighbor list and dirty list index to make
+			// replacing current chunks more efficient, replacements in insertion are sufficiently
+			// rare that we don't bother to optimize for it.
+			self.internal_unlink(&mut old.get_mut());
 		}
+
+		// Set the chunk's main state
+		let mut chunk_state = chunk.get_mut();
+		chunk_state.pos = pos;
+
+		// Link the chunk to its neighbors
+		for (face, neighbor) in chunk_state.neighbors.iter_mut() {
+			let neighbor_chunk = self.get_chunk(pos + face.unit_typed::<ChunkVec>());
+			*neighbor = neighbor_chunk;
+
+			if let Some(neighbor_chunk) = neighbor_chunk {
+				neighbor_chunk.get_mut().neighbors[face.invert()] = Some(chunk);
+			}
+		}
+
+		// Add the chunk to the dirty queue
+		chunk_state.dirty_index = self.dirty.len();
+		self.dirty.push(chunk);
+
+		old
 	}
 
-	pub fn try_get_chunk(&self, pos: ChunkVec) -> Option<Obj<VoxelChunkData>> {
+	pub fn remove_chunk(&mut self, pos: ChunkVec) -> Option<OwnedObj<ChunkVoxelData>> {
+		let chunk = self.pos_map.remove(&pos);
+
+		if let Some(chunk) = &chunk {
+			self.internal_unlink(&mut chunk.get_mut());
+		}
+
+		chunk
+	}
+
+	pub fn get_chunk(&self, pos: ChunkVec) -> Option<Obj<ChunkVoxelData>> {
 		self.pos_map.get(&pos).map(OwnedObj::obj)
 	}
 
-	pub fn get_chunk_or_create(&mut self, pos: ChunkVec) -> Obj<VoxelChunkData> {
-		// Return the chunk if it already exists
-		if let Some(chunk) = self.pos_map.get(&pos) {
-			return chunk.obj();
-		}
-
-		// Register chunk
-		let (chunk, chunk_ref) = OwnedObj::insert(
-			(self.chunk_factory)(pos),
-			VoxelChunkData {
-				pos,
-				flagged: None,
-				neighbors: CEnumMap::default(),
-				data: Box::new([0; CHUNK_VOLUME as usize]),
-			},
-		)
-		.split_guard();
-		self.pos_map.insert(pos, chunk);
-
-		// Link to neighbors
-		let mut chunk_data = chunk_ref.get_mut();
-
-		for face in BlockFace::variants() {
-			let neighbor_pos = pos + face.unit();
-			let neighbor = match self.pos_map.get(&neighbor_pos) {
-				Some(ent) => ent.obj(),
-				None => continue,
-			};
-
-			chunk_data.neighbors[face] = Some(neighbor);
-			neighbor.get_mut().neighbors[face.invert()] = Some(chunk_ref);
-		}
-
-		// Add the new chunk to the dirty queue
-		self.flag_list.add(&mut chunk_data, chunk_ref);
-
-		chunk_ref
+	pub fn read_chunk(&self, chunk: Obj<ChunkVoxelData>) -> Ref<'_, ChunkVoxelData> {
+		chunk.get()
 	}
 
-	pub fn remove_chunk(&mut self, pos: ChunkVec) {
-		let chunk = self.pos_map.remove(&pos).unwrap();
-		let chunk_data = chunk.owned_entity().remove::<VoxelChunkData>().unwrap();
+	pub fn write_chunk(&mut self, chunk: Obj<ChunkVoxelData>) -> ChunkVoxelDataMut<'_> {
+		ChunkVoxelDataMut {
+			world: self,
+			chunk,
+			chunk_state: chunk.get_mut(),
+		}
+	}
 
-		// Unlink neighbors
-		for (face, &neighbor) in chunk_data.neighbors.iter() {
-			let Some(neighbor) = neighbor else {
-				continue;
-			};
+	pub fn flush_dirty(&mut self) -> Vec<Obj<ChunkVoxelData>> {
+		let dirty = mem::take(&mut self.dirty);
 
-			neighbor.get_mut().neighbors[face.invert()] = None;
+		for &dirty in &dirty {
+			dirty.get_mut().dirty_index = usize::MAX;
+		}
+
+		dirty
+	}
+
+	// === Alias methods === //
+
+	// TODO
+
+	// === Internal methods === //
+
+	fn internal_mark_dirty(&mut self, chunk: Obj<ChunkVoxelData>, dirty_index: &mut usize) {
+		if *dirty_index == usize::MAX {
+			*dirty_index = self.dirty.len();
+			self.dirty.push(chunk);
+		}
+	}
+
+	fn internal_unlink(&mut self, chunk_state: &mut ChunkVoxelData) {
+		// Unlink from neighbors
+		for (face, neighbor) in chunk_state.neighbors.iter() {
+			if let Some(neighbor) = neighbor {
+				neighbor.get_mut().neighbors[face.invert()] = None;
+			}
 		}
 
 		// Remove from dirty queue
-		if let Some(flagged_idx) = chunk_data.flagged {
-			self.flag_list.flagged.swap_remove(flagged_idx);
+		if chunk_state.dirty_index != usize::MAX {
+			self.dirty.swap_remove(chunk_state.dirty_index);
 
-			if let Some(moved) = self.flag_list.flagged.get(flagged_idx).copied() {
-				moved.get_mut().flagged = Some(flagged_idx);
+			if let Some(displaced) = self.dirty.get(chunk_state.dirty_index) {
+				displaced.get_mut().dirty_index = chunk_state.dirty_index;
 			}
 		}
-	}
-
-	pub fn chunk_state(&self, chunk: Obj<VoxelChunkData>) -> Ref<VoxelChunkDataView> {
-		Ref::map(chunk.get(), VoxelChunkDataView::wrap_ref)
-	}
-
-	pub fn chunk_state_mut(&mut self, chunk: Obj<VoxelChunkData>) -> VoxelChunkDataViewMut {
-		VoxelChunkDataViewMut {
-			chunk,
-			flag_list: &mut self.flag_list,
-			data: chunk.get_mut(),
-		}
-	}
-
-	pub fn flush_flagged(&mut self) -> Vec<Obj<VoxelChunkData>> {
-		let flagged = mem::take(&mut self.flag_list.flagged);
-
-		for &flagged in &flagged {
-			flagged.get_mut().flagged = None;
-		}
-
-		flagged
 	}
 }
 
 #[derive(Debug)]
-pub struct VoxelChunkData {
-	pub(super) pos: ChunkVec,
-	pub(super) flagged: Option<usize>,
-	pub(super) neighbors: CEnumMap<BlockFace, Option<Obj<Self>>>,
-	pub(super) data: Box<[u32; CHUNK_VOLUME as usize]>,
+pub struct ChunkVoxelData {
+	// The position of the chunk in the world.
+	pos: ChunkVec,
+
+	// References to the chunk's neighbors. These references never dangle.
+	neighbors: CEnumMap<BlockFace, Option<Obj<Self>>>,
+
+	// The chunk's block states or `None` if the chunk hasn't loaded yet.
+	blocks: Option<Box<[Block; CHUNK_VOLUME as usize]>>,
+
+	// The index of the chunk in the dirty queue or `usize::MAX` if it isn't in the queue.
+	dirty_index: usize,
 }
 
-transparent! {
-	#[derive(Debug)]
-	pub struct VoxelChunkDataView(VoxelChunkData, ());
-}
-
-impl VoxelChunkDataView {
+impl ChunkVoxelData {
 	pub fn pos(&self) -> ChunkVec {
-		self.raw.pos
+		self.pos
 	}
 
-	pub fn neighbor(&self, face: BlockFace) -> Option<Obj<VoxelChunkData>> {
-		self.raw.neighbors[face]
+	pub fn neighbor(&self, face: BlockFace) -> Option<Obj<Self>> {
+		self.neighbors[face]
 	}
 
-	pub fn block_state(&self, pos: BlockVec) -> BlockState {
-		BlockState::decode(self.raw.data[pos.to_index()])
+	pub fn blocks(&self) -> Option<ChunkBlocks<'_>> {
+		self.blocks.as_ref().map(|blocks| ChunkBlocks(blocks))
+	}
+
+	pub fn block(&self, pos: BlockVec) -> Option<Block> {
+		self.blocks().map(|blocks| blocks.block(pos))
+	}
+	
+	pub fn block_or_air(&self, pos: BlockVec) -> Block {
+		self.block(pos).unwrap_or(Block::AIR)
+	}
+
+	pub fn is_dirty(&self) -> bool {
+		self.dirty_index != usize::MAX
 	}
 }
 
-pub struct VoxelChunkDataViewMut<'a> {
-	chunk: Obj<VoxelChunkData>,
-	flag_list: &'a mut VoxelWorldFlagList,
-	data: RefMut<'a, VoxelChunkData>,
+#[derive(Debug, Copy, Clone)]
+pub struct ChunkBlocks<'a>(&'a [Block; CHUNK_VOLUME as usize]);
+
+impl ChunkBlocks<'_> {
+	pub fn block(&self, pos: BlockVec) -> Block {
+		self.0[pos.to_index()]
+	}
 }
 
-impl Deref for VoxelChunkDataViewMut<'_> {
-	type Target = VoxelChunkDataView;
+#[derive(Debug)]
+pub struct ChunkVoxelDataMut<'a> {
+	world: &'a mut WorldVoxelData,
+	chunk: Obj<ChunkVoxelData>,
+	chunk_state: RefMut<'a, ChunkVoxelData>,
+}
+
+impl Deref for ChunkVoxelDataMut<'_> {
+	type Target = ChunkVoxelData;
 
 	fn deref(&self) -> &Self::Target {
-		VoxelChunkDataView::wrap_ref(&self.data)
+		&self.chunk_state
 	}
 }
 
-impl VoxelChunkDataViewMut<'_> {
-	pub fn set_block_state(&mut self, pos: BlockVec, new: BlockState) {
-		let state = &mut self.data.data[pos.to_index()];
-		let new = new.encode();
+impl ChunkVoxelDataMut<'_> {
+	pub fn mark_dirty(&mut self) {
+		self.world
+			.internal_mark_dirty(self.chunk, &mut self.chunk_state.dirty_index);
+	}
 
-		if *state != new {
-			*state = new;
-			self.flag_list.add(&mut self.data, self.chunk);
+	pub fn blocks_mut(&mut self) -> Option<VoxelBlocksMut<'_>> {
+		let world = &mut *self.world;
+		let chunk = self.chunk;
+		let chunk_state = &mut *self.chunk_state;
+
+		let blocks = &mut chunk_state.blocks;
+		let dirty_index = &mut chunk_state.dirty_index;
+
+		blocks.as_mut().map(|blocks| VoxelBlocksMut {
+			world,
+			chunk,
+			blocks,
+			dirty_index,
+		})
+	}
+
+	#[must_use]
+	pub fn try_set_block(&mut self, pos: BlockVec, block: Block) -> bool {
+		if let Some(mut blocks) = self.blocks_mut() {
+			blocks.set_block(pos, block);
+			true
+		} else {
+			false
 		}
 	}
 }
 
-// === Block State Manipulation === //
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Default)]
-pub struct BlockState {
-	pub material: u16,
-	pub variant: u8,
-	pub light_level: u8,
+#[derive(Debug)]
+pub struct VoxelBlocksMut<'a> {
+	world: &'a mut WorldVoxelData,
+	chunk: Obj<ChunkVoxelData>,
+	blocks: &'a mut [Block; CHUNK_VOLUME as usize],
+	dirty_index: &'a mut usize,
 }
 
-// Format:
-//
-// ```text
-// LSB                                      MSB
-// ---- ---- ~~~~ ~~~~ | ---- ---- | ~~~~ ~~~~ |
-// Material Data       | Variant   | Light lvl |
-// (u16)               | (u8)      | (u8)      |
-// ```
-impl BlockState {
-	pub const AIR: Self = Self {
-		material: AIR_MATERIAL_SLOT,
-		light_level: 0,
-		variant: 0,
-	};
-
-	pub fn decode(word: u32) -> Self {
-		let material = word as u16;
-		let variant = word.to_le_bytes()[2];
-		let light_level = word.to_le_bytes()[3];
-
-		let decoded = Self {
-			material,
-			variant,
-			light_level,
-		};
-
-		debug_assert_eq!(
-			word,
-			decoded.encode(),
-			"Decoding of {word} as {decoded:?} resulted in a different round-trip encoding. This is a bug."
-		);
-
-		decoded
+impl VoxelBlocksMut<'_> {
+	pub fn as_ref(&self) -> ChunkBlocks<'_> {
+		ChunkBlocks(self.blocks)
 	}
 
-	pub fn encode(&self) -> u32 {
-		let mut enc = self.material as u32;
-		enc += (self.variant as u32) << 16;
-		enc += (self.light_level as u32) << (16 + 8);
-		enc
+	pub fn block(&self, pos: BlockVec) -> Block {
+		self.blocks[pos.to_index()]
+	}
+
+	pub fn set_block(&mut self, pos: BlockVec, block: Block) {
+		let block_ref = &mut self.blocks[pos.to_index()];
+
+		if *block_ref != block {
+			*block_ref = block;
+			self.world.internal_mark_dirty(self.chunk, self.dirty_index);
+		}
+	}
+}
+
+// === Block === //
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct Block {
+	pub material: MaterialId,
+	pub variant: u8,
+	pub light: u8,
+}
+
+impl Block {
+	pub const AIR: Self = Self::new(MaterialId::AIR);
+
+	pub const fn new(material: MaterialId) -> Self {
+		Self {
+			material,
+			variant: 0,
+			light: u8::MAX,
+		}
 	}
 
 	pub fn is_air(&self) -> bool {
-		self.material == AIR_MATERIAL_SLOT
+		self.material == MaterialId::AIR
 	}
 
 	pub fn is_not_air(&self) -> bool {
@@ -260,155 +290,143 @@ impl BlockState {
 	}
 }
 
-// === Location === //
+// === VoxelPointer === //
 
-pub type BlockLocation = Location<WorldVec>;
-pub type EntityLocation = Location<EntityVec>;
+pub type BlockVoxelPointer = VoxelPointer<WorldVec>;
+pub type EntityVoxelPointer = VoxelPointer<EntityVec>;
 
 #[derive(Debug, Copy, Clone)]
-pub struct Location<V> {
+pub struct VoxelPointer<V> {
+	cache: Option<Obj<ChunkVoxelData>>,
 	pos: V,
-	chunk_cache: Option<Obj<VoxelChunkData>>,
 }
 
-impl<V> Location<V>
+impl<V> VoxelPointer<V>
 where
 	WorldVec: CastVecFrom<V>,
 	V: CastVecFrom<WorldVec>,
 	V: SignedNumericVector3,
 {
-	pub fn new(world: &VoxelWorldData, pos: V) -> Self {
+	// === Constructors === //
+
+	pub fn new(world: &WorldVoxelData, pos: V) -> Self {
 		Self {
+			cache: world.get_chunk(WorldVec::cast_from(pos).chunk()),
 			pos,
-			chunk_cache: world.try_get_chunk(WorldVec::cast_from(pos).chunk()),
 		}
 	}
 
 	pub fn new_uncached(pos: V) -> Self {
-		Self {
-			pos,
-			chunk_cache: None,
-		}
+		Self { cache: None, pos }
 	}
 
-	pub fn refresh(&mut self, world: &VoxelWorldData) {
-		self.chunk_cache = world.try_get_chunk(WorldVec::cast_from(self.pos).chunk());
+	// === Getters === //
+
+	pub fn cached_chunk(&self) -> Option<Obj<ChunkVoxelData>> {
+		self.cache
 	}
 
 	pub fn pos(&self) -> V {
 		self.pos
 	}
 
-	pub fn set_pos_within_chunk(&mut self, pos: V) {
-		debug_assert_eq!(
-			WorldVec::cast_from(pos).chunk(),
-			WorldVec::cast_from(self.pos).chunk()
-		);
+	pub fn voxel_pos(&self) -> WorldVec {
+		self.pos.cast()
+	}
 
+	// === Cache management === //
+
+	pub fn refresh(&mut self, world: &WorldVoxelData) {
+		self.cache = world.get_chunk(self.voxel_pos().chunk());
+	}
+
+	pub fn chunk(&mut self, world: &WorldVoxelData) -> Option<Obj<ChunkVoxelData>> {
+		match self.cache {
+			Some(cache) if cache.is_alive() => Some(cache),
+			_ => {
+				self.refresh(world);
+				self.cached_chunk()
+			}
+		}
+	}
+
+	pub fn chunk_no_writeback(&self, world: &WorldVoxelData) -> Option<Obj<ChunkVoxelData>> {
+		self.clone().chunk(world)
+	}
+
+	// === Setters === //
+
+	pub fn set_pos(&mut self, world: Option<&WorldVoxelData>, pos: V) {
+		// Update `pos` and determine chunk delta
+		let old_chunk = self.voxel_pos().chunk();
 		self.pos = pos;
-	}
+		let new_chunk = self.voxel_pos().chunk();
 
-	pub fn chunk(&mut self, world: &VoxelWorldData) -> Option<Obj<VoxelChunkData>> {
-		match self.chunk_cache {
-			Some(chunk) => Some(chunk),
-			None => {
-				self.refresh(world);
-				self.chunk_cache
-			}
-		}
-	}
-
-	pub fn move_to_neighbor(&mut self, world: &VoxelWorldData, face: BlockFace) {
-		// Update position
-		let old_pos = self.pos;
-		self.pos += face.unit_typed::<V>();
-
-		// Update chunk cache
-		if WorldVec::cast_from(old_pos).chunk() != WorldVec::cast_from(self.pos).chunk() {
-			if let Some(chunk) = self.chunk_cache {
-				self.chunk_cache = world.chunk_state(chunk).neighbor(face);
+		// If the chunk changed and we have a cache, update it.
+		if let Some(cache) = self.cache.filter(|_| old_chunk != new_chunk) {
+			if let (Some(world), Some(face)) = (
+				world,
+				BlockFace::from_vec((new_chunk - old_chunk).to_glam()),
+			) {
+				self.cache = world.read_chunk(cache).neighbor(face);
 			} else {
-				self.refresh(world);
+				self.cache = None;
 			}
 		}
 	}
 
-	pub fn at_neighbor(mut self, world: &VoxelWorldData, face: BlockFace) -> Self {
-		self.move_to_neighbor(world, face);
-		self
+	pub fn move_by(&mut self, world: Option<&WorldVoxelData>, rel: V) {
+		self.set_pos(world, self.pos + rel);
 	}
 
-	pub fn move_to(&mut self, world: &VoxelWorldData, new_pos: V) {
-		let chunk_delta =
-			WorldVec::cast_from(new_pos).chunk() - WorldVec::cast_from(self.pos).chunk();
-
-		if let (Some(chunk), Some(face)) =
-			(self.chunk_cache, BlockFace::from_vec(chunk_delta.to_glam()))
-		{
-			self.pos = new_pos;
-			self.chunk_cache = world.chunk_state(chunk).neighbor(face);
-		} else {
-			self.pos = new_pos;
-			self.refresh(world);
-		}
+	pub fn move_to_neighbor(&mut self, world: Option<&WorldVoxelData>, face: BlockFace) {
+		self.move_by(world, face.unit_typed());
 	}
 
-	pub fn at_absolute(mut self, world: &VoxelWorldData, new_pos: V) -> Self {
-		self.move_to(world, new_pos);
-		self
+	// === Operations === //
+
+	pub fn at_absolute(&self, world: Option<&WorldVoxelData>, pos: V) -> Self {
+		let mut clone = self.clone();
+		clone.set_pos(world, pos);
+		clone
 	}
 
-	pub fn move_relative(&mut self, world: &VoxelWorldData, delta: V) {
-		self.move_to(world, self.pos + delta);
+	pub fn at_relative(&self, world: Option<&WorldVoxelData>, rel: V) -> Self {
+		let mut clone = self.clone();
+		clone.move_by(world, rel);
+		clone
 	}
 
-	pub fn at_relative(mut self, world: &VoxelWorldData, delta: V) -> Self {
-		self.move_relative(world, delta);
-		self
+	pub fn at_neighbor(&self, world: Option<&WorldVoxelData>, face: BlockFace) -> Self {
+		let mut clone = self.clone();
+		clone.move_to_neighbor(world, face);
+		clone
 	}
 
-	pub fn state(&mut self, world: &VoxelWorldData) -> Option<BlockState> {
-		self.chunk(world).map(|chunk| {
+	// === Aliases === //
+
+	pub fn state(&mut self, world: &WorldVoxelData) -> Option<Block> {
+		let chunk = self.chunk(world)?;
+		world.read_chunk(chunk).block(self.voxel_pos().block())
+	}
+
+	#[must_use]
+	pub fn try_set_state(&mut self, world: &mut WorldVoxelData, block: Block) -> bool {
+		if let Some(chunk) = self.chunk(world) {
 			world
-				.chunk_state(chunk)
-				.block_state(WorldVec::cast_from(self.pos).block())
-		})
+				.write_chunk(chunk)
+				.try_set_block(self.voxel_pos().block(), block)
+		} else {
+			false
+		}
 	}
+}
 
-	pub fn set_state_in_world(&mut self, world: &mut VoxelWorldData, state: BlockState) {
-		let chunk = match self.chunk(world) {
-			Some(chunk) => chunk,
-			None => {
-				log::warn!("`set_state` called on `BlockLocation` outside of the world.");
-				return;
-			}
-		};
-
-		world
-			.chunk_state_mut(chunk)
-			.set_block_state(WorldVec::cast_from(self.pos).block(), state);
-	}
-
-	pub fn set_state_or_create(&mut self, world: &mut VoxelWorldData, state: BlockState) {
-		// Fetch chunk
-		let chunk = match self.chunk(world) {
-			Some(chunk) => chunk,
-			None => {
-				let pos = WorldVec::cast_from(self.pos).chunk();
-				world.get_chunk_or_create(pos)
-			}
-		};
-
-		// Set block state
-		world
-			.chunk_state_mut(chunk)
-			.set_block_state(WorldVec::cast_from(self.pos).block(), state);
-	}
-
-	pub fn as_block_location(&self) -> BlockLocation {
-		BlockLocation {
-			chunk_cache: self.chunk_cache,
-			pos: WorldVec::cast_from(self.pos),
+impl EntityVoxelPointer {
+	pub fn as_block_location(&self) -> BlockVoxelPointer {
+		BlockVoxelPointer {
+			cache: self.cache,
+			pos: self.voxel_pos(),
 		}
 	}
 }

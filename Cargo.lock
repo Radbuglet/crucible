@@ -448,7 +448,6 @@ dependencies = [
  "hashbrown 0.13.2",
  "log",
  "num-traits",
- "semver",
  "smallvec",
  "typed-glam",
 ]
@@ -456,6 +455,13 @@ dependencies = [
 [[package]]
 name = "crucible-shared"
 version = "0.1.0"
+dependencies = [
+ "bort",
+ "crucible-foundation-shared",
+ "crucible-util",
+ "semver",
+ "smallvec",
+]
 
 [[package]]
 name = "crucible-util"
