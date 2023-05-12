@@ -1,4 +1,6 @@
-use std::{iter, mem::MaybeUninit};
+use std::mem::MaybeUninit;
+
+use crate::lang::iter::iter_repeat_len;
 
 use super::transmute::{entirely_unchecked_transmute, sizealign_checked_transmute};
 
@@ -124,28 +126,14 @@ where
 
 // === Boxed array creation === //
 
-pub fn iter_repeat_len<F, T>(f: F, len: usize) -> iter::Take<iter::RepeatWith<F>>
-where
-	F: FnMut() -> T,
-{
-	iter::repeat_with(f).take(len)
+pub fn boxed_arr_from_iter<T, const N: usize>(iter: impl IntoIterator<Item = T>) -> Box<[T; N]> {
+	Box::new(arr_from_iter(iter))
 }
 
-pub fn vec_from_fn<F, T>(f: F, len: usize) -> Vec<T>
-where
-	F: FnMut() -> T,
-{
+pub fn boxed_arr_from_fn<T, const N: usize>(mut f: impl FnMut() -> T) -> Box<[T; N]> {
+	Box::new(arr![f(); N])
+}
+
+pub fn boxed_slice_from_fn<T>(f: impl FnMut() -> T, len: usize) -> Box<[T]> {
 	iter_repeat_len(f, len).collect()
-}
-
-pub fn boxed_arr_from_fn<F, T>(f: F, len: usize) -> Box<[T]>
-where
-	F: FnMut() -> T,
-{
-	// We must reserve the exact capacity up-front to avoid re-allocation, which `Vec::from_iter`
-	// may not do (it's hard to tell what exactly will happen in Rust 1.66.0 because there's a *lot*
-	// of specialization happening under the hood)
-	let mut arr = Vec::with_capacity(len);
-	arr.extend(iter_repeat_len(f, len));
-	arr.into_boxed_slice()
 }

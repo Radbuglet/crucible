@@ -33,8 +33,10 @@ impl WorldManager {
 	}
 }
 
-#[derive(Debug)]
-pub struct WorldManagedData {}
+#[derive(Debug, Default)]
+pub struct WorldManagedData {
+	_private: (),
+}
 
 // === Views === //
 
@@ -76,5 +78,9 @@ impl WorldViewMut<'_> {
 		self.try_get_block(pos).unwrap_or(Block::AIR)
 	}
 
-	// TODO
+	#[must_use]
+	pub fn try_set_block(&mut self, pos: WorldVec, block: Block) -> bool {
+		self.location_cache.set_pos(Some(&self.voxel_data), pos);
+		self.location_cache.try_set_state(&mut self.voxel_data, block)
+	}
 }

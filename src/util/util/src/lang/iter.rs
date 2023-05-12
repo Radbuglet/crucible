@@ -163,3 +163,12 @@ impl<const N: usize> Iterator for VolumetricIter<N> {
 		self.next_capturing(|_| {})
 	}
 }
+
+// === Iter helpers === //
+
+pub fn iter_repeat_len<F, T>(f: F, len: usize) -> iter::Take<iter::RepeatWith<F>>
+where
+	F: FnMut() -> T,
+{
+	iter::repeat_with(f).take(len)
+}

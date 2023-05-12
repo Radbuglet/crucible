@@ -5,7 +5,7 @@ use std::{
 };
 
 use bort::{Obj, OwnedObj};
-use crucible_util::mem::{c_enum::CEnumMap, hash::FxHashMap};
+use crucible_util::mem::{array::boxed_arr_from_fn, c_enum::CEnumMap, hash::FxHashMap};
 use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 
 use crate::{
@@ -167,7 +167,7 @@ impl ChunkVoxelData {
 	pub fn block(&self, pos: BlockVec) -> Option<Block> {
 		self.blocks().map(|blocks| blocks.block(pos))
 	}
-	
+
 	pub fn block_or_air(&self, pos: BlockVec) -> Block {
 		self.block(pos).unwrap_or(Block::AIR)
 	}
@@ -205,6 +205,10 @@ impl ChunkVoxelDataMut<'_> {
 	pub fn mark_dirty(&mut self) {
 		self.world
 			.internal_mark_dirty(self.chunk, &mut self.chunk_state.dirty_index);
+	}
+
+	pub fn load_blocks(&mut self, data: Option<Box<[Block; CHUNK_VOLUME as usize]>>) {
+		self.chunk_state.blocks = Some(data.unwrap_or_else(|| boxed_arr_from_fn(|| Block::AIR)));
 	}
 
 	pub fn blocks_mut(&mut self) -> Option<VoxelBlocksMut<'_>> {
