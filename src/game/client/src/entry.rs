@@ -19,6 +19,8 @@ use winit::{
 	window::{WindowBuilder, WindowId},
 };
 
+use crate::game::GameSceneRoot;
+
 pub fn main_inner() -> anyhow::Result<()> {
 	// Create the event loop
 	let event_loop: EventLoop<WinitUserdata> = EventLoopBuilder::with_user_event().build();
@@ -72,15 +74,17 @@ pub fn main_inner() -> anyhow::Result<()> {
 	viewport_mgr.register(main_viewport);
 
 	// Create engine root
-	let engine = OwnedEntity::new()
+	let (engine, engine_ref) = OwnedEntity::new()
 		.with_debug_label("engine root")
 		.with(gfx)
 		.with(viewport_mgr)
-		.with(SceneManager::default());
+		.with(SceneManager::default())
+		.split_guard();
 
 	// Setup an initial scene
-	// engine.get_mut::<SceneManager>().set_initial(scene);
-	// TODO
+	engine
+		.get_mut::<SceneManager>()
+		.set_initial(GameSceneRoot::spawn(engine_ref, main_viewport_ref));
 
 	// Show all viewports
 	{
@@ -97,7 +101,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 	}
 
 	impl MainLoopHandler for MyMainLoopHandler {
-		fn on_update(&mut self, _main_loop: &mut MainLoop, _winit: &WinitEventProxy) {
+		fn on_update(&mut self, main_loop: &mut MainLoop, _winit: &WinitEventProxy) {
 			// Swap scenes
 			let mut scene_mgr = self.engine.get_mut::<SceneManager>();
 			drop(scene_mgr.swap_scenes());
@@ -105,7 +109,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			// Update the current scene
 			let scene = scene_mgr.current();
 			drop(scene_mgr);
-			scene.get::<SceneUpdateHandler>()(scene);
+			scene.get::<SceneUpdateHandler>()(scene, main_loop);
 
 			// Reset input trackers and request redraws
 			for (_, viewport) in self.engine.get::<ViewportManager>().window_map() {
@@ -138,7 +142,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 			// Render the current scene
 			let scene = self.engine.get::<SceneManager>().current();
-			scene.get::<SceneRenderHandler>()(scene, &mut frame);
+			scene.get::<SceneRenderHandler>()(scene, viewport, &mut frame);
 
 			// Present the frame
 			frame.present();

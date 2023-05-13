@@ -113,6 +113,14 @@ impl FullScreenTexture {
 
 		self.texture.as_mut().map(|(tex, view)| (tex, view))
 	}
+
+	pub fn acquire_view(
+		&mut self,
+		gfx: &GfxContext,
+		viewport: &Viewport,
+	) -> &mut wgpu::TextureView {
+		self.acquire(gfx, viewport).unwrap().1
+	}
 }
 
 // === SamplerDesc === //

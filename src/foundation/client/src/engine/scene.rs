@@ -1,6 +1,8 @@
 use bort::{Entity, OwnedEntity};
 use crucible_util::delegate;
 
+use super::io::main_loop::MainLoop;
+
 #[derive(Debug, Default)]
 pub struct SceneManager {
 	current: Option<OwnedEntity>,
@@ -35,9 +37,9 @@ impl SceneManager {
 }
 
 delegate! {
-	pub fn SceneUpdateHandler(me: Entity)
+	pub fn SceneUpdateHandler(&'a self [me: Entity], main_loop: &mut MainLoop)
 }
 
 delegate! {
-	pub fn SceneRenderHandler(me: Entity, frame: &mut wgpu::SurfaceTexture)
+	pub fn SceneRenderHandler(&'a self [me: Entity], viewport: Entity, frame: &mut wgpu::SurfaceTexture)
 }

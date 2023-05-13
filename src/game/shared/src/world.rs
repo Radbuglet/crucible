@@ -10,7 +10,7 @@ use crucible_util::mem::hash::FxHashMap;
 
 // === State === //
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct WorldManager {
 	worlds: FxHashMap<String, OwnedObj<WorldManagedData>>,
 }
@@ -81,6 +81,7 @@ impl WorldViewMut<'_> {
 	#[must_use]
 	pub fn try_set_block(&mut self, pos: WorldVec, block: Block) -> bool {
 		self.location_cache.set_pos(Some(&self.voxel_data), pos);
-		self.location_cache.try_set_state(&mut self.voxel_data, block)
+		self.location_cache
+			.try_set_state(&mut self.voxel_data, block)
 	}
 }

@@ -407,6 +407,8 @@ dependencies = [
  "anyhow",
  "bort",
  "crucible-foundation-client",
+ "crucible-foundation-shared",
+ "crucible-shared",
  "crucible-util",
  "env_logger",
  "futures",

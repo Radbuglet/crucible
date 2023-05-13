@@ -6,7 +6,9 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 bort = { workspace = true }
+crucible-foundation-shared = { workspace = true }
 crucible-foundation-client = { workspace = true }
+crucible-shared = { workspace = true }
 crucible-util = { workspace = true }
 env_logger = "0.10.0"
 futures = "0.3.28"

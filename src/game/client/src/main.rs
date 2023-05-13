@@ -1,4 +1,5 @@
 mod entry;
+mod game;
 
 fn main() {
 	use crucible_util::debug::error::ErrorFormatExt;

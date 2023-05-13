@@ -101,6 +101,7 @@ macro_rules! delegate {
 							$(,$fn_lt)*
 						)?)?
 					> fn(
+						&$inj_lt (),
 						$(&mut $inj),*
 					) -> Injector::GuardHelper<$inj_lt>>,
 				Receiver: ?Sized + 'static,
@@ -114,7 +115,7 @@ macro_rules! delegate {
 					) $(-> $ret)?,
 			{
 				Self::new(move |$(mut $inj_name,)* $($para_name,)*| {
-					let guard = Injector::INJECTOR($(&mut $inj_name,)*);
+					let guard = Injector::INJECTOR(&(), $(&mut $inj_name,)*);
 
 					handler(&*guard, $($inj_name,)* $($para_name,)*)
 				})
@@ -132,6 +133,7 @@ macro_rules! delegate {
 							$(,$fn_lt)*
 						)?)?
 					> fn(
+						&$inj_lt (),
 						$(&mut $inj),*
 					) -> Injector::GuardHelper<$inj_lt>>,
 				Receiver: ?Sized + 'static,
@@ -145,7 +147,7 @@ macro_rules! delegate {
 					) $(-> $ret)?,
 			{
 				Self::new(move |$(mut $inj_name,)* $($para_name,)*| {
-					let mut guard = Injector::INJECTOR($(&mut $inj_name,)*);
+					let mut guard = Injector::INJECTOR(&(), $(&mut $inj_name,)*);
 
 					handler(&mut *guard, $($inj_name,)* $($para_name,)*)
 				})

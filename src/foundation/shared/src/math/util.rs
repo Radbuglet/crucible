@@ -50,15 +50,19 @@ impl Sign {
 		}
 	}
 
-	pub fn unit_i(self) -> i32 {
+	pub fn unit_i32(self) -> i32 {
 		self.unit_typed()
 	}
 
-	pub fn unit_f(self) -> f32 {
+	pub fn unit_i64(self) -> i64 {
 		self.unit_typed()
 	}
 
-	pub fn unit_d(self) -> f64 {
+	pub fn unit_f32(self) -> f32 {
+		self.unit_typed()
+	}
+
+	pub fn unit_f64(self) -> f64 {
 		self.unit_typed()
 	}
 }
