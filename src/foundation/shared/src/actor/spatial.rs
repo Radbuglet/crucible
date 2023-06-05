@@ -43,14 +43,14 @@ fn spatial_chunk_for_aabb(aabb: EntityAabb) -> IVec3 {
 	spatial_chunk_for_pos(aabb.origin)
 }
 
-// === SpatialManager === //
+// === SpatialTracker === //
 
 #[derive(Debug, Default)]
-pub struct SpatialManager {
+pub struct SpatialTracker {
 	chunks: FxHashMap<IVec3, Vec<Obj<Spatial>>>,
 }
 
-impl SpatialManager {
+impl SpatialTracker {
 	pub fn new() -> Self {
 		Self::default()
 	}

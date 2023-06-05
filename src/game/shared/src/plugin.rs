@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
-use bort::{Entity, OwnedEntity};
-use crucible_util::delegate;
+use bort::{Entity, Obj, OwnedEntity, OwnedObj};
+use crucible_util::{delegate, mem::hash::FxHashMap};
 use semver::Version;
 use smallvec::SmallVec;
 
@@ -14,12 +14,17 @@ delegate! {
 #[derive(Debug)]
 pub struct BasePlugin {
 	me: Entity,
+	deps: usize,
 	config: PluginConfig,
 }
 
 impl BasePlugin {
 	pub fn new(me: Entity, config: PluginConfig) -> Self {
-		Self { me, config }
+		Self {
+			me,
+			deps: config.dependencies.len(),
+			config,
+		}
 	}
 
 	pub fn entity(&self) -> Entity {
@@ -118,5 +123,53 @@ pub trait BoilerPlugin: 'static + Default {
 				)
 			})
 			.with(Self::default())
+	}
+}
+
+// === PluginManager === //
+
+#[derive(Debug)]
+pub struct PluginManager {
+	loadable_plugins: Vec<OwnedObj<BasePlugin>>,
+	blocked_plugins: FxHashMap<Cow<'static, str>, OwnedObj<BasePlugin>>,
+	by_id: FxHashMap<Cow<'static, str>, OwnedObj<BasePlugin>>,
+}
+
+impl PluginManager {
+	pub fn add(&mut self, plugin: OwnedObj<BasePlugin>) {
+		let plugin_state = plugin.get();
+
+		if plugin_state.deps == 0 {
+			self.loadable_plugins.push(plugin);
+		} else {
+			self.blocked_plugins
+				.insert(plugin_state.config.id.clone(), plugin);
+		}
+	}
+
+	pub fn load(&mut self) {
+		while let Some(plugin) = self.loadable_plugins.pop() {
+			let plugin_state = &mut *plugin.get_mut();
+
+			// Run enable logic
+			(plugin_state.config.on_enable.clone())(plugin_state);
+
+			// Unblock dependencies
+			for dep in &plugin_state.config.dependencies {
+				let blocked = &mut *self.blocked_plugins[dep].get_mut();
+
+				blocked.deps -= 1;
+				if blocked.deps == 0 {
+					self.loadable_plugins
+						.push(self.blocked_plugins.remove(dep).unwrap());
+				}
+			}
+		}
+
+		assert_eq!(self.blocked_plugins.len(), 0);
+	}
+
+	pub fn get(&self, id: &str) -> Obj<BasePlugin> {
+		self.by_id[id].obj()
 	}
 }

@@ -104,10 +104,6 @@ impl WorldVoxelData {
 		dirty
 	}
 
-	// === Alias methods === //
-
-	// TODO
-
 	// === Internal methods === //
 
 	fn internal_mark_dirty(&mut self, chunk: Obj<ChunkVoxelData>, dirty_index: &mut usize) {
@@ -136,7 +132,7 @@ impl WorldVoxelData {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ChunkVoxelData {
 	// The position of the chunk in the world.
 	pos: ChunkVec,

@@ -2,7 +2,7 @@ use std::cell::RefMut;
 
 use bort::{Obj, OwnedObj};
 use crucible_foundation_shared::{
-	actor::spatial::SpatialManager,
+	actor::spatial::SpatialTracker,
 	math::WorldVec,
 	voxel::data::{Block, BlockVoxelPointer, WorldVoxelData},
 };
@@ -16,20 +16,18 @@ pub struct WorldManager {
 }
 
 impl WorldManager {
-	pub fn create_world(&mut self, id: impl ToString) {
-		todo!()
-	}
-
-	pub fn unload_world(&mut self, id: &str) {
-		todo!()
+	pub fn create_world(
+		&mut self,
+		id: impl ToString,
+		world: OwnedObj<WorldManagedData>,
+	) -> Obj<WorldManagedData> {
+		let (world, world_ref) = world.split_guard();
+		self.worlds.insert(id.to_string(), world);
+		world_ref
 	}
 
 	pub fn mutate_world(&mut self, world: Obj<WorldManagedData>) -> WorldViewMut<'_> {
 		WorldViewMut::new(world)
-	}
-
-	pub fn get_world_mut(&mut self, id: &str) {
-		todo!()
 	}
 }
 
@@ -45,7 +43,7 @@ pub struct WorldManagedData {
 pub struct WorldViewMut<'a> {
 	pub managed: RefMut<'a, WorldManagedData>,
 	pub voxel_data: RefMut<'a, WorldVoxelData>,
-	pub spatials: RefMut<'a, SpatialManager>,
+	pub spatials: RefMut<'a, SpatialTracker>,
 	pub location_cache: BlockVoxelPointer,
 }
 

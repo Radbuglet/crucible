@@ -1,4 +1,7 @@
-use std::ops::Range;
+use std::{
+	ops::Range,
+	time::{Duration, Instant},
+};
 
 use bort::{Obj, OwnedObj};
 use crucible_util::delegate;
@@ -77,6 +80,8 @@ impl WorldLoader {
 		from_region: Option<R>,
 		to_region: Option<R>,
 	) {
+		let unload_at = Instant::now() + Duration::from_secs(15);
+
 		R::compare(to_region, from_region, |pos, sign| {
 			let chunk_obj = world
 				.get_chunk(pos)
@@ -104,9 +109,13 @@ impl WorldLoader {
 			if sign == Sign::Negative && chunk.rc == 1 {
 				chunk.flag_loc = self.to_unload.len();
 				self.to_unload.push(chunk_obj);
+				chunk.unload_at = unload_at;
 			}
 
-			chunk.rc = chunk.rc.saturating_add_signed(sign.unit_i64());
+			chunk.rc = chunk
+				.rc
+				.checked_add_signed(sign.unit_i64())
+				.expect("too many references to the chunk");
 		});
 	}
 
@@ -132,6 +141,7 @@ impl WorldLoader {
 pub struct LoadedChunk {
 	rc: u64,
 	flag_loc: usize,
+	unload_at: Instant,
 }
 
 impl Default for LoadedChunk {
@@ -139,6 +149,7 @@ impl Default for LoadedChunk {
 		Self {
 			rc: 0,
 			flag_loc: usize::MAX,
+			unload_at: Instant::now(),
 		}
 	}
 }
@@ -146,5 +157,9 @@ impl Default for LoadedChunk {
 impl LoadedChunk {
 	pub fn rc(&self) -> u64 {
 		self.rc
+	}
+
+	pub fn unload_at(&self) -> Instant {
+		self.unload_at
 	}
 }

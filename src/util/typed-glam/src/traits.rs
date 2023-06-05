@@ -473,7 +473,6 @@ impl_numeric_vector!(
 	glam::Vec2,  glam::BVec2,  f32,  Dim2;
 	glam::Vec3,  glam::BVec3,  f32,  Dim3;
 	glam::Vec3A, glam::BVec3A, f32,  Dim3;
-	glam::Vec4,  glam::BVec4A, f32,  Dim4;
 	glam::DVec2, glam::BVec2,  f64,  Dim2;
 	glam::DVec3, glam::BVec3,  f64,  Dim3;
 	glam::DVec4, glam::BVec4,  f64,  Dim4;
@@ -484,6 +483,21 @@ impl_numeric_vector!(
 	glam::UVec3, glam::BVec3,  u32,  Dim3;
 	glam::UVec4, glam::BVec4,  u32,  Dim4;
 );
+
+// N.B. Unfortunately, the type of Vec4's boolean vector changes between scalar and SIMD
+// implementations.
+#[cfg(not(any(
+	feature = "core-simd",
+	target_feature = "sse2",
+	target_feature = "simd128"
+)))]
+impl_numeric_vector!(glam::Vec4, glam::BVec4, f32, Dim4);
+
+#[cfg(all(
+	target_feature = "sse2",
+	not(any(feature = "core-simd", feature = "scalar-math"))
+))]
+impl_numeric_vector!(glam::Vec4, glam::BVec4A, f32, Dim4);
 
 macro_rules! impl_integer_vector {
 	($($ty:ty),*$(,)?) => {$(
