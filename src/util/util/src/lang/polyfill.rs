@@ -8,24 +8,13 @@ use super::std_traits::OptionLike;
 // === Option === //
 
 pub trait OptionPoly: OptionLike {
-	fn p_is_some_and<F>(self, f: F) -> bool
-	where
-		F: FnOnce(Self::Value) -> bool;
-
-	fn p_is_none_or<F>(self, f: F) -> bool
+	fn is_none_or<F>(self, f: F) -> bool
 	where
 		F: FnOnce(Self::Value) -> bool;
 }
 
 impl<T> OptionPoly for Option<T> {
-	fn p_is_some_and<F>(self, f: F) -> bool
-	where
-		F: FnOnce(Self::Value) -> bool,
-	{
-		self.map_or(false, f)
-	}
-
-	fn p_is_none_or<F>(self, f: F) -> bool
+	fn is_none_or<F>(self, f: F) -> bool
 	where
 		F: FnOnce(Self::Value) -> bool,
 	{

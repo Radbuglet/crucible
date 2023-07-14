@@ -1,4 +1,4 @@
-use bort::CompRef;
+use bort::prelude::*;
 use crucible_util::{impl_tuples, lang::tuple::PreOwned, mem::array::map_arr};
 use typed_wgpu::{
 	pipeline::PipelineSet,

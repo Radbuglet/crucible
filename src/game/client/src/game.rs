@@ -1,4 +1,4 @@
-use bort::{Entity, OwnedEntity};
+use bort::prelude::*;
 use crucible_foundation_client::{
 	engine::{
 		gfx::texture::FullScreenTexture,
@@ -7,12 +7,9 @@ use crucible_foundation_client::{
 	},
 	gfx::voxel::mesh::{ChunkVoxelMesh, WorldVoxelMesh},
 };
-use crucible_foundation_shared::{
-	bort::delegate::ComponentInjector,
-	voxel::{
-		data::{ChunkVoxelData, WorldVoxelData},
-		loader::{LoadedChunk, WorldChunkFactory, WorldLoader},
-	},
+use crucible_foundation_shared::voxel::{
+	data::{ChunkVoxelData, WorldVoxelData},
+	loader::{LoadedChunk, WorldChunkFactory, WorldLoader},
 };
 use crucible_shared::world::{WorldManagedData, WorldManager};
 use winit::event::VirtualKeyCode;

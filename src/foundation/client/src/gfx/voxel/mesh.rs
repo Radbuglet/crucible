@@ -1,18 +1,15 @@
 use std::time::{Duration, Instant};
 
-use bort::{storage, CompRef, Entity};
+use bort::prelude::*;
 use crevice::std430::AsStd430;
 use crucible_foundation_shared::{
 	material::{MaterialId, MaterialRegistry},
 	math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, Tri, WorldVec, WorldVecExt, QUAD_UVS},
 	voxel::{data::WorldVoxelData, mesh::QuadMeshLayer},
 };
-use crucible_util::{
-	lang::polyfill::OptionPoly,
-	mem::{
-		array::map_arr,
-		c_enum::{CEnum, CEnumMap},
-	},
+use crucible_util::mem::{
+	array::map_arr,
+	c_enum::{CEnum, CEnumMap},
 };
 use hashbrown::HashSet;
 use typed_glam::glam::{UVec2, Vec3};
@@ -211,7 +208,7 @@ impl WorldVoxelMesh {
 			);
 
 			// Ensure that we haven't gone over our time limit.
-			if time_limit.p_is_some_and(|time_limit| started.elapsed() > time_limit) {
+			if time_limit.is_some_and(|time_limit| started.elapsed() > time_limit) {
 				break;
 			}
 		}

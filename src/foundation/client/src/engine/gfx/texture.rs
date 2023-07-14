@@ -1,6 +1,6 @@
 use std::borrow::{Borrow, Cow};
 
-use bort::CompRef;
+use bort::prelude::*;
 use crucible_util::debug::label::{DebugLabel, ReifiedDebugLabel};
 use typed_glam::glam::UVec2;
 

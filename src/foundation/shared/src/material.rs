@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use bort::{Entity, OwnedEntity};
+use bort::prelude::*;
 use crucible_util::mem::{free_list::FreeList, hash::FxHashMap};
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

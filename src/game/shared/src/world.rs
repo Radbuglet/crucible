@@ -1,6 +1,4 @@
-use std::cell::RefMut;
-
-use bort::{Obj, OwnedObj};
+use bort::{core::heap::HeapMut, prelude::*};
 use crucible_foundation_shared::{
 	actor::spatial::SpatialTracker,
 	math::WorldVec,
@@ -41,9 +39,9 @@ pub struct WorldManagedData {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct WorldViewMut<'a> {
-	pub managed: RefMut<'a, WorldManagedData>,
-	pub voxel_data: RefMut<'a, WorldVoxelData>,
-	pub spatials: RefMut<'a, SpatialTracker>,
+	pub managed: HeapMut<'a, WorldManagedData>,
+	pub voxel_data: HeapMut<'a, WorldVoxelData>,
+	pub spatials: HeapMut<'a, SpatialTracker>,
 	pub location_cache: BlockVoxelPointer,
 }
 

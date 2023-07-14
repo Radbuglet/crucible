@@ -1,5 +1,3 @@
-pub mod control;
-pub mod delegate;
 pub mod format;
 pub mod generator;
 pub mod iter;
@@ -9,4 +7,3 @@ pub mod polyfill;
 pub mod std_traits;
 pub mod transparent;
 pub mod tuple;
-pub mod view;

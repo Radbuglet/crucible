@@ -70,7 +70,7 @@ impl MainLoop {
 					let update_start = Instant::now();
 					let next_update = main_loop.next_update();
 
-					if next_update.p_is_none_or(|next_update| update_start > next_update) {
+					if next_update.is_none_or(|next_update| update_start > next_update) {
 						// Run user-define update logic.
 						// It is up to the update handler to queue up redraw requests where
 						// applicable.

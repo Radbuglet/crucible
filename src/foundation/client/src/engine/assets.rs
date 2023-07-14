@@ -1,6 +1,6 @@
 use std::any::type_name;
 
-use bort::{storage, CompRef, Entity, OwnedEntity};
+use bort::prelude::*;
 use crucible_util::lang::{polyfill::BuildHasherPoly, tuple::ToOwnedTupleEq};
 use hashbrown::{hash_map::RawEntryMut, HashMap};
 

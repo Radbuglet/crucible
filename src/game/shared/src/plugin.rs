@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
-use bort::{Entity, Obj, OwnedEntity, OwnedObj};
-use crucible_util::{delegate, mem::hash::FxHashMap};
+use bort::prelude::*;
+use crucible_util::mem::hash::FxHashMap;
 use semver::Version;
 use smallvec::SmallVec;
 
