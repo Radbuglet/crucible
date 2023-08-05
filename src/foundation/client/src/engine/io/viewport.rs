@@ -1,4 +1,4 @@
-use bort::prelude::*;
+use bort::{Entity, OwnedEntity};
 use crucible_util::mem::{hash::FxHashMap, manually_bind::ManuallyBind};
 use thiserror::Error;
 use typed_glam::glam::UVec2;

@@ -1,17 +1,10 @@
-use bort::prelude::*;
-use crucible_foundation_client::{
-	engine::{
-		gfx::texture::FullScreenTexture,
-		io::{gfx::GfxContext, input::InputManager, main_loop::MainLoop},
-		scene::{SceneRenderHandler, SceneUpdateHandler},
-	},
-	gfx::voxel::mesh::{ChunkVoxelMesh, WorldVoxelMesh},
+use bort::{ComponentInjector, Entity, OwnedEntity};
+use crucible_foundation_client::engine::{
+	gfx::texture::FullScreenTexture,
+	io::{gfx::GfxContext, input::InputManager, main_loop::MainLoop},
+	scene::{SceneRenderHandler, SceneUpdateHandler},
 };
-use crucible_foundation_shared::voxel::{
-	data::{ChunkVoxelData, WorldVoxelData},
-	loader::{LoadedChunk, WorldChunkFactory, WorldLoader},
-};
-use crucible_shared::world::{WorldManagedData, WorldManager};
+
 use winit::event::VirtualKeyCode;
 
 #[derive(Debug)]
@@ -25,7 +18,6 @@ impl GameSceneRoot {
 		let root = OwnedEntity::new()
 			.with_debug_label("game root")
 			.with(Self { engine, viewport })
-			.with(WorldManager::default())
 			.with(SceneUpdateHandler::new_method_mut(
 				ComponentInjector,
 				Self::update,
@@ -34,24 +26,6 @@ impl GameSceneRoot {
 				ComponentInjector,
 				Self::render,
 			));
-
-		// Create the main world
-		root.get_mut::<WorldManager>().create_world(
-			"overworld",
-			OwnedEntity::new()
-				.with(WorldManagedData::default())
-				.with(WorldVoxelData::default())
-				.with(WorldVoxelMesh::default())
-				.with(WorldLoader::new(WorldChunkFactory::new(|_, pos| {
-					OwnedEntity::new()
-						.with_debug_label(format_args!("chunk at {pos:?}"))
-						.with(ChunkVoxelData::default())
-						.with(ChunkVoxelMesh::default())
-						.with(LoadedChunk::default())
-						.into_obj()
-				})))
-				.into_obj(),
-		);
 
 		root
 	}

@@ -1,4 +1,4 @@
-use bort::prelude::*;
+use bort::{storage, Entity, Storage};
 use crucible_util::{
 	lang::{
 		generator::{ContinuationSig, Yield},

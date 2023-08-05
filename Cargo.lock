@@ -212,7 +212,7 @@ dependencies = [
 [[package]]
 name = "bort"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/bort.git?rev=c56f3e939214a818d98951ab1f02cbc3cdfbd2db#c56f3e939214a818d98951ab1f02cbc3cdfbd2db"
+source = "git+https://github.com/Radbuglet/bort.git?rev=bafb6c4b028188bf060f14bc9fd0710942af513a#bafb6c4b028188bf060f14bc9fd0710942af513a"
 dependencies = [
  "cfgenius",
  "derive-where",

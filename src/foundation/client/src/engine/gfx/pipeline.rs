@@ -1,4 +1,4 @@
-use bort::prelude::*;
+use bort::{core::cell::OptRef, CompRef};
 use crucible_util::{impl_tuples, lang::tuple::PreOwned, mem::array::map_arr};
 use typed_wgpu::{
 	pipeline::PipelineSet,
@@ -14,16 +14,18 @@ pub trait BindGroupExt: BindGroup {
 		assets: &mut AssetManager,
 		gfx: &GfxContext,
 		config: &Self::Config,
-	) -> CompRef<wgpu::BindGroupLayout> {
-		assets.cache(config, |_| Self::create_layout(&gfx.device, config).raw)
+	) -> OptRef<'static, wgpu::BindGroupLayout> {
+		CompRef::into_opt_ref(
+			assets.cache(config, |_| Self::create_layout(&gfx.device, config).raw),
+		)
 	}
 
 	fn load_layout(
 		assets: &mut AssetManager,
 		gfx: &GfxContext,
 		config: &Self::Config,
-	) -> CompRef<BindGroupLayout<Self>> {
-		CompRef::map(
+	) -> OptRef<'static, BindGroupLayout<Self>> {
+		OptRef::map(
 			Self::load_layout_raw(assets, gfx, config),
 			BindGroupLayout::wrap_ref,
 		)
@@ -52,37 +54,46 @@ pub fn load_untyped_pipeline_layout<const N: usize, const M: usize>(
 	gfx: &GfxContext,
 	bind_groups: [&wgpu::BindGroupLayout; N],
 	push_constants: [wgpu::PushConstantRange; M],
-) -> CompRef<wgpu::PipelineLayout> {
+) -> OptRef<'static, wgpu::PipelineLayout> {
 	let bind_ids = map_arr(bind_groups, |v| v.global_id());
 
-	assets.cache((&bind_ids, PreOwned(push_constants.clone())), |_| {
-		gfx.device
-			.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-				label: None,
-				bind_group_layouts: &bind_groups,
-				push_constant_ranges: &push_constants,
-			})
-	})
+	CompRef::into_opt_ref(
+		assets.cache((&bind_ids, PreOwned(push_constants.clone())), |_| {
+			gfx.device
+				.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+					label: None,
+					bind_group_layouts: &bind_groups,
+					push_constant_ranges: &push_constants,
+				})
+		}),
+	)
 }
 
 pub trait PipelineLayoutConfigs<K: PipelineSet>: Sized {
-	fn load(self, assets: &mut AssetManager, gfx: &GfxContext) -> CompRef<PipelineLayout<K>>;
+	fn load(
+		self,
+		assets: &mut AssetManager,
+		gfx: &GfxContext,
+	) -> OptRef<'static, PipelineLayout<K>>;
 }
 
 pub trait PipelineLayoutConfigsDefault: PipelineSet {
-	fn load_default(assets: &mut AssetManager, gfx: &GfxContext) -> CompRef<PipelineLayout<Self>>;
+	fn load_default(
+		assets: &mut AssetManager,
+		gfx: &GfxContext,
+	) -> OptRef<'static, PipelineLayout<Self>>;
 }
 
 macro_rules! impl_pipeline_layout_configs {
 	($($para:ident:$field:tt),*) => {
 		impl<$($para: 'static + BindGroup),*> PipelineLayoutConfigs<($($para,)*)> for ($(&$para::Config,)*) {
-			fn load(self, assets: &mut AssetManager, gfx: &GfxContext) -> CompRef<PipelineLayout<($($para,)*)>> {
+			fn load(self, assets: &mut AssetManager, gfx: &GfxContext) -> OptRef<'static, PipelineLayout<($($para,)*)>> {
 				let bind_groups = [$(&$para::load_layout(assets, gfx, &self.$field).raw),*];
 				let push_constants = [];
 
 				let raw = load_untyped_pipeline_layout(assets, gfx, bind_groups, push_constants);
 
-				CompRef::map(raw, PipelineLayout::wrap_ref)
+				OptRef::map(raw, PipelineLayout::wrap_ref)
 			}
 		}
 
@@ -90,7 +101,7 @@ macro_rules! impl_pipeline_layout_configs {
 		where
 			$($para::Config: Default),*
 		{
-			fn load_default(assets: &mut AssetManager, gfx: &GfxContext) -> CompRef<PipelineLayout<Self>> {
+			fn load_default(assets: &mut AssetManager, gfx: &GfxContext) -> OptRef<'static, PipelineLayout<Self>> {
 				($(&<$para::Config>::default(),)*).load(assets, gfx)
 			}
 		}
@@ -99,10 +110,10 @@ macro_rules! impl_pipeline_layout_configs {
 
 impl_tuples!(impl_pipeline_layout_configs);
 
-pub trait PipelineLayoutExt {
+pub trait PipelineLayoutExt: Sized {
 	type Set: PipelineSet;
 
-	fn load_default(assets: &mut AssetManager, gfx: &GfxContext) -> CompRef<Self>
+	fn load_default(assets: &mut AssetManager, gfx: &GfxContext) -> OptRef<'static, Self>
 	where
 		Self::Set: PipelineLayoutConfigsDefault;
 
@@ -110,13 +121,13 @@ pub trait PipelineLayoutExt {
 		assets: &mut AssetManager,
 		gfx: &GfxContext,
 		configs: impl PipelineLayoutConfigs<Self::Set>,
-	) -> CompRef<Self>;
+	) -> OptRef<'static, Self>;
 }
 
 impl<T: PipelineSet> PipelineLayoutExt for PipelineLayout<T> {
 	type Set = T;
 
-	fn load_default(assets: &mut AssetManager, gfx: &GfxContext) -> CompRef<Self>
+	fn load_default(assets: &mut AssetManager, gfx: &GfxContext) -> OptRef<'static, Self>
 	where
 		Self::Set: PipelineLayoutConfigsDefault,
 	{
@@ -127,7 +138,7 @@ impl<T: PipelineSet> PipelineLayoutExt for PipelineLayout<T> {
 		assets: &mut AssetManager,
 		gfx: &GfxContext,
 		configs: impl PipelineLayoutConfigs<Self::Set>,
-	) -> CompRef<Self> {
+	) -> OptRef<'static, Self> {
 		configs.load(assets, gfx)
 	}
 }

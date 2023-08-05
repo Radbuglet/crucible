@@ -21,7 +21,7 @@ typed-glam = { path = "src/util/typed-glam" }
 typed-wgpu = { path = "src/util/typed-wgpu" }
 
 # Interface dependencies (i.e. dependencies that leak out into the public interface)
-bort = { git = "https://github.com/Radbuglet/bort.git", rev = "c56f3e939214a818d98951ab1f02cbc3cdfbd2db" }
+bort = { git = "https://github.com/Radbuglet/bort.git", rev = "bafb6c4b028188bf060f14bc9fd0710942af513a" }
 hashbrown = "0.14.0"
 log = "0.4.19"
 smallvec = "1.11.0"
@@ -31,4 +31,4 @@ winit = "0.28.6"
 # Internal dependencies (i.e. dependencies that are only used as implementation details)
 anyhow = "1.0.70"
 derive-where = "1.2.1"
-num-traits = "0.2.15" # These act mostly like trait aliases and should not be weakened over time.
+num-traits = "0.2.15"  # These act mostly like trait aliases and should not be weakened over time.

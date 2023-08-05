@@ -1,3 +1,5 @@
+//! Implements a data-structure for iterating through objects partially contained within a given volume.
+//!
 //! ## Internals
 //!
 //! To optimize AABB intersection queries, we place every spatial into exactly one spatial-chunk, which
@@ -20,7 +22,7 @@
 //! concatenate their entity lists together to form a candidate list. For AABBs less than
 //! `HALF_GRID_SIZE`, we will be querying at most 8 chunks.
 
-use bort::prelude::*;
+use bort::{CompMut, Obj};
 use crucible_util::{lang::iter::VolumetricIter, mem::hash::FxHashMap};
 use typed_glam::{ext::VecExt, glam::IVec3};
 
@@ -55,22 +57,20 @@ impl SpatialTracker {
 		Self::default()
 	}
 
-	pub fn register(&mut self, target: Obj<Spatial>) {
-		let target_data = &mut *target.get_mut();
-		let chunk = spatial_chunk_for_aabb(target_data.aabb);
-		self.register_inner(target, target_data, chunk);
+	pub fn register(&mut self, target: &mut CompMut<Spatial>) {
+		let chunk = spatial_chunk_for_aabb(target.aabb);
+		self.register_inner(target, chunk);
 	}
 
-	pub fn unregister(&mut self, target: Obj<Spatial>) {
-		let target_data = &mut *target.get_mut();
-		let chunk = spatial_chunk_for_aabb(target_data.aabb);
-		self.unregister_inner(target_data, chunk);
+	pub fn unregister(&mut self, target: &mut CompMut<Spatial>) {
+		let chunk = spatial_chunk_for_aabb(target.aabb);
+		self.unregister_inner(target, chunk);
 	}
 
-	fn register_inner(&mut self, target: Obj<Spatial>, target_data: &mut Spatial, chunk: IVec3) {
+	fn register_inner(&mut self, target_data: &mut CompMut<Spatial>, chunk: IVec3) {
 		let spatials = self.chunks.entry(chunk).or_insert_with(Default::default);
 		target_data.index = spatials.len();
-		spatials.push(target);
+		spatials.push(CompMut::owner(target_data));
 	}
 
 	fn unregister_inner(&mut self, target_data: &mut Spatial, chunk: IVec3) {
@@ -99,18 +99,16 @@ impl SpatialTracker {
 		target.get().aabb
 	}
 
-	pub fn update(&mut self, target: Obj<Spatial>, aabb: EntityAabb) {
-		let target_data = &mut *target.get_mut();
-
+	pub fn update(&mut self, target: &mut CompMut<Spatial>, aabb: EntityAabb) {
 		// Update AABB
-		let old_chunk = spatial_chunk_for_aabb(target_data.aabb);
+		let old_chunk = spatial_chunk_for_aabb(target.aabb);
 		let new_chunk = spatial_chunk_for_aabb(aabb);
-		target_data.aabb = aabb;
+		target.aabb = aabb;
 
 		// If we changed chunk, move ourselves into it.
 		if old_chunk != new_chunk {
-			self.unregister_inner(target_data, old_chunk);
-			self.register_inner(target, target_data, new_chunk);
+			self.unregister_inner(target, old_chunk);
+			self.register_inner(target, new_chunk);
 		}
 	}
 

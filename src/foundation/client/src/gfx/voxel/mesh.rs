@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use bort::prelude::*;
+use bort::{storage, Entity, CompRef};
 use crevice::std430::AsStd430;
 use crucible_foundation_shared::{
 	material::{MaterialId, MaterialRegistry},

@@ -1,9 +1,6 @@
 use std::{mem, ops::Deref};
 
-use bort::{
-	core::heap::{HeapMut, HeapRef},
-	prelude::*,
-};
+use bort::{HeapMut, HeapRef, Obj, OwnedObj};
 use crucible_util::mem::{array::boxed_arr_from_fn, c_enum::CEnumMap, hash::FxHashMap};
 use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 

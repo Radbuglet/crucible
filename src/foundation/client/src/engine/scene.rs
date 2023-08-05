@@ -1,4 +1,4 @@
-use bort::prelude::*;
+use bort::{delegate, Entity, OwnedEntity};
 
 use super::io::main_loop::MainLoop;
 

@@ -5,7 +5,7 @@ fn main() {
 	use crucible_util::debug::error::ErrorFormatExt;
 
 	// Initialize the logger
-	env_logger::init();
+	env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 	log::info!("Hello!");
 
 	// Delegate to the inner entry function

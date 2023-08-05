@@ -3,7 +3,7 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use bort::prelude::*;
+use bort::{delegate, Obj, OwnedObj};
 
 use crate::math::{Aabb3, ChunkVec, Sign};
 

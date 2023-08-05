@@ -1,4 +1,4 @@
-use bort::prelude::*;
+use bort::CompRef;
 use crevice::std430::AsStd430;
 use typed_glam::glam;
 use typed_wgpu::{

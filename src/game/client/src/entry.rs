@@ -1,5 +1,5 @@
 use anyhow::Context;
-use bort::prelude::*;
+use bort::{storage, OwnedEntity};
 use crucible_foundation_client::engine::{
 	gfx::texture::FullScreenTexture,
 	io::{
