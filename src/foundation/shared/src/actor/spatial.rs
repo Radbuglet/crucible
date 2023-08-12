@@ -22,7 +22,7 @@
 //! concatenate their entity lists together to form a candidate list. For AABBs less than
 //! `HALF_GRID_SIZE`, we will be querying at most 8 chunks.
 
-use bort::{CompMut, Obj};
+use bort::{CompMut, Obj, HasGlobalManagedTag};
 use crucible_util::{lang::iter::VolumetricIter, mem::hash::FxHashMap};
 use typed_glam::{ext::VecExt, glam::IVec3};
 
@@ -95,10 +95,6 @@ impl SpatialTracker {
 		}
 	}
 
-	pub fn aabb_of(&self, target: Obj<Spatial>) -> EntityAabb {
-		target.get().aabb
-	}
-
 	pub fn update(&mut self, target: &mut CompMut<Spatial>, aabb: EntityAabb) {
 		// Update AABB
 		let old_chunk = spatial_chunk_for_aabb(target.aabb);
@@ -146,8 +142,16 @@ pub struct Spatial {
 	index: usize,
 }
 
+impl HasGlobalManagedTag for Spatial {
+    type Component = Self;
+}
+
 impl Spatial {
 	pub fn new(aabb: EntityAabb) -> Self {
 		Self { aabb, index: 0 }
+	}
+
+	pub fn aabb(&self) -> EntityAabb {
+		self.aabb
 	}
 }

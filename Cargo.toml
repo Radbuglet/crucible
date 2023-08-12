@@ -21,7 +21,7 @@ typed-glam = { path = "src/util/typed-glam" }
 typed-wgpu = { path = "src/util/typed-wgpu" }
 
 # Interface dependencies (i.e. dependencies that leak out into the public interface)
-bort = { git = "https://github.com/Radbuglet/bort.git", rev = "bafb6c4b028188bf060f14bc9fd0710942af513a" }
+bort = { git = "https://github.com/Radbuglet/bort.git", rev = "3ffef4fa7a58a3a5d130c212ceb23bb8c8bb06a0" }
 hashbrown = "0.14.0"
 log = "0.4.19"
 smallvec = "1.11.0"

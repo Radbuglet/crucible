@@ -105,10 +105,12 @@ impl WorldLoader {
 				chunk.flag_loc = usize::MAX;
 			}
 
+			// If the chunk was loaded but now no longer should be, add it to the unload queue.
 			if sign == Sign::Negative && chunk.rc == 1 {
 				chunk.flag_loc = self.to_unload.len();
 				self.to_unload.push(chunk_obj);
 				chunk.unload_at = unload_at;
+				chunk.rc = 0;
 			}
 
 			chunk.rc = chunk

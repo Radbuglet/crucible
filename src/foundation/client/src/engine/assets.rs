@@ -26,7 +26,7 @@ impl AssetManager {
 		loader(assets)
 	}
 
-	pub fn cache<K, L, R>(&mut self, args: K, loader: L) -> CompRef<R>
+	pub fn cache<K, L, R>(&mut self, args: K, loader: L) -> CompRef<'static, R>
 	where
 		K: ToOwnedTupleEq,
 		K::Owned: 'static,

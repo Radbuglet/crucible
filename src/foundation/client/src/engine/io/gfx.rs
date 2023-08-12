@@ -195,6 +195,18 @@ impl Judgement {
 		}
 	}
 
+	pub fn make_soft_error(self, penalty: f64) -> Self {
+		Self {
+			name: self.name,
+			kind: match self.kind {
+				JudgementKind::Ok => JudgementKind::Ok,
+				_ => JudgementKind::Penalized(penalty),
+			},
+			reason: self.reason,
+			subs: self.subs,
+		}
+	}
+
 	pub fn push_sub(&mut self, judgement: Judgement) {
 		// Merge kinds
 		match judgement.kind {

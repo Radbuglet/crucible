@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 crucible-util = { workspace = true }
 derive-where = { workspace = true }
-wgpu = { workspace = true, default-features = false }
+wgpu = { workspace = true }

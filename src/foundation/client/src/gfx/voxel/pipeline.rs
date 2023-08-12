@@ -68,7 +68,7 @@ impl VoxelVertex {
 pub fn load_opaque_block_shader(
 	assets: &mut AssetManager,
 	gfx: &GfxContext,
-) -> CompRef<wgpu::ShaderModule> {
+) -> CompRef<'static, wgpu::ShaderModule> {
 	assets.cache((), |_| {
 		gfx.device
 			.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -88,7 +88,7 @@ pub fn load_opaque_block_pipeline(
 	gfx: &GfxContext,
 	surface_format: wgpu::TextureFormat,
 	depth_format: wgpu::TextureFormat,
-) -> CompRef<OpaqueBlockPipeline> {
+) -> CompRef<'static, OpaqueBlockPipeline> {
 	assets.cache(&(surface_format, depth_format), |assets| {
 		let shader = load_opaque_block_shader(assets, gfx);
 

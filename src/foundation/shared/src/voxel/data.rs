@@ -1,6 +1,6 @@
 use std::{mem, ops::Deref};
 
-use bort::{HeapMut, HeapRef, Obj, OwnedObj};
+use bort::{CompMut, CompRef, Obj, OwnedObj};
 use crucible_util::mem::{array::boxed_arr_from_fn, c_enum::CEnumMap, hash::FxHashMap};
 use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 
@@ -78,7 +78,7 @@ impl WorldVoxelData {
 		self.pos_map.get(&pos).map(OwnedObj::obj)
 	}
 
-	pub fn read_chunk(&self, chunk: Obj<ChunkVoxelData>) -> HeapRef<ChunkVoxelData> {
+	pub fn read_chunk(&self, chunk: Obj<ChunkVoxelData>) -> CompRef<'_, ChunkVoxelData> {
 		chunk.get()
 	}
 
@@ -182,7 +182,7 @@ impl ChunkBlocks<'_> {
 pub struct ChunkVoxelDataMut<'a> {
 	world: &'a mut WorldVoxelData,
 	chunk: Obj<ChunkVoxelData>,
-	chunk_state: HeapMut<'a, ChunkVoxelData>,
+	chunk_state: CompMut<'a, ChunkVoxelData>,
 }
 
 impl Deref for ChunkVoxelDataMut<'_> {

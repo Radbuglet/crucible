@@ -218,6 +218,13 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 		}
 	}
 
+	pub fn from_origin_size(origin: V, size: V, percent: V) -> Self {
+		Aabb3 {
+			origin: origin - size * percent,
+			size,
+		}
+	}
+
 	pub fn translated(&self, by: V) -> Self {
 		Self {
 			origin: self.origin + by,

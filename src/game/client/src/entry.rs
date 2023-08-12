@@ -1,5 +1,5 @@
 use anyhow::Context;
-use bort::{storage, OwnedEntity};
+use bort::{storage, BehaviorRegistry, OwnedEntity};
 use crucible_foundation_client::engine::{
 	gfx::texture::FullScreenTexture,
 	io::{
@@ -19,9 +19,12 @@ use winit::{
 	window::{WindowBuilder, WindowId},
 };
 
-use crate::game::GameSceneRoot;
+use crate::game::prefabs::scene_root::make_game_scene_root;
 
 pub fn main_inner() -> anyhow::Result<()> {
+	// Create the behavior registry
+	let bhv = BehaviorRegistry::new().with_many(crate::game::prefabs::register);
+
 	// Create the event loop
 	let event_loop: EventLoop<WinitUserdata> = EventLoopBuilder::with_user_event().build();
 
@@ -39,7 +42,11 @@ pub fn main_inner() -> anyhow::Result<()> {
 		|info: &mut CompatQueryInfo| {
 			Judgement::new_ok("Adapter is suitable")
 				.sub(feat_requires_screen(info).0)
-				.sub(feat_requires_power_pref(wgpu::PowerPreference::HighPerformance)(info).0)
+				.sub(
+					feat_requires_power_pref(wgpu::PowerPreference::HighPerformance)(info)
+						.0
+						.make_soft_error(1.0),
+				)
 				.with_table(())
 		},
 	))
@@ -76,6 +83,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 	// Create engine root
 	let (engine, engine_ref) = OwnedEntity::new()
 		.with_debug_label("engine root")
+		.with(bhv)
 		.with(gfx)
 		.with(viewport_mgr)
 		.with(SceneManager::default())
@@ -84,7 +92,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 	// Setup an initial scene
 	engine
 		.get_mut::<SceneManager>()
-		.set_initial(GameSceneRoot::spawn(engine_ref, main_viewport_ref));
+		.set_initial(make_game_scene_root(engine_ref, main_viewport_ref));
 
 	// Show all viewports
 	{

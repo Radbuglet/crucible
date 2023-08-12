@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use bort::{storage, Entity, CompRef};
+use bort::{storage, CompRef, Entity};
 use crevice::std430::AsStd430;
 use crucible_foundation_shared::{
 	material::{MaterialId, MaterialRegistry},
@@ -230,7 +230,7 @@ impl WorldVoxelMesh {
 
 #[derive(Debug)]
 pub struct ChunkRenderPass {
-	meshes: Vec<CompRef<ChunkVoxelMesh>>,
+	meshes: Vec<CompRef<'static, ChunkVoxelMesh>>,
 }
 
 impl ChunkRenderPass {
