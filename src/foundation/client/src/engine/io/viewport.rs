@@ -1,4 +1,7 @@
-use bort::{Entity, OwnedEntity};
+use bort::{
+	saddle::{cx, BortComponents},
+	Entity, OwnedEntity,
+};
 use crucible_util::mem::{hash::FxHashMap, manually_bind::ManuallyBind};
 use thiserror::Error;
 use typed_glam::glam::UVec2;
@@ -16,9 +19,9 @@ pub struct ViewportManager {
 }
 
 impl ViewportManager {
-	pub fn register(&mut self, viewport: OwnedEntity) {
+	pub fn register(&mut self, cx: &cx![BortComponents; ref Viewport], viewport: OwnedEntity) {
 		self.window_map
-			.insert(viewport.get::<Viewport>().window().id(), viewport);
+			.insert(viewport.get_s::<Viewport>(cx).window().id(), viewport);
 	}
 
 	pub fn get_viewport(&self, id: WindowId) -> Option<Entity> {

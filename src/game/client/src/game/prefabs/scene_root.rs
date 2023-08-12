@@ -2,14 +2,13 @@ use std::time::Duration;
 
 use bort::{
 	auto_reborrow, delegate, derive_behavior_delegate, derive_event_handler,
-	derive_multiplexed_handler, BehaviorRegistry, Entity, HasBehavior, OwnedEntity, VecEventList,
-	VirtualTag,
+	derive_multiplexed_handler, saddle::behavior, BehaviorRegistry, Entity, HasBehavior,
+	OwnedEntity, VecEventList, VirtualTag,
 };
 use crucible_foundation_client::{
 	engine::{
 		gfx::{atlas::AtlasTexture, camera::CameraManager, texture::FullScreenTexture},
 		io::{gfx::GfxContext, input::InputManager},
-		scene::{SceneRenderHandler, SceneUpdateHandler},
 	},
 	gfx::voxel::mesh::{ChunkVoxelMesh, WorldVoxelMesh},
 };
@@ -28,7 +27,10 @@ use crucible_foundation_shared::{
 use typed_glam::glam::UVec2;
 use winit::event::VirtualKeyCode;
 
-use crate::game::components::scene_root::GameSceneRoot;
+use crate::{
+	entry::{SceneRenderHandler, SceneUpdateBhv, SceneUpdateHandler},
+	game::components::scene_root::GameSceneRoot,
+};
 
 use super::player::make_local_player;
 
@@ -76,16 +78,21 @@ pub fn make_game_scene_root(engine: Entity, viewport: Entity) -> OwnedEntity {
 		})))
 		.with(MaterialRegistry::default())
 		.with(AtlasTexture::new(UVec2::new(16, 16), UVec2::new(2, 2)))
-		.with(SceneUpdateHandler::new(|me, main_loop| {
-			let state = &mut *me.get_mut::<GameSceneRoot>();
-			let input_mgr = &*state.viewport.get::<InputManager>();
+		.with(SceneUpdateHandler::new(|me, bhv_cx, main_loop| {
+			behavior! {
+				as SceneUpdateBhv[bhv_cx] do
+				(cx: [;mut GameSceneRoot, ref InputManager], _bhv_cx: []) {{
+					let state = me.get_mut_s::<GameSceneRoot>(cx);
+					let input_mgr = state.viewport.get_s::<InputManager>(cx);
 
-			// Handle quit-on-escape
-			if input_mgr.key(VirtualKeyCode::Escape).recently_pressed() {
-				main_loop.exit();
+					// Handle quit-on-escape
+					if input_mgr.key(VirtualKeyCode::Escape).recently_pressed() {
+						main_loop.exit();
+					}
+				}}
 			}
 		}))
-		.with(SceneRenderHandler::new(|me, viewport, frame| {
+		.with(SceneRenderHandler::new(|me, bhv_cx, viewport, frame| {
 			// Acquire context
 			let mut cx = auto_reborrow! {
 				let state = me.get_mut::<GameSceneRoot>();
@@ -108,15 +115,15 @@ pub fn make_game_scene_root(engine: Entity, viewport: Entity) -> OwnedEntity {
 			});
 
 			// Update the world
-			auto_reborrow!(cx: gfx, world_data, world_mesh, atlas_texture, material_registry => {
-				world_mesh.update_chunks(
-					world_data,
-					gfx,
-					&atlas_texture,
-					material_registry,
-					Some(Duration::from_millis(16)),
-				);
-			});
+			// auto_reborrow!(cx: gfx, world_data, world_mesh, atlas_texture, material_registry => {
+			// 	world_mesh.update_chunks(
+			// 		world_data,
+			// 		gfx,
+			// 		&atlas_texture,
+			// 		material_registry,
+			// 		Some(Duration::from_millis(16)),
+			// 	);
+			// });
 
 			// Render a black screen
 			auto_reborrow!(cx: gfx, viewport_depth => {
@@ -185,17 +192,9 @@ pub fn make_game_scene_root(engine: Entity, viewport: Entity) -> OwnedEntity {
 		OwnedEntity::new().with_debug_label("air block descriptor"),
 	);
 
-	let stone_material = material_registry.register(
+	let _stone_material = material_registry.register(
 		"crucible:stone",
 		OwnedEntity::new().with_debug_label("stone block descriptor"),
-	);
-
-	// Construct starting island
-	auto_reborrow!(cx: world_data, world_loader);
-
-	world_loader.load_region(
-		&mut *world_data,
-		Aabb3::from_corners(ChunkVec::ZERO, ChunkVec::X),
 	);
 
 	root

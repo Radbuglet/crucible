@@ -1,6 +1,9 @@
 use std::{mem, ops::Deref};
 
-use bort::{CompMut, CompRef, Obj, OwnedObj};
+use bort::{
+	saddle::{cx, BortComponents},
+	CompMut, CompRef, Obj, OwnedObj,
+};
 use crucible_util::mem::{array::boxed_arr_from_fn, c_enum::CEnumMap, hash::FxHashMap};
 use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 
@@ -10,6 +13,13 @@ use crate::{
 		BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, WorldVec, WorldVecExt, CHUNK_VOLUME,
 	},
 };
+
+// === Context === //
+
+cx! {
+	pub trait CxMut(BortComponents) = mut ChunkVoxelData;
+	pub trait CxRef(BortComponents) = ref ChunkVoxelData;
+}
 
 // === WorldVoxelData === //
 
@@ -29,6 +39,7 @@ impl WorldVoxelData {
 
 	pub fn insert_chunk(
 		&mut self,
+		cx: &impl CxMut,
 		pos: ChunkVec,
 		chunk: OwnedObj<ChunkVoxelData>,
 	) -> Option<OwnedObj<ChunkVoxelData>> {
@@ -40,11 +51,11 @@ impl WorldVoxelData {
 			// While, yes, we could reuse the old chunk's neighbor list and dirty list index to make
 			// replacing current chunks more efficient, replacements in insertion are sufficiently
 			// rare that we don't bother to optimize for it.
-			self.internal_unlink(&mut old.get_mut());
+			self.internal_unlink(cx, &mut old.get_mut_s(cx));
 		}
 
 		// Set the chunk's main state
-		let mut chunk_state = chunk.get_mut();
+		let mut chunk_state = chunk.get_mut_s(cx);
 		chunk_state.pos = pos;
 
 		// Link the chunk to its neighbors
@@ -53,7 +64,7 @@ impl WorldVoxelData {
 			*neighbor = neighbor_chunk;
 
 			if let Some(neighbor_chunk) = neighbor_chunk {
-				neighbor_chunk.get_mut().neighbors[face.invert()] = Some(chunk);
+				neighbor_chunk.get_mut_s(cx).neighbors[face.invert()] = Some(chunk);
 			}
 		}
 
@@ -64,11 +75,15 @@ impl WorldVoxelData {
 		old
 	}
 
-	pub fn remove_chunk(&mut self, pos: ChunkVec) -> Option<OwnedObj<ChunkVoxelData>> {
+	pub fn remove_chunk(
+		&mut self,
+		cx: &impl CxMut,
+		pos: ChunkVec,
+	) -> Option<OwnedObj<ChunkVoxelData>> {
 		let chunk = self.pos_map.remove(&pos);
 
 		if let Some(chunk) = &chunk {
-			self.internal_unlink(&mut chunk.get_mut());
+			self.internal_unlink(cx, &mut chunk.get_mut_s(cx));
 		}
 
 		chunk
@@ -78,23 +93,31 @@ impl WorldVoxelData {
 		self.pos_map.get(&pos).map(OwnedObj::obj)
 	}
 
-	pub fn read_chunk(&self, chunk: Obj<ChunkVoxelData>) -> CompRef<'_, ChunkVoxelData> {
-		chunk.get()
+	pub fn read_chunk<'a>(
+		&'a self,
+		cx: &'a impl CxRef,
+		chunk: Obj<ChunkVoxelData>,
+	) -> CompRef<'a, ChunkVoxelData> {
+		chunk.get_s(cx)
 	}
 
-	pub fn write_chunk(&mut self, chunk: Obj<ChunkVoxelData>) -> ChunkVoxelDataMut<'_> {
+	pub fn write_chunk<'a>(
+		&'a mut self,
+		cx: &'a impl CxMut,
+		chunk: Obj<ChunkVoxelData>,
+	) -> ChunkVoxelDataMut<'a> {
 		ChunkVoxelDataMut {
 			world: self,
 			chunk,
-			chunk_state: chunk.get_mut(),
+			chunk_state: chunk.get_mut_s(cx),
 		}
 	}
 
-	pub fn flush_dirty(&mut self) -> Vec<Obj<ChunkVoxelData>> {
+	pub fn flush_dirty(&mut self, cx: &impl CxMut) -> Vec<Obj<ChunkVoxelData>> {
 		let dirty = mem::take(&mut self.dirty);
 
 		for &dirty in &dirty {
-			dirty.get_mut().dirty_index = usize::MAX;
+			dirty.get_mut_s(cx).dirty_index = usize::MAX;
 		}
 
 		dirty
@@ -109,11 +132,11 @@ impl WorldVoxelData {
 		}
 	}
 
-	fn internal_unlink(&mut self, chunk_state: &mut ChunkVoxelData) {
+	fn internal_unlink(&mut self, cx: &impl CxMut, chunk_state: &mut ChunkVoxelData) {
 		// Unlink from neighbors
 		for (face, neighbor) in chunk_state.neighbors.iter() {
 			if let Some(neighbor) = neighbor {
-				neighbor.get_mut().neighbors[face.invert()] = None;
+				neighbor.get_mut_s(cx).neighbors[face.invert()] = None;
 			}
 		}
 
@@ -122,7 +145,7 @@ impl WorldVoxelData {
 			self.dirty.swap_remove(chunk_state.dirty_index);
 
 			if let Some(displaced) = self.dirty.get(chunk_state.dirty_index) {
-				displaced.get_mut().dirty_index = chunk_state.dirty_index;
+				displaced.get_mut_s(cx).dirty_index = chunk_state.dirty_index;
 			}
 		}
 	}
@@ -352,7 +375,7 @@ where
 
 	// === Setters === //
 
-	pub fn set_pos(&mut self, world: Option<&WorldVoxelData>, pos: V) {
+	pub fn set_pos(&mut self, world: Option<(&impl CxRef, &WorldVoxelData)>, pos: V) {
 		// Update `pos` and determine chunk delta
 		let old_chunk = self.voxel_pos().chunk();
 		self.pos = pos;
@@ -360,57 +383,70 @@ where
 
 		// If the chunk changed and we have a cache, update it.
 		if let Some(cache) = self.cache.filter(|_| old_chunk != new_chunk) {
-			if let (Some(world), Some(face)) = (
+			if let (Some((cx, world)), Some(face)) = (
 				world,
 				BlockFace::from_vec((new_chunk - old_chunk).to_glam()),
 			) {
-				self.cache = world.read_chunk(cache).neighbor(face);
+				self.cache = world.read_chunk(cx, cache).neighbor(face);
 			} else {
 				self.cache = None;
 			}
 		}
 	}
 
-	pub fn move_by(&mut self, world: Option<&WorldVoxelData>, rel: V) {
+	pub fn move_by(&mut self, world: Option<(&impl CxRef, &WorldVoxelData)>, rel: V) {
 		self.set_pos(world, self.pos + rel);
 	}
 
-	pub fn move_to_neighbor(&mut self, world: Option<&WorldVoxelData>, face: BlockFace) {
+	pub fn move_to_neighbor(
+		&mut self,
+		world: Option<(&impl CxRef, &WorldVoxelData)>,
+		face: BlockFace,
+	) {
 		self.move_by(world, face.unit_typed());
 	}
 
 	// === Operations === //
 
-	pub fn at_absolute(&self, world: Option<&WorldVoxelData>, pos: V) -> Self {
-		let mut clone = self.clone();
+	pub fn at_absolute(&self, world: Option<(&impl CxRef, &WorldVoxelData)>, pos: V) -> Self {
+		let mut clone = *self;
 		clone.set_pos(world, pos);
 		clone
 	}
 
-	pub fn at_relative(&self, world: Option<&WorldVoxelData>, rel: V) -> Self {
-		let mut clone = self.clone();
+	pub fn at_relative(&self, world: Option<(&impl CxRef, &WorldVoxelData)>, rel: V) -> Self {
+		let mut clone = *self;
 		clone.move_by(world, rel);
 		clone
 	}
 
-	pub fn at_neighbor(&self, world: Option<&WorldVoxelData>, face: BlockFace) -> Self {
-		let mut clone = self.clone();
+	pub fn at_neighbor(
+		&self,
+		world: Option<(&impl CxRef, &WorldVoxelData)>,
+		face: BlockFace,
+	) -> Self {
+		let mut clone = *self;
 		clone.move_to_neighbor(world, face);
 		clone
 	}
 
 	// === Aliases === //
 
-	pub fn state(&mut self, world: &WorldVoxelData) -> Option<Block> {
+	pub fn state(&mut self, cx: &impl CxRef, world: &WorldVoxelData) -> Option<Block> {
 		let chunk = self.chunk(world)?;
-		world.read_chunk(chunk).block(self.voxel_pos().block())
+		world.read_chunk(cx, chunk).block(self.voxel_pos().block())
 	}
 
 	#[must_use]
-	pub fn try_set_state(&mut self, world: &mut WorldVoxelData, block: Block) -> bool {
+	pub fn try_set_state(
+		&mut self,
+		cx: &impl CxMut,
+		world: &mut WorldVoxelData,
+		block: Block,
+	) -> bool {
 		if let Some(chunk) = self.chunk(world) {
 			world
-				.write_chunk(chunk)
+				.write_chunk(cx, chunk)
 				.try_set_block(self.voxel_pos().block(), block)
 		} else {
 			false

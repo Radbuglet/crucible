@@ -1,6 +1,4 @@
-use bort::{delegate, Entity, OwnedEntity};
-
-use super::io::main_loop::MainLoop;
+use bort::{Entity, OwnedEntity};
 
 #[derive(Debug, Default)]
 pub struct SceneManager {
@@ -33,12 +31,4 @@ impl SceneManager {
 			None
 		}
 	}
-}
-
-delegate! {
-	pub fn SceneUpdateHandler(&'a self [me: Entity], main_loop: &mut MainLoop)
-}
-
-delegate! {
-	pub fn SceneRenderHandler(&'a self [me: Entity], viewport: Entity, frame: &mut wgpu::SurfaceTexture)
 }

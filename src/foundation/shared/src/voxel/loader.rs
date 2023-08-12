@@ -3,11 +3,21 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use bort::{delegate, Obj, OwnedObj};
+use bort::{
+	delegate,
+	saddle::{cx, BortComponents},
+	Obj, OwnedObj,
+};
 
 use crate::math::{Aabb3, ChunkVec, Sign};
 
-use super::data::{ChunkVoxelData, WorldVoxelData};
+use super::data::{self, ChunkVoxelData, WorldVoxelData};
+
+// === Context === //
+
+cx! {
+	pub trait CxMut(BortComponents): data::CxMut = mut LoadedChunk;
+}
 
 // === Region === //
 
@@ -75,6 +85,7 @@ impl WorldLoader {
 
 	pub fn update_region<R: Region>(
 		&mut self,
+		cx: &impl CxMut,
 		world: &mut WorldVoxelData,
 		from_region: Option<R>,
 		to_region: Option<R>,
@@ -86,20 +97,20 @@ impl WorldLoader {
 				.get_chunk(pos)
 				.unwrap_or_else(|| {
 					let (chunk, chunk_ref) = (self.factory)(world, pos).split_guard();
-					world.insert_chunk(pos, chunk);
+					world.insert_chunk(cx, pos, chunk);
 					chunk_ref
 				})
 				.entity()
 				.obj::<LoadedChunk>();
 
-			let mut chunk = chunk_obj.get_mut();
+			let mut chunk = chunk_obj.get_mut_s(cx);
 
 			// If the chunk was on the deletion queue but no longer is, remove it from the queue.
 			if sign == Sign::Positive && chunk.rc == 0 && chunk.flag_loc != usize::MAX {
 				self.to_unload.swap_remove(chunk.flag_loc);
 
 				if let Some(moved) = self.to_unload.get(chunk.flag_loc) {
-					moved.get_mut().flag_loc = chunk.flag_loc;
+					moved.get_mut_s(cx).flag_loc = chunk.flag_loc;
 				}
 
 				chunk.flag_loc = usize::MAX;
@@ -120,21 +131,32 @@ impl WorldLoader {
 		});
 	}
 
-	pub fn load_region(&mut self, world: &mut WorldVoxelData, new_region: impl Region) {
-		self.update_region(world, None, Some(new_region));
+	pub fn load_region(
+		&mut self,
+		cx: &impl CxMut,
+		world: &mut WorldVoxelData,
+		new_region: impl Region,
+	) {
+		self.update_region(cx, world, None, Some(new_region));
 	}
 
-	pub fn unload_region(&mut self, world: &mut WorldVoxelData, old_region: impl Region) {
-		self.update_region(world, Some(old_region), None);
+	pub fn unload_region(
+		&mut self,
+		cx: &impl CxMut,
+		world: &mut WorldVoxelData,
+		old_region: impl Region,
+	) {
+		self.update_region(cx, world, Some(old_region), None);
 	}
 
 	pub fn move_region<R: Region>(
 		&mut self,
+		cx: &impl CxMut,
 		world: &mut WorldVoxelData,
 		from_region: R,
 		to_region: R,
 	) {
-		self.update_region(world, Some(from_region), Some(to_region));
+		self.update_region(cx, world, Some(from_region), Some(to_region));
 	}
 }
 

@@ -175,10 +175,12 @@ macro_rules! impl_to_owned_tuple {
 		impl<$($name: ToOwnedTuple),*> ToOwnedTuple for ($($name,)*) {
 			type Owned = ($($name::Owned,)*);
 
+			#[allow(clippy::unused_unit)]
 			fn to_owned(self) -> Self::Owned {
 				($(self.$field.to_owned(),)*)
 			}
 
+			#[allow(clippy::unused_unit)]
 			fn to_owned_by_ref(&self) -> Self::Owned {
 				($(self.$field.to_owned_by_ref(),)*)
 			}

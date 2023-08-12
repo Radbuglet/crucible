@@ -156,9 +156,8 @@ macro_rules! impl_pure_handle_for {
 			type State = ();
 			type Meta = ();
 
-			fn default_state() -> Self::State {
-				()
-			}
+
+			fn default_state() -> Self::State {}
 
 			fn slot_occupied(_state: &mut Self::State, slot: usize) -> (Self, Self::Meta) {
 				(
@@ -235,9 +234,7 @@ mod release_impl {
 		type State = ();
 		type Meta = ();
 
-		fn default_state() -> Self::State {
-			()
-		}
+		fn default_state() -> Self::State {}
 
 		fn slot_occupied(_state: &mut Self::State, slot: usize) -> (Self, Self::Meta) {
 			(Self(slot), ())

@@ -227,7 +227,7 @@ impl Judgement {
 		self.subs.push(judgement);
 	}
 
-	pub fn sub(mut self, judgement: Judgement) -> Self {
+	pub fn with_sub(mut self, judgement: Judgement) -> Self {
 		self.push_sub(judgement);
 		self
 	}

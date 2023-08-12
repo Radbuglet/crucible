@@ -1,4 +1,4 @@
-use std::{any::TypeId, borrow::Cow, marker::PhantomData, num::NonZeroU32};
+use std::{any::TypeId, borrow::Cow, num::NonZeroU32};
 
 use crucible_util::{impl_tuples, lang::marker::PhantomInvariant, transparent};
 use derive_where::derive_where;
@@ -87,23 +87,27 @@ pub struct RenderPipelineBuilder<'a, U: PipelineSet, V: PipelineSet> {
 
 	// Vertex shader config
 	layout: Option<&'a PipelineLayout<U>>,
-	vertex_shader: Option<(
-		&'a wgpu::ShaderModule,
-		&'a str,
-		Cow<'a, [wgpu::VertexBufferLayout<'a>]>,
-		PhantomInvariant<V>,
-	)>,
-	fragment_shader: Option<(
-		&'a wgpu::ShaderModule,
-		&'a str,
-		Cow<'a, [Option<wgpu::ColorTargetState>]>,
-	)>,
+	_vertex_layout: PhantomInvariant<V>,
+	vertex_shader: Option<RpbVertexShader<'a>>,
+	fragment_shader: Option<RpbFragShader<'a>>,
 
 	// Fixed function config
 	primitive: wgpu::PrimitiveState,
 	multisample: wgpu::MultisampleState,
 	depth_stencil: Option<wgpu::DepthStencilState>,
 	multiview: Option<NonZeroU32>,
+}
+
+struct RpbVertexShader<'a> {
+	module: &'a wgpu::ShaderModule,
+	entry: &'a str,
+	buffers: Cow<'a, [wgpu::VertexBufferLayout<'a>]>,
+}
+
+struct RpbFragShader<'a> {
+	module: &'a wgpu::ShaderModule,
+	entry: &'a str,
+	targets: Cow<'a, [Option<wgpu::ColorTargetState>]>,
 }
 
 impl<'a, U: PipelineSet, V: PipelineSet> RenderPipelineBuilder<'a, U, V> {
@@ -130,7 +134,11 @@ impl<'a, U: PipelineSet, V: PipelineSet> RenderPipelineBuilder<'a, U, V> {
 	where
 		V: StaticPipelineSet,
 	{
-		self.vertex_shader = Some((module, entry, buffers.layouts(), PhantomData));
+		self.vertex_shader = Some(RpbVertexShader {
+			module,
+			entry,
+			buffers: buffers.layouts(),
+		});
 		self
 	}
 
@@ -157,7 +165,11 @@ impl<'a, U: PipelineSet, V: PipelineSet> RenderPipelineBuilder<'a, U, V> {
 		entry: &'a str,
 		targets: impl Into<Cow<'a, [Option<wgpu::ColorTargetState>]>>,
 	) -> Self {
-		self.fragment_shader = Some((module, entry, targets.into()));
+		self.fragment_shader = Some(RpbFragShader {
+			module,
+			entry,
+			targets: targets.into(),
+		});
 		self
 	}
 
@@ -237,28 +249,25 @@ impl<'a, U: PipelineSet, V: PipelineSet> RenderPipelineBuilder<'a, U, V> {
 				label: self.label,
 				layout: self.layout.map(|u| &u.raw),
 				vertex: {
-					let (module, entry_point, buffers, _) = self
+					let vs = self
 						.vertex_shader
 						.as_ref()
 						.expect("failed to create render pipeline: no vertex shader specified");
 
 					wgpu::VertexState {
-						module,
-						entry_point,
-						buffers,
+						module: vs.module,
+						entry_point: vs.entry,
+						buffers: &vs.buffers,
 					}
 				},
 				primitive: self.primitive,
 				depth_stencil: self.depth_stencil,
 				multisample: self.multisample,
-				fragment: self
-					.fragment_shader
-					.as_ref()
-					.map(|(module, entry_point, targets)| wgpu::FragmentState {
-						module,
-						entry_point,
-						targets,
-					}),
+				fragment: self.fragment_shader.as_ref().map(|fs| wgpu::FragmentState {
+					module: fs.module,
+					entry_point: fs.entry,
+					targets: &fs.targets,
+				}),
 				multiview: self.multiview,
 			})
 			.into()

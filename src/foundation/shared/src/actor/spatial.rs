@@ -22,7 +22,10 @@
 //! concatenate their entity lists together to form a candidate list. For AABBs less than
 //! `HALF_GRID_SIZE`, we will be querying at most 8 chunks.
 
-use bort::{CompMut, Obj, HasGlobalManagedTag};
+use bort::{
+	saddle::{cx, BortComponents},
+	CompMut, HasGlobalManagedTag, Obj,
+};
 use crucible_util::{lang::iter::VolumetricIter, mem::hash::FxHashMap};
 use typed_glam::{ext::VecExt, glam::IVec3};
 
@@ -47,6 +50,11 @@ fn spatial_chunk_for_aabb(aabb: EntityAabb) -> IVec3 {
 
 // === SpatialTracker === //
 
+cx! {
+	pub trait CxMut(BortComponents) = mut Spatial;
+	pub trait CxRef(BortComponents) = ref Spatial;
+}
+
 #[derive(Debug, Default)]
 pub struct SpatialTracker {
 	chunks: FxHashMap<IVec3, Vec<Obj<Spatial>>>,
@@ -62,9 +70,9 @@ impl SpatialTracker {
 		self.register_inner(target, chunk);
 	}
 
-	pub fn unregister(&mut self, target: &mut CompMut<Spatial>) {
+	pub fn unregister(&mut self, cx: &impl CxMut, target: &mut CompMut<Spatial>) {
 		let chunk = spatial_chunk_for_aabb(target.aabb);
-		self.unregister_inner(target, chunk);
+		self.unregister_inner(cx, target, chunk);
 	}
 
 	fn register_inner(&mut self, target_data: &mut CompMut<Spatial>, chunk: IVec3) {
@@ -73,7 +81,7 @@ impl SpatialTracker {
 		spatials.push(CompMut::owner(target_data));
 	}
 
-	fn unregister_inner(&mut self, target_data: &mut Spatial, chunk: IVec3) {
+	fn unregister_inner(&mut self, cx: &impl CxMut, target_data: &mut Spatial, chunk: IVec3) {
 		// Remove ourselves from the old chunk
 		let hashbrown::hash_map::Entry::Occupied(mut entry) = self.chunks.entry(chunk) else {
 			unreachable!()
@@ -86,7 +94,7 @@ impl SpatialTracker {
 
 		// If we displaced something, update its index
 		if let Some(displaced) = entry_slice.get(target_data.index) {
-			displaced.get_mut().index = target_data.index;
+			displaced.get_mut_s(cx).index = target_data.index;
 		}
 
 		// If the chunk is empty, remove it from the vector
@@ -95,7 +103,7 @@ impl SpatialTracker {
 		}
 	}
 
-	pub fn update(&mut self, target: &mut CompMut<Spatial>, aabb: EntityAabb) {
+	pub fn update(&mut self, cx: &impl CxMut, target: &mut CompMut<Spatial>, aabb: EntityAabb) {
 		// Update AABB
 		let old_chunk = spatial_chunk_for_aabb(target.aabb);
 		let new_chunk = spatial_chunk_for_aabb(aabb);
@@ -103,12 +111,16 @@ impl SpatialTracker {
 
 		// If we changed chunk, move ourselves into it.
 		if old_chunk != new_chunk {
-			self.unregister_inner(target, old_chunk);
+			self.unregister_inner(cx, target, old_chunk);
 			self.register_inner(target, new_chunk);
 		}
 	}
 
-	pub fn query_in(&self, aabb: EntityAabb) -> impl Iterator<Item = Obj<Spatial>> + '_ {
+	pub fn query_in<'a>(
+		&'a self,
+		cx: &'a impl CxRef,
+		aabb: EntityAabb,
+	) -> impl Iterator<Item = Obj<Spatial>> + 'a {
 		// Determine candidate chunks.
 		let candidates = Aabb3::from_corners(
 			spatial_chunk_for_pos(aabb.origin),
@@ -132,7 +144,7 @@ impl SpatialTracker {
 		});
 
 		// Filter out non-overlapping candidates and yield to the caller
-		candidates.filter(move |spatial| aabb.intersects(spatial.get().aabb))
+		candidates.filter(move |spatial| aabb.intersects(spatial.get_s(cx).aabb))
 	}
 }
 
@@ -143,7 +155,7 @@ pub struct Spatial {
 }
 
 impl HasGlobalManagedTag for Spatial {
-    type Component = Self;
+	type Component = Self;
 }
 
 impl Spatial {

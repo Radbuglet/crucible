@@ -61,6 +61,7 @@ pub mod macro_internal {
 			entirely_unchecked_transmute(self)
 		}
 
+		#[allow(clippy::len_without_is_empty)] // (this is purely an internal object)
 		pub const fn len(&self) -> usize {
 			N
 		}

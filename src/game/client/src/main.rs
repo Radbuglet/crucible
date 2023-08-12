@@ -6,6 +6,7 @@ fn main() {
 
 	// Initialize the logger
 	env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+	color_backtrace::install();
 	log::info!("Hello!");
 
 	// Delegate to the inner entry function

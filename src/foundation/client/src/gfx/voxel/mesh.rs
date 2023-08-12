@@ -1,11 +1,17 @@
 use std::time::{Duration, Instant};
 
-use bort::{storage, CompRef, Entity};
+use bort::{
+	saddle::{cx, BortComponents},
+	storage, CompRef, Entity,
+};
 use crevice::std430::AsStd430;
 use crucible_foundation_shared::{
 	material::{MaterialId, MaterialRegistry},
 	math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, Tri, WorldVec, WorldVecExt, QUAD_UVS},
-	voxel::{data::WorldVoxelData, mesh::QuadMeshLayer},
+	voxel::{
+		data::{self, WorldVoxelData},
+		mesh::QuadMeshLayer,
+	},
 };
 use crucible_util::mem::{
 	array::map_arr,
@@ -18,6 +24,12 @@ use wgpu::util::DeviceExt;
 use crate::engine::{gfx::atlas::AtlasTexture, io::gfx::GfxContext};
 
 use super::pipeline::{VoxelUniforms, VoxelVertex};
+
+// === Context === //
+
+cx! {
+	pub trait CxMut(BortComponents): data::CxRef;
+}
 
 // === Services === //
 
@@ -41,6 +53,7 @@ impl WorldVoxelMesh {
 
 	pub fn update_chunks(
 		&mut self,
+		cx: &impl CxMut,
 		world: &WorldVoxelData,
 		gfx: &GfxContext,
 		atlas: &AtlasTexture,
@@ -58,7 +71,7 @@ impl WorldVoxelMesh {
 			}
 
 			// Acquire dependencies
-			let chunk_data = world.read_chunk(chunk.obj());
+			let chunk_data = world.read_chunk(cx, chunk.obj());
 
 			// Mesh chunk
 			let mut vertices = Vec::new();
@@ -94,7 +107,7 @@ impl WorldVoxelMesh {
 									};
 
 									world
-										.read_chunk(neighbor)
+										.read_chunk(cx, neighbor)
 										.block_or_air(neighbor_block.wrap())
 								};
 

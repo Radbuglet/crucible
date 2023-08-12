@@ -212,7 +212,7 @@ dependencies = [
 [[package]]
 name = "bort"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/bort.git?rev=3ffef4fa7a58a3a5d130c212ceb23bb8c8bb06a0#3ffef4fa7a58a3a5d130c212ceb23bb8c8bb06a0"
+source = "git+https://github.com/Radbuglet/bort.git?rev=ba1a25abf087e385778470d4ec7f0683917db128#ba1a25abf087e385778470d4ec7f0683917db128"
 dependencies = [
  "cfgenius",
  "derive-where",
@@ -289,6 +289,16 @@ checksum = "3538270d33cc669650c4b093848450d380def10c331d38c768e34cac80576e6e"
 dependencies = [
  "termcolor",
  "unicode-width",
+]
+
+[[package]]
+name = "color-backtrace"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6fcd4d200ae702628e8d54bafff5f7e7397b031a5849656a6f5bfe2c5fb780d"
+dependencies = [
+ "backtrace",
+ "termcolor",
 ]
 
 [[package]]
@@ -422,12 +432,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bort",
+ "color-backtrace",
  "crucible-foundation-client",
  "crucible-foundation-shared",
  "crucible-shared",
  "crucible-util",
  "env_logger",
  "futures",
+ "linkme",
  "log",
  "typed-glam",
  "wgpu",
@@ -1692,7 +1704,7 @@ dependencies = [
 [[package]]
 name = "saddle"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/bort.git?rev=3ffef4fa7a58a3a5d130c212ceb23bb8c8bb06a0#3ffef4fa7a58a3a5d130c212ceb23bb8c8bb06a0"
+source = "git+https://github.com/Radbuglet/bort.git?rev=ba1a25abf087e385778470d4ec7f0683917db128#ba1a25abf087e385778470d4ec7f0683917db128"
 dependencies = [
  "derive-where",
  "linkme",

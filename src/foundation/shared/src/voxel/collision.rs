@@ -1,4 +1,7 @@
-use bort::{storage, Entity, Storage};
+use bort::{
+	saddle::{cx, BortComponents},
+	storage, Entity, Storage,
+};
 use crucible_util::{
 	lang::{
 		generator::{ContinuationSig, Yield},
@@ -21,9 +24,15 @@ use crate::{
 };
 
 use super::{
-	data::{BlockVoxelPointer, EntityVoxelPointer, WorldVoxelData},
+	data::{self, BlockVoxelPointer, EntityVoxelPointer, WorldVoxelData},
 	mesh::{QuadMeshLayer, VolumetricMeshLayer},
 };
+
+// === Context === //
+
+cx! {
+	pub trait CxRef(BortComponents): data::CxRef;
+}
 
 // === General Collisions === //
 
@@ -67,13 +76,14 @@ impl MaterialColliderDescriptor {
 
 pub async fn occluding_volumes_in_block<'a>(
 	y: &'a Yield<(EntityAabb, CollisionMeta)>,
+	cx: &'a impl CxRef,
 	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a WorldVoxelData,
 	registry: &'a MaterialRegistry,
 	mut block: BlockVoxelPointer,
 ) {
 	// Decode descriptor
-	let Some(state) = block.state(world).filter(Block::is_not_air) else {
+	let Some(state) = block.state(cx, world).filter(Block::is_not_air) else {
 			return;
 		};
 
@@ -111,6 +121,7 @@ pub async fn occluding_volumes_in_block<'a>(
 
 pub async fn occluding_faces_in_block<'a>(
 	y: &'a Yield<(AaQuad<EntityVec>, CollisionMeta)>,
+	cx: &impl CxRef,
 	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a WorldVoxelData,
 	registry: &'a MaterialRegistry,
@@ -118,7 +129,7 @@ pub async fn occluding_faces_in_block<'a>(
 	face: BlockFace,
 ) {
 	// Decode descriptor
-	let Some(state) = block.state(world).filter(Block::is_not_air) else {
+	let Some(state) = block.state(cx, world).filter(Block::is_not_air) else {
 		return;
 	};
 
@@ -194,6 +205,7 @@ pub struct IntersectingFaceInBlock {
 
 pub async fn intersecting_faces_in_block<'a>(
 	y: &'a Yield<IntersectingFaceInBlock>,
+	cx: &impl CxRef,
 	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a WorldVoxelData,
 	registry: &'a MaterialRegistry,
@@ -217,6 +229,7 @@ pub async fn intersecting_faces_in_block<'a>(
 		// For every occluding quad of the block pointing towards our ray...
 		use_generator!(let iter[y] = occluding_faces_in_block(
 			y,
+			cx,
 			collider_descs,
 			world,
 			registry,
@@ -247,6 +260,7 @@ pub async fn intersecting_faces_in_block<'a>(
 pub const COLLISION_TOLERANCE: f64 = 0.0005;
 
 pub fn cast_volume(
+	cx: &impl CxRef,
 	world: &WorldVoxelData,
 	registry: &MaterialRegistry,
 	quad: AaQuad<EntityVec>,
@@ -288,10 +302,11 @@ pub fn cast_volume(
 		for pos in check_aabb.iter_blocks() {
 			use_generator!(let iter[y] = occluding_faces_in_block(
 				y,
+				cx,
 				collider_descs,
 				world,
 				registry,
-				cached_loc.at_absolute(Some(world), pos),
+				cached_loc.at_absolute(Some((cx, world)), pos),
 				quad.face.invert(),
 			));
 
@@ -348,6 +363,7 @@ pub fn cast_volume(
 
 pub async fn check_volume<'a>(
 	y: &'a Yield<(BlockVoxelPointer, CollisionMeta)>,
+	cx: &impl CxRef,
 	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a WorldVoxelData,
 	registry: &'a MaterialRegistry,
@@ -356,9 +372,10 @@ pub async fn check_volume<'a>(
 	let cached_loc = BlockVoxelPointer::new(world, aabb.origin.block_pos());
 
 	for block_pos in aabb.as_blocks().iter_blocks() {
-		let block = cached_loc.at_absolute(Some(world), block_pos);
+		let block = cached_loc.at_absolute(Some((cx, world)), block_pos);
 		use_generator!(let iter[y] = occluding_volumes_in_block(
 			y,
+			cx,
 			collider_descs,
 			world,
 			registry,
@@ -421,7 +438,11 @@ impl RayCast {
 		Line3::new_origin_delta(self.pos(), self.dir)
 	}
 
-	pub fn step(&mut self, world: &WorldVoxelData) -> SmallVec<[RayCastIntersection; 3]> {
+	pub fn step(
+		&mut self,
+		cx: &impl CxRef,
+		world: &WorldVoxelData,
+	) -> SmallVec<[RayCastIntersection; 3]> {
 		// Construct a buffer to hold our `RayCastIntersection`s. There should be at most three of
 		// these and, therefore, we should never allocate anything on the heap.
 		let mut intersections = SmallVec::<[RayCastIntersection; 3]>::new();
@@ -436,7 +457,7 @@ impl RayCast {
 			let step_line = self.step_line();
 
 			// Bump our location by this delta.
-			self.loc.at_relative(Some(world), self.dir);
+			self.loc.at_relative(Some((cx, world)), self.dir);
 
 			// Determine the delta in blocks that we committed by taking this step. This is not
 			// necessarily from one neighbor to the other in the case where we cast along the
@@ -489,7 +510,7 @@ impl RayCast {
 		// Update block positions by accumulating face traversals onto `block_loc`—which is currently
 		// just the position of our ray before the step began.
 		for isect in &mut intersections {
-			isect.block = block_loc.at_neighbor(Some(world), isect.face.invert());
+			isect.block = block_loc.at_neighbor(Some((cx, world)), isect.face.invert());
 			block_loc = isect.block;
 		}
 
@@ -503,6 +524,7 @@ impl RayCast {
 
 	pub fn step_intersect(
 		&mut self,
+		cx: &impl CxRef,
 		collider_descs: Storage<MaterialColliderDescriptor>,
 		world: &WorldVoxelData,
 		registry: &MaterialRegistry,
@@ -511,7 +533,7 @@ impl RayCast {
 		// Step the ray forward, keeping track of its old state.
 		let start_dist = self.dist();
 		let line = self.step_line();
-		let block_isects = self.step(world);
+		let block_isects = self.step(cx, world);
 
 		// Clear scratch buffer
 		isect_buffer.clear();
@@ -520,6 +542,7 @@ impl RayCast {
 		for block_isect in block_isects {
 			use_generator!(let iter[y] = intersecting_faces_in_block(
 				y,
+				cx,
 				collider_descs,
 				world,
 				registry,
@@ -552,10 +575,11 @@ impl RayCast {
 	pub async fn step_for(
 		&mut self,
 		y: &yielder![RayCastIntersection; for<'a> &'a WorldVoxelData],
+		cx: &impl CxRef,
 		max_dist: f64,
 	) {
 		while self.dist() <= max_dist {
-			for isect in y.ask(|world| self.step(world)).await {
+			for isect in y.ask(|world| self.step(cx, world)).await {
 				if isect.distance > max_dist {
 					continue;
 				}
@@ -565,9 +589,11 @@ impl RayCast {
 		}
 	}
 
+	#[allow(clippy::type_complexity)]
 	pub async fn step_intersect_for(
 		&mut self,
 		y: &yielder![(RayCastIntersection, CollisionMeta); for<'a> (&'a WorldVoxelData, &'a MaterialRegistry)],
+		cx: &impl CxRef,
 		collider_descs: Storage<MaterialColliderDescriptor>,
 		max_dist: f64,
 	) {
@@ -576,7 +602,7 @@ impl RayCast {
 		while self.dist() <= max_dist {
 			// Collect intersections into the `isect_buffer`...
 			y.ask(|(world, registry)| {
-				self.step_intersect(collider_descs, world, registry, &mut isect_buffer)
+				self.step_intersect(cx, collider_descs, world, registry, &mut isect_buffer)
 			})
 			.await;
 
@@ -604,6 +630,7 @@ pub struct RayCastIntersection {
 // === Rigid Body === //
 
 pub fn move_rigid_body(
+	cx: &impl CxRef,
 	world: &WorldVoxelData,
 	registry: &MaterialRegistry,
 	mut aabb: EntityAabb,
@@ -619,6 +646,7 @@ pub fn move_rigid_body(
 
 		// Determine how far we can move
 		let actual_delta = cast_volume(
+			cx,
 			world,
 			registry,
 			aabb.quad(face),

@@ -41,6 +41,7 @@ enum YieldState<T, C: ?Sized + for<'a> ContinuationSig<'a>> {
 	#[derive_where(default)]
 	Meaningless,
 	Polling,
+	#[allow(clippy::type_complexity)]
 	AwaitingContinuation(DynamicRef<dyn Fn(&mut Feed<'_, C>)>),
 	ResolvedValue(T),
 }
@@ -89,7 +90,7 @@ impl<T, C: ?Sized + for<'a> ContinuationSig<'a>> Yield<T, C> {
 				self.state
 					.set(YieldState::AwaitingContinuation(continuator));
 			}
-			state @ _ => {
+			state => {
 				self.state.set(state);
 				panic!(
 					"Cannot `ask` for a continuation while the generator caller is not polling."
@@ -107,7 +108,7 @@ impl<T, C: ?Sized + for<'a> ContinuationSig<'a>> Yield<T, C> {
 				self.state.set(state);
 				Poll::Pending
 			}
-			state @ _ => {
+			state => {
 				self.state.set(state);
 				panic!(
 					"`AwaitingContinuation` state never resolved. Got into an unexpected state."
@@ -123,7 +124,7 @@ impl<T, C: ?Sized + for<'a> ContinuationSig<'a>> Yield<T, C> {
 			YieldState::Polling => {
 				self.state.set(YieldState::ResolvedValue(value));
 			}
-			state @ _ => {
+			state => {
 				self.state.set(state);
 				panic!("`Cannot `provide` a value while the generator caller is not polling.");
 			}
@@ -139,7 +140,7 @@ impl<T, C: ?Sized + for<'a> ContinuationSig<'a>> Yield<T, C> {
 				self.state.set(state);
 				Poll::Pending
 			}
-			state @ _ => {
+			state => {
 				self.state.set(state);
 				panic!("`ResolvedValue` state never resolved. Got into an unexpected state.");
 			}
@@ -166,7 +167,7 @@ impl<T, C: ?Sized + for<'a> ContinuationSig<'a>> Yield<T, C> {
 			state @ YieldState::Polling => {
 				self.state.set(state);
 			}
-			state @ _ => {
+			state => {
 				self.state.set(state);
 				panic!("Cannot call `next` on a `Yield` instance in a non-neutral state.");
 			}

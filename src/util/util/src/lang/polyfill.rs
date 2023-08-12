@@ -8,6 +8,7 @@ use super::std_traits::OptionLike;
 // === Option === //
 
 pub trait OptionPoly: OptionLike {
+	#[allow(clippy::wrong_self_convention)] // (this follows the standard library's conventions)
 	fn is_none_or<F>(self, f: F) -> bool
 	where
 		F: FnOnce(Self::Value) -> bool;
