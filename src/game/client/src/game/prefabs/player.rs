@@ -9,7 +9,7 @@ use crucible_foundation_shared::{
 };
 
 use super::{
-	scene_root::{ActorSpawnedInGameBehavior, CameraProviderDelegate},
+	scene_root::{ActorSpawnedInGameBehavior, CameraProviderBehavior},
 	spatial_bundle::push_spatial_bundle,
 };
 
@@ -47,11 +47,11 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 			}
 		},
 	))
-	.register::<CameraProviderDelegate>(CameraProviderDelegate::new(
+	.register::<CameraProviderBehavior>(CameraProviderBehavior::new(
 		|_bhv, bhv_cx, actor_tag, camera_mgr| {
 			behavior! {
-				as CameraProviderDelegate[bhv_cx] do
-				(cx: [;ref Spatial], _bhv_cx: []) {
+				as CameraProviderBehavior[bhv_cx] do
+				(_cx: [;ref Spatial], _bhv_cx: []) {
 					query! {
 						for (ref spatial in GlobalTag::<Spatial>) + [actor_tag, GlobalVirtualTag::<LocalPlayerTag>] {
 							camera_mgr.set_pos_rot(

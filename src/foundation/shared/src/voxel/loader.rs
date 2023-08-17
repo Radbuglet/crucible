@@ -1,4 +1,5 @@
 use std::{
+	fmt,
 	ops::Range,
 	time::{Duration, Instant},
 };
@@ -21,7 +22,7 @@ cx! {
 
 // === Region === //
 
-pub trait Region: Sized + Clone {
+pub trait Region: Sized + Clone + fmt::Debug {
 	fn compare(add: Option<Self>, sub: Option<Self>, iter: impl FnMut(ChunkVec, Sign));
 }
 
@@ -29,7 +30,6 @@ fn iter_added_dim(main: Range<i32>, exclude: Range<i32>) -> impl Iterator<Item =
 	(main.start..exclude.start).chain(exclude.end..main.end)
 }
 
-// TODO: Clean up AABB code
 fn iter_added_aabb(add: Aabb3<ChunkVec>, sub: Aabb3<ChunkVec>, mut iter: impl FnMut(ChunkVec)) {
 	for x in iter_added_dim(
 		add.origin.x()..add.max_corner().x(),
@@ -89,6 +89,7 @@ impl WorldLoader {
 		world: &mut WorldVoxelData,
 		from_region: Option<R>,
 		to_region: Option<R>,
+		is_temporary: bool,
 	) {
 		let unload_at = Instant::now() + Duration::from_secs(15);
 
@@ -117,17 +118,23 @@ impl WorldLoader {
 			}
 
 			// If the chunk was loaded but now no longer should be, add it to the unload queue.
-			if sign == Sign::Negative && chunk.rc == 1 {
+			if (sign == Sign::Negative && chunk.rc == 1) ||
+				// Alternatively, if this chunk is being temporarily loaded and no one else is keeping
+				// it alive, queue its unloading.
+				(is_temporary && chunk.rc == 0)
+			{
 				chunk.flag_loc = self.to_unload.len();
 				self.to_unload.push(chunk_obj);
 				chunk.unload_at = unload_at;
 				chunk.rc = 0;
 			}
 
-			chunk.rc = chunk
-				.rc
-				.checked_add_signed(sign.unit_i64())
-				.expect("too many references to the chunk");
+			if !is_temporary {
+				chunk.rc = chunk
+					.rc
+					.checked_add_signed(sign.unit_i64())
+					.expect("too many references to the chunk");
+			}
 		});
 	}
 
@@ -137,7 +144,7 @@ impl WorldLoader {
 		world: &mut WorldVoxelData,
 		new_region: impl Region,
 	) {
-		self.update_region(cx, world, None, Some(new_region));
+		self.update_region(cx, world, None, Some(new_region), false);
 	}
 
 	pub fn unload_region(
@@ -146,7 +153,7 @@ impl WorldLoader {
 		world: &mut WorldVoxelData,
 		old_region: impl Region,
 	) {
-		self.update_region(cx, world, Some(old_region), None);
+		self.update_region(cx, world, Some(old_region), None, false);
 	}
 
 	pub fn move_region<R: Region>(
@@ -156,7 +163,16 @@ impl WorldLoader {
 		from_region: R,
 		to_region: R,
 	) {
-		self.update_region(cx, world, Some(from_region), Some(to_region));
+		self.update_region(cx, world, Some(from_region), Some(to_region), false);
+	}
+
+	pub fn temp_load_region(
+		&mut self,
+		cx: &impl CxMut,
+		world: &mut WorldVoxelData,
+		new_region: impl Region,
+	) {
+		self.update_region(cx, world, None, Some(new_region), true);
 	}
 }
 

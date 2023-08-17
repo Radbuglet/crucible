@@ -208,7 +208,7 @@ pub struct Aabb3<V> {
 }
 
 impl<V: SignedNumericVector3> Aabb3<V> {
-	pub fn from_corners(a: V, b: V) -> Self {
+	pub fn from_corners_max_excl(a: V, b: V) -> Self {
 		let min = a.min(b);
 		let max = a.max(b);
 

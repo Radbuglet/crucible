@@ -122,9 +122,9 @@ impl SpatialTracker {
 		aabb: EntityAabb,
 	) -> impl Iterator<Item = Obj<Spatial>> + 'a {
 		// Determine candidate chunks.
-		let candidates = Aabb3::from_corners(
+		let candidates = Aabb3::from_corners_max_excl(
 			spatial_chunk_for_pos(aabb.origin),
-			spatial_chunk_for_pos(aabb.max_corner()),
+			spatial_chunk_for_pos(aabb.max_corner()) + IVec3::ONE,
 		);
 
 		// Determine candidate entities

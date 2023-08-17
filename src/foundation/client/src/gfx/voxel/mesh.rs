@@ -62,7 +62,7 @@ impl WorldVoxelMesh {
 	) {
 		let started = Instant::now();
 
-		let descriptors = storage::<BlockDescriptorVisual>();
+		let descriptors = storage::<MaterialVisualDescriptor>();
 
 		while let Some(chunk) = self.dirty_queue.pop() {
 			// Ignore dead chunks
@@ -92,7 +92,7 @@ impl WorldVoxelMesh {
 
 				// Process material
 				match &*descriptors.get(material.descriptor) {
-					BlockDescriptorVisual::Cubic { textures } => {
+					MaterialVisualDescriptor::Cubic { textures } => {
 						// For every side of a solid block...
 						for face in BlockFace::variants() {
 							let neighbor_block = center_pos + face.unit();
@@ -118,7 +118,7 @@ impl WorldVoxelMesh {
 								let material = registry.find_by_id(state.material);
 								let descriptor = descriptors.get(material.descriptor);
 
-								matches!(&*descriptor, BlockDescriptorVisual::Cubic { .. })
+								matches!(&*descriptor, MaterialVisualDescriptor::Cubic { .. })
 							};
 
 							if is_solid {
@@ -155,7 +155,7 @@ impl WorldVoxelMesh {
 							}
 						}
 					}
-					BlockDescriptorVisual::Mesh { mesh } => {
+					MaterialVisualDescriptor::Mesh { mesh } => {
 						// Push the mesh
 						for (quad, material) in mesh.iter_cloned() {
 							// Translate the quad relative to the block
@@ -182,7 +182,7 @@ impl WorldVoxelMesh {
 							vertices.extend(quad_vertices);
 						}
 					}
-					BlockDescriptorVisual::Custom => todo!(),
+					MaterialVisualDescriptor::Custom => todo!(),
 				}
 			}
 
@@ -271,7 +271,7 @@ pub struct ChunkVoxelMesh {
 // === Material descriptors === //
 
 #[derive(Debug)]
-pub enum BlockDescriptorVisual {
+pub enum MaterialVisualDescriptor {
 	Cubic {
 		textures: CEnumMap<BlockFace, UVec2>,
 	},
@@ -281,7 +281,7 @@ pub enum BlockDescriptorVisual {
 	Custom,
 }
 
-impl BlockDescriptorVisual {
+impl MaterialVisualDescriptor {
 	pub fn cubic_simple(atlas: UVec2) -> Self {
 		Self::Cubic {
 			textures: CEnumMap::new([atlas; BlockFace::COUNT]),

@@ -5,6 +5,7 @@ use bort::{
 	storage, BehaviorRegistry, Entity, OwnedEntity,
 };
 use crucible_foundation_client::engine::{
+	assets::AssetManager,
 	gfx::texture::FullScreenTexture,
 	io::{
 		gfx::{
@@ -28,7 +29,8 @@ use crate::game::prefabs::scene_root::make_game_scene_root;
 // === Behaviors === //
 
 namespace! {
-	pub EngineEntryBhv in BortComponents;
+	pub EngineEntryBehavior in BortComponents;
+	pub SceneInitBehavior in BortComponents;
 }
 
 namespace! {
@@ -62,7 +64,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 	// Initialize the engine
 	behavior! {
-		as EngineEntryBhv[bhv_cx] do
+		as EngineEntryBehavior[bhv_cx] do
 		(_cx: [], _bhv_cx: []) {
 			// Create the event loop
 			let event_loop: EventLoop<WinitUserdata> = EventLoopBuilder::with_user_event().build();
@@ -120,20 +122,21 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 			viewport_mgr.register(cx, main_viewport);
 		}
-		(cx: [; mut SceneManager], _bhv_cx: []) {
+		(cx: [; mut SceneManager], bhv_cx: [SceneInitBehavior]) {
 			// Create engine root
 			let (engine, engine_ref) = OwnedEntity::new()
 				.with_debug_label("engine root")
 				.with(bhv)
 				.with(gfx)
 				.with(viewport_mgr)
+				.with(AssetManager::default())
 				.with(SceneManager::default())
 				.split_guard();
 
 			// Setup an initial scene
 			engine
 				.get_mut_s::<SceneManager>(cx)
-				.set_initial(make_game_scene_root(engine_ref, main_viewport_ref));
+				.set_initial(make_game_scene_root(bhv_cx, engine_ref, main_viewport_ref));
 		}
 		(cx: [; ref ViewportManager], _bhv_cx: []) {
 			// Show all viewports
@@ -159,7 +162,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			let mut bhv_cx = RootBehaviorToken::acquire();
 
 			behavior! {
-				as EngineEntryBhv[bhv_cx] do
+				as EngineEntryBehavior[bhv_cx] do
 				(cx: [; mut SceneManager, ref SceneUpdateHandler], bhv_cx: [SceneUpdateHandler]) {
 					// Swap scenes
 					let mut scene_mgr = self.engine.get_mut_s::<SceneManager>(cx);
@@ -189,7 +192,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			let mut bhv_cx = RootBehaviorToken::acquire();
 
 			behavior! {
-				as EngineEntryBhv[bhv_cx] do
+				as EngineEntryBehavior[bhv_cx] do
 				(cx: [; ref GfxContext, ref ViewportManager, mut Viewport], _bhv_cx: []) {
 					let gfx = self.engine.get_s::<GfxContext>(cx);
 
@@ -229,7 +232,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			let mut bhv_cx = RootBehaviorToken::acquire();
 
 			behavior! {
-				as EngineEntryBhv[bhv_cx] do
+				as EngineEntryBehavior[bhv_cx] do
 				(cx: [; ref GfxContext, ref ViewportManager, mut Viewport, mut InputManager], _bhv_cx: []) {
 					if matches!(event, WindowEvent::CloseRequested) {
 						main_loop.exit();
@@ -257,7 +260,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			let mut bhv_cx = RootBehaviorToken::acquire();
 
 			behavior! {
-				as EngineEntryBhv[bhv_cx] do
+				as EngineEntryBehavior[bhv_cx] do
 				(cx: [;ref ViewportManager, mut InputManager], _bhv_cx: []) {
 					for (_, viewport) in self.engine.get_s::<ViewportManager>(cx).window_map() {
 						viewport

@@ -167,6 +167,11 @@ pub struct ChunkVoxelData {
 }
 
 impl ChunkVoxelData {
+	pub fn with_default_air_data(mut self) -> Self {
+		self.blocks = Some(default_block_vector());
+		self
+	}
+
 	pub fn pos(&self) -> ChunkVec {
 		self.pos
 	}
@@ -223,7 +228,7 @@ impl ChunkVoxelDataMut<'_> {
 	}
 
 	pub fn load_blocks(&mut self, data: Option<Box<[Block; CHUNK_VOLUME as usize]>>) {
-		self.chunk_state.blocks = Some(data.unwrap_or_else(|| boxed_arr_from_fn(|| Block::AIR)));
+		self.chunk_state.blocks = Some(data.unwrap_or_else(|| default_block_vector()));
 	}
 
 	pub fn blocks_mut(&mut self) -> Option<VoxelBlocksMut<'_>> {
@@ -251,6 +256,10 @@ impl ChunkVoxelDataMut<'_> {
 			false
 		}
 	}
+}
+
+fn default_block_vector() -> Box<[Block; CHUNK_VOLUME as usize]> {
+	boxed_arr_from_fn(|| Block::AIR)
 }
 
 #[derive(Debug)]
@@ -345,6 +354,10 @@ where
 		self.cache
 	}
 
+	pub fn set_cached_chunk(&mut self, cache: Option<Obj<ChunkVoxelData>>) {
+		self.cache = cache;
+	}
+
 	pub fn pos(&self) -> V {
 		self.pos
 	}
@@ -437,19 +450,37 @@ where
 		world.read_chunk(cx, chunk).block(self.voxel_pos().block())
 	}
 
-	#[must_use]
 	pub fn try_set_state(
 		&mut self,
 		cx: &impl CxMut,
 		world: &mut WorldVoxelData,
 		block: Block,
-	) -> bool {
+	) -> Result<(), TrySetStateError> {
 		if let Some(chunk) = self.chunk(world) {
 			world
 				.write_chunk(cx, chunk)
 				.try_set_block(self.voxel_pos().block(), block)
+				.then_some(())
+				.ok_or(TrySetStateError::ChunkNotLoaded)
 		} else {
-			false
+			Err(TrySetStateError::OutOfWorld)
+		}
+	}
+
+	pub fn set_state_or_ignore(
+		&mut self,
+		cx: &impl CxMut,
+		world: &mut WorldVoxelData,
+		block: Block,
+	) {
+		if let Err(err) = self.try_set_state(cx, world, block) {
+			log::warn!(
+				"Attempted to write block outside of world or in an unloaded chunk. \
+				 Specific error: {:?}, Requested position: {:?}, Material: {:?}.",
+				err,
+				self.pos,
+				block,
+			);
 		}
 	}
 }
@@ -461,4 +492,10 @@ impl EntityVoxelPointer {
 			pos: self.voxel_pos(),
 		}
 	}
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum TrySetStateError {
+	OutOfWorld,
+	ChunkNotLoaded,
 }

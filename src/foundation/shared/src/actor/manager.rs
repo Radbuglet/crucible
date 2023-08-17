@@ -1,7 +1,4 @@
-use bort::{
-	ContextlessEventHandler, Entity, EventTarget, HasBehavior, OwnedEntity, VecEventList,
-	VirtualTag,
-};
+use bort::{Entity, EventTarget, OwnedEntity, VirtualTag};
 use crucible_util::mem::hash::FxHashSet;
 
 #[derive(Debug, Default)]
@@ -39,15 +36,7 @@ pub struct ActorSpawned {
 	_private: (),
 }
 
-impl HasBehavior for ActorSpawned {
-	type Delegate = ContextlessEventHandler<VecEventList<Self>>;
-}
-
 #[derive(Debug)]
 pub struct ActorDespawned {
 	_private: (),
-}
-
-impl HasBehavior for ActorDespawned {
-	type Delegate = ContextlessEventHandler<VecEventList<Self>>;
 }

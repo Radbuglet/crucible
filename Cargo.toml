@@ -22,6 +22,7 @@ typed-wgpu = { path = "src/util/typed-wgpu" }
 
 # Interface dependencies (i.e. dependencies that leak out into the public interface)
 hashbrown = "0.14.0"
+image = "0.24.5"
 log = "0.4.19"
 smallvec = "1.11.0"
 wgpu = "0.17.0"
@@ -35,4 +36,5 @@ num-traits = "0.2.15"  # These act mostly like trait aliases and should not be w
 [workspace.dependencies.bort]
 git = "https://github.com/Radbuglet/bort.git"
 rev = "76737e1e36756655da00da9bb0d0afb19020fce6"
+# path = "../bort/src/bort"
 features = ["saddle"]
