@@ -1,7 +1,17 @@
-use bort::{query, BehaviorRegistry, GlobalVirtualTag, HasGlobalVirtualTag, OwnedEntity};
-use crucible_foundation_shared::math::{Aabb3, EntityVec};
+use bort::{
+	query, saddle::behavior, BehaviorRegistry, GlobalTag, GlobalVirtualTag, HasGlobalVirtualTag,
+	OwnedEntity,
+};
+use crucible_foundation_client::engine::gfx::camera::CameraSettings;
+use crucible_foundation_shared::{
+	actor::spatial::Spatial,
+	math::{Aabb3, Angle3D, EntityVec},
+};
 
-use super::{scene_root::ActorSpawnedInGameBehavior, spatial_bundle::push_spatial_bundle};
+use super::{
+	scene_root::{ActorSpawnedInGameBehavior, CameraProviderDelegate},
+	spatial_bundle::push_spatial_bundle,
+};
 
 // === Tags === //
 
@@ -33,6 +43,24 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 			query! {
 				for (_event in *events; @me) + [GlobalVirtualTag::<LocalPlayerTag>] {
 					log::info!("Spawned player {me:?}");
+				}
+			}
+		},
+	))
+	.register::<CameraProviderDelegate>(CameraProviderDelegate::new(
+		|_bhv, bhv_cx, actor_tag, camera_mgr| {
+			behavior! {
+				as CameraProviderDelegate[bhv_cx] do
+				(cx: [;ref Spatial], _bhv_cx: []) {
+					query! {
+						for (ref spatial in GlobalTag::<Spatial>) + [actor_tag, GlobalVirtualTag::<LocalPlayerTag>] {
+							camera_mgr.set_pos_rot(
+								spatial.aabb().at_percent(EntityVec::new(0.5, 0.9, 0.5)).to_glam().as_vec3(),
+								Angle3D::new(0.0, 0.0),
+								CameraSettings::Perspective { fov: 70f32.to_radians(), near: 0.1, far: 100.0 },
+							);
+						}
+					}
 				}
 			}
 		},

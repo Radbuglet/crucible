@@ -24,7 +24,7 @@ typed-wgpu = { path = "src/util/typed-wgpu" }
 hashbrown = "0.14.0"
 log = "0.4.19"
 smallvec = "1.11.0"
-wgpu = "0.16.2"
+wgpu = "0.17.0"
 winit = "0.28.6"
 
 # Internal dependencies (i.e. dependencies that are only used as implementation details)
@@ -34,5 +34,5 @@ num-traits = "0.2.15"  # These act mostly like trait aliases and should not be w
 
 [workspace.dependencies.bort]
 git = "https://github.com/Radbuglet/bort.git"
-rev = "ba1a25abf087e385778470d4ec7f0683917db128"
+rev = "76737e1e36756655da00da9bb0d0afb19020fce6"
 features = ["saddle"]

@@ -1,7 +1,7 @@
 use anyhow::Context;
 use bort::{
 	delegate,
-	saddle::{behavior, namespace, saddle::BehaviorToken, BortComponents, RootBehaviorToken},
+	saddle::{behavior, saddle::namespace, BehaviorToken, BortComponents, RootBehaviorToken},
 	storage, BehaviorRegistry, Entity, OwnedEntity,
 };
 use crucible_foundation_client::engine::{
@@ -29,14 +29,17 @@ use crate::game::prefabs::scene_root::make_game_scene_root;
 
 namespace! {
 	pub EngineEntryBhv in BortComponents;
-	pub SceneUpdateBhv in BortComponents;
-	pub SceneRenderBhv in BortComponents;
+}
+
+namespace! {
+	derive SceneUpdateHandler => BortComponents;
+	derive SceneRenderHandler => BortComponents;
 }
 
 delegate! {
 	pub fn SceneUpdateHandler(
 		&'a self [me: Entity],
-		bhv_cx: &mut dyn BehaviorToken<SceneUpdateBhv>,
+		bhv_cx: &mut dyn BehaviorToken<SceneUpdateHandler>,
 		main_loop: &mut MainLoop,
 	)
 }
@@ -44,7 +47,7 @@ delegate! {
 delegate! {
 	pub fn SceneRenderHandler(
 		&'a self [me: Entity],
-		bhv_cx: &mut dyn BehaviorToken<SceneRenderBhv>,
+		bhv_cx: &mut dyn BehaviorToken<SceneRenderHandler>,
 		viewport: Entity,
 		frame: &mut wgpu::SurfaceTexture,
 	)
@@ -54,7 +57,7 @@ delegate! {
 
 pub fn main_inner() -> anyhow::Result<()> {
 	// Create the behavior registry
-	let mut bhv_cx = RootBehaviorToken::<BortComponents>::acquire();
+	let mut bhv_cx = RootBehaviorToken::acquire();
 	let bhv = BehaviorRegistry::new().with_many(crate::game::prefabs::register);
 
 	// Initialize the engine
@@ -153,11 +156,11 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 	impl MainLoopHandler for MyMainLoopHandler {
 		fn on_update(&mut self, main_loop: &mut MainLoop, _winit: &WinitEventProxy) {
-			let mut bhv_cx = RootBehaviorToken::<BortComponents>::acquire();
+			let mut bhv_cx = RootBehaviorToken::acquire();
 
 			behavior! {
 				as EngineEntryBhv[bhv_cx] do
-				(cx: [; mut SceneManager, ref SceneUpdateHandler], bhv_cx: [SceneUpdateBhv]) {
+				(cx: [; mut SceneManager, ref SceneUpdateHandler], bhv_cx: [SceneUpdateHandler]) {
 					// Swap scenes
 					let mut scene_mgr = self.engine.get_mut_s::<SceneManager>(cx);
 					drop(scene_mgr.swap_scenes());
@@ -183,7 +186,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			_winit: &WinitEventProxy,
 			window_id: WindowId,
 		) {
-			let mut bhv_cx = RootBehaviorToken::<BortComponents>::acquire();
+			let mut bhv_cx = RootBehaviorToken::acquire();
 
 			behavior! {
 				as EngineEntryBhv[bhv_cx] do
@@ -205,7 +208,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 					};
 					drop(gfx);
 				}
-				(cx: [;ref SceneManager, ref SceneRenderHandler], bhv_cx: [SceneRenderBhv]) {
+				(cx: [;ref SceneManager, ref SceneRenderHandler], bhv_cx: [SceneRenderHandler]) {
 					// Render the current scene
 					let scene = self.engine.get_s::<SceneManager>(cx).current();
 					scene.get_s::<SceneRenderHandler>(cx)(scene, bhv_cx, viewport, &mut frame);
@@ -223,7 +226,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			window_id: WindowId,
 			event: WindowEvent,
 		) {
-			let mut bhv_cx = RootBehaviorToken::<BortComponents>::acquire();
+			let mut bhv_cx = RootBehaviorToken::acquire();
 
 			behavior! {
 				as EngineEntryBhv[bhv_cx] do
@@ -251,7 +254,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			device_id: winit::event::DeviceId,
 			event: winit::event::DeviceEvent,
 		) {
-			let mut bhv_cx = RootBehaviorToken::<BortComponents>::acquire();
+			let mut bhv_cx = RootBehaviorToken::acquire();
 
 			behavior! {
 				as EngineEntryBhv[bhv_cx] do

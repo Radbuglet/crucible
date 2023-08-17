@@ -219,10 +219,7 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 	}
 
 	pub fn from_origin_size(origin: V, size: V, percent: V) -> Self {
-		Aabb3 {
-			origin: origin - size * percent,
-			size,
-		}
+		Aabb3 { origin, size }.centered_at(percent)
 	}
 
 	pub fn translated(&self, by: V) -> Self {
@@ -234,6 +231,10 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 
 	pub fn centered_at(&self, percent: V) -> Self {
 		self.translated(-self.size * percent)
+	}
+
+	pub fn at_percent(&self, percent: V) -> V {
+		self.origin + self.size * percent
 	}
 
 	pub fn max_corner(&self) -> V {

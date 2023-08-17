@@ -1,16 +1,16 @@
 use std::time::Duration;
 
 use bort::{
-	auto_reborrow, delegate, derive_behavior_delegate, derive_event_handler,
-	derive_multiplexed_handler, saddle::behavior, BehaviorRegistry, Entity, HasBehavior,
-	OwnedEntity, VecEventList, VirtualTag,
+	behavior_kind, delegate, derive_behavior_delegate,
+	saddle::{behavior, late_borrow, late_borrow_mut, BehaviorToken},
+	BehaviorRegistry, Entity, HasBehavior, OwnedEntity, VecEventList, VirtualTag,
 };
 use crucible_foundation_client::{
 	engine::{
 		gfx::{atlas::AtlasTexture, camera::CameraManager, texture::FullScreenTexture},
-		io::{gfx::GfxContext, input::InputManager},
+		io::{gfx::GfxContext, input::InputManager, viewport::Viewport},
 	},
-	gfx::voxel::mesh::{ChunkVoxelMesh, WorldVoxelMesh},
+	gfx::voxel::mesh::{self, ChunkVoxelMesh, WorldVoxelMesh},
 };
 use crucible_foundation_shared::{
 	actor::{
@@ -18,7 +18,6 @@ use crucible_foundation_shared::{
 		spatial::SpatialTracker,
 	},
 	material::MaterialRegistry,
-	math::{Aabb3, ChunkVec, EntityVec},
 	voxel::{
 		data::{ChunkVoxelData, WorldVoxelData},
 		loader::{LoadedChunk, WorldChunkFactory, WorldLoader},
@@ -28,18 +27,15 @@ use typed_glam::glam::UVec2;
 use winit::event::VirtualKeyCode;
 
 use crate::{
-	entry::{SceneRenderHandler, SceneUpdateBhv, SceneUpdateHandler},
+	entry::{SceneRenderHandler, SceneUpdateHandler},
 	game::components::scene_root::GameSceneRoot,
 };
-
-use super::player::make_local_player;
 
 // === Delegates === //
 
 delegate! {
 	pub fn ActorSpawnedInGameBehavior(bhv: &BehaviorRegistry, events: &mut VecEventList<ActorSpawned>, engine: Entity)
-	as deriving derive_behavior_delegate
-	as deriving derive_event_handler
+	as deriving derive_behavior_delegate { event }
 }
 
 impl HasBehavior for ActorSpawnedInGameBehavior {
@@ -47,20 +43,21 @@ impl HasBehavior for ActorSpawnedInGameBehavior {
 }
 
 delegate! {
-	pub fn CameraProviderBehavior(bhv: &BehaviorRegistry, actor_namespace: VirtualTag, mgr: &mut CameraManager)
-	as deriving derive_behavior_delegate
-	as deriving derive_multiplexed_handler
-}
-
-impl HasBehavior for CameraProviderBehavior {
-	type Delegate = Self;
+	pub fn CameraProviderDelegate(
+		bhv: &BehaviorRegistry,
+		bhv_cx: &mut dyn BehaviorToken<CameraProviderDelegate>,
+		actor_namespace: VirtualTag,
+		mgr: &mut CameraManager
+	)
+	as deriving derive_behavior_delegate { query }
+	as deriving behavior_kind
 }
 
 // === Prefabs === //
 
 pub fn make_game_scene_root(engine: Entity, viewport: Entity) -> OwnedEntity {
 	// Create scene root
-	let root = OwnedEntity::new()
+	OwnedEntity::new()
 		.with_debug_label("game scene root")
 		.with(GameSceneRoot { engine, viewport })
 		.with(ActorManager::default())
@@ -80,7 +77,7 @@ pub fn make_game_scene_root(engine: Entity, viewport: Entity) -> OwnedEntity {
 		.with(AtlasTexture::new(UVec2::new(16, 16), UVec2::new(2, 2)))
 		.with(SceneUpdateHandler::new(|me, bhv_cx, main_loop| {
 			behavior! {
-				as SceneUpdateBhv[bhv_cx] do
+				as SceneUpdateHandler[bhv_cx] do
 				(cx: [;mut GameSceneRoot, ref InputManager], _bhv_cx: []) {{
 					let state = me.get_mut_s::<GameSceneRoot>(cx);
 					let input_mgr = state.viewport.get_s::<InputManager>(cx);
@@ -93,111 +90,118 @@ pub fn make_game_scene_root(engine: Entity, viewport: Entity) -> OwnedEntity {
 			}
 		}))
 		.with(SceneRenderHandler::new(|me, bhv_cx, viewport, frame| {
-			// Acquire context
-			let mut cx = auto_reborrow! {
-				let state = me.get_mut::<GameSceneRoot>();
-				let actor_mgr = me.get_mut::<ActorManager>();
-				let camera_mgr = me.get_mut::<CameraManager>();
-				let world_data = me.get_mut::<WorldVoxelData>();
-				let world_mesh = me.get_mut::<WorldVoxelMesh>();
-				let material_registry = me.get_mut::<MaterialRegistry>();
-				let atlas_texture = me.get_mut::<AtlasTexture>();
+			behavior! {
+				as SceneRenderHandler[bhv_cx] do
+				(cx: [;ref GameSceneRoot, ref ActorManager], _bhv_cx: []) {
+					// Acquire self context
+					let world_data = late_borrow(|cx| me.get_s::<WorldVoxelData>(cx));
+					let world_mesh = late_borrow_mut(|cx| me.get_mut_s::<WorldVoxelMesh>(cx));
+					let camera_mgr = late_borrow_mut(|cx| me.get_mut_s::<CameraManager>(cx));
+					let atlas_texture = late_borrow(|cx| me.get_s::<AtlasTexture>(cx));
+					let material_registry = late_borrow(|cx| me.get_s::<MaterialRegistry>(cx));
+					let actor_mgr = late_borrow(|cx| me.get_s::<ActorManager>(cx));
+					let state = late_borrow(|cx| me.get_s::<GameSceneRoot>(cx));
 
-				let bhv(state) = state.engine.get::<BehaviorRegistry>();
-				let gfx(state) = state.engine.get::<GfxContext>();
-				let viewport_depth = viewport.get_mut::<FullScreenTexture>();
-			};
+					let actor_tag = actor_mgr.get(cx).tag();
 
-			// Determine the active camera
-			auto_reborrow!(cx: bhv, actor_mgr, camera_mgr => {
-				camera_mgr.unset();
-				bhv.process::<CameraProviderBehavior>((actor_mgr.tag(), &mut **camera_mgr));
-			});
+					// Acquire engine context
+					let engine = state.get(cx).engine;
+					let main_viewport = state.get(cx).viewport;
 
-			// Update the world
-			// auto_reborrow!(cx: gfx, world_data, world_mesh, atlas_texture, material_registry => {
-			// 	world_mesh.update_chunks(
-			// 		world_data,
-			// 		gfx,
-			// 		&atlas_texture,
-			// 		material_registry,
-			// 		Some(Duration::from_millis(16)),
-			// 	);
-			// });
+					let bhv = late_borrow(|cx| engine.get_s::<BehaviorRegistry>(cx));
+					let gfx = late_borrow(|cx| engine.get_s::<GfxContext>(cx));
 
-			// Render a black screen
-			auto_reborrow!(cx: gfx, viewport_depth => {
-				let frame_view = frame
-				.texture
-				.create_view(&wgpu::TextureViewDescriptor::default());
+					// Ensure that we're rendering the correct viewport
+					if viewport != main_viewport {
+						return;
+					}
+				}
+				(cx: [;ref BehaviorRegistry, mut CameraManager], bhv_cx: [CameraProviderDelegate]) {{
+					let bhv = &*bhv.get(cx);
+					let camera_mgr = &mut *camera_mgr.get(cx);
 
-				let mut cb = gfx
-					.device
-					.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+					// Determine the active camera
+					camera_mgr.unset();
+					bhv.process::<CameraProviderDelegate>((
+						bhv_cx.as_dyn_mut(),
+						actor_tag,
+						camera_mgr,
+					));
+				}}
+				(
+					cx: [
+						mesh::CxMut;
+						ref GfxContext,
+						ref WorldVoxelData,
+						mut WorldVoxelMesh,
+						ref AtlasTexture,
+						ref MaterialRegistry,
+					],
+					_bhv_cx: [],
+				) {{
+					let gfx = &*gfx.get(cx);
+					let world_data = &*world_data.get(cx);
+					let world_mesh = &mut *world_mesh.get(cx);
+					let atlas_texture = &*atlas_texture.get(cx);
+					let material_registry = &*material_registry.get(cx);
 
-				let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
-					label: None,
-					color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-						view: &frame_view,
-						resolve_target: None,
-						ops: wgpu::Operations {
-							load: wgpu::LoadOp::Clear(wgpu::Color {
-								r: 0.1,
-								g: 0.1,
-								b: 0.1,
-								a: 1.0,
+					// Update the world
+					world_mesh.update_chunks(
+						cx,
+						world_data,
+						gfx,
+						atlas_texture,
+						material_registry,
+						Some(Duration::from_millis(16)),
+					);
+				}}
+				(
+					cx: [;ref GfxContext, mut FullScreenTexture, ref Viewport],
+					_bhv_cx: [],
+				) {{
+					let gfx = &*gfx.get(cx);
+					let viewport_depth = &mut *main_viewport.get_mut_s::<FullScreenTexture>(cx);
+
+					// Render a black screen
+					let frame_view = frame
+						.texture
+						.create_view(&wgpu::TextureViewDescriptor::default());
+
+					let mut cb = gfx
+						.device
+						.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+
+					let pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
+						label: None,
+						color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+							view: &frame_view,
+							resolve_target: None,
+							ops: wgpu::Operations {
+								load: wgpu::LoadOp::Clear(wgpu::Color {
+									r: 0.1,
+									g: 0.1,
+									b: 0.1,
+									a: 1.0,
+								}),
+								store: true,
+							},
+						})],
+						depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+							view: viewport_depth.acquire_view(gfx, &main_viewport.get_s(cx)),
+							depth_ops: Some(wgpu::Operations {
+								load: wgpu::LoadOp::Clear(1.0),
+								store: true,
 							}),
-							store: true,
-						},
-					})],
-					depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-						view: viewport_depth.acquire_view(&gfx, &*viewport.get()),
-						depth_ops: Some(wgpu::Operations {
-							load: wgpu::LoadOp::Clear(1.0),
-							store: true,
+							stencil_ops: None,
 						}),
-						stencil_ops: None,
-					}),
-				});
+					});
 
-				// Finish rendering
-				drop(pass);
-				gfx.queue.submit([cb.finish()]);
-			});
-		}));
-
-	// Initialize world
-	let (root, root_ref) = root.split_guard();
-	let mut cx = auto_reborrow! {
-		let bhv = engine.get::<BehaviorRegistry>();
-		let actor_mgr = root_ref.get_mut::<ActorManager>();
-		let material_registry = root_ref.get_mut::<MaterialRegistry>();
-		let world_data = root_ref.get_mut::<WorldVoxelData>();
-		let world_loader = root_ref.get_mut::<WorldLoader>();
-	};
-
-	// Spawn local player
-	auto_reborrow!(cx: bhv, actor_mgr => {
-		let mut on_actor_spawn = VecEventList::new();
-		actor_mgr.spawn(&mut on_actor_spawn, make_local_player());
-
-		bhv.process::<ActorSpawnedInGameBehavior>((&mut on_actor_spawn, (root.entity(),)));
-	});
-
-	// Define materials
-	auto_reborrow!(cx: material_registry);
-
-	let _air_material = material_registry.register(
-		"crucible:air",
-		OwnedEntity::new().with_debug_label("air block descriptor"),
-	);
-
-	let _stone_material = material_registry.register(
-		"crucible:stone",
-		OwnedEntity::new().with_debug_label("stone block descriptor"),
-	);
-
-	root
+					// Finish rendering
+					drop(pass);
+					gfx.queue.submit([cb.finish()]);
+				}}
+			}
+		}))
 }
 
 pub fn register(_bhv: &mut BehaviorRegistry) {}
