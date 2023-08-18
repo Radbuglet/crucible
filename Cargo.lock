@@ -212,6 +212,7 @@ dependencies = [
 [[package]]
 name = "bort"
 version = "0.1.0"
+source = "git+https://github.com/Radbuglet/bort.git?rev=7afadfe6490af6d9fd8e9994a456ab20e0f1fdfb#7afadfe6490af6d9fd8e9994a456ab20e0f1fdfb"
 dependencies = [
  "cfgenius",
  "derive-where",
@@ -1519,6 +1520,7 @@ dependencies = [
 [[package]]
 name = "partial-scope"
 version = "0.1.0"
+source = "git+https://github.com/Radbuglet/bort.git?rev=7afadfe6490af6d9fd8e9994a456ab20e0f1fdfb#7afadfe6490af6d9fd8e9994a456ab20e0f1fdfb"
 
 [[package]]
 name = "paste"
@@ -1742,6 +1744,7 @@ dependencies = [
 [[package]]
 name = "saddle"
 version = "0.1.0"
+source = "git+https://github.com/Radbuglet/bort.git?rev=7afadfe6490af6d9fd8e9994a456ab20e0f1fdfb#7afadfe6490af6d9fd8e9994a456ab20e0f1fdfb"
 dependencies = [
  "derive-where",
  "linkme",

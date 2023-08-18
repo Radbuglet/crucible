@@ -34,7 +34,7 @@ derive-where = "1.2.1"
 num-traits = "0.2.15"  # These act mostly like trait aliases and should not be weakened over time.
 
 [workspace.dependencies.bort]
-# git = "https://github.com/Radbuglet/bort.git"
-# rev = "76737e1e36756655da00da9bb0d0afb19020fce6"
-path = "../bort/src/bort"
+git = "https://github.com/Radbuglet/bort.git"
+rev = "7afadfe6490af6d9fd8e9994a456ab20e0f1fdfb"
+# path = "../bort/src/bort"
 features = ["saddle"]
