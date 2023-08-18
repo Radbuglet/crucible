@@ -1,7 +1,7 @@
 use crucible_foundation_shared::math::{Angle3D, Angle3DExt};
 use typed_glam::glam::{Mat4, Vec3};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct CameraManager {
 	is_locked: bool,
 	view: Mat4,

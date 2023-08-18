@@ -1,4 +1,4 @@
-type Color = vec4<f32>;
+alias Color = vec4<f32>;
 
 struct VertexInput {
 	@location(0) position: vec3<f32>,

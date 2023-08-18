@@ -27,6 +27,12 @@ impl VertexBufferSetLayoutGenerator<UntypedPipelineSet> for [wgpu::VertexBufferL
 	}
 }
 
+impl VertexBufferSetLayoutGenerator<()> for () {
+	fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
+		vec![].into()
+	}
+}
+
 macro_rules! impl_vertex_buffer_set {
 	($($para:ident:$field:tt),*) => {
 		impl<'a, $($para: 'static),*> VertexBufferSetLayoutGenerator<($($para,)*)> for ($(&'a VertexBufferLayout<$para>,)*) {

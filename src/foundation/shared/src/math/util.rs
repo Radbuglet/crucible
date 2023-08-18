@@ -239,24 +239,34 @@ impl FlavorCastFrom<Vec2> for Angle3DFlavor {
 }
 
 pub trait Angle3DExt {
+	#[must_use]
 	fn new_deg(yaw: f32, pitch: f32) -> Self;
 
+	#[must_use]
 	fn as_matrix(&self) -> Mat4;
 
+	#[must_use]
 	fn as_matrix_horizontal(&self) -> Mat4;
 
+	#[must_use]
 	fn as_matrix_vertical(&self) -> Mat4;
 
+	#[must_use]
 	fn forward(&self) -> Vec3;
 
+	#[must_use]
 	fn wrap(&self) -> Self;
 
+	#[must_use]
 	fn wrap_x(&self) -> Self;
 
+	#[must_use]
 	fn wrap_y(&self) -> Self;
 
+	#[must_use]
 	fn clamp_y(&self, min: f32, max: f32) -> Self;
 
+	#[must_use]
 	fn clamp_y_90(&self) -> Self;
 }
 

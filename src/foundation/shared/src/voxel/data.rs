@@ -467,12 +467,7 @@ where
 		}
 	}
 
-	pub fn set_state_or_ignore(
-		&mut self,
-		cx: &impl CxMut,
-		world: &mut WorldVoxelData,
-		block: Block,
-	) {
+	pub fn set_state_or_warn(&mut self, cx: &impl CxMut, world: &mut WorldVoxelData, block: Block) {
 		if let Err(err) = self.try_set_state(cx, world, block) {
 			log::warn!(
 				"Attempted to write block outside of world or in an unloaded chunk. \
