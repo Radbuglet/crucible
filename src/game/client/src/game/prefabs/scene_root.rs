@@ -65,7 +65,7 @@ delegate! {
 	pub fn CameraProviderBehavior(
 		bhv: &BehaviorRegistry,
 		bhv_cx: &mut dyn BehaviorToken<CameraProviderBehavior>,
-		actor_namespace: VirtualTag,
+		actor_tag: VirtualTag,
 		mgr: &mut CameraManager
 	)
 	as deriving behavior_kind
@@ -76,8 +76,41 @@ delegate! {
 	pub fn ActorInputBehavior(
 		bhv: &BehaviorRegistry,
 		bhv_cx: &mut dyn BehaviorToken<ActorInputBehavior>,
-		actor_namespace: VirtualTag,
+		actor_tag: VirtualTag,
 		input: &InputManager,
+	)
+	as deriving behavior_kind
+	as deriving derive_behavior_delegate { query }
+}
+
+delegate! {
+	pub fn ActorPhysicsResetBehavior(
+		bhv: &BehaviorRegistry,
+		bhv_cx: &mut dyn BehaviorToken<ActorPhysicsResetBehavior>,
+		actor_tag: VirtualTag,
+	)
+	as deriving behavior_kind
+	as deriving derive_behavior_delegate { query }
+}
+
+delegate! {
+	pub fn ActorPhysicsInfluenceBehavior(
+		bhv: &BehaviorRegistry,
+		bhv_cx: &mut dyn BehaviorToken<ActorPhysicsInfluenceBehavior>,
+		actor_tag: VirtualTag,
+	)
+	as deriving behavior_kind
+	as deriving derive_behavior_delegate { query }
+}
+
+delegate! {
+	pub fn ActorPhysicsApplyBehavior(
+		bhv: &BehaviorRegistry,
+		bhv_cx: &mut dyn BehaviorToken<ActorPhysicsApplyBehavior>,
+		actor_tag: VirtualTag,
+		spatial_mgr: &mut SpatialTracker,
+		world: &WorldVoxelData,
+		registry: &MaterialRegistry,
 	)
 	as deriving behavior_kind
 	as deriving derive_behavior_delegate { query }
@@ -222,6 +255,9 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 			(cx: [;ref ActorManager, ref GameSceneRoot, ref Viewport], _bhv_cx: []) {
 				// Acquire self context
 				let actor_mgr = late_borrow(|cx| me.get_s::<ActorManager>(cx));
+				let spatial_mgr = late_borrow_mut(|cx| me.get_mut_s::<SpatialTracker>(cx));
+				let world_data = late_borrow(|cx| me.get_s::<WorldVoxelData>(cx));
+				let block_registry = late_borrow(|cx| me.get_s::<MaterialRegistry>(cx));
 				let state = late_borrow(|cx| me.get_s::<GameSceneRoot>(cx));
 
 				let actor_tag = actor_mgr.get(cx).tag();
@@ -235,11 +271,16 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 				let viewport_data = late_borrow(|cx| main_viewport.get_s::<Viewport>(cx));
 				let input_mgr = late_borrow(|cx| main_viewport.get_s::<InputManager>(cx));
 			}
+			(cx: [;ref BehaviorRegistry], bhv_cx: [ActorPhysicsResetBehavior]) {
+				bhv.get(cx).process::<ActorPhysicsResetBehavior>((bhv_cx.as_dyn_mut(), actor_tag));
+			}
 			(cx: [;ref GameSceneRoot, ref BehaviorRegistry, ref Viewport, ref InputManager], bhv_cx: [ActorInputBehavior]) {{
+				// Acquire context
 				let bhv = &*bhv.get(cx);
 				let input_mgr = &*input_mgr.get(cx);
 				let viewport_data = &*viewport_data.get(cx);
 
+				// Handle mouse lock
 				if input_mgr.button(MouseButton::Left).recently_pressed() {
 					viewport_data.window().set_cursor_visible(false);
 
@@ -255,12 +296,28 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 					viewport_data.window().set_cursor_visible(true);
 				}
 
+				// Process inputs
 				bhv.process::<ActorInputBehavior>((
 					bhv_cx.as_dyn_mut(),
 					actor_tag,
 					input_mgr,
 				));
 			}}
+			(cx: [;ref BehaviorRegistry], bhv_cx: [ActorPhysicsInfluenceBehavior]) {{
+				bhv.get(cx).process::<ActorPhysicsInfluenceBehavior>((bhv_cx.as_dyn_mut(), actor_tag));
+			}}
+			(
+				cx: [;ref BehaviorRegistry, mut SpatialTracker, ref WorldVoxelData, ref MaterialRegistry],
+				bhv_cx: [ActorPhysicsApplyBehavior]
+			) {
+				bhv.get(cx).process::<ActorPhysicsApplyBehavior>((
+					bhv_cx.as_dyn_mut(),
+					actor_tag,
+					&mut *spatial_mgr.get(cx),
+					&*world_data.get(cx),
+					&*block_registry.get(cx),
+				));
+			}
 		}
 	})
 }

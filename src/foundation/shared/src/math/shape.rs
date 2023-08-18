@@ -208,6 +208,7 @@ pub struct Aabb3<V> {
 }
 
 impl<V: SignedNumericVector3> Aabb3<V> {
+	#[must_use]
 	pub fn from_corners_max_excl(a: V, b: V) -> Self {
 		let min = a.min(b);
 		let max = a.max(b);
@@ -218,10 +219,20 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 		}
 	}
 
+	#[must_use]
 	pub fn from_origin_size(origin: V, size: V, percent: V) -> Self {
 		Aabb3 { origin, size }.centered_at(percent)
 	}
 
+	#[must_use]
+	pub fn with_origin(&self, new_origin: V) -> Self {
+		Aabb3 {
+			origin: new_origin,
+			size: self.size,
+		}
+	}
+
+	#[must_use]
 	pub fn translated(&self, by: V) -> Self {
 		Self {
 			origin: self.origin + by,
@@ -229,18 +240,22 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 		}
 	}
 
+	#[must_use]
 	pub fn centered_at(&self, percent: V) -> Self {
 		self.translated(-self.size * percent)
 	}
 
+	#[must_use]
 	pub fn at_percent(&self, percent: V) -> V {
 		self.origin + self.size * percent
 	}
 
+	#[must_use]
 	pub fn max_corner(&self) -> V {
 		self.origin + self.size
 	}
 
+	#[must_use]
 	pub fn grow(self, by: V) -> Self {
 		Self {
 			origin: self.origin - by,
@@ -248,6 +263,7 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 		}
 	}
 
+	#[must_use]
 	pub fn quad(self, face: BlockFace) -> AaQuad<V> {
 		let origin = self.origin;
 		let origin = if face.sign() == Sign::Positive {
@@ -259,6 +275,7 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 		AaQuad::new_given_volume(origin, face, self.size)
 	}
 
+	#[must_use]
 	pub fn contains(&self, point: V) -> bool
 	where
 		V::Comp: PartialOrd,
@@ -268,6 +285,7 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 			&& (self.origin.z() <= point.z() && point.z() < self.origin.z() + self.size.z())
 	}
 
+	#[must_use]
 	pub fn intersects(&self, other: Self) -> bool
 	where
 		V::Comp: PartialOrd,
