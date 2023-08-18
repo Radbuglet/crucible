@@ -152,6 +152,19 @@ impl SamplerAssetDescriptor {
 		anisotropy_clamp: 0,
 		border_color: None,
 	};
+
+	pub const FILTER_CLAMP_EDGES: Self = Self {
+		label: Some(Cow::Borrowed("filter clamp edges")),
+		address_mode_u: wgpu::AddressMode::ClampToEdge,
+		address_mode_v: wgpu::AddressMode::ClampToEdge,
+		address_mode_w: wgpu::AddressMode::ClampToEdge,
+		mag_filter: wgpu::FilterMode::Linear,
+		min_filter: wgpu::FilterMode::Linear,
+		mipmap_filter: wgpu::FilterMode::Linear,
+		compare: None,
+		anisotropy_clamp: 1,
+		border_color: None,
+	};
 }
 
 impl Default for SamplerAssetDescriptor {

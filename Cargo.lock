@@ -432,6 +432,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bort",
+ "bytemuck",
  "color-backtrace",
  "crucible-foundation-client",
  "crucible-foundation-shared",

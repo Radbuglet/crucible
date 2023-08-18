@@ -73,9 +73,7 @@ pub fn load_opaque_block_shader(
 		gfx.device
 			.create_shader_module(wgpu::ShaderModuleDescriptor {
 				label: Some("opaque_block.wgsl"),
-				source: wgpu::ShaderSource::Wgsl(
-					include_str!("../res/shaders/opaque_block.wgsl").into(),
-				),
+				source: wgpu::ShaderSource::Wgsl(include_str!("opaque_block.wgsl").into()),
 			})
 	})
 }

@@ -30,6 +30,7 @@ winit = "0.28.6"
 
 # Internal dependencies (i.e. dependencies that are only used as implementation details)
 anyhow = "1.0.70"
+bytemuck = "1.10.0"
 derive-where = "1.2.1"
 num-traits = "0.2.15"  # These act mostly like trait aliases and should not be weakened over time.
 

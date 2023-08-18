@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 bort = { workspace = true }
+bytemuck = { workspace = true }
 crucible-foundation-shared = { workspace = true }
 crucible-foundation-client = { workspace = true }
 crucible-shared = { workspace = true }

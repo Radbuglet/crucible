@@ -38,6 +38,7 @@ use crucible_foundation_shared::{
 };
 use crucible_util::debug::error::ResultExt;
 use typed_glam::glam::{UVec2, Vec4};
+use wgpu::util::DeviceExt;
 use winit::{
 	event::{MouseButton, VirtualKeyCode},
 	window::CursorGrabMode,
@@ -155,9 +156,34 @@ pub fn make_game_scene_root(
 			);
 			atlas_gfx.update(gfx, atlas);
 
+			let skybox = image::load_from_memory(include_bytes!("../res/skybox.png"))
+				.unwrap_pretty()
+				.into_rgba8();
+
+			let skybox = gfx.device.create_texture_with_data(
+				&gfx.queue,
+				&wgpu::TextureDescriptor {
+					label: Some("Skybox panorama"),
+					size: wgpu::Extent3d {
+						width: skybox.width(),
+						height: skybox.height(),
+						depth_or_array_layers: 1,
+					},
+					mip_level_count: 1,
+					sample_count: 1,
+					dimension: wgpu::TextureDimension::D2,
+					format: wgpu::TextureFormat::Rgba8Unorm,
+					usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+					view_formats: &[],
+				},
+				&skybox,
+			);
+
+			let skybox = skybox.create_view(&wgpu::TextureViewDescriptor::default());
+
 			// Create atlas and voxel uniform services
 			root.insert(VoxelUniforms::new(asset_mgr, gfx, &atlas_gfx.view));
-			root.insert(SkyboxUniforms::new(asset_mgr, gfx));
+			root.insert(SkyboxUniforms::new(asset_mgr, gfx, &skybox));
 			root.insert(atlas_gfx);
 
 			// Register core materials
@@ -171,15 +197,15 @@ pub fn make_game_scene_root(
 
 			// Setup base world state
 			world_loader.temp_load_region(cx, world_data, Aabb3::from_corners_max_excl(
-				WorldVec::new(-100, -1, -100).chunk(),
-				WorldVec::new(100, -1, 100).chunk() + ChunkVec::ONE,
+				WorldVec::new(-10, -5, -10).chunk(),
+				WorldVec::new(10, -5, 10).chunk() + ChunkVec::ONE,
 			));
 
 			let mut pointer = BlockVoxelPointer::new(world_data, WorldVec::ZERO);
 
-			for x in -100..=100 {
-				for z in -100..=100 {
-					pointer.set_pos(Some((cx, world_data)), WorldVec::new(x, -1, z));
+			for x in -10..=10 {
+				for z in -10..=10 {
+					pointer.set_pos(Some((cx, world_data)), WorldVec::new(x, -5, z));
 					pointer.set_state_or_warn(cx, world_data, Block::new(proto_mat.id));
 				}
 			}

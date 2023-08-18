@@ -9,7 +9,10 @@ use typed_wgpu::{
 
 use crate::engine::{
 	assets::AssetManager,
-	gfx::pipeline::{BindGroupExt, PipelineLayoutExt},
+	gfx::{
+		pipeline::{BindGroupExt, PipelineLayoutExt},
+		texture::SamplerAssetDescriptor,
+	},
 	io::gfx::GfxContext,
 };
 
@@ -21,7 +24,7 @@ pub fn load_skybox_shader_module(
 		gfx.device
 			.create_shader_module(wgpu::ShaderModuleDescriptor {
 				label: Some("Skybox shader module"),
-				source: wgpu::ShaderSource::Wgsl(include_str!("../res/shaders/skybox.wgsl").into()),
+				source: wgpu::ShaderSource::Wgsl(include_str!("skybox.wgsl").into()),
 			})
 	})
 }
@@ -29,7 +32,8 @@ pub fn load_skybox_shader_module(
 #[derive(Debug)]
 pub struct SkyboxRenderingBindUniform<'a> {
 	pub uniforms: BufferBinding<'a, SkyboxRenderingUniformBuffer>,
-	// pub panorama: &'a wgpu::TextureView,
+	pub panorama: &'a wgpu::TextureView,
+	pub panorama_sampler: &'a wgpu::Sampler,
 }
 
 #[derive(Debug, AsStd430)]
@@ -42,16 +46,22 @@ impl BindGroup for SkyboxRenderingBindUniform<'_> {
 	type DynamicOffsets = NoDynamicOffsets;
 
 	fn layout(builder: &mut impl BindGroupBuilder<Self>, (): &Self::Config) {
-		builder.with_uniform_buffer(wgpu::ShaderStages::FRAGMENT, false, |c| {
-			c.uniforms.raw.clone()
-		});
-		// .with_texture(
-		// 	wgpu::ShaderStages::FRAGMENT,
-		// 	wgpu::TextureSampleType::Float { filterable: false },
-		// 	wgpu::TextureViewDimension::D2,
-		// 	false,
-		// 	|c| c.panorama,
-		// );
+		builder
+			.with_uniform_buffer(wgpu::ShaderStages::FRAGMENT, false, |c| {
+				c.uniforms.raw.clone()
+			})
+			.with_texture(
+				wgpu::ShaderStages::FRAGMENT,
+				wgpu::TextureSampleType::Float { filterable: true },
+				wgpu::TextureViewDimension::D2,
+				false,
+				|c| c.panorama,
+			)
+			.with_sampler(
+				wgpu::ShaderStages::FRAGMENT,
+				wgpu::SamplerBindingType::Filtering,
+				|c| c.panorama_sampler,
+			);
 	}
 }
 
@@ -80,11 +90,7 @@ pub struct SkyboxUniforms {
 }
 
 impl SkyboxUniforms {
-	pub fn new(
-		assets: &mut AssetManager,
-		gfx: &GfxContext,
-		/* panorama: &wgpu::TextureView */
-	) -> Self {
+	pub fn new(assets: &mut AssetManager, gfx: &GfxContext, panorama: &wgpu::TextureView) -> Self {
 		let buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("skybox uniform buffer"),
 			mapped_at_creation: false,
@@ -94,7 +100,8 @@ impl SkyboxUniforms {
 
 		let bind_group = SkyboxRenderingBindUniform {
 			uniforms: buffer.as_entire_buffer_binding().into(),
-			// panorama,
+			panorama,
+			panorama_sampler: &*SamplerAssetDescriptor::FILTER_CLAMP_EDGES.load(assets, gfx),
 		}
 		.load_instance(assets, gfx, &());
 
