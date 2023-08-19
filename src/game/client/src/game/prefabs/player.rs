@@ -2,34 +2,24 @@ use bort::{query, saddle::behavior, BehaviorRegistry, GlobalTag, OwnedEntity};
 use crucible_foundation_client::engine::gfx::camera::CameraSettings;
 use crucible_foundation_shared::{
 	actor::spatial::Spatial,
-	math::{
-		kinematic::{tick_friction_coef_to_coef_qty, MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
-		Aabb3, Angle3D, Angle3DExt, BlockFace, EntityVec,
+	material::MaterialRegistry,
+	math::{kinematic::tick_friction_coef_to_coef_qty, Angle3D, Angle3DExt, EntityVec},
+	voxel::{
+		collision::{self},
+		data::WorldVoxelData,
 	},
 };
-use typed_glam::glam::{DVec3, Vec3};
-use winit::event::VirtualKeyCode;
+use winit::event::{MouseButton, VirtualKeyCode};
 
-use crate::game::components::{kinematic::KinematicSpatial, player::LocalPlayer};
+use crate::game::components::{
+	kinematic::KinematicSpatial,
+	player::{
+		BlockPlacementCx, LocalPlayer, LocalPlayerInputs, GRAVITY_VEC, PLAYER_AIR_FRICTION_COEF,
+		PLAYER_BLOCK_FRICTION_COEF,
+	},
+};
 
 use super::scene_root::{ActorInputBehavior, ActorSpawnedInGameBehavior, CameraProviderBehavior};
-
-// === Constants === //
-
-// See: https://web.archive.org/web/20230313061131/https://www.mcpk.wiki/wiki/Jumping
-pub const GRAVITY: f64 = 0.08 * MC_TICKS_TO_SECS_SQUARED;
-pub const GRAVITY_VEC: EntityVec = EntityVec::from_glam(DVec3::new(0.0, -GRAVITY, 0.0));
-
-const PLAYER_SPEED: f64 = 0.13 * MC_TICKS_TO_SECS_SQUARED;
-const PLAYER_AIR_FRICTION_COEF: f64 = 0.98;
-const PLAYER_BLOCK_FRICTION_COEF: f64 = 0.91;
-
-const PLAYER_JUMP_IMPULSE: f64 = 0.43 * MC_TICKS_TO_SECS;
-const PLAYER_JUMP_COOL_DOWN: u64 = 30;
-
-const PLAYER_WIDTH: f64 = 0.8;
-const PLAYER_HEIGHT: f64 = 1.8;
-const PLAYER_EYE_LEVEL: f64 = 1.6;
 
 // === Prefabs === //
 
@@ -42,15 +32,12 @@ pub fn make_local_player() -> OwnedEntity {
 				facing: Angle3D::ZERO,
 				fly_mode: false,
 				jump_cool_down: 0,
+				view_bob: 0.0,
 			},
 		)
 		.with_tagged(
 			GlobalTag::<Spatial>,
-			Spatial::new(Aabb3::from_origin_size(
-				EntityVec::ZERO,
-				EntityVec::new(PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_WIDTH),
-				EntityVec::new(0.5, 0.0, 0.5),
-			)),
+			Spatial::new(LocalPlayer::new_aabb(EntityVec::ZERO)),
 		)
 		.with_tagged(
 			GlobalTag::<KinematicSpatial>,
@@ -84,13 +71,24 @@ fn make_spawn_behavior() -> ActorSpawnedInGameBehavior {
 }
 
 fn make_input_behavior() -> ActorInputBehavior {
-	ActorInputBehavior::new(|_bhv, bhv_cx, actor_tag, inputs| {
+	ActorInputBehavior::new(|_bhv, bhv_cx, scene_root, actor_tag, inputs| {
 		behavior! {
 			as ActorInputBehavior[bhv_cx] do
-			(_cx: [;mut LocalPlayer, mut KinematicSpatial], _bhv_cx: []) {
+			(cx: [
+				collision::CxRef, BlockPlacementCx;
+				mut LocalPlayer,
+				ref Spatial,
+				mut KinematicSpatial,
+				mut WorldVoxelData,
+				ref MaterialRegistry,
+			], _bhv_cx: []) {{
+				let world = &mut *scene_root.get_mut_s::<WorldVoxelData>(cx);
+				let registry = &*scene_root.get_s::<MaterialRegistry>(cx);
+
 				query! {
 					for (
 						mut player in GlobalTag::<LocalPlayer>,
+						ref spatial in GlobalTag::<Spatial>,
 						mut kinematic in GlobalTag::<KinematicSpatial>,
 					) + [actor_tag] {
 						// Apply gravity
@@ -100,68 +98,31 @@ fn make_input_behavior() -> ActorInputBehavior {
 						player.facing += inputs.mouse_delta() * f32::to_radians(0.4);
 						player.facing = player.facing.clamp_y_90().wrap_x();
 
-						// Compute heading
-						let mut heading = Vec3::ZERO;
-
-						if inputs.key(VirtualKeyCode::W).state() {
-							heading += Vec3::Z;
-						}
-
-						if inputs.key(VirtualKeyCode::S).state() {
-							heading -= Vec3::Z;
-						}
-
-						if inputs.key(VirtualKeyCode::A).state() {
-							heading -= Vec3::X;
-						}
-
-						if inputs.key(VirtualKeyCode::D).state() {
-							heading += Vec3::X;
-						}
-
-						// Normalize heading
-						let heading = heading.normalize_or_zero();
-
-						// Convert player-local heading to world space
-						let heading = EntityVec::cast_from(
-							player
-								.facing
-								.as_matrix_horizontal()
-								.transform_vector3(heading),
-						);
-
-						// Accelerate in that direction
-						kinematic.apply_acceleration(heading * PLAYER_SPEED);
-
 						// Process fly mode
 						if inputs.key(VirtualKeyCode::F).recently_pressed() {
 							player.fly_mode = !player.fly_mode;
 						}
 
-						// Handle jumps
-						let space_pressed = inputs.key(VirtualKeyCode::Space).state();
+						// Process movement
+						player.process_movement(kinematic, LocalPlayerInputs {
+							forward: inputs.key(VirtualKeyCode::W).state(),
+							backward: inputs.key(VirtualKeyCode::S).state(),
+							left: inputs.key(VirtualKeyCode::A).state(),
+							right: inputs.key(VirtualKeyCode::D).state(),
+							jump: inputs.key(VirtualKeyCode::Space).state(),
+						});
 
-						if !space_pressed {
-							player.jump_cool_down = 0;
+						// Handle block placement
+						if inputs.button(MouseButton::Right).recently_pressed() {
+							player.place_block_where_looking(cx, world, registry, spatial, 7.0);
 						}
 
-						if player.jump_cool_down > 0 {
-							player.jump_cool_down -= 1;
-						}
-
-						if space_pressed {
-							if player.fly_mode {
-								kinematic.apply_acceleration(-GRAVITY_VEC * 2.0);
-							} else if player.jump_cool_down == 0
-								&& kinematic.was_face_touching(BlockFace::NegativeY)
-							{
-								player.jump_cool_down = PLAYER_JUMP_COOL_DOWN;
-								*kinematic.velocity.y_mut() = PLAYER_JUMP_IMPULSE;
-							}
+						if inputs.button(MouseButton::Left).recently_pressed() {
+							player.break_block_where_looking(cx, world, registry, spatial, 7.0);
 						}
 					}
 				}
-			}
+			}}
 		}
 	})
 }
@@ -174,9 +135,7 @@ fn make_camera_behavior() -> CameraProviderBehavior {
 				query! {
 					for (ref spatial in GlobalTag::<Spatial>, ref player in GlobalTag::<LocalPlayer>) + [actor_tag] {
 						camera_mgr.set_pos_rot(
-							spatial.aabb()
-								.at_percent(EntityVec::new(0.5, PLAYER_EYE_LEVEL / PLAYER_HEIGHT, 0.5))
-								.to_glam().as_vec3(),
+							player.eye_pos(spatial).to_glam().as_vec3(),
 							player.facing,
 							CameraSettings::Perspective { fov: 110f32.to_radians(), near: 0.1, far: 100.0 },
 						);

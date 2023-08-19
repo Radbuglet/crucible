@@ -39,3 +39,9 @@ git = "https://github.com/Radbuglet/bort.git"
 rev = "2842acbf9342e6fa7c71aee82b37ffde5dc9324d"
 # path = "../bort/src/bort"
 features = ["saddle"]
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package.image]
+opt-level = 3

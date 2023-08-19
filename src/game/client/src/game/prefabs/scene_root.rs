@@ -29,14 +29,14 @@ use crucible_foundation_shared::{
 		spatial::SpatialTracker,
 	},
 	material::MaterialRegistry,
-	math::{Aabb3, ChunkVec, WorldVec, WorldVecExt},
+	math::{Aabb3, BlockFace, ChunkVec, WorldVec, WorldVecExt},
 	voxel::{
 		collision::{CollisionMeta, MaterialColliderDescriptor},
 		data::{Block, BlockVoxelPointer, ChunkVoxelData, WorldVoxelData},
 		loader::{self, LoadedChunk, WorldChunkFactory, WorldLoader},
 	},
 };
-use crucible_util::debug::error::ResultExt;
+use crucible_util::{debug::error::ResultExt, mem::c_enum::CEnum};
 use typed_glam::glam::{UVec2, Vec4};
 use wgpu::util::DeviceExt;
 use winit::{
@@ -76,6 +76,7 @@ delegate! {
 	pub fn ActorInputBehavior(
 		bhv: &BehaviorRegistry,
 		bhv_cx: &mut dyn BehaviorToken<ActorInputBehavior>,
+		scene: Entity,
 		actor_tag: VirtualTag,
 		input: &InputManager,
 	)
@@ -115,6 +116,10 @@ delegate! {
 	as deriving behavior_kind
 	as deriving derive_behavior_delegate { query }
 }
+
+// === Behaviors === //
+
+pub fn register(_bhv: &mut BehaviorRegistry) {}
 
 // === Prefabs === //
 
@@ -230,15 +235,15 @@ pub fn make_game_scene_root(
 
 			// Setup base world state
 			world_loader.temp_load_region(cx, world_data, Aabb3::from_corners_max_excl(
-				WorldVec::new(-10, -5, -10).chunk(),
-				WorldVec::new(10, -5, 10).chunk() + ChunkVec::ONE,
+				WorldVec::new(-10, -10, -10).chunk(),
+				WorldVec::new(10, -10, 10).chunk() + ChunkVec::ONE,
 			));
 
 			let mut pointer = BlockVoxelPointer::new(world_data, WorldVec::ZERO);
 
 			for x in -10..=10 {
 				for z in -10..=10 {
-					pointer.set_pos(Some((cx, world_data)), WorldVec::new(x, -5, z));
+					pointer.set_pos(Some((cx, world_data)), WorldVec::new(x, -10, z));
 					pointer.set_state_or_warn(cx, world_data, Block::new(proto_mat.id));
 				}
 			}
@@ -299,6 +304,7 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 				// Process inputs
 				bhv.process::<ActorInputBehavior>((
 					bhv_cx.as_dyn_mut(),
+					me,
 					actor_tag,
 					input_mgr,
 				));
@@ -378,6 +384,11 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 				// Consume flagged chunks
 				for dirty in world_data.flush_dirty(cx) {
 					world_mesh.flag_chunk(dirty.entity());
+
+					for neighbor in BlockFace::variants() {
+						let Some(neighbor) = world_data.read_chunk(cx, dirty).neighbor(neighbor) else { continue };
+						world_mesh.flag_chunk(neighbor.entity());
+					}
 				}
 
 				// Update the world
@@ -517,5 +528,3 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 		}
 	})
 }
-
-pub fn register(_bhv: &mut BehaviorRegistry) {}

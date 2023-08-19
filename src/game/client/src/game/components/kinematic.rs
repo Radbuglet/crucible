@@ -1,22 +1,25 @@
 use bort::{
 	saddle::{cx, BortComponents},
-	HasGlobalManagedTag,
+	CompMut, HasGlobalManagedTag,
 };
 use crucible_foundation_shared::{
-	actor::spatial::Spatial,
+	actor::spatial::{self, Spatial, SpatialTracker},
 	material::MaterialRegistry,
-	math::{Aabb3, BlockFace, EntityVec},
+	math::{kinematic::update_kinematic, Aabb3, Axis3, BlockFace, EntityVec, Sign, VecCompExt},
 	voxel::{
-		collision::{self, cast_volume, filter_all_colliders, COLLISION_TOLERANCE},
+		collision::{
+			self, cast_volume, filter_all_colliders, move_rigid_body, COLLISION_TOLERANCE,
+		},
 		data::WorldVoxelData,
 	},
 };
-use crucible_util::mem::c_enum::CEnumMap;
+use crucible_util::mem::c_enum::{CEnum, CEnumMap};
 
 // === Context === //
 
 cx! {
-	pub trait CxMut(BortComponents): collision::CxRef;
+	pub trait CxSideOcclusion(BortComponents): collision::CxRef;
+	pub trait CxApplyPhysics(BortComponents): CxSideOcclusion, spatial::CxMut;
 }
 
 // === Components === //
@@ -45,10 +48,50 @@ impl KinematicSpatial {
 		}
 	}
 
+	pub fn apply_physics(
+		&mut self,
+		cx: &impl CxApplyPhysics,
+		world: &WorldVoxelData,
+		registry: &MaterialRegistry,
+		spatial_mgr: &mut SpatialTracker,
+		spatial: &mut CompMut<Spatial>,
+		delta: f64,
+	) {
+		// Clip velocities and accelerations into obstructed faces
+		self.update_face_touching_mask(cx, world, registry, spatial);
+
+		for axis in Axis3::variants() {
+			let clip_comp = |comp: &mut f64| {
+				let sign = Sign::of(*comp).unwrap_or(Sign::Positive);
+				let face = BlockFace::compose(axis, sign);
+
+				if self.collision_mask[face] {
+					*comp = 0.0;
+				}
+			};
+
+			// N.B. we do these separately because a player could be accelerating
+			// in the direction opposite to which they are moving.
+			clip_comp(self.velocity.comp_mut(axis));
+			clip_comp(self.acceleration.comp_mut(axis));
+		}
+
+		// Update velocity and position
+		let aabb = spatial.aabb();
+		let (delta_pos, velocity) =
+			update_kinematic(self.velocity, self.acceleration, self.friction, delta);
+
+		self.velocity = velocity;
+		let new_origin =
+			move_rigid_body(cx, world, registry, aabb, delta_pos, filter_all_colliders());
+
+		spatial_mgr.update(cx, spatial, aabb.with_origin(new_origin));
+	}
+
 	// === Collisions === //
 
 	fn is_face_touching_now_inner(
-		cx: &impl CxMut,
+		cx: &impl CxSideOcclusion,
 		world: &WorldVoxelData,
 		registry: &MaterialRegistry,
 		aabb: Aabb3<EntityVec>,
@@ -69,7 +112,7 @@ impl KinematicSpatial {
 
 	pub fn is_face_touching_now(
 		&self,
-		cx: &impl CxMut,
+		cx: &impl CxSideOcclusion,
 		world: &WorldVoxelData,
 		registry: &MaterialRegistry,
 		spatial: &Spatial,
@@ -80,7 +123,7 @@ impl KinematicSpatial {
 
 	pub fn update_face_touching_mask(
 		&mut self,
-		cx: &impl CxMut,
+		cx: &impl CxSideOcclusion,
 		world: &WorldVoxelData,
 		registry: &MaterialRegistry,
 		spatial: &Spatial,

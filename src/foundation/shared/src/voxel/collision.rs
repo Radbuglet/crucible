@@ -492,8 +492,7 @@ impl RayCast {
 				let (isect_lerp, isect_pos) = isect_plane.intersection(step_line);
 
 				intersections.push(RayCastIntersection {
-					// This will be updated in a bit.
-					block: block_loc,
+					block: block_loc, // This will be updated in a bit.
 					face: exit_face.invert(),
 					// N.B. This lerp value is the actual length along the ray because the ray is a
 					// unit vector.
@@ -514,10 +513,13 @@ impl RayCast {
 			block_loc = isect.block;
 		}
 
-		// Finally, we update distance accumulator.
+		// Update the distance accumulator.
 		// N.B. the direction is either normalized, in which case the step was of length 1, or we're
-		// traveling with direction zero, in which case the distance is already infinite.
+		// traveling with direction zero, in which case the distance traveled is already infinite.
 		self.dist += 1.0;
+
+		// Don't forget to bump the position!
+		self.loc.move_by(Some((cx, world)), self.dir);
 
 		intersections
 	}
