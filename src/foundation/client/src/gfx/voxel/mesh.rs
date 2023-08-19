@@ -9,7 +9,7 @@ use crucible_foundation_shared::{
 	material::{MaterialId, MaterialRegistry},
 	math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, Tri, WorldVec, WorldVecExt, QUAD_UVS},
 	voxel::{
-		data::{self, WorldVoxelData},
+		data::{VoxelDataReadCx, WorldVoxelData},
 		mesh::QuadMeshLayer,
 	},
 };
@@ -28,7 +28,7 @@ use super::pipeline::{VoxelUniforms, VoxelVertex};
 // === Context === //
 
 cx! {
-	pub trait CxMut(BortComponents): data::CxRef;
+	pub trait MeshUpdateCx(BortComponents): VoxelDataReadCx;
 }
 
 // === Services === //
@@ -53,7 +53,7 @@ impl WorldVoxelMesh {
 
 	pub fn update_chunks(
 		&mut self,
-		cx: &impl CxMut,
+		cx: &impl MeshUpdateCx,
 		world: &WorldVoxelData,
 		gfx: &GfxContext,
 		atlas: &AtlasTexture,

@@ -24,14 +24,14 @@ use crate::{
 };
 
 use super::{
-	data::{self, BlockVoxelPointer, EntityVoxelPointer, WorldVoxelData},
+	data::{BlockVoxelPointer, EntityVoxelPointer, VoxelDataReadCx, WorldVoxelData},
 	mesh::{QuadMeshLayer, VolumetricMeshLayer},
 };
 
 // === Context === //
 
 cx! {
-	pub trait CxRef(BortComponents): data::CxRef;
+	pub trait ColliderCheckCx(BortComponents): VoxelDataReadCx = ref MaterialColliderDescriptor;
 }
 
 // === General Collisions === //
@@ -76,7 +76,7 @@ impl MaterialColliderDescriptor {
 
 pub async fn occluding_volumes_in_block<'a>(
 	y: &'a Yield<(EntityAabb, CollisionMeta)>,
-	cx: &'a impl CxRef,
+	cx: &'a impl ColliderCheckCx,
 	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a WorldVoxelData,
 	registry: &'a MaterialRegistry,
@@ -121,7 +121,7 @@ pub async fn occluding_volumes_in_block<'a>(
 
 pub async fn occluding_faces_in_block<'a>(
 	y: &'a Yield<(AaQuad<EntityVec>, CollisionMeta)>,
-	cx: &impl CxRef,
+	cx: &impl ColliderCheckCx,
 	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a WorldVoxelData,
 	registry: &'a MaterialRegistry,
@@ -205,7 +205,7 @@ pub struct IntersectingFaceInBlock {
 
 pub async fn intersecting_faces_in_block<'a>(
 	y: &'a Yield<IntersectingFaceInBlock>,
-	cx: &impl CxRef,
+	cx: &impl ColliderCheckCx,
 	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a WorldVoxelData,
 	registry: &'a MaterialRegistry,
@@ -260,7 +260,7 @@ pub async fn intersecting_faces_in_block<'a>(
 pub const COLLISION_TOLERANCE: f64 = 0.0005;
 
 pub fn cast_volume(
-	cx: &impl CxRef,
+	cx: &impl ColliderCheckCx,
 	world: &WorldVoxelData,
 	registry: &MaterialRegistry,
 	quad: AaQuad<EntityVec>,
@@ -363,7 +363,7 @@ pub fn cast_volume(
 
 pub async fn check_volume<'a>(
 	y: &'a Yield<(BlockVoxelPointer, CollisionMeta)>,
-	cx: &impl CxRef,
+	cx: &impl ColliderCheckCx,
 	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a WorldVoxelData,
 	registry: &'a MaterialRegistry,
@@ -440,7 +440,7 @@ impl RayCast {
 
 	pub fn step(
 		&mut self,
-		cx: &impl CxRef,
+		cx: &impl ColliderCheckCx,
 		world: &WorldVoxelData,
 	) -> SmallVec<[RayCastIntersection; 3]> {
 		// Construct a buffer to hold our `RayCastIntersection`s. There should be at most three of
@@ -526,7 +526,7 @@ impl RayCast {
 
 	pub fn step_intersect(
 		&mut self,
-		cx: &impl CxRef,
+		cx: &impl ColliderCheckCx,
 		collider_descs: Storage<MaterialColliderDescriptor>,
 		world: &WorldVoxelData,
 		registry: &MaterialRegistry,
@@ -577,7 +577,7 @@ impl RayCast {
 	pub async fn step_for(
 		&mut self,
 		y: &yielder![RayCastIntersection; for<'a> &'a WorldVoxelData],
-		cx: &impl CxRef,
+		cx: &impl ColliderCheckCx,
 		max_dist: f64,
 	) {
 		while self.dist() <= max_dist {
@@ -595,7 +595,7 @@ impl RayCast {
 	pub async fn step_intersect_for(
 		&mut self,
 		y: &yielder![(RayCastIntersection, CollisionMeta); for<'a> (&'a WorldVoxelData, &'a MaterialRegistry)],
-		cx: &impl CxRef,
+		cx: &impl ColliderCheckCx,
 		collider_descs: Storage<MaterialColliderDescriptor>,
 		max_dist: f64,
 	) {
@@ -632,7 +632,7 @@ pub struct RayCastIntersection {
 // === Rigid Body === //
 
 pub fn move_rigid_body(
-	cx: &impl CxRef,
+	cx: &impl ColliderCheckCx,
 	world: &WorldVoxelData,
 	registry: &MaterialRegistry,
 	mut aabb: EntityAabb,

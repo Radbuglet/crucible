@@ -75,7 +75,7 @@ fn make_input_behavior() -> ActorInputBehavior {
 		behavior! {
 			as ActorInputBehavior[bhv_cx] do
 			(cx: [
-				collision::CxRef, BlockPlacementCx;
+				collision::ColliderCheckCx, BlockPlacementCx;
 				mut LocalPlayer,
 				ref Spatial,
 				mut KinematicSpatial,
@@ -137,7 +137,7 @@ fn make_camera_behavior() -> CameraProviderBehavior {
 						camera_mgr.set_pos_rot(
 							player.eye_pos(spatial).to_glam().as_vec3(),
 							player.facing,
-							CameraSettings::Perspective { fov: 110f32.to_radians(), near: 0.1, far: 100.0 },
+							CameraSettings::Perspective { fov: 110f32.to_radians(), near: 0.1, far: 500.0 },
 						);
 					}
 				}

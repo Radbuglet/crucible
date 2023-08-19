@@ -12,9 +12,8 @@ use crucible_foundation_shared::{
 		Angle3D, Angle3DExt, BlockFace, EntityAabb, EntityVec,
 	},
 	voxel::{
-		self,
-		collision::{self, MaterialColliderDescriptor, RayCast},
-		data::{Block, EntityVoxelPointer, WorldVoxelData},
+		collision::{ColliderCheckCx, RayCast},
+		data::{Block, EntityVoxelPointer, VoxelDataWriteCx, WorldVoxelData},
 	},
 };
 use crucible_util::{lang::iter::ContextualIter, use_generator};
@@ -28,7 +27,7 @@ use super::kinematic::KinematicSpatial;
 // === Contexts === //
 
 cx! {
-	pub trait BlockPlacementCx(BortComponents): collision::CxRef, voxel::data::CxMut;
+	pub trait BlockPlacementCx(BortComponents): ColliderCheckCx, VoxelDataWriteCx;
 }
 
 // === Constants === //

@@ -51,8 +51,8 @@ fn spatial_chunk_for_aabb(aabb: EntityAabb) -> IVec3 {
 // === SpatialTracker === //
 
 cx! {
-	pub trait CxMut(BortComponents) = mut Spatial;
-	pub trait CxRef(BortComponents) = ref Spatial;
+	pub trait SpatialMutateCx(BortComponents) = mut Spatial;
+	pub trait SpatialQueryCx(BortComponents) = ref Spatial;
 }
 
 #[derive(Debug, Default)]
@@ -70,7 +70,7 @@ impl SpatialTracker {
 		self.register_inner(target, chunk);
 	}
 
-	pub fn unregister(&mut self, cx: &impl CxMut, target: &mut CompMut<Spatial>) {
+	pub fn unregister(&mut self, cx: &impl SpatialMutateCx, target: &mut CompMut<Spatial>) {
 		let chunk = spatial_chunk_for_aabb(target.aabb);
 		self.unregister_inner(cx, target, chunk);
 	}
@@ -81,7 +81,12 @@ impl SpatialTracker {
 		spatials.push(CompMut::owner(target_data));
 	}
 
-	fn unregister_inner(&mut self, cx: &impl CxMut, target_data: &mut Spatial, chunk: IVec3) {
+	fn unregister_inner(
+		&mut self,
+		cx: &impl SpatialMutateCx,
+		target_data: &mut Spatial,
+		chunk: IVec3,
+	) {
 		// Remove ourselves from the old chunk
 		let hashbrown::hash_map::Entry::Occupied(mut entry) = self.chunks.entry(chunk) else {
 			unreachable!()
@@ -103,7 +108,12 @@ impl SpatialTracker {
 		}
 	}
 
-	pub fn update(&mut self, cx: &impl CxMut, target: &mut CompMut<Spatial>, aabb: EntityAabb) {
+	pub fn update(
+		&mut self,
+		cx: &impl SpatialMutateCx,
+		target: &mut CompMut<Spatial>,
+		aabb: EntityAabb,
+	) {
 		// Update AABB
 		let old_chunk = spatial_chunk_for_aabb(target.aabb);
 		let new_chunk = spatial_chunk_for_aabb(aabb);
@@ -118,7 +128,7 @@ impl SpatialTracker {
 
 	pub fn query_in<'a>(
 		&'a self,
-		cx: &'a impl CxRef,
+		cx: &'a impl SpatialQueryCx,
 		aabb: EntityAabb,
 	) -> impl Iterator<Item = Obj<Spatial>> + 'a {
 		// Determine candidate chunks.

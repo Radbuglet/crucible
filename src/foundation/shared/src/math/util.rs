@@ -350,11 +350,12 @@ impl BlockFace {
 
 		for axis in Axis3::variants() {
 			let comp = vec.comp(axis);
-			if comp.abs() == 1 {
-				if choice.is_some() {
-					return None;
-				}
 
+			if comp != 0 && choice.is_some() {
+				return None;
+			}
+
+			if comp.abs() == 1 {
 				choice = Some(BlockFace::compose(axis, Sign::of(comp).unwrap()));
 			}
 		}

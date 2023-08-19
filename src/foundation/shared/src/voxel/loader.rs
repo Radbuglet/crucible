@@ -12,12 +12,12 @@ use bort::{
 
 use crate::math::{Aabb3, ChunkVec, Sign};
 
-use super::data::{self, ChunkVoxelData, WorldVoxelData};
+use super::data::{ChunkVoxelData, VoxelDataWriteCx, WorldVoxelData};
 
 // === Context === //
 
 cx! {
-	pub trait CxMut(BortComponents): data::CxMut = mut LoadedChunk;
+	pub trait LoaderUpdateCx(BortComponents): VoxelDataWriteCx = mut LoadedChunk;
 }
 
 // === Region === //
@@ -85,7 +85,7 @@ impl WorldLoader {
 
 	pub fn update_region<R: Region>(
 		&mut self,
-		cx: &impl CxMut,
+		cx: &impl LoaderUpdateCx,
 		world: &mut WorldVoxelData,
 		from_region: Option<R>,
 		to_region: Option<R>,
@@ -140,7 +140,7 @@ impl WorldLoader {
 
 	pub fn load_region(
 		&mut self,
-		cx: &impl CxMut,
+		cx: &impl LoaderUpdateCx,
 		world: &mut WorldVoxelData,
 		new_region: impl Region,
 	) {
@@ -149,7 +149,7 @@ impl WorldLoader {
 
 	pub fn unload_region(
 		&mut self,
-		cx: &impl CxMut,
+		cx: &impl LoaderUpdateCx,
 		world: &mut WorldVoxelData,
 		old_region: impl Region,
 	) {
@@ -158,7 +158,7 @@ impl WorldLoader {
 
 	pub fn move_region<R: Region>(
 		&mut self,
-		cx: &impl CxMut,
+		cx: &impl LoaderUpdateCx,
 		world: &mut WorldVoxelData,
 		from_region: R,
 		to_region: R,
@@ -168,7 +168,7 @@ impl WorldLoader {
 
 	pub fn temp_load_region(
 		&mut self,
-		cx: &impl CxMut,
+		cx: &impl LoaderUpdateCx,
 		world: &mut WorldVoxelData,
 		new_region: impl Region,
 	) {

@@ -3,12 +3,13 @@ use bort::{
 	CompMut, HasGlobalManagedTag,
 };
 use crucible_foundation_shared::{
-	actor::spatial::{self, Spatial, SpatialTracker},
+	actor::spatial::{Spatial, SpatialMutateCx, SpatialTracker},
 	material::MaterialRegistry,
 	math::{kinematic::update_kinematic, Aabb3, Axis3, BlockFace, EntityVec, Sign, VecCompExt},
 	voxel::{
 		collision::{
-			self, cast_volume, filter_all_colliders, move_rigid_body, COLLISION_TOLERANCE,
+			cast_volume, filter_all_colliders, move_rigid_body, ColliderCheckCx,
+			COLLISION_TOLERANCE,
 		},
 		data::WorldVoxelData,
 	},
@@ -18,8 +19,8 @@ use crucible_util::mem::c_enum::{CEnum, CEnumMap};
 // === Context === //
 
 cx! {
-	pub trait CxSideOcclusion(BortComponents): collision::CxRef;
-	pub trait CxApplyPhysics(BortComponents): CxSideOcclusion, spatial::CxMut;
+	pub trait CxSideOcclusion(BortComponents): ColliderCheckCx;
+	pub trait CxApplyPhysics(BortComponents): CxSideOcclusion, SpatialMutateCx;
 }
 
 // === Components === //

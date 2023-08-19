@@ -158,7 +158,7 @@ pub fn make_game_scene_root(
 	behavior! {
 		as SceneInitBehavior[bhv_cx] do
 		(cx: [
-			loader::CxMut;
+			loader::LoaderUpdateCx;
 			mut ActorManager,
 			mut AtlasTexture,
 			mut AssetManager,
@@ -235,16 +235,18 @@ pub fn make_game_scene_root(
 
 			// Setup base world state
 			world_loader.temp_load_region(cx, world_data, Aabb3::from_corners_max_excl(
-				WorldVec::new(-10, -10, -10).chunk(),
-				WorldVec::new(10, -10, 10).chunk() + ChunkVec::ONE,
+				WorldVec::new(-100, -50, -100).chunk(),
+				WorldVec::new(100, 50, 100).chunk() + ChunkVec::ONE,
 			));
 
 			let mut pointer = BlockVoxelPointer::new(world_data, WorldVec::ZERO);
 
-			for x in -10..=10 {
-				for z in -10..=10 {
-					pointer.set_pos(Some((cx, world_data)), WorldVec::new(x, -10, z));
-					pointer.set_state_or_warn(cx, world_data, Block::new(proto_mat.id));
+			for x in -100..=100 {
+				for y in -50..0 {
+					for z in -100..=100 {
+						pointer.set_pos(Some((cx, world_data)), WorldVec::new(x, y, z));
+						pointer.set_state_or_warn(cx, world_data, Block::new(proto_mat.id));
+					}
 				}
 			}
 		}}
@@ -365,7 +367,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 			}
 			(
 				cx: [
-					mesh::CxMut;
+					mesh::MeshUpdateCx;
 					ref GfxContext,
 					mut WorldVoxelData,
 					mut WorldVoxelMesh,
