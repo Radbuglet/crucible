@@ -451,17 +451,8 @@ pub const ZERO_TO_ONE_EXPONENT: u8 = 0b01111111;
 pub fn compose_f32(sign: Sign, exp: u8, mantissa: u32) -> f32 {
 	debug_assert!(mantissa < MAX_MANTISSA_EXCLUSIVE);
 	let bits = mantissa +  // Bits 0 to `MANTISSA_DIGITS - 2`
-		((exp as u32) << (f32::MANTISSA_DIGITS - 1)) +  // Bits `MANTISSA_DIGITS - 1` to `MANTISSA_DIGITS - 1 + 8`
+		((exp as u32) << MANTISSA_BITS) +  // Bits `MANTISSA_BITS` to `MANTISSA_BITS + 8`
 		((sign.is_negative() as u32) << 31); // Bit 31
 
 	f32::from_bits(bits)
-}
-
-pub fn allocate_unit_depth(depth: &mut u32) -> (f32, bool) {
-	*depth += 1;
-	*depth |= MANTISSA_MASK;
-	(
-		compose_f32(Sign::Positive, ZERO_TO_ONE_EXPONENT, *depth),
-		*depth == 0,
-	)
 }

@@ -209,3 +209,31 @@ impl FlavorCastFrom<glam::Vec3> for Color3Flavor {
 		Color3::from_glam(v)
 	}
 }
+
+// === Color4 === //
+
+pub type Color4 = TypedVector<Color4Flavor>;
+
+#[non_exhaustive]
+pub struct Color4Flavor;
+
+impl VecFlavor for Color4Flavor {
+	type Backing = glam::Vec4;
+
+	const DEBUG_NAME: &'static str = "Color4";
+}
+
+impl FlavorCastFrom<f32> for Color4Flavor {
+	fn cast_from(vec: f32) -> Color4
+	where
+		Self: VecFlavor,
+	{
+		Color4::splat(vec)
+	}
+}
+
+impl FlavorCastFrom<glam::Vec4> for Color4Flavor {
+	fn cast_from(v: glam::Vec4) -> Color4 {
+		Color4::from_glam(v)
+	}
+}

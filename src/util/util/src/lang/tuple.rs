@@ -93,8 +93,8 @@ pub trait ToOwnedTuple {
 	}
 }
 
-pub trait ToOwnedTupleEq: hash::Hash + Eq + ToOwnedTuple<Owned = Self::_OwnedEq> {
-	type _OwnedEq: hash::Hash + Eq;
+pub trait ToOwnedTupleEq: hash::Hash + Eq + ToOwnedTuple<Owned = Self::OwnedEq> {
+	type OwnedEq: hash::Hash + Eq;
 
 	fn is_eq_owned(&self, owned: &Self::Owned) -> bool;
 }
@@ -116,7 +116,7 @@ where
 	T: ?Sized + ToOwned + hash::Hash + Eq,
 	T::Owned: hash::Hash + Eq,
 {
-	type _OwnedEq = Self::Owned;
+	type OwnedEq = Self::Owned;
 
 	fn is_eq_owned(&self, owned: &Self::Owned) -> bool {
 		*self == owned.borrow()
@@ -139,7 +139,7 @@ impl<T: Clone> ToOwnedTuple for PreOwned<T> {
 }
 
 impl<T: Clone + Eq + hash::Hash> ToOwnedTupleEq for PreOwned<T> {
-	type _OwnedEq = Self::Owned;
+	type OwnedEq = Self::Owned;
 
 	fn is_eq_owned(&self, owned: &Self::Owned) -> bool {
 		&self.0 == owned
@@ -163,7 +163,7 @@ impl<T: ?Sized + ToOwnedTuple> ToOwnedTuple for RefToOwnable<'_, T> {
 }
 
 impl<T: ?Sized + ToOwnedTupleEq> ToOwnedTupleEq for RefToOwnable<'_, T> {
-	type _OwnedEq = Self::Owned;
+	type OwnedEq = Self::Owned;
 
 	fn is_eq_owned(&self, owned: &Self::Owned) -> bool {
 		self.0.is_eq_owned(owned)
@@ -187,7 +187,7 @@ macro_rules! impl_to_owned_tuple {
 		}
 
 		impl<$($name: ToOwnedTupleEq),*> ToOwnedTupleEq for ($($name,)*) {
-			type _OwnedEq = Self::Owned;
+			type OwnedEq = Self::Owned;
 
 			#[allow(unused)]
 			fn is_eq_owned(&self, owned: &Self::Owned) -> bool {
