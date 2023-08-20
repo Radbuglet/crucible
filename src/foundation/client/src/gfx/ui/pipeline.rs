@@ -51,6 +51,7 @@ impl MeshInstance {
 			color,
 		}
 	}
+
 	pub fn layout() -> VertexBufferLayout<Self> {
 		VertexBufferLayout::builder()
 			.with_attribute(Std430VertexFormat::Uint32) // pos
