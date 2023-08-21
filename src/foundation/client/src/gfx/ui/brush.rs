@@ -11,6 +11,7 @@ use crucible_util::{
 	mem::hash::FxHashMap,
 };
 use derive_where::derive_where;
+use typed_glam::glam::Affine2;
 
 use crate::engine::{assets::AssetManager, io::gfx::GfxContext};
 
@@ -40,6 +41,8 @@ pub trait ImmMaterial: Sized + 'static + fmt::Debug {
 		&'a mut self,
 		gfx: &'a GfxContext,
 		assets: &mut AssetManager,
+		surface_format: wgpu::TextureFormat,
+		depth_format: wgpu::TextureFormat,
 	) -> Self::Pass<'a>;
 }
 
@@ -60,17 +63,33 @@ impl ImmRenderer {
 	}
 
 	pub fn brush(&self) -> ImmBrush<'_> {
-		ImmBrush { renderer: self }
+		ImmBrush {
+			renderer: self,
+			transform: Affine2::IDENTITY,
+		}
 	}
 
 	pub fn use_inner(&self) -> RefMut<'_, ImmRendererInner> {
 		self.inner.borrow_mut()
+	}
+
+	pub fn prepare_render<'a>(
+		&'a mut self,
+		gfx: &'a GfxContext,
+		assets: &mut AssetManager,
+		surface_format: wgpu::TextureFormat,
+		depth_format: wgpu::TextureFormat,
+	) -> ImmRenderPass<'a> {
+		self.inner
+			.get_mut()
+			.prepare_render(gfx, assets, surface_format, depth_format)
 	}
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct ImmBrush<'a> {
 	pub renderer: &'a ImmRenderer,
+	pub transform: Affine2,
 }
 
 impl<'a> ImmBrush<'a> {
@@ -203,13 +222,15 @@ impl ImmRendererInner {
 		&'a mut self,
 		gfx: &'a GfxContext,
 		assets: &mut AssetManager,
+		surface_format: wgpu::TextureFormat,
+		depth_format: wgpu::TextureFormat,
 	) -> ImmRenderPass<'a> {
 		ImmRenderPass {
 			layer_count: self.layer_count,
 			materials: self
 				.materials
 				.iter_mut()
-				.map(|material| material.create_pass_dyn(gfx, assets))
+				.map(|material| material.create_pass_dyn(gfx, assets, surface_format, depth_format))
 				.collect(),
 		}
 	}
@@ -249,6 +270,8 @@ trait ReifiedMaterial: 'static + fmt::Debug {
 		&'a mut self,
 		gfx: &'a GfxContext,
 		assets: &mut AssetManager,
+		surface_format: wgpu::TextureFormat,
+		depth_format: wgpu::TextureFormat,
 	) -> Box<dyn ImmPass + 'a>;
 }
 
@@ -265,7 +288,9 @@ impl<T: ImmMaterial> ReifiedMaterial for T {
 		&'a mut self,
 		gfx: &'a GfxContext,
 		assets: &mut AssetManager,
+		surface_format: wgpu::TextureFormat,
+		depth_format: wgpu::TextureFormat,
 	) -> Box<dyn ImmPass + 'a> {
-		Box::new(self.create_pass(gfx, assets))
+		Box::new(self.create_pass(gfx, assets, surface_format, depth_format))
 	}
 }

@@ -17,6 +17,7 @@ use crucible_foundation_client::{
 	},
 	gfx::{
 		skybox::pipeline::{load_skybox_pipeline, SkyboxUniforms},
+		ui::{brush::ImmRenderer, materials::sdf_rect::SdfRectImmBrushExt},
 		voxel::{
 			mesh::{self, ChunkVoxelMesh, MaterialVisualDescriptor, WorldVoxelMesh},
 			pipeline::{load_opaque_block_pipeline, VoxelUniforms},
@@ -29,7 +30,7 @@ use crucible_foundation_shared::{
 		spatial::SpatialTracker,
 	},
 	material::MaterialRegistry,
-	math::{Aabb3, BlockFace, ChunkVec, WorldVec, WorldVecExt},
+	math::{Aabb2, Aabb3, BlockFace, ChunkVec, Color4, WorldVec, WorldVecExt},
 	voxel::{
 		collision::{CollisionMeta, MaterialColliderDescriptor},
 		data::{Block, BlockVoxelPointer, ChunkVoxelData, WorldVoxelData},
@@ -37,7 +38,7 @@ use crucible_foundation_shared::{
 	},
 };
 use crucible_util::{debug::error::ResultExt, mem::c_enum::CEnum};
-use typed_glam::glam::{UVec2, Vec4};
+use typed_glam::glam::{UVec2, Vec2, Vec4};
 use wgpu::util::DeviceExt;
 use winit::{
 	event::{MouseButton, VirtualKeyCode},
@@ -462,6 +463,23 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					viewport_depth.format(),
 				);
 
+				// Setup UI rendering sub-pass
+				let mut ui = ImmRenderer::new();
+				{
+					let brush = ui.brush();
+					brush.fill_rect(
+						Aabb2 { origin: Vec2::splat(-0.01), size: Vec2::splat(0.02) },
+						Color4::new(1.0, 0.0, 0.0, 1.0),
+					);
+				}
+				let ui = ui.prepare_render(
+					gfx,
+					asset_mgr,
+					frame.texture.format(),
+					viewport_depth.format(),
+				);
+
+
 				// Begin rendering
 				let frame_view = frame
 					.texture
@@ -521,6 +539,31 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					voxel_pipeline.bind_pipeline(&mut pass);
 					voxel_uniforms.write_pass_state(&mut pass);
 					world_mesh_subpass.push(voxel_uniforms, &mut pass);
+				}
+
+				// Render UI
+				{
+					let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
+						label: None,
+						color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+							view: &frame_view,
+							resolve_target: None,
+							ops: wgpu::Operations {
+								load: wgpu::LoadOp::Load,
+								store: true,
+							},
+						})],
+						depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+							view: viewport_depth.acquire_view(gfx, viewport_data),
+							depth_ops: Some(wgpu::Operations {
+								load: wgpu::LoadOp::Clear(0.0),
+								store: true,
+							}),
+							stencil_ops: None,
+						}),
+					});
+
+					ui.render(&mut pass);
 				}
 
 				// Finish rendering
