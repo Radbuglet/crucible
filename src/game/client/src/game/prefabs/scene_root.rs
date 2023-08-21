@@ -467,10 +467,15 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 				let mut ui = ImmRenderer::new();
 				{
 					let brush = ui.brush();
-					brush.fill_rect(
-						Aabb2 { origin: Vec2::splat(-0.01), size: Vec2::splat(0.02) },
-						Color4::new(1.0, 0.0, 0.0, 1.0),
-					);
+					for x in -100..100 {
+						for y in -100..100 {
+							let pos = Vec2::new(x as f32 / 100.0, y as f32 / 100.0);
+							brush.fill_rect(
+								Aabb2 { origin: pos, size: Vec2::splat(0.01) },
+								Color4::new((pos.x + 1.0) / 2.0, (pos.y + 1.0) / 2.0, 0.0, 0.5),
+							);
+						}
+					}
 				}
 				let ui = ui.prepare_render(
 					gfx,

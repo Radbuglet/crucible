@@ -446,7 +446,7 @@ pub const MAX_MANTISSA_EXCLUSIVE: u32 = 1 << MANTISSA_BITS;
 pub const MANTISSA_MASK: u32 = MAX_MANTISSA_EXCLUSIVE - 1;
 
 /// The floating-point exponent for the range `0` to `1`.
-pub const ZERO_TO_ONE_EXPONENT: u8 = 0b01111111;
+pub const ZERO_TO_ONE_EXPONENT: u8 = 0b01111110;
 
 pub fn compose_f32(sign: Sign, exp: u8, mantissa: u32) -> f32 {
 	debug_assert!(mantissa < MAX_MANTISSA_EXCLUSIVE);

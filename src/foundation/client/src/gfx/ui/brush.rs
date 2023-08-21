@@ -93,7 +93,25 @@ pub struct ImmBrush<'a> {
 }
 
 impl<'a> ImmBrush<'a> {
-	// TODO
+	pub fn transform_before(&mut self, transform: Affine2) {
+		self.transform = self.transform * transform;
+	}
+
+	#[must_use]
+	pub fn transformed_before(mut self, transform: Affine2) -> Self {
+		self.transform_before(transform);
+		self
+	}
+
+	pub fn transform_after(&mut self, transform: Affine2) {
+		self.transform = transform * self.transform;
+	}
+
+	#[must_use]
+	pub fn transformed_after(mut self, transform: Affine2) -> Self {
+		self.transform_after(transform);
+		self
+	}
 }
 
 // === ImmRendererInner === //
@@ -135,7 +153,7 @@ impl ImmRendererInner {
 
 				let Some((_, candidate_config)) = candidate
 					.config_and_phantom
-					.downcast_ref::<(PhantomInvariant<T>, T::Config)>()
+					.downcast_ref::<MaterialConfigAndPhantom<T>>()
 				else {
 					return false;
 				};

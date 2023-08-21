@@ -176,6 +176,7 @@ impl<V: SignedNumericVector2> Aabb2<V> {
 			size: V::new(w, h),
 		}
 	}
+
 	pub fn contains(&self, point: V) -> bool
 	where
 		V::Comp: PartialOrd,

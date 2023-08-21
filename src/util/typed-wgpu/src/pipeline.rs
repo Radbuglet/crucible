@@ -6,7 +6,7 @@ use derive_where::derive_where;
 use crate::{
 	buffer::BufferSlice,
 	uniform::{BindGroup, BindGroupInstance, DynamicOffsetSet, PipelineLayout},
-	vertex::{VertexBufferSetInstanceGenerator, VertexBufferSetLayoutGenerator},
+	vertex::VertexBufferSetLayoutGenerator,
 };
 
 // === PipelineSet === //
@@ -148,13 +148,39 @@ impl<'a, U: PipelineSet, V: PipelineSet> RenderPipelineBuilder<'a, U, V> {
 		entry: &'a str,
 		format: wgpu::TextureFormat,
 	) -> Self {
+		self.with_fragment_shader_custom(module, entry, format, None, wgpu::ColorWrites::all())
+	}
+
+	pub fn with_fragment_shader_alpha_blend(
+		self,
+		module: &'a wgpu::ShaderModule,
+		entry: &'a str,
+		format: wgpu::TextureFormat,
+	) -> Self {
+		self.with_fragment_shader_custom(
+			module,
+			entry,
+			format,
+			Some(wgpu::BlendState::ALPHA_BLENDING),
+			wgpu::ColorWrites::all(),
+		)
+	}
+
+	pub fn with_fragment_shader_custom(
+		self,
+		module: &'a wgpu::ShaderModule,
+		entry: &'a str,
+		format: wgpu::TextureFormat,
+		blend: Option<wgpu::BlendState>,
+		write_mask: wgpu::ColorWrites,
+	) -> Self {
 		self.with_multi_fragment_shader(
 			module,
 			entry,
 			vec![Some(wgpu::ColorTargetState {
 				format,
-				blend: None,
-				write_mask: wgpu::ColorWrites::all(),
+				blend,
+				write_mask,
 			})],
 		)
 	}
@@ -324,14 +350,5 @@ impl<U: PipelineSet, V: PipelineSet> RenderPipeline<U, V> {
 		V: StaticPipelineSetHas<T, D>,
 	{
 		pass.set_vertex_buffer(V::index(), buffer.raw);
-	}
-
-	pub fn bind_vertex_buffers<'a>(
-		pass: &mut wgpu::RenderPass<'a>,
-		buffers: &'a impl VertexBufferSetInstanceGenerator<V>,
-	) where
-		V: StaticPipelineSet,
-	{
-		buffers.apply(pass);
 	}
 }

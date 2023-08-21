@@ -19,11 +19,12 @@ use crucible_util::mem::{
 };
 use hashbrown::HashSet;
 use typed_glam::glam::{UVec2, Vec3};
+use typed_wgpu::buffer::BufferSlice;
 use wgpu::util::DeviceExt;
 
 use crate::engine::{gfx::atlas::AtlasTexture, io::gfx::GfxContext};
 
-use super::pipeline::{VoxelUniforms, VoxelVertex};
+use super::pipeline::{OpaqueBlockPipeline, VoxelUniforms, VoxelVertex};
 
 // === Context === //
 
@@ -255,7 +256,7 @@ impl ChunkRenderPass {
 				continue;
 			};
 
-			pass.set_vertex_buffer(0, buffer.slice(..));
+			OpaqueBlockPipeline::bind_vertex_buffer(pass, BufferSlice::wrap(buffer.slice(..)));
 			pass.draw(0..mesh.vertex_count, 0..1);
 		}
 	}

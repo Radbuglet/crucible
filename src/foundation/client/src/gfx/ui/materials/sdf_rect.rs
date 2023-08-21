@@ -63,7 +63,7 @@ fn load_pipeline(
 
 		SdfRectPipeline::builder()
 			.with_vertex_shader(&shader, "vs_main", &(Instance::layout(),))
-			.with_fragment_shader(&shader, "fs_main", surface_format)
+			.with_fragment_shader_alpha_blend(&shader, "fs_main", surface_format)
 			.with_depth(depth_format, true, wgpu::CompareFunction::Greater)
 			.finish(&gfx.device)
 	})
