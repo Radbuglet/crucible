@@ -177,6 +177,13 @@ impl<V: SignedNumericVector2> Aabb2<V> {
 		}
 	}
 
+	pub fn from_origin_size(pos: V, size: V, percent: V) -> Self {
+		Self {
+			origin: pos - size * percent,
+			size,
+		}
+	}
+
 	pub fn contains(&self, point: V) -> bool
 	where
 		V::Comp: PartialOrd,

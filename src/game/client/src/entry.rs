@@ -1,8 +1,7 @@
 use anyhow::Context;
 use bort::{
-	delegate,
-	saddle::{behavior, saddle::namespace, BehaviorToken, BortComponents, RootBehaviorToken},
-	storage, BehaviorRegistry, Entity, OwnedEntity,
+	alias, proc, proc_collection, saddle_delegate, storage, BehaviorRegistry, Entity, OwnedEntity,
+	RootCollectionCallToken,
 };
 use crucible_foundation_client::engine::{
 	assets::AssetManager,
@@ -28,44 +27,37 @@ use crate::game::prefabs::scene_root::make_game_scene_root;
 
 // === Behaviors === //
 
-namespace! {
-	pub EngineEntryBehavior in BortComponents;
-	pub SceneInitBehavior in BortComponents;
+proc_collection! {
+	pub EngineEntryBehavior;
+	pub SceneInitBehavior;
 }
 
-namespace! {
-	derive SceneUpdateHandler => BortComponents;
-	derive SceneRenderHandler => BortComponents;
+saddle_delegate! {
+	pub fn SceneUpdateHandler(me: Entity, main_loop: &mut MainLoop)
 }
 
-delegate! {
-	pub fn SceneUpdateHandler(
-		&'a self [me: Entity],
-		bhv_cx: &mut dyn BehaviorToken<SceneUpdateHandler>,
-		main_loop: &mut MainLoop,
-	)
-}
-
-delegate! {
-	pub fn SceneRenderHandler(
-		&'a self [me: Entity],
-		bhv_cx: &mut dyn BehaviorToken<SceneRenderHandler>,
-		viewport: Entity,
-		frame: &mut wgpu::SurfaceTexture,
-	)
+saddle_delegate! {
+	pub fn SceneRenderHandler(me: Entity, viewport: Entity, frame: &mut wgpu::SurfaceTexture)
 }
 
 // === Entry === //
 
+alias! {
+	let bhv: BehaviorRegistry;
+	let gfx: GfxContext;
+	let scene_mgr: SceneManager;
+	let viewport_mgr: ViewportManager;
+}
+
 pub fn main_inner() -> anyhow::Result<()> {
 	// Create the behavior registry
-	let mut bhv_cx = RootBehaviorToken::acquire();
+	let mut call_cx = RootCollectionCallToken::acquire();
 	let bhv = BehaviorRegistry::new().with_many(crate::game::prefabs::register);
 
 	// Initialize the engine
-	behavior! {
-		as EngineEntryBehavior[bhv_cx] do
-		(_cx: [], _bhv_cx: []) {
+	proc! {
+		as EngineEntryBehavior[call_cx] do
+		(_cx: [], _call_cx: []) {
 			// Create the event loop
 			let event_loop: EventLoop<WinitUserdata> = EventLoopBuilder::with_user_event().build();
 
@@ -93,7 +85,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			))
 			.context("failed to create graphics device")?;
 		}
-		(cx: [; ref Viewport], _bhv_cx: []) {
+		(cx: [ref Viewport], _call_cx: []) {
 			// Create viewport manager
 			let mut viewport_mgr = ViewportManager::default();
 			let (main_viewport, main_viewport_ref) = OwnedEntity::new()
@@ -122,7 +114,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 			viewport_mgr.register(cx, main_viewport);
 		}
-		(cx: [; mut SceneManager], bhv_cx: [SceneInitBehavior]) {
+		(cx: [mut SceneManager], call_cx: [SceneInitBehavior]) {
 			// Create engine root
 			let (engine, engine_ref) = OwnedEntity::new()
 				.with_debug_label("engine root")
@@ -136,20 +128,20 @@ pub fn main_inner() -> anyhow::Result<()> {
 			// Setup an initial scene
 			engine
 				.get_mut_s::<SceneManager>(cx)
-				.set_initial(make_game_scene_root(bhv_cx, engine_ref, main_viewport_ref));
+				.set_initial(make_game_scene_root(call_cx, engine_ref, main_viewport_ref));
 		}
-		(cx: [; ref ViewportManager], _bhv_cx: []) {
+		(cx: [], _call_cx: [], ref viewport_mgr = engine) {
 			// Show all viewports
 			{
 				let viewports = storage::<Viewport>();
-				for (_, viewport) in engine.get_s::<ViewportManager>(cx).window_map() {
+				for (_, viewport) in viewport_mgr.window_map() {
 					viewports.get(viewport.entity()).window().set_visible(true);
 				}
 			}
 		}
 	}
 
-	drop(bhv_cx);
+	drop(call_cx);
 
 	// Create the handler and start the main loop
 	#[derive(Debug)]
@@ -159,23 +151,30 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 	impl MainLoopHandler for MyMainLoopHandler {
 		fn on_update(&mut self, main_loop: &mut MainLoop, _winit: &WinitEventProxy) {
-			let mut bhv_cx = RootBehaviorToken::acquire();
+			let mut call_cx = RootCollectionCallToken::acquire();
 
-			behavior! {
-				as EngineEntryBehavior[bhv_cx] do
-				(cx: [; mut SceneManager, ref SceneUpdateHandler], bhv_cx: [SceneUpdateHandler]) {
+			proc! {
+				as EngineEntryBehavior[call_cx] do
+				(
+					cx: [ref SceneUpdateHandler],
+					call_cx: [SceneUpdateHandler],
+					mut scene_mgr = self.engine,
+					ref bhv = self.engine,
+				) {
 					// Swap scenes
-					let mut scene_mgr = self.engine.get_mut_s::<SceneManager>(cx);
 					drop(scene_mgr.swap_scenes());
 
 					// Update the current scene
 					let scene = scene_mgr.current();
-					drop(scene_mgr);
-					scene.get_s::<SceneUpdateHandler>(cx)(scene, bhv_cx, main_loop);
+					scene.get_s::<SceneUpdateHandler>(cx)(&bhv, call_cx, scene, main_loop);
 				}
-				(cx: [; ref ViewportManager, ref Viewport, mut InputManager], _bhv_cx: []) {
+				(
+					cx: [ref Viewport, mut InputManager],
+					_call_cx: [],
+					ref viewport_mgr = self.engine,
+				) {
 					// Reset input trackers and request redraws
-					for (_, viewport) in self.engine.get_s::<ViewportManager>(cx).window_map() {
+					for (_, viewport) in viewport_mgr.window_map() {
 						viewport.get_s::<Viewport>(cx).window().request_redraw();
 						viewport.get_mut_s::<InputManager>(cx).end_tick();
 					}
@@ -189,15 +188,18 @@ pub fn main_inner() -> anyhow::Result<()> {
 			_winit: &WinitEventProxy,
 			window_id: WindowId,
 		) {
-			let mut bhv_cx = RootBehaviorToken::acquire();
+			let mut call_cx = RootCollectionCallToken::acquire();
 
-			behavior! {
-				as EngineEntryBehavior[bhv_cx] do
-				(cx: [; ref GfxContext, ref ViewportManager, mut Viewport], _bhv_cx: []) {
-					let gfx = self.engine.get_s::<GfxContext>(cx);
-
+			proc! {
+				as EngineEntryBehavior[call_cx] do
+				(
+					cx: [mut Viewport],
+					_call_cx: [],
+					ref gfx = self.engine,
+					ref viewport_mgr = self.engine,
+				) {
 					// Acquire the current frame
-					let Some(viewport) = self.engine.get_s::<ViewportManager>(cx).get_viewport(window_id) else {
+					let Some(viewport) = viewport_mgr.get_viewport(window_id) else {
 						return;
 					};
 
@@ -209,12 +211,16 @@ pub fn main_inner() -> anyhow::Result<()> {
 							return;
 						}
 					};
-					drop(gfx);
 				}
-				(cx: [;ref SceneManager, ref SceneRenderHandler], bhv_cx: [SceneRenderHandler]) {
+				(
+					cx: [ref SceneRenderHandler],
+					call_cx: [SceneRenderHandler],
+					ref bhv = self.engine,
+					ref scene_mgr = self.engine,
+				) {
 					// Render the current scene
-					let scene = self.engine.get_s::<SceneManager>(cx).current();
-					scene.get_s::<SceneRenderHandler>(cx)(scene, bhv_cx, viewport, &mut frame);
+					let scene = scene_mgr.current();
+					scene.get_s::<SceneRenderHandler>(cx)(&bhv, call_cx, scene, viewport, &mut frame);
 
 					// Present the frame
 					frame.present();
@@ -229,17 +235,21 @@ pub fn main_inner() -> anyhow::Result<()> {
 			window_id: WindowId,
 			event: WindowEvent,
 		) {
-			let mut bhv_cx = RootBehaviorToken::acquire();
+			let mut call_cx = RootCollectionCallToken::acquire();
 
-			behavior! {
-				as EngineEntryBehavior[bhv_cx] do
-				(cx: [; ref GfxContext, ref ViewportManager, mut Viewport, mut InputManager], _bhv_cx: []) {
+			proc! {
+				as EngineEntryBehavior[call_cx] do
+				(
+					cx: [mut Viewport, mut InputManager],
+					_call_cx: [],
+					ref viewport_mgr = self.engine,
+				) {
 					if matches!(event, WindowEvent::CloseRequested) {
 						main_loop.exit();
 						return;
 					}
 
-					let Some(viewport) = self.engine.get_s::<ViewportManager>(cx).get_viewport(window_id) else {
+					let Some(viewport) = viewport_mgr.get_viewport(window_id) else {
 						return;
 					};
 
@@ -257,12 +267,16 @@ pub fn main_inner() -> anyhow::Result<()> {
 			device_id: winit::event::DeviceId,
 			event: winit::event::DeviceEvent,
 		) {
-			let mut bhv_cx = RootBehaviorToken::acquire();
+			let mut call_cx = RootCollectionCallToken::acquire();
 
-			behavior! {
-				as EngineEntryBehavior[bhv_cx] do
-				(cx: [;ref ViewportManager, mut InputManager], _bhv_cx: []) {
-					for (_, viewport) in self.engine.get_s::<ViewportManager>(cx).window_map() {
+			proc! {
+				as EngineEntryBehavior[call_cx] do
+				(
+					cx: [mut InputManager],
+					_call_cx: [],
+					ref viewport_mgr = self.engine,
+				) {
+					for (_, viewport) in viewport_mgr.window_map() {
 						viewport
 							.get_mut_s::<InputManager>(cx)
 							.handle_device_event(device_id, &event);

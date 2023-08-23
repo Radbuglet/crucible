@@ -1,9 +1,6 @@
 use std::{mem, ops::Deref};
 
-use bort::{
-	saddle::{cx, BortComponents},
-	CompMut, CompRef, Obj, OwnedObj,
-};
+use bort::{access_cx, CompMut, CompRef, Obj, OwnedObj};
 use crucible_util::mem::{array::boxed_arr_from_fn, c_enum::CEnumMap, hash::FxHashMap};
 use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 
@@ -16,9 +13,9 @@ use crate::{
 
 // === Context === //
 
-cx! {
-	pub trait VoxelDataWriteCx(BortComponents) = mut ChunkVoxelData;
-	pub trait VoxelDataReadCx(BortComponents) = ref ChunkVoxelData;
+access_cx! {
+	pub trait VoxelDataWriteCx = mut ChunkVoxelData;
+	pub trait VoxelDataReadCx = ref ChunkVoxelData;
 }
 
 // === WorldVoxelData === //

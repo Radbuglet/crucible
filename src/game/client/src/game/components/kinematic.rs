@@ -1,7 +1,4 @@
-use bort::{
-	saddle::{cx, BortComponents},
-	CompMut, HasGlobalManagedTag,
-};
+use bort::{access_cx, CompMut, HasGlobalManagedTag};
 use crucible_foundation_shared::{
 	actor::spatial::{Spatial, SpatialMutateCx, SpatialTracker},
 	material::MaterialRegistry,
@@ -18,9 +15,9 @@ use crucible_util::mem::c_enum::{CEnum, CEnumMap};
 
 // === Context === //
 
-cx! {
-	pub trait CxSideOcclusion(BortComponents): ColliderCheckCx;
-	pub trait CxApplyPhysics(BortComponents): CxSideOcclusion, SpatialMutateCx;
+access_cx! {
+	pub trait CxSideOcclusion: ColliderCheckCx;
+	pub trait CxApplyPhysics: CxSideOcclusion, SpatialMutateCx;
 }
 
 // === Components === //

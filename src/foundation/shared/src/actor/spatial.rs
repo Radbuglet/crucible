@@ -22,10 +22,7 @@
 //! concatenate their entity lists together to form a candidate list. For AABBs less than
 //! `HALF_GRID_SIZE`, we will be querying at most 8 chunks.
 
-use bort::{
-	saddle::{cx, BortComponents},
-	CompMut, HasGlobalManagedTag, Obj,
-};
+use bort::{access_cx, CompMut, HasGlobalManagedTag, Obj};
 use crucible_util::{lang::iter::VolumetricIter, mem::hash::FxHashMap};
 use typed_glam::{ext::VecExt, glam::IVec3};
 
@@ -50,9 +47,9 @@ fn spatial_chunk_for_aabb(aabb: EntityAabb) -> IVec3 {
 
 // === SpatialTracker === //
 
-cx! {
-	pub trait SpatialMutateCx(BortComponents) = mut Spatial;
-	pub trait SpatialQueryCx(BortComponents) = ref Spatial;
+access_cx! {
+	pub trait SpatialMutateCx = mut Spatial;
+	pub trait SpatialQueryCx = ref Spatial;
 }
 
 #[derive(Debug, Default)]

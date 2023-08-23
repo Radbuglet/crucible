@@ -1,4 +1,4 @@
-use bort::{query, saddle::behavior, BehaviorRegistry, GlobalTag, OwnedEntity};
+use bort::{alias, proc, query, BehaviorRegistry, GlobalTag, OwnedEntity};
 use crucible_foundation_client::engine::gfx::camera::CameraSettings;
 use crucible_foundation_shared::{
 	actor::spatial::Spatial,
@@ -54,14 +54,19 @@ pub fn make_local_player() -> OwnedEntity {
 
 // === Behaviors === //
 
+alias! {
+	let registry: MaterialRegistry;
+	let world: WorldVoxelData;
+}
+
 pub fn register(bhv: &mut BehaviorRegistry) {
-	bhv.register::<ActorSpawnedInGameBehavior>(make_spawn_behavior())
-		.register::<ActorInputBehavior>(make_input_behavior())
-		.register::<CameraProviderBehavior>(make_camera_behavior());
+	bhv.register_combined(make_spawn_behavior())
+		.register_combined(make_input_behavior())
+		.register_combined(make_camera_behavior());
 }
 
 fn make_spawn_behavior() -> ActorSpawnedInGameBehavior {
-	ActorSpawnedInGameBehavior::new(|_bhv, events, _scene| {
+	ActorSpawnedInGameBehavior::new(|_bhv, _call_cx, events, _scene| {
 		query! {
 			for (_event in *events; @me) + [GlobalTag::<LocalPlayer>] {
 				log::info!("Spawned player {me:?}");
@@ -71,20 +76,20 @@ fn make_spawn_behavior() -> ActorSpawnedInGameBehavior {
 }
 
 fn make_input_behavior() -> ActorInputBehavior {
-	ActorInputBehavior::new(|_bhv, bhv_cx, scene_root, actor_tag, inputs| {
-		behavior! {
-			as ActorInputBehavior[bhv_cx] do
-			(cx: [
-				collision::ColliderCheckCx, BlockPlacementCx;
-				mut LocalPlayer,
-				ref Spatial,
-				mut KinematicSpatial,
-				mut WorldVoxelData,
-				ref MaterialRegistry,
-			], _bhv_cx: []) {{
-				let world = &mut *scene_root.get_mut_s::<WorldVoxelData>(cx);
-				let registry = &*scene_root.get_s::<MaterialRegistry>(cx);
-
+	ActorInputBehavior::new(|_bhv, call_cx, scene_root, actor_tag, inputs| {
+		proc! {
+			as ActorInputBehavior[call_cx] do
+			(
+				cx: [
+					mut LocalPlayer,
+					ref Spatial,
+					mut KinematicSpatial
+					; collision::ColliderCheckCx, BlockPlacementCx
+				],
+				_call_cx: [],
+				mut world = scene_root,
+				ref registry = scene_root,
+			) {{
 				query! {
 					for (
 						mut player in GlobalTag::<LocalPlayer>,
@@ -128,10 +133,10 @@ fn make_input_behavior() -> ActorInputBehavior {
 }
 
 fn make_camera_behavior() -> CameraProviderBehavior {
-	CameraProviderBehavior::new(|_bhv, bhv_cx, actor_tag, camera_mgr| {
-		behavior! {
-			as CameraProviderBehavior[bhv_cx] do
-			(_cx: [; ref Spatial, ref LocalPlayer], _bhv_cx: []) {
+	CameraProviderBehavior::new(|_bhv, call_cx, actor_tag, camera_mgr| {
+		proc! {
+			as CameraProviderBehavior[call_cx] do
+			(_cx: [ref Spatial, ref LocalPlayer], _call_cx: []) {
 				query! {
 					for (ref spatial in GlobalTag::<Spatial>, ref player in GlobalTag::<LocalPlayer>) + [actor_tag] {
 						camera_mgr.set_pos_rot(

@@ -1,9 +1,6 @@
 use std::time::{Duration, Instant};
 
-use bort::{
-	saddle::{cx, BortComponents},
-	storage, CompRef, Entity,
-};
+use bort::{access_cx, storage, CompRef, Entity};
 use crevice::std430::AsStd430;
 use crucible_foundation_shared::{
 	material::{MaterialId, MaterialRegistry},
@@ -28,8 +25,8 @@ use super::pipeline::{OpaqueBlockPipeline, VoxelUniforms, VoxelVertex};
 
 // === Context === //
 
-cx! {
-	pub trait MeshUpdateCx(BortComponents): VoxelDataReadCx;
+access_cx! {
+	pub trait MeshUpdateCx: VoxelDataReadCx;
 }
 
 // === Services === //

@@ -4,11 +4,7 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use bort::{
-	delegate,
-	saddle::{cx, BortComponents},
-	Obj, OwnedObj,
-};
+use bort::{delegate, saddle::access_cx, Obj, OwnedObj};
 
 use crate::math::{Aabb3, ChunkVec, Sign};
 
@@ -16,8 +12,8 @@ use super::data::{ChunkVoxelData, VoxelDataWriteCx, WorldVoxelData};
 
 // === Context === //
 
-cx! {
-	pub trait LoaderUpdateCx(BortComponents): VoxelDataWriteCx = mut LoadedChunk;
+access_cx! {
+	pub trait LoaderUpdateCx: VoxelDataWriteCx = mut LoadedChunk;
 }
 
 // === Region === //

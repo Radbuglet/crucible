@@ -1,9 +1,6 @@
 use std::f64::consts::{PI, TAU};
 
-use bort::{
-	saddle::{cx, BortComponents},
-	storage, HasGlobalManagedTag,
-};
+use bort::{access_cx, storage, HasGlobalManagedTag};
 use crucible_foundation_shared::{
 	actor::spatial::Spatial,
 	material::{MaterialId, MaterialRegistry},
@@ -26,8 +23,8 @@ use super::kinematic::KinematicSpatial;
 
 // === Contexts === //
 
-cx! {
-	pub trait BlockPlacementCx(BortComponents): ColliderCheckCx, VoxelDataWriteCx;
+access_cx! {
+	pub trait BlockPlacementCx: ColliderCheckCx, VoxelDataWriteCx;
 }
 
 // === Constants === //

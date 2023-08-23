@@ -1,9 +1,8 @@
 use std::time::Duration;
 
 use bort::{
-	behavior_kind, delegate, derive_behavior_delegate,
-	saddle::{behavior, late_borrow, late_borrow_mut, BehaviorToken},
-	BehaviorRegistry, Entity, OwnedEntity, VecEventList, VirtualTag,
+	alias, call_cx, proc, saddle_delegate, BehaviorRegistry, Entity, OwnedEntity, VecEventList,
+	VirtualTag,
 };
 use crucible_foundation_client::{
 	engine::{
@@ -52,70 +51,43 @@ use crate::{
 
 // === Delegates === //
 
-delegate! {
+saddle_delegate! {
 	pub fn ActorSpawnedInGameBehavior(
-		bhv: &BehaviorRegistry,
 		events: &mut VecEventList<ActorSpawned>,
 		engine: Entity,
 	)
-	as deriving behavior_kind
-	as deriving derive_behavior_delegate { event }
 }
 
-delegate! {
+saddle_delegate! {
 	pub fn CameraProviderBehavior(
-		bhv: &BehaviorRegistry,
-		bhv_cx: &mut dyn BehaviorToken<CameraProviderBehavior>,
 		actor_tag: VirtualTag,
 		mgr: &mut CameraManager
 	)
-	as deriving behavior_kind
-	as deriving derive_behavior_delegate { query }
 }
 
-delegate! {
+saddle_delegate! {
 	pub fn ActorInputBehavior(
-		bhv: &BehaviorRegistry,
-		bhv_cx: &mut dyn BehaviorToken<ActorInputBehavior>,
 		scene: Entity,
 		actor_tag: VirtualTag,
 		input: &InputManager,
 	)
-	as deriving behavior_kind
-	as deriving derive_behavior_delegate { query }
 }
 
-delegate! {
-	pub fn ActorPhysicsResetBehavior(
-		bhv: &BehaviorRegistry,
-		bhv_cx: &mut dyn BehaviorToken<ActorPhysicsResetBehavior>,
-		actor_tag: VirtualTag,
-	)
-	as deriving behavior_kind
-	as deriving derive_behavior_delegate { query }
+saddle_delegate! {
+	pub fn ActorPhysicsResetBehavior(actor_tag: VirtualTag)
 }
 
-delegate! {
-	pub fn ActorPhysicsInfluenceBehavior(
-		bhv: &BehaviorRegistry,
-		bhv_cx: &mut dyn BehaviorToken<ActorPhysicsInfluenceBehavior>,
-		actor_tag: VirtualTag,
-	)
-	as deriving behavior_kind
-	as deriving derive_behavior_delegate { query }
+saddle_delegate! {
+	pub fn ActorPhysicsInfluenceBehavior(actor_tag: VirtualTag)
 }
 
-delegate! {
+saddle_delegate! {
 	pub fn ActorPhysicsApplyBehavior(
-		bhv: &BehaviorRegistry,
-		bhv_cx: &mut dyn BehaviorToken<ActorPhysicsApplyBehavior>,
 		actor_tag: VirtualTag,
 		spatial_mgr: &mut SpatialTracker,
 		world: &WorldVoxelData,
 		registry: &MaterialRegistry,
 	)
-	as deriving behavior_kind
-	as deriving derive_behavior_delegate { query }
 }
 
 // === Behaviors === //
@@ -124,8 +96,28 @@ pub fn register(_bhv: &mut BehaviorRegistry) {}
 
 // === Prefabs === //
 
+alias! {
+	let asset_mgr: AssetManager;
+	let actor_mgr: ActorManager;
+	let atlas_texture: AtlasTexture;
+	let bhv: BehaviorRegistry;
+	let block_registry: MaterialRegistry;
+	let camera_mgr: CameraManager;
+	let gfx: GfxContext;
+	let input_mgr: InputManager;
+	let material_registry: MaterialRegistry;
+	let skybox_uniforms: SkyboxUniforms;
+	let spatial_mgr: SpatialTracker;
+	let state: GameSceneRoot;
+	let viewport_data: Viewport;
+	let voxel_uniforms: VoxelUniforms;
+	let world_data: WorldVoxelData;
+	let world_loader: WorldLoader;
+	let world_mesh: WorldVoxelMesh;
+}
+
 pub fn make_game_scene_root(
-	bhv_cx: &mut dyn BehaviorToken<SceneInitBehavior>,
+	call_cx: &mut call_cx![SceneInitBehavior],
 	engine: Entity,
 	viewport: Entity,
 ) -> OwnedEntity {
@@ -156,44 +148,33 @@ pub fn make_game_scene_root(
 		.with(make_scene_render_handler());
 
 	// Initialize the scene
-	behavior! {
-		as SceneInitBehavior[bhv_cx] do
-		(cx: [
-			loader::LoaderUpdateCx;
-			mut ActorManager,
-			mut AtlasTexture,
-			mut AssetManager,
-			ref BehaviorRegistry,
-			ref GfxContext,
-			mut LoadedChunk,
-			mut MaterialRegistry,
-			mut WorldVoxelData,
-			mut WorldLoader,
-		], _bhv_cx: []) {{
-			// Acquire context
-			let actor_mgr = &mut *root.get_mut_s::<ActorManager>(cx);
-			let atlas = &mut *root.get_mut_s::<AtlasTexture>(cx);
-			let material_registry = &mut *root.get_mut_s::<MaterialRegistry>(cx);
-			let world_data = &mut *root.get_mut_s::<WorldVoxelData>(cx);
-			let world_loader = &mut *root.get_mut_s::<WorldLoader>(cx);
-
-			let bhv = &*engine.get_s::<BehaviorRegistry>(cx);
-			let gfx = &*engine.get_s::<GfxContext>(cx);
-			let asset_mgr = &mut *engine.get_mut_s::<AssetManager>(cx);
-
+	proc! {
+		as SceneInitBehavior[call_cx] do
+		(
+			cx: [mut LoadedChunk; loader::LoaderUpdateCx],
+			call_cx: [ActorSpawnedInGameBehavior],
+			ref bhv = engine,
+			ref gfx = engine,
+			mut asset_mgr = engine,
+			mut actor_mgr = root,
+			mut atlas_texture = root,
+			mut material_registry = root,
+			mut world_data = root,
+			mut world_loader = root,
+		) {{
 			// Spawn local player
 			let mut on_actor_spawn = VecEventList::new();
 			actor_mgr.spawn(&mut on_actor_spawn, make_local_player());
-			bhv.process::<ActorSpawnedInGameBehavior>((&mut on_actor_spawn, (root.entity(),)));
+			bhv.get::<ActorSpawnedInGameBehavior>()(call_cx, &mut on_actor_spawn, root.entity());
 
 			// Load core textures
-			let mut atlas_gfx = AtlasTextureGfx::new(gfx, atlas, Some("block texture atlas"));
-			let stone_tex = atlas.add(
+			let mut atlas_gfx = AtlasTextureGfx::new(gfx, atlas_texture, Some("block texture atlas"));
+			let stone_tex = atlas_texture.add(
 				&image::load_from_memory(include_bytes!("../res/proto_1.png"))
 					.unwrap_pretty()
 					.into_rgba32f()
 			);
-			atlas_gfx.update(gfx, atlas);
+			atlas_gfx.update(gfx, atlas_texture);
 
 			let skybox = image::load_from_memory(include_bytes!("../res/skybox.png"))
 				.unwrap_pretty()
@@ -257,37 +238,17 @@ pub fn make_game_scene_root(
 }
 
 fn make_scene_update_handler() -> SceneUpdateHandler {
-	SceneUpdateHandler::new(|me, bhv_cx, _main_loop| {
-		behavior! {
-			as SceneUpdateHandler[bhv_cx] do
-			(cx: [;ref ActorManager, ref GameSceneRoot, ref Viewport], _bhv_cx: []) {
-				// Acquire self context
-				let actor_mgr = late_borrow(|cx| me.get_s::<ActorManager>(cx));
-				let spatial_mgr = late_borrow_mut(|cx| me.get_mut_s::<SpatialTracker>(cx));
-				let world_data = late_borrow(|cx| me.get_s::<WorldVoxelData>(cx));
-				let block_registry = late_borrow(|cx| me.get_s::<MaterialRegistry>(cx));
-				let state = late_borrow(|cx| me.get_s::<GameSceneRoot>(cx));
-
-				let actor_tag = actor_mgr.get(cx).tag();
-
-				// Acquire engine context
-				let engine = state.get(cx).engine;
-				let main_viewport = state.get(cx).viewport;
-				let bhv = late_borrow(|cx| engine.get_s::<BehaviorRegistry>(cx));
-
-				// Acquire viewport context
-				let viewport_data = late_borrow(|cx| main_viewport.get_s::<Viewport>(cx));
-				let input_mgr = late_borrow(|cx| main_viewport.get_s::<InputManager>(cx));
+	SceneUpdateHandler::new(|bhv, call_cx, me, _main_loop| {
+		proc! {
+			as SceneUpdateHandler[call_cx] do
+			(_cx: [], _call_cx: [], ref state = me, ref actor_mgr = me) {
+				let main_viewport = state.viewport;
+				let actor_tag = actor_mgr.tag();
 			}
-			(cx: [;ref BehaviorRegistry], bhv_cx: [ActorPhysicsResetBehavior]) {
-				bhv.get(cx).process::<ActorPhysicsResetBehavior>((bhv_cx.as_dyn_mut(), actor_tag));
+			(cx: [ref BehaviorRegistry], call_cx: [ActorPhysicsResetBehavior]) {
+				bhv.get::<ActorPhysicsResetBehavior>()(call_cx, actor_tag);
 			}
-			(cx: [;ref GameSceneRoot, ref BehaviorRegistry, ref Viewport, ref InputManager], bhv_cx: [ActorInputBehavior]) {{
-				// Acquire context
-				let bhv = &*bhv.get(cx);
-				let input_mgr = &*input_mgr.get(cx);
-				let viewport_data = &*viewport_data.get(cx);
-
+			(cx: [], call_cx: [ActorInputBehavior], ref viewport_data = main_viewport, ref input_mgr = main_viewport) {
 				// Handle mouse lock
 				if input_mgr.button(MouseButton::Left).recently_pressed() {
 					viewport_data.window().set_cursor_visible(false);
@@ -305,85 +266,48 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 				}
 
 				// Process inputs
-				bhv.process::<ActorInputBehavior>((
-					bhv_cx.as_dyn_mut(),
-					me,
+				bhv.get::<ActorInputBehavior>()(call_cx, me, actor_tag, &input_mgr);
+			}
+			(_cx: [], call_cx: [ActorPhysicsInfluenceBehavior]) {
+				bhv.get::<ActorPhysicsInfluenceBehavior>()(call_cx, actor_tag);
+			}
+			(_cx: [], call_cx: [ActorPhysicsApplyBehavior], mut spatial_mgr = me, ref world_data = me, ref block_registry = me) {
+				bhv.get::<ActorPhysicsApplyBehavior>()(
+					call_cx,
 					actor_tag,
-					input_mgr,
-				));
-			}}
-			(cx: [;ref BehaviorRegistry], bhv_cx: [ActorPhysicsInfluenceBehavior]) {{
-				bhv.get(cx).process::<ActorPhysicsInfluenceBehavior>((bhv_cx.as_dyn_mut(), actor_tag));
-			}}
-			(
-				cx: [;ref BehaviorRegistry, mut SpatialTracker, ref WorldVoxelData, ref MaterialRegistry],
-				bhv_cx: [ActorPhysicsApplyBehavior]
-			) {
-				bhv.get(cx).process::<ActorPhysicsApplyBehavior>((
-					bhv_cx.as_dyn_mut(),
-					actor_tag,
-					&mut *spatial_mgr.get(cx),
-					&*world_data.get(cx),
-					&*block_registry.get(cx),
-				));
+					spatial_mgr,
+					world_data,
+					block_registry,
+				);
 			}
 		}
 	})
 }
 
 fn make_scene_render_handler() -> SceneRenderHandler {
-	SceneRenderHandler::new(|me, bhv_cx, viewport, frame| {
-		behavior! {
-			as SceneRenderHandler[bhv_cx] do
-			(cx: [;ref ActorManager, ref GameSceneRoot, ref Viewport], _bhv_cx: []) {
-				// Acquire self context
-				let world_data = late_borrow_mut(|cx| me.get_mut_s::<WorldVoxelData>(cx));
-				let world_mesh = late_borrow_mut(|cx| me.get_mut_s::<WorldVoxelMesh>(cx));
-				let camera_mgr = late_borrow_mut(|cx| me.get_mut_s::<CameraManager>(cx));
-				let atlas_texture = late_borrow(|cx| me.get_s::<AtlasTexture>(cx));
-				let material_registry = late_borrow(|cx| me.get_s::<MaterialRegistry>(cx));
-				let actor_mgr = late_borrow(|cx| me.get_s::<ActorManager>(cx));
-				let state = late_borrow(|cx| me.get_s::<GameSceneRoot>(cx));
-				let voxel_uniforms = late_borrow_mut(|cx| me.get_mut_s::<VoxelUniforms>(cx));
-				let skybox_uniforms = late_borrow_mut(|cx| me.get_mut_s::<SkyboxUniforms>(cx));
+	SceneRenderHandler::new(|bhv, call_cx, me, viewport, frame| {
+		proc! {
+			as SceneRenderHandler[call_cx] do
+			(cx: [ref Viewport], _call_cx: [], ref state = me, ref actor_mgr = me) {
+				let engine = state.engine;
+				let main_viewport = state.viewport;
+				let actor_tag = actor_mgr.tag();
 
-				let actor_tag = actor_mgr.get(cx).tag();
-
-				// Acquire engine context
-				let engine = state.get(cx).engine;
-				let main_viewport = state.get(cx).viewport;
-
-				let asset_mgr = late_borrow_mut(|cx| engine.get_mut_s::<AssetManager>(cx));
-				let bhv = late_borrow(|cx| engine.get_s::<BehaviorRegistry>(cx));
-				let gfx = late_borrow(|cx| engine.get_s::<GfxContext>(cx));
-
-				// Ensure that we're rendering the correct viewport
 				if viewport != main_viewport {
 					return;
 				}
 
-				// Acquire viewport context
-				let viewport_data = late_borrow(|cx| viewport.get_s::<Viewport>(cx));
-				let Some(aspect) = viewport_data.get(cx).curr_surface_aspect() else { return };
+				let Some(aspect) = viewport.get_s::<Viewport>(cx).curr_surface_aspect() else { return };
 			}
 			(
-				cx: [
-					mesh::MeshUpdateCx;
-					ref GfxContext,
-					mut WorldVoxelData,
-					mut WorldVoxelMesh,
-					mut ChunkVoxelData,
-					ref AtlasTexture,
-					ref MaterialRegistry,
-				],
-				_bhv_cx: [],
-			) {{
-				let gfx = &*gfx.get(cx);
-				let world_data = &mut *world_data.get(cx);
-				let world_mesh = &mut *world_mesh.get(cx);
-				let atlas_texture = &*atlas_texture.get(cx);
-				let material_registry = &*material_registry.get(cx);
-
+				cx: [mut ChunkVoxelData; mesh::MeshUpdateCx],
+				_call_cx: [],
+				ref gfx = engine,
+				mut world_data = me,
+				mut world_mesh = me,
+				ref atlas_texture = me,
+				ref material_registry = me,
+			) {
 				// Consume flagged chunks
 				for dirty in world_data.flush_dirty(cx) {
 					world_mesh.flag_chunk(dirty.entity());
@@ -403,42 +327,34 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					material_registry,
 					Some(Duration::from_millis(16)),
 				);
-			}}
-			(cx: [;ref BehaviorRegistry, mut CameraManager], bhv_cx: [CameraProviderBehavior]) {
-				let camera_mgr_snap = {
-					let bhv = &*bhv.get(cx);
-					let camera_mgr = &mut *camera_mgr.get(cx);
-
-					// Determine the active camera
-					camera_mgr.unset();
-					bhv.process::<CameraProviderBehavior>((
-						bhv_cx.as_dyn_mut(),
-						actor_tag,
-						&mut *camera_mgr,
-					));
-
-					camera_mgr.clone()
-				};
+			}
+			(cx: [mut CameraManager], call_cx: [CameraProviderBehavior], mut camera_mgr = me) {
+				// Determine the active camera
+				camera_mgr.unset();
+				bhv.get::<CameraProviderBehavior>()(
+					call_cx,
+					actor_tag,
+					camera_mgr,
+				);
+				let camera_mgr_snap = camera_mgr.clone();
 			}
 			(
-				cx: [;
-					mut AssetManager,
-					ref Viewport,
+				cx: [
 					mut FullScreenTexture,
 					ref GfxContext,
 					mut SkyboxUniforms,
 					mut VoxelUniforms,
 					mut WorldVoxelMesh,
 				],
-				_bhv_cx: [],
+				_call_cx: [],
+				ref gfx = engine,
+				mut asset_mgr = engine,
+				ref viewport_data = viewport,
+				mut world_mesh = me,
+				mut skybox_uniforms = me,
+				mut voxel_uniforms = me,
 			) {{
-				let asset_mgr = &mut *asset_mgr.get(cx);
-				let gfx = &*gfx.get(cx);
-				let viewport_data = &*viewport_data.get(cx);
 				let viewport_depth = &mut *viewport.get_mut_s::<FullScreenTexture>(cx);
-				let world_mesh = &mut *world_mesh.get(cx);
-				let skybox_uniforms = &mut *skybox_uniforms.get(cx);
-				let voxel_uniforms = &mut *voxel_uniforms.get(cx);
 
 				// Setup skybox rendering sub-pass
 				{
@@ -447,14 +363,14 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					i_view.w_axis = Vec4::new(0.0, 0.0, 0.0, i_view.w_axis.w);
 
 					skybox_uniforms.set_camera_matrix(
-						gfx,
+						&gfx,
 						i_view * i_proj,
 					);
 				}
 				let skybox_pipeline = load_skybox_pipeline(asset_mgr, gfx, frame.texture.format());
 
 				// Setup world rendering sub-pass
-				voxel_uniforms.set_camera_matrix(gfx, camera_mgr_snap.get_camera_xform(aspect));
+				voxel_uniforms.set_camera_matrix(&gfx, camera_mgr_snap.get_camera_xform(aspect));
 				let world_mesh_subpass = world_mesh.prepare_chunk_draw_pass();
 				let voxel_pipeline = load_opaque_block_pipeline(
 					asset_mgr,
@@ -465,18 +381,11 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 
 				// Setup UI rendering sub-pass
 				let mut ui = ImmRenderer::new();
-				{
-					let brush = ui.brush();
-					for x in -100..100 {
-						for y in -100..100 {
-							let pos = Vec2::new(x as f32 / 100.0, y as f32 / 100.0);
-							brush.fill_rect(
-								Aabb2 { origin: pos, size: Vec2::splat(0.01) },
-								Color4::new((pos.x + 1.0) / 2.0, (pos.y + 1.0) / 2.0, 0.0, 0.5),
-							);
-						}
-					}
-				}
+				ui.brush().fill_rect(
+					Aabb2::from_origin_size(Vec2::ZERO, Vec2::splat(0.05), Vec2::splat(0.5)),
+					Color4::new(1.0, 0.0, 0.0, 0.5),
+				);
+
 				let ui = ui.prepare_render(
 					gfx,
 					asset_mgr,
@@ -532,7 +441,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 							},
 						})],
 						depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-							view: viewport_depth.acquire_view(gfx, viewport_data),
+							view: viewport_depth.acquire_view(&gfx, &viewport_data),
 							depth_ops: Some(wgpu::Operations {
 								load: wgpu::LoadOp::Clear(1.0),
 								store: true,
@@ -559,7 +468,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 							},
 						})],
 						depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-							view: viewport_depth.acquire_view(gfx, viewport_data),
+							view: viewport_depth.acquire_view(&gfx, &viewport_data),
 							depth_ops: Some(wgpu::Operations {
 								load: wgpu::LoadOp::Clear(0.0),
 								store: true,
@@ -572,7 +481,6 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 				}
 
 				// Finish rendering
-
 				gfx.queue.submit([cb.finish()]);
 			}}
 		}

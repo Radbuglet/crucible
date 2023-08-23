@@ -5,7 +5,7 @@ use super::scene_root::ActorSpawnedInGameBehavior;
 
 pub fn register(bhv: &mut BehaviorRegistry) {
 	bhv.register::<ActorSpawnedInGameBehavior>(ActorSpawnedInGameBehavior::new(
-		|_bhv, events, scene| {
+		|_bhv, _call_cx, events, scene| {
 			let spatial_mgr = &mut *scene.get_mut::<SpatialTracker>();
 
 			query! {

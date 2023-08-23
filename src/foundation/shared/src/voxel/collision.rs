@@ -1,7 +1,4 @@
-use bort::{
-	saddle::{cx, BortComponents},
-	storage, Entity, Storage,
-};
+use bort::{access_cx, storage, Entity, Storage};
 use crucible_util::{
 	lang::{
 		generator::{ContinuationSig, Yield},
@@ -30,8 +27,8 @@ use super::{
 
 // === Context === //
 
-cx! {
-	pub trait ColliderCheckCx(BortComponents): VoxelDataReadCx = ref MaterialColliderDescriptor;
+access_cx! {
+	pub trait ColliderCheckCx: VoxelDataReadCx = ref MaterialColliderDescriptor;
 }
 
 // === General Collisions === //

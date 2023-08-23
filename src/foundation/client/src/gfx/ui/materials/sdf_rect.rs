@@ -139,7 +139,6 @@ impl ImmPass for Pass<'_> {
 			BufferSlice::wrap(self.all_instances.slice(byte_range)),
 		);
 		pass.draw(0..6, 0..instance_count);
-		log::info!("Rendering {instance_count} rectangle(s) (range: {from_byte}..{to_byte_excl})!");
 	}
 }
 
