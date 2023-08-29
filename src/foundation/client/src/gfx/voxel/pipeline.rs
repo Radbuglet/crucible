@@ -10,7 +10,10 @@ use typed_wgpu::{
 
 use crate::engine::{
 	assets::AssetManager,
-	gfx::pipeline::{BindGroupExt, PipelineLayoutExt},
+	gfx::{
+		pipeline::{BindGroupExt, PipelineLayoutExt},
+		texture::SamplerAssetDescriptor,
+	},
 	io::gfx::GfxContext,
 };
 
@@ -20,6 +23,7 @@ use crate::engine::{
 pub struct VoxelRenderingBindUniform<'a> {
 	pub uniforms: BufferBinding<'a, VoxelRenderingUniformBuffer>,
 	pub texture: &'a wgpu::TextureView,
+	pub sampler: &'a wgpu::Sampler,
 }
 
 #[derive(Debug, AsStd430)]
@@ -42,6 +46,11 @@ impl BindGroup for VoxelRenderingBindUniform<'_> {
 				wgpu::TextureViewDimension::D2,
 				false,
 				|c| c.texture,
+			)
+			.with_sampler(
+				wgpu::ShaderStages::FRAGMENT,
+				wgpu::SamplerBindingType::NonFiltering,
+				|c| c.sampler,
 			);
 	}
 }
@@ -116,10 +125,19 @@ impl VoxelUniforms {
 			size: VoxelRenderingUniformBuffer::std430_size_static() as u64,
 			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
 		});
+		let sampler = SamplerAssetDescriptor {
+			// mipmap_filter: wgpu::FilterMode::Linear,
+			// anisotropy_clamp: 1,
+			// lod_min_clamp: 0.0,
+			// lod_max_clamp: 4.0,
+			..SamplerAssetDescriptor::NEAREST_CLAMP_EDGES
+		}
+		.load(assets, gfx);
 
 		let bind_group = VoxelRenderingBindUniform {
 			uniforms: buffer.as_entire_buffer_binding().into(),
 			texture,
+			sampler: &sampler,
 		}
 		.load_instance(assets, gfx, &());
 

@@ -5,6 +5,9 @@ var<uniform> camera: mat4x4f;
 @group(0) @binding(1)
 var texture: texture_2d<f32>;
 
+@group(0) @binding(2)
+var texture_s: sampler;
+
 // Vertex definitions
 struct VertexInput {
 	@location(0) position: vec3f,
@@ -28,5 +31,5 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-	return vec4f(textureLoad(texture, vec2i(in.uv), 0));
+	return vec4f(textureSample(texture, texture_s, in.uv));
 }

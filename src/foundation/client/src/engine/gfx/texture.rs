@@ -1,4 +1,7 @@
-use std::borrow::{Borrow, Cow};
+use std::{
+	borrow::{Borrow, Cow},
+	hash,
+};
 
 use bort::CompRef;
 use crucible_util::debug::label::{DebugLabel, ReifiedDebugLabel};
@@ -125,7 +128,7 @@ impl FullScreenTexture {
 
 // === SamplerDesc === //
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SamplerAssetDescriptor {
 	pub label: ReifiedDebugLabel,
 	pub address_mode_u: wgpu::AddressMode,
@@ -134,10 +137,31 @@ pub struct SamplerAssetDescriptor {
 	pub mag_filter: wgpu::FilterMode,
 	pub min_filter: wgpu::FilterMode,
 	pub mipmap_filter: wgpu::FilterMode,
+	pub lod_min_clamp: f32,
+	pub lod_max_clamp: f32,
 	pub compare: Option<wgpu::CompareFunction>,
 	pub anisotropy_clamp: u16,
 	pub border_color: Option<wgpu::SamplerBorderColor>,
 }
+
+impl hash::Hash for SamplerAssetDescriptor {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		self.label.hash(state);
+		self.address_mode_u.hash(state);
+		self.address_mode_v.hash(state);
+		self.address_mode_w.hash(state);
+		self.mag_filter.hash(state);
+		self.min_filter.hash(state);
+		self.mipmap_filter.hash(state);
+		self.lod_min_clamp.to_bits().hash(state);
+		self.lod_max_clamp.to_bits().hash(state);
+		self.compare.hash(state);
+		self.anisotropy_clamp.hash(state);
+		self.border_color.hash(state);
+	}
+}
+
+impl Eq for SamplerAssetDescriptor {}
 
 impl SamplerAssetDescriptor {
 	pub const NEAREST_CLAMP_EDGES: Self = Self {
@@ -147,9 +171,11 @@ impl SamplerAssetDescriptor {
 		address_mode_w: wgpu::AddressMode::ClampToEdge,
 		mag_filter: wgpu::FilterMode::Nearest,
 		min_filter: wgpu::FilterMode::Nearest,
-		mipmap_filter: wgpu::FilterMode::Nearest,
+		mipmap_filter: wgpu::FilterMode::Linear,
+		lod_min_clamp: 0.0,
+		lod_max_clamp: 0.0,
 		compare: None,
-		anisotropy_clamp: 0,
+		anisotropy_clamp: 1,
 		border_color: None,
 	};
 
@@ -161,6 +187,8 @@ impl SamplerAssetDescriptor {
 		mag_filter: wgpu::FilterMode::Linear,
 		min_filter: wgpu::FilterMode::Linear,
 		mipmap_filter: wgpu::FilterMode::Linear,
+		lod_min_clamp: 0.0,
+		lod_max_clamp: 0.0,
 		compare: None,
 		anisotropy_clamp: 1,
 		border_color: None,
@@ -188,8 +216,8 @@ impl SamplerAssetDescriptor {
 				mag_filter: self.mag_filter,
 				min_filter: self.min_filter,
 				mipmap_filter: self.mipmap_filter,
-				lod_min_clamp: 0.0,
-				lod_max_clamp: f32::MAX,
+				lod_min_clamp: self.lod_min_clamp,
+				lod_max_clamp: self.lod_max_clamp,
 				compare: self.compare,
 				anisotropy_clamp: self.anisotropy_clamp,
 				border_color: self.border_color,

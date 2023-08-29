@@ -126,7 +126,8 @@ impl WorldVoxelMesh {
 							// Mesh it!
 							{
 								// Decode the texture bounds
-								let (uv_origin, uv_size) = atlas.decode_uv_bounds(textures[face]);
+								let (uv_origin, uv_size) =
+									atlas.decode_uv_percent_bounds(textures[face]);
 
 								// Determine the quad origin
 								let center_origin = if face.sign() == Sign::Positive {
@@ -160,7 +161,7 @@ impl WorldVoxelMesh {
 							let quad = quad.translated(center_origin);
 
 							// Decode the texture bounds
-							let (uv_origin, uv_size) = atlas.decode_uv_bounds(material);
+							let (uv_origin, uv_size) = atlas.decode_uv_percent_bounds(material);
 
 							// Give it UVs
 							let quad = quad

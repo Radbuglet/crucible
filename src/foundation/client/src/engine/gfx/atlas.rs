@@ -91,7 +91,13 @@ impl AtlasTexture {
 		self.free_tiles.insert(sub);
 	}
 
-	pub fn decode_uv_bounds(&self, tile: UVec2) -> (Vec2, Vec2) {
+	pub fn decode_uv_percent_bounds(&self, tile: UVec2) -> (Vec2, Vec2) {
+		let (origin, size) = self.decode_uv_pixel_bounds(tile);
+		let tex_size = self.atlas_size().as_vec2();
+		(origin / tex_size, size / tex_size)
+	}
+
+	pub fn decode_uv_pixel_bounds(&self, tile: UVec2) -> (Vec2, Vec2) {
 		let origin = tile.as_vec2() * self.tile_size.as_vec2();
 		let size = self.tile_size.as_vec2();
 		(origin, size)
