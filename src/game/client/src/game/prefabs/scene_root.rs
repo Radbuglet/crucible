@@ -110,6 +110,7 @@ alias! {
 	let spatial_mgr: SpatialTracker;
 	let state: GameSceneRoot;
 	let viewport_data: Viewport;
+	let viewport_depth: FullScreenTexture;
 	let voxel_uniforms: VoxelUniforms;
 	let world_data: WorldVoxelData;
 	let world_loader: WorldLoader;
@@ -161,7 +162,7 @@ pub fn make_game_scene_root(
 			mut material_registry = root,
 			mut world_data = root,
 			mut world_loader = root,
-		) {{
+		) {
 			// Spawn local player
 			let mut on_actor_spawn = VecEventList::new();
 			actor_mgr.spawn(&mut on_actor_spawn, make_local_player());
@@ -231,7 +232,7 @@ pub fn make_game_scene_root(
 					}
 				}
 			}
-		}}
+		}
 	}
 
 	root
@@ -297,6 +298,8 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					return;
 				}
 
+				let Some(viewport_size) = viewport.get_s::<Viewport>(cx).curr_surface_size() else { return };
+				let viewport_size = viewport_size.as_vec2();
 				let Some(aspect) = viewport.get_s::<Viewport>(cx).curr_surface_aspect() else { return };
 			}
 			(
@@ -350,12 +353,11 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 				ref gfx = engine,
 				mut asset_mgr = engine,
 				ref viewport_data = viewport,
+				mut viewport_depth = viewport,
 				mut world_mesh = me,
 				mut skybox_uniforms = me,
 				mut voxel_uniforms = me,
-			) {{
-				let viewport_depth = &mut *viewport.get_mut_s::<FullScreenTexture>(cx);
-
+			) {
 				// Setup skybox rendering sub-pass
 				{
 					let i_proj = camera_mgr_snap.get_proj_xform(aspect).inverse();
@@ -381,10 +383,15 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 
 				// Setup UI rendering sub-pass
 				let mut ui = ImmRenderer::new();
-				ui.brush().fill_rect(
-					Aabb2::from_origin_size(Vec2::ZERO, Vec2::splat(0.05), Vec2::splat(0.5)),
-					Color4::new(1.0, 0.0, 0.0, 0.5),
-				);
+				ui.brush()
+					.transformed_rect_after(
+						Aabb2::new(-1.0, 1.0, 2.0, -2.0),
+						Aabb2::new(0.0, 0.0, viewport_size.x, viewport_size.y),
+					)
+					.fill_rect(
+						Aabb2::from_origin_size(viewport_size / 2.0, Vec2::splat(20.0), Vec2::splat(0.5)),
+						Color4::new(1.0, 0.0, 0.0, 0.5),
+					);
 
 				let ui = ui.prepare_render(
 					gfx,
@@ -392,7 +399,6 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					frame.texture.format(),
 					viewport_depth.format(),
 				);
-
 
 				// Begin rendering
 				let frame_view = frame
@@ -479,10 +485,11 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 
 					ui.render(&mut pass);
 				}
+				drop(ui);
 
 				// Finish rendering
 				gfx.queue.submit([cb.finish()]);
-			}}
+			}
 		}
 	})
 }

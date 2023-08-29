@@ -4,7 +4,7 @@ use crucible_foundation_shared::actor::spatial::{Spatial, SpatialTracker};
 use super::scene_root::ActorSpawnedInGameBehavior;
 
 pub fn register(bhv: &mut BehaviorRegistry) {
-	bhv.register::<ActorSpawnedInGameBehavior>(ActorSpawnedInGameBehavior::new(
+	bhv.register_combined(ActorSpawnedInGameBehavior::new(
 		|_bhv, _call_cx, events, scene| {
 			let spatial_mgr = &mut *scene.get_mut::<SpatialTracker>();
 

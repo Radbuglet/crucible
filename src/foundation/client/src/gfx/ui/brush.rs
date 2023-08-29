@@ -6,12 +6,13 @@ use std::{
 	marker::PhantomData,
 };
 
+use crucible_foundation_shared::math::Aabb2;
 use crucible_util::{
 	lang::{marker::PhantomInvariant, tuple::ToOwnedTupleEq},
 	mem::hash::FxHashMap,
 };
 use derive_where::derive_where;
-use typed_glam::glam::Affine2;
+use typed_glam::glam::{Affine2, Vec2};
 
 use crate::engine::{assets::AssetManager, io::gfx::GfxContext};
 
@@ -93,6 +94,7 @@ pub struct ImmBrush<'a> {
 }
 
 impl<'a> ImmBrush<'a> {
+	// Transform
 	pub fn transform_before(&mut self, transform: Affine2) {
 		self.transform = self.transform * transform;
 	}
@@ -110,6 +112,65 @@ impl<'a> ImmBrush<'a> {
 	#[must_use]
 	pub fn transformed_after(mut self, transform: Affine2) -> Self {
 		self.transform_after(transform);
+		self
+	}
+
+	// Translate
+	pub fn translate_before(&mut self, translation: Vec2) {
+		self.transform_before(Affine2::from_translation(translation));
+	}
+
+	#[must_use]
+	pub fn translated_before(mut self, translation: Vec2) -> Self {
+		self.translate_before(translation);
+		self
+	}
+
+	pub fn translate_after(&mut self, translation: Vec2) {
+		self.transform_after(Affine2::from_translation(translation));
+	}
+
+	#[must_use]
+	pub fn translated_after(mut self, translation: Vec2) -> Self {
+		self.translate_after(translation);
+		self
+	}
+
+	// Scale
+	pub fn scale_before(&mut self, scale: Vec2) {
+		self.transform_before(Affine2::from_scale(scale));
+	}
+
+	#[must_use]
+	pub fn scaled_before(mut self, scale: Vec2) -> Self {
+		self.scale_before(scale);
+		self
+	}
+
+	pub fn scale_after(&mut self, scale: Vec2) {
+		self.transform_after(Affine2::from_scale(scale));
+	}
+
+	#[must_use]
+	pub fn scaled_after(mut self, scale: Vec2) -> Self {
+		self.scale_after(scale);
+		self
+	}
+
+	// Transform rectangle
+	pub fn transform_rect_after(&mut self, dest: Aabb2<Vec2>, src: Aabb2<Vec2>) {
+		// Convert to unit coordinate-space
+		self.translate_after(-src.origin);
+		self.scale_after(1.0 / src.size);
+
+		// Convert to dest coordinate-space
+		self.scale_after(dest.size);
+		self.translate_after(dest.origin);
+	}
+
+	#[must_use]
+	pub fn transformed_rect_after(mut self, from: Aabb2<Vec2>, to: Aabb2<Vec2>) -> Self {
+		self.transform_rect_after(from, to);
 		self
 	}
 }

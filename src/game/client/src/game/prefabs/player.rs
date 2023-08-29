@@ -89,7 +89,7 @@ fn make_input_behavior() -> ActorInputBehavior {
 				_call_cx: [],
 				mut world = scene_root,
 				ref registry = scene_root,
-			) {{
+			) {
 				query! {
 					for (
 						mut player in GlobalTag::<LocalPlayer>,
@@ -127,7 +127,7 @@ fn make_input_behavior() -> ActorInputBehavior {
 						}
 					}
 				}
-			}}
+			}
 		}
 	})
 }
