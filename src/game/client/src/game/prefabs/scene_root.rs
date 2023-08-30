@@ -130,7 +130,7 @@ pub fn make_game_scene_root(
 		.with(ActorManager::default())
 		.with(SpatialTracker::default())
 		// Visual management
-		.with(AtlasTexture::new(UVec2::new(16, 16), UVec2::new(2, 2)))
+		.with(AtlasTexture::new(UVec2::new(16, 16), UVec2::new(2, 2), 4))
 		.with(CameraManager::default())
 		// Voxel management
 		.with(MaterialRegistry::default())

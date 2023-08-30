@@ -3,18 +3,18 @@ use hashbrown::HashSet;
 use image::{imageops, Rgba32FImage};
 use typed_glam::glam::{UVec2, Vec2};
 
-use crate::engine::io::gfx::GfxContext;
+use crate::engine::{gfx::texture::write_texture_data_raw, io::gfx::GfxContext};
 
 #[derive(Debug)]
 pub struct AtlasTexture {
 	tile_size: UVec2,
 	tile_counts: UVec2,
 	free_tiles: HashSet<UVec2>,
-	atlas: Rgba32FImage,
+	atlas: Vec<Rgba32FImage>,
 }
 
 impl AtlasTexture {
-	pub fn new(tile_size: UVec2, tile_counts: UVec2) -> Self {
+	pub fn new(tile_size: UVec2, tile_counts: UVec2, mips: u32) -> Self {
 		let image_size = tile_size * tile_counts;
 
 		Self {
@@ -23,12 +23,27 @@ impl AtlasTexture {
 			free_tiles: VolumetricIter::new_exclusive_iter(tile_counts.to_array())
 				.map(UVec2::from_array)
 				.collect::<HashSet<_>>(),
-			atlas: Rgba32FImage::new(image_size.x, image_size.y),
+			atlas: (0..mips)
+				.map(|level| {
+					let size = wgpu::Extent3d {
+						width: image_size.x,
+						height: image_size.y,
+						depth_or_array_layers: 1,
+					}
+					.mip_level_size(level, wgpu::TextureDimension::D2);
+
+					Rgba32FImage::new(size.width, size.height)
+				})
+				.collect(),
 		}
 	}
 
-	pub fn texture(&self) -> &Rgba32FImage {
+	pub fn textures(&self) -> &[Rgba32FImage] {
 		&self.atlas
+	}
+
+	pub fn mips_layers(&self) -> u32 {
+		self.textures().len() as u32
 	}
 
 	pub fn tile_size(&self) -> UVec2 {
@@ -40,7 +55,7 @@ impl AtlasTexture {
 	}
 
 	pub fn atlas_size(&self) -> UVec2 {
-		UVec2::new(self.atlas.width(), self.atlas.height())
+		UVec2::new(self.atlas[0].width(), self.atlas[0].height())
 	}
 
 	pub fn free_tile_count(&self) -> usize {
@@ -73,13 +88,25 @@ impl AtlasTexture {
 		self.free_tiles.remove(&free_tile);
 
 		// Write to the free tile
+		let atlas_size = self.atlas_size().as_dvec2();
 		let offset = free_tile * self.tile_size;
-		imageops::replace(
-			&mut self.atlas,
-			sub,
-			i64::from(offset.x),
-			i64::from(offset.y),
-		);
+
+		for layer in &mut self.atlas {
+			let factor_x = layer.width() as f64 / atlas_size.x as f64;
+			let factor_y = layer.height() as f64 / atlas_size.y as f64;
+
+			imageops::replace(
+				layer,
+				&imageops::resize(
+					sub,
+					(sub.width() as f64 * factor_x) as u32,
+					(sub.height() as f64 * factor_y) as u32,
+					imageops::FilterType::CatmullRom,
+				),
+				(offset.x as f64 * factor_x) as i64,
+				(offset.y as f64 * factor_y) as i64,
+			);
+		}
 
 		free_tile
 	}
@@ -113,7 +140,7 @@ pub struct AtlasTextureGfx {
 
 impl AtlasTextureGfx {
 	pub fn new(gfx: &GfxContext, atlas: &AtlasTexture, label: Option<&str>) -> Self {
-		let tex_dim: UVec2 = atlas.texture().dimensions().into();
+		let tex_dim: UVec2 = atlas.atlas_size().into();
 		let texture = gfx.device.create_texture(&wgpu::TextureDescriptor {
 			label,
 			size: wgpu::Extent3d {
@@ -121,7 +148,7 @@ impl AtlasTextureGfx {
 				height: tex_dim.y,
 				depth_or_array_layers: 1,
 			},
-			mip_level_count: 1,
+			mip_level_count: atlas.mips_layers(),
 			sample_count: 1,
 			dimension: wgpu::TextureDimension::D2,
 			format: wgpu::TextureFormat::Rgba32Float,
@@ -138,22 +165,14 @@ impl AtlasTextureGfx {
 	}
 
 	pub fn update(&mut self, gfx: &GfxContext, atlas: &AtlasTexture) {
-		let dim: UVec2 = atlas.texture().dimensions().into();
+		let dim: UVec2 = atlas.atlas_size().into();
 		debug_assert_eq!(dim, self.tex_dim);
 
-		gfx.queue.write_texture(
-			self.texture.as_image_copy(),
-			bytemuck::cast_slice(atlas.texture()),
-			wgpu::ImageDataLayout {
-				offset: 0,
-				bytes_per_row: Some(dim.x * 4 * 4),
-				rows_per_image: None,
-			},
-			wgpu::Extent3d {
-				width: atlas.texture().width(),
-				height: atlas.texture().height(),
-				depth_or_array_layers: 1,
-			},
-		)
+		let mut mips_data = Vec::new();
+		for layer in atlas.textures() {
+			mips_data.extend(bytemuck::cast_slice(&layer));
+		}
+
+		write_texture_data_raw(gfx, &self.texture, &mips_data);
 	}
 }

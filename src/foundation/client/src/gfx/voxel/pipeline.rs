@@ -126,10 +126,9 @@ impl VoxelUniforms {
 			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
 		});
 		let sampler = SamplerAssetDescriptor {
-			// mipmap_filter: wgpu::FilterMode::Linear,
-			// anisotropy_clamp: 1,
-			// lod_min_clamp: 0.0,
-			// lod_max_clamp: 4.0,
+			mipmap_filter: wgpu::FilterMode::Linear,
+			lod_min_clamp: 0.0,
+			lod_max_clamp: 4.0,
 			..SamplerAssetDescriptor::NEAREST_CLAMP_EDGES
 		}
 		.load(assets, gfx);
