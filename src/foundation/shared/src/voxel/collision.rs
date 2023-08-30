@@ -81,8 +81,8 @@ pub async fn occluding_volumes_in_block<'a>(
 ) {
 	// Decode descriptor
 	let Some(state) = block.state(cx, world).filter(Block::is_not_air) else {
-			return;
-		};
+		return;
+	};
 
 	let material = registry.find_by_id(state.material);
 	let descriptor = collider_descs.get(material.descriptor);
@@ -237,7 +237,7 @@ pub async fn intersecting_faces_in_block<'a>(
 		for (quad, meta) in iter.with_context(()) {
 			// Search for an intersection
 			let Some((lerp, pos)) = quad.intersection(line) else {
-				continue
+				continue;
 			};
 
 			// Yield the intersection

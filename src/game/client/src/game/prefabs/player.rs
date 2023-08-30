@@ -1,7 +1,7 @@
 use bort::{alias, proc, query, BehaviorRegistry, GlobalTag, OwnedEntity};
 use crucible_foundation_client::engine::gfx::camera::CameraSettings;
 use crucible_foundation_shared::{
-	actor::spatial::Spatial,
+	actor::{kinematic::KinematicSpatial, spatial::Spatial},
 	material::MaterialRegistry,
 	math::{kinematic::tick_friction_coef_to_coef_qty, Angle3D, Angle3DExt, EntityVec},
 	voxel::{
@@ -11,12 +11,9 @@ use crucible_foundation_shared::{
 };
 use winit::event::{MouseButton, VirtualKeyCode};
 
-use crate::game::components::{
-	kinematic::KinematicSpatial,
-	player::{
-		BlockPlacementCx, LocalPlayer, LocalPlayerInputs, GRAVITY_VEC, PLAYER_AIR_FRICTION_COEF,
-		PLAYER_BLOCK_FRICTION_COEF,
-	},
+use crate::game::components::player::{
+	BlockPlacementCx, LocalPlayer, LocalPlayerInputs, GRAVITY_VEC, PLAYER_AIR_FRICTION_COEF,
+	PLAYER_BLOCK_FRICTION_COEF,
 };
 
 use super::scene_root::{ActorInputBehavior, ActorSpawnedInGameBehavior, CameraProviderBehavior};

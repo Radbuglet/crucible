@@ -21,7 +21,9 @@ impl ActorManager {
 	}
 
 	pub fn despawn(&mut self, event: &mut impl EventTarget<ActorDespawned>, actor: Entity) {
-		let Some(actor) = self.actors.take(&actor) else { return };
+		let Some(actor) = self.actors.take(&actor) else {
+			return;
+		};
 		actor.untag(self.tag);
 		event.fire_owned(actor, ActorDespawned { _private: () }, ());
 	}

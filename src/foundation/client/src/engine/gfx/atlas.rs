@@ -101,7 +101,7 @@ impl AtlasTexture {
 					sub,
 					(sub.width() as f64 * factor_x) as u32,
 					(sub.height() as f64 * factor_y) as u32,
-					imageops::FilterType::CatmullRom,
+					imageops::FilterType::Gaussian,
 				),
 				(offset.x as f64 * factor_x) as i64,
 				(offset.y as f64 * factor_y) as i64,

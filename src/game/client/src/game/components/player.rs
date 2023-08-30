@@ -2,7 +2,7 @@ use std::f64::consts::{PI, TAU};
 
 use bort::{access_cx, storage, HasGlobalManagedTag};
 use crucible_foundation_shared::{
-	actor::spatial::Spatial,
+	actor::{kinematic::KinematicSpatial, spatial::Spatial},
 	material::{MaterialId, MaterialRegistry},
 	math::{
 		kinematic::{MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
@@ -18,8 +18,6 @@ use typed_glam::{
 	glam::{DVec3, Vec3, Vec3Swizzles},
 	traits::NumericVector,
 };
-
-use super::kinematic::KinematicSpatial;
 
 // === Contexts === //
 

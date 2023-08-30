@@ -237,3 +237,34 @@ impl FlavorCastFrom<glam::Vec4> for Color4Flavor {
 		Color4::from_glam(v)
 	}
 }
+
+// === UI Coordinate === //
+
+pub type UiVec = TypedVector<UiVecFlavor>;
+
+#[non_exhaustive]
+pub struct UiVecFlavor;
+
+impl VecFlavor for UiVecFlavor {
+	type Backing = glam::Vec2;
+
+	const DEBUG_NAME: &'static str = "UiVec";
+}
+
+impl FlavorCastFrom<f32> for UiVecFlavor {
+	fn cast_from(vec: f32) -> TypedVector<Self>
+	where
+		Self: VecFlavor,
+	{
+		UiVec::splat(vec)
+	}
+}
+
+impl FlavorCastFrom<glam::Vec2> for UiVecFlavor {
+	fn cast_from(vec: glam::Vec2) -> TypedVector<Self>
+	where
+		Self: VecFlavor,
+	{
+		UiVec::from_glam(vec)
+	}
+}

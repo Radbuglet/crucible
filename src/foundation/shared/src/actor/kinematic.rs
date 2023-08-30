@@ -1,5 +1,4 @@
-use bort::{access_cx, CompMut, HasGlobalManagedTag};
-use crucible_foundation_shared::{
+use crate::{
 	actor::spatial::{Spatial, SpatialMutateCx, SpatialTracker},
 	material::MaterialRegistry,
 	math::{kinematic::update_kinematic, Aabb3, Axis3, BlockFace, EntityVec, Sign, VecCompExt},
@@ -11,6 +10,7 @@ use crucible_foundation_shared::{
 		data::WorldVoxelData,
 	},
 };
+use bort::{access_cx, CompMut, HasGlobalManagedTag};
 use crucible_util::mem::c_enum::{CEnum, CEnumMap};
 
 // === Context === //

@@ -242,8 +242,6 @@ pub fn write_texture_data_raw(gfx: &GfxContext, texture: &wgpu::Texture, data: &
 	for layer in 0..layer_iterations {
 		for mip in 0..texture.mip_level_count() {
 			let mut mip_size = texture.size().mip_level_size(mip, texture.dimension());
-			dbg!((mip, mip_size));
-
 			// copying layers separately
 			if texture.dimension() != wgpu::TextureDimension::D3 {
 				mip_size.depth_or_array_layers = 1;

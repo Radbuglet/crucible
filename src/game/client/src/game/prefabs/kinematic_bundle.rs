@@ -1,7 +1,11 @@
 use bort::{proc, query, BehaviorRegistry, GlobalTag::GlobalTag};
-use crucible_foundation_shared::{actor::spatial::Spatial, math::EntityVec};
-
-use crate::game::components::kinematic::{self, KinematicSpatial};
+use crucible_foundation_shared::{
+	actor::{
+		kinematic::{self, KinematicSpatial},
+		spatial::Spatial,
+	},
+	math::EntityVec,
+};
 
 use super::scene_root::{ActorPhysicsApplyBehavior, ActorPhysicsResetBehavior};
 
