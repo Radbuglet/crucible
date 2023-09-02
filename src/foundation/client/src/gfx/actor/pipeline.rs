@@ -1,6 +1,6 @@
 use bort::CompRef;
 use crevice::std430::AsStd430;
-use typed_glam::glam::{Mat4, Vec2, Vec3};
+use typed_glam::glam::{Mat4, Vec3};
 use typed_wgpu::{
 	pipeline::RenderPipeline,
 	uniform::{BindGroup, BindGroupBuilder, BindGroupInstance, NoDynamicOffsets},
@@ -55,7 +55,6 @@ pub struct ActorRenderingUniformData {
 pub struct ActorVertex {
 	pub pos: Vec3,
 	pub color: Vec3,
-	pub uv: Vec2,
 }
 
 impl ActorVertex {
@@ -63,7 +62,6 @@ impl ActorVertex {
 		VertexBufferLayout::builder()
 			.with_attribute(Std430VertexFormat::Float32x3) // pos
 			.with_attribute(Std430VertexFormat::Float32x3) // color
-			.with_attribute(Std430VertexFormat::Float32x2) // uv
 			.finish(wgpu::VertexStepMode::Vertex)
 	}
 }
