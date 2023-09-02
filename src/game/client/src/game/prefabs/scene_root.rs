@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{f32::consts::PI, time::Duration};
 
 use bort::{
 	alias, call_cx, proc, saddle_delegate, BehaviorRegistry, Entity, OwnedEntity, VecEventList,
@@ -15,6 +15,10 @@ use crucible_foundation_client::{
 		io::{gfx::GfxContext, input::InputManager, viewport::Viewport},
 	},
 	gfx::{
+		actor::{
+			mesh::ActorRenderer,
+			pipeline::{load_opaque_actor_pipeline, ActorRenderingUniforms},
+		},
 		skybox::pipeline::{load_skybox_pipeline, SkyboxUniforms},
 		ui::{brush::ImmRenderer, materials::sdf_rect::SdfRectImmBrushExt},
 		voxel::{
@@ -29,15 +33,16 @@ use crucible_foundation_shared::{
 		spatial::SpatialTracker,
 	},
 	material::MaterialRegistry,
-	math::{Aabb2, Aabb3, BlockFace, ChunkVec, Color4, WorldVec, WorldVecExt},
+	math::{Aabb2, Aabb3, BlockFace, ChunkVec, Color3, Color4, WorldVec, WorldVecExt},
 	voxel::{
 		collision::{CollisionMeta, MaterialColliderDescriptor},
 		data::{Block, BlockVoxelPointer, ChunkVoxelData, WorldVoxelData},
 		loader::{self, LoadedChunk, WorldChunkFactory, WorldLoader},
+		mesh::QuadMeshLayer,
 	},
 };
 use crucible_util::{debug::error::ResultExt, mem::c_enum::CEnum};
-use typed_glam::glam::{UVec2, Vec2, Vec4};
+use typed_glam::glam::{Affine3A, UVec2, Vec2, Vec3, Vec4};
 use wgpu::util::DeviceExt;
 use winit::{
 	event::{MouseButton, VirtualKeyCode},
@@ -99,6 +104,8 @@ pub fn register(_bhv: &mut BehaviorRegistry) {}
 alias! {
 	let asset_mgr: AssetManager;
 	let actor_mgr: ActorManager;
+	let actor_uniforms: ActorRenderingUniforms;
+	let actor_renderer: ActorRenderer;
 	let atlas_texture: AtlasTexture;
 	let bhv: BehaviorRegistry;
 	let block_registry: MaterialRegistry;
@@ -206,6 +213,10 @@ pub fn make_game_scene_root(
 			root.insert(VoxelUniforms::new(asset_mgr, gfx, &atlas_gfx.view));
 			root.insert(SkyboxUniforms::new(asset_mgr, gfx, &skybox));
 			root.insert(atlas_gfx);
+
+			// Create actor rendering services
+			root.insert(ActorRenderingUniforms::new(asset_mgr, gfx));
+			root.insert(ActorRenderer::default());
 
 			// Register core materials
 			material_registry.register("crucible:air", OwnedEntity::new()
@@ -351,6 +362,8 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 				],
 				_call_cx: [],
 				ref gfx = engine,
+				mut actor_renderer = me,
+				ref actor_uniforms = me,
 				mut asset_mgr = engine,
 				ref viewport_data = viewport,
 				mut viewport_depth = viewport,
@@ -381,6 +394,47 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					viewport_depth.format(),
 				);
 
+				// Setup actor rendering
+				actor_uniforms.set_camera_matrix(gfx, camera_mgr_snap.get_camera_xform(aspect));
+				let actor_pipeline = load_opaque_actor_pipeline(
+					asset_mgr,
+					gfx,
+					frame.texture.format(),
+					viewport_depth.format(),
+				);
+
+				actor_renderer.push_model(gfx, &QuadMeshLayer::new()
+					.with_cube(
+						Aabb3::from_origin_size(Vec3::X * -0.3, Vec3::new(0.45, 0.95, 0.45), Vec3::new(0.5, 0.0, 0.5)),
+						Color3::new(0.5, 0.5, 0.5)
+					)
+					.with_cube(
+						Aabb3::from_origin_size(Vec3::X * 0.3, Vec3::new(0.45, 0.95, 0.45), Vec3::new(0.5, 0.0, 0.5)),
+						Color3::new(0.5, 0.5, 0.5)
+					)
+					.with_cube(
+						Aabb3::from_origin_size(Vec3::Y * 0.95, Vec3::splat(1.2), Vec3::new(0.5, 0.0, 0.5)),
+						Color3::new(0.5, 0.5, 0.5)
+					)
+					.with_cube(
+						Aabb3::from_origin_size(Vec3::new(-0.5, 0.95 + 0.6, 0.6), Vec3::splat(0.3), Vec3::new(0.5, 0.5, 0.5)),
+						Color3::new(0.1, 0.1, 1.0)
+					)
+					.with_cube(
+						Aabb3::from_origin_size(Vec3::new(0.5, 0.95 + 0.6, 0.6), Vec3::splat(0.3), Vec3::new(0.5, 0.5, 0.5)),
+						Color3::new(0.1, 0.1, 1.0)
+					)
+				);
+
+				actor_renderer.push_model_instance(
+					gfx,
+					Affine3A::from_translation(Vec3::Z * 10.0) * Affine3A::from_rotation_y(PI),
+				);
+				actor_renderer.push_model_instance(
+					gfx,
+					Affine3A::from_translation(Vec3::Z * -10.0),
+				);
+
 				// Setup UI rendering sub-pass
 				let mut ui = ImmRenderer::new();
 				ui.brush()
@@ -408,6 +462,9 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 				let mut cb = gfx
 					.device
 					.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+
+				// Upload actor data
+				actor_renderer.upload(gfx, &mut cb);
 
 				// Render skybox
 				{
@@ -461,6 +518,33 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					world_mesh_subpass.push(voxel_uniforms, &mut pass);
 				}
 
+				// Render actors
+				{
+					let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
+						label: None,
+						color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+							view: &frame_view,
+							resolve_target: None,
+							ops: wgpu::Operations {
+								load: wgpu::LoadOp::Load,
+								store: true,
+							},
+						})],
+						depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+							view: viewport_depth.acquire_view(&gfx, &viewport_data),
+							depth_ops: Some(wgpu::Operations {
+								load: wgpu::LoadOp::Load,
+								store: true,
+							}),
+							stencil_ops: None,
+						}),
+					});
+
+					actor_pipeline.bind_pipeline(&mut pass);
+					actor_uniforms.write_pass_state(&mut pass);
+					actor_renderer.render(&mut pass);
+				}
+
 				// Render UI
 				{
 					let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -489,6 +573,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 
 				// Finish rendering
 				gfx.queue.submit([cb.finish()]);
+				actor_renderer.reset_and_release();
 			}
 		}
 	})

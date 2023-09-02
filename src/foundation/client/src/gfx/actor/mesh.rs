@@ -27,6 +27,24 @@ struct MeshEnding {
 	last_instance: u32,
 }
 
+impl Default for ActorRenderer {
+	fn default() -> Self {
+		Self {
+			vertex_buffer: DynamicBuffer::new(
+				"actor vertex buffer",
+				wgpu::BufferUsages::VERTEX,
+				1024,
+			),
+			instance_buffer: DynamicBuffer::new(
+				"actor instance buffer",
+				wgpu::BufferUsages::VERTEX,
+				1024,
+			),
+			mesh_endings: Default::default(),
+		}
+	}
+}
+
 impl ActorRenderer {
 	pub fn push_model(&mut self, gfx: &GfxContext, model: &QuadMeshLayer<Color3>) {
 		for (quad, color) in model.iter_cloned() {
@@ -47,7 +65,7 @@ impl ActorRenderer {
 		self.mesh_endings.push(MeshEnding {
 			last_vertex: buffer_len_to_count::<ActorVertex>(self.vertex_buffer.len()),
 			last_instance: buffer_len_to_count::<ActorInstance>(self.instance_buffer.len()),
-		})
+		});
 	}
 
 	pub fn push_model_instance(&mut self, gfx: &GfxContext, affine: Affine3A) {
@@ -62,6 +80,8 @@ impl ActorRenderer {
 			.as_std430()
 			.as_bytes(),
 		);
+		self.mesh_endings.last_mut().unwrap().last_instance =
+			buffer_len_to_count::<ActorInstance>(self.instance_buffer.len());
 	}
 
 	pub fn upload(&mut self, gfx: &GfxContext, cb: &mut wgpu::CommandEncoder) {

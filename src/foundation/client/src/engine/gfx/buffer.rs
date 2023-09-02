@@ -116,7 +116,8 @@ pub struct DynamicBuffer {
 impl DynamicBuffer {
 	pub fn new(label: impl DebugLabel, usage: wgpu::BufferUsages, chunk_size: usize) -> Self {
 		let chunk_size = chunk_size & !(wgpu::COPY_BUFFER_ALIGNMENT as usize - 1);
-		let chunk_size = chunk_size.min(wgpu::COPY_BUFFER_ALIGNMENT as usize);
+		let chunk_size = chunk_size.max(wgpu::COPY_BUFFER_ALIGNMENT as usize);
+		let usage = usage | wgpu::BufferUsages::COPY_DST;
 
 		Self {
 			label: label.reify(),
@@ -216,10 +217,9 @@ impl DynamicBuffer {
 		let mut dst_offset = 0;
 
 		for chunk in &self.written_chunks {
-			dst_offset += chunk_size;
-
 			chunk.unmap();
 			cb.copy_buffer_to_buffer(&chunk, 0, &buffer, dst_offset, chunk_size);
+			dst_offset += chunk_size;
 		}
 	}
 
@@ -227,6 +227,7 @@ impl DynamicBuffer {
 		for chunk in self.written_chunks.drain(..) {
 			self.chunk_pool.release(chunk);
 		}
+		self.curr_chunk_len = self.chunk_size;
 	}
 }
 

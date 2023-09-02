@@ -3,13 +3,13 @@ use crevice::std430::AsStd430;
 use typed_glam::glam::{Mat4, Vec3};
 use typed_wgpu::{
 	pipeline::RenderPipeline,
-	uniform::{BindGroup, BindGroupBuilder, BindGroupInstance, NoDynamicOffsets},
+	uniform::{BindGroup, BindGroupBuilder, BindGroupInstance, NoDynamicOffsets, PipelineLayout},
 	vertex::{Std430VertexFormat, VertexBufferLayout},
 };
 
 use crate::engine::{
 	assets::AssetManager,
-	gfx::{pipeline::BindGroupExt, texture::SamplerAssetDescriptor},
+	gfx::pipeline::{BindGroupExt, PipelineLayoutExt},
 	io::gfx::GfxContext,
 };
 
@@ -18,8 +18,6 @@ use crate::engine::{
 #[derive(Debug)]
 pub struct ActorRenderingBindUniform<'a> {
 	pub camera: wgpu::BufferBinding<'a>,
-	pub texture: &'a wgpu::TextureView,
-	pub sampler: &'a wgpu::Sampler,
 }
 
 impl BindGroup for ActorRenderingBindUniform<'_> {
@@ -27,20 +25,7 @@ impl BindGroup for ActorRenderingBindUniform<'_> {
 	type DynamicOffsets = NoDynamicOffsets;
 
 	fn layout(builder: &mut impl BindGroupBuilder<Self>, _config: &Self::Config) {
-		builder
-			.with_uniform_buffer(wgpu::ShaderStages::VERTEX, false, |c| c.camera.clone())
-			.with_texture(
-				wgpu::ShaderStages::FRAGMENT,
-				wgpu::TextureSampleType::Float { filterable: false },
-				wgpu::TextureViewDimension::D2,
-				false,
-				|c| c.texture,
-			)
-			.with_sampler(
-				wgpu::ShaderStages::FRAGMENT,
-				wgpu::SamplerBindingType::NonFiltering,
-				|c| c.sampler,
-			);
+		builder.with_uniform_buffer(wgpu::ShaderStages::VERTEX, false, |c| c.camera.clone());
 	}
 }
 
@@ -77,6 +62,7 @@ pub struct ActorInstance {
 impl ActorInstance {
 	pub fn layout() -> VertexBufferLayout<Self> {
 		VertexBufferLayout::builder()
+			.with_location(2)
 			.with_attribute(Std430VertexFormat::Float32x3) // affine_x
 			.with_attribute(Std430VertexFormat::Float32x3) // affine_y
 			.with_attribute(Std430VertexFormat::Float32x3) // affine_z
@@ -113,6 +99,7 @@ pub fn load_opaque_actor_pipeline(
 		let shader = &*load_opaque_actor_shader(assets, gfx);
 
 		RenderPipeline::builder()
+			.with_layout(&PipelineLayout::load_default(assets, gfx))
 			.with_vertex_shader(
 				shader,
 				"vs_main",
@@ -134,20 +121,16 @@ pub struct ActorRenderingUniforms {
 }
 
 impl ActorRenderingUniforms {
-	pub fn new(assets: &mut AssetManager, gfx: &GfxContext, texture: &wgpu::TextureView) -> Self {
-		let sampler = &*SamplerAssetDescriptor::NEAREST_CLAMP_EDGES.load(assets, gfx);
-
+	pub fn new(assets: &mut AssetManager, gfx: &GfxContext) -> Self {
 		let uniform_buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
 			label: Some("actor rendering uniforms buffer"),
 			size: ActorRenderingUniformData::std430_size_static() as u64,
-			usage: wgpu::BufferUsages::UNIFORM,
+			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
 			mapped_at_creation: false,
 		});
 
 		let bind_group = ActorRenderingBindUniform {
 			camera: uniform_buffer.as_entire_buffer_binding(),
-			texture,
-			sampler,
 		}
 		.load_instance(assets, gfx, &());
 
