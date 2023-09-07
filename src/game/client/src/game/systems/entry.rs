@@ -1,17 +1,13 @@
 use std::{f32::consts::PI, time::Duration};
 
 use bort::{
-	alias, call_cx, proc, saddle_delegate, BehaviorRegistry, Entity, OwnedEntity, VecEventList,
-	VirtualTag,
+	alias, call_cx, delegate, proc, proc_collection, saddle_delegate, BehaviorProvider,
+	BehaviorRegistry, Entity, OwnedEntity, VecEventList, VirtualTag,
 };
 use crucible_foundation_client::{
 	engine::{
 		assets::AssetManager,
-		gfx::{
-			atlas::{AtlasTexture, AtlasTextureGfx},
-			camera::CameraManager,
-			texture::FullScreenTexture,
-		},
+		gfx::{atlas::AtlasTexture, camera::CameraManager, texture::FullScreenTexture},
 		io::{gfx::GfxContext, input::InputManager, viewport::Viewport},
 	},
 	gfx::{
@@ -22,7 +18,7 @@ use crucible_foundation_client::{
 		skybox::pipeline::{load_skybox_pipeline, SkyboxUniforms},
 		ui::{brush::ImmRenderer, materials::sdf_rect::SdfRectImmBrushExt},
 		voxel::{
-			mesh::{self, ChunkVoxelMesh, MaterialVisualDescriptor, WorldVoxelMesh},
+			mesh::{MeshUpdateCx, WorldVoxelMesh},
 			pipeline::{load_opaque_block_pipeline, VoxelUniforms},
 		},
 	},
@@ -32,18 +28,17 @@ use crucible_foundation_shared::{
 		manager::{ActorManager, ActorSpawned},
 		spatial::SpatialTracker,
 	},
+	bort::lifecycle::{LifecycleManager, PartialEntity},
 	material::MaterialRegistry,
 	math::{Aabb2, Aabb3, BlockFace, ChunkVec, Color3, Color4, WorldVec, WorldVecExt},
 	voxel::{
-		collision::{CollisionMeta, MaterialColliderDescriptor},
 		data::{Block, BlockVoxelPointer, ChunkVoxelData, WorldVoxelData},
-		loader::{self, LoadedChunk, WorldChunkFactory, WorldLoader},
+		loader::{LoaderUpdateCx, WorldLoader},
 		mesh::QuadMeshLayer,
 	},
 };
-use crucible_util::{debug::error::ResultExt, mem::c_enum::CEnum};
-use typed_glam::glam::{Affine3A, UVec2, Vec2, Vec3, Vec4};
-use wgpu::util::DeviceExt;
+use crucible_util::mem::c_enum::CEnum;
+use typed_glam::glam::{Affine3A, Vec2, Vec3, Vec4};
 use winit::{
 	event::{MouseButton, VirtualKeyCode},
 	window::CursorGrabMode,
@@ -51,7 +46,7 @@ use winit::{
 
 use crate::{
 	entry::{SceneInitBehavior, SceneRenderHandler, SceneUpdateHandler},
-	game::{components::scene_root::GameSceneRoot, prefabs::player::make_local_player},
+	game::actors::player::spawn_local_player,
 };
 
 // === Delegates === //
@@ -95,11 +90,21 @@ saddle_delegate! {
 	)
 }
 
-// === Behaviors === //
+// === GameInitManager === //
 
-pub fn register(_bhv: &mut BehaviorRegistry) {}
+delegate! {
+	pub fn GameSceneInitBehavior(
+		bhv: BehaviorProvider<'_>,
+		call_cx: &mut call_cx![GameSceneInitBehavior],
+		scene: PartialEntity<'_>,
+		engine: Entity,
+	)
+	as deriving proc_collection
+}
 
-// === Prefabs === //
+pub type GameInitRegistry = LifecycleManager<GameSceneInitBehavior>;
+
+// === Aliases === //
 
 alias! {
 	let asset_mgr: AssetManager;
@@ -124,116 +129,73 @@ alias! {
 	let world_mesh: WorldVoxelMesh;
 }
 
-pub fn make_game_scene_root(
+// === Behaviors === //
+
+pub fn register(bhv: &mut BehaviorRegistry) {
+	let _ = bhv;
+}
+
+// === Components === //
+
+#[derive(Debug)]
+pub struct GameSceneRoot {
+	pub engine: Entity,
+	pub viewport: Entity,
+}
+
+// === Prefabs === //
+
+pub fn spawn_game_scene_root(
 	call_cx: &mut call_cx![SceneInitBehavior],
 	engine: Entity,
 	viewport: Entity,
 ) -> OwnedEntity {
-	// Create scene root
+	// Spawn base entity
 	let root = OwnedEntity::new()
 		.with_debug_label("game scene root")
 		.with(GameSceneRoot { engine, viewport })
-		// Actor management
-		.with(ActorManager::default())
-		.with(SpatialTracker::default())
-		// Visual management
-		.with(AtlasTexture::new(UVec2::new(16, 16), UVec2::new(2, 2), 4))
-		.with(CameraManager::default())
-		// Voxel management
-		.with(MaterialRegistry::default())
-		.with(WorldVoxelData::default())
-		.with(WorldVoxelMesh::default())
-		.with(WorldLoader::new(WorldChunkFactory::new(|_world, pos| {
-			OwnedEntity::new()
-				.with_debug_label(format_args!("chunk at {pos:?}"))
-				.with(ChunkVoxelData::default().with_default_air_data())
-				.with(ChunkVoxelMesh::default())
-				.with(LoadedChunk::default())
-				.into_obj()
-		})))
-		// Handlers
 		.with(make_scene_update_handler())
 		.with(make_scene_render_handler());
 
-	// Initialize the scene
+	// Run external initializers
+	let pm = GameInitRegistry::new()
+		.with_many(super::actor_data::push_plugins)
+		.with_many(super::actor_rendering::push_plugins)
+		.with_many(super::core_rendering::push_plugins)
+		.with_many(super::voxel_data::push_plugins)
+		.with_many(super::voxel_rendering::push_plugins);
+
+	proc! {
+		as SceneInitBehavior[call_cx] do
+		(_cx: [], call_cx: [GameSceneInitBehavior], ref bhv = engine) {
+			pm.execute(|delegate, scene| delegate(bhv.provider(), call_cx, scene, engine), root.entity());
+		}
+	}
+
+	// Setup initial scene
 	proc! {
 		as SceneInitBehavior[call_cx] do
 		(
-			cx: [mut LoadedChunk; loader::LoaderUpdateCx],
+			cx: [; LoaderUpdateCx],
 			call_cx: [ActorSpawnedInGameBehavior],
-			ref bhv = engine,
-			ref gfx = engine,
-			mut asset_mgr = engine,
 			mut actor_mgr = root,
-			mut atlas_texture = root,
-			mut material_registry = root,
-			mut world_data = root,
+			ref bhv = engine,
 			mut world_loader = root,
+			mut world_data = root,
+			ref material_registry = root,
 		) {
-			// Spawn local player
-			let mut on_actor_spawn = VecEventList::new();
-			actor_mgr.spawn(&mut on_actor_spawn, make_local_player());
-			bhv.get::<ActorSpawnedInGameBehavior>()(call_cx, &mut on_actor_spawn, root.entity());
-
-			// Load core textures
-			let mut atlas_gfx = AtlasTextureGfx::new(gfx, atlas_texture, Some("block texture atlas"));
-			let stone_tex = atlas_texture.add(
-				&image::load_from_memory(include_bytes!("../res/proto_1.png"))
-					.unwrap_pretty()
-					.into_rgba32f()
-			);
-			atlas_gfx.update(gfx, atlas_texture);
-
-			let skybox = image::load_from_memory(include_bytes!("../res/skybox.png"))
-				.unwrap_pretty()
-				.into_rgba8();
-
-			let skybox = gfx.device.create_texture_with_data(
-				&gfx.queue,
-				&wgpu::TextureDescriptor {
-					label: Some("Skybox panorama"),
-					size: wgpu::Extent3d {
-						width: skybox.width(),
-						height: skybox.height(),
-						depth_or_array_layers: 1,
-					},
-					mip_level_count: 1,
-					sample_count: 1,
-					dimension: wgpu::TextureDimension::D2,
-					format: wgpu::TextureFormat::Rgba8Unorm,
-					usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-					view_formats: &[],
-				},
-				&skybox,
+			// Populate initial world data
+			world_loader.temp_load_region(
+				cx,
+				world_data,
+				Aabb3::from_corners_max_excl(
+					WorldVec::new(-100, -50, -100).chunk(),
+					WorldVec::new(100, 50, 100).chunk() + ChunkVec::ONE,
+				),
 			);
 
-			let skybox = skybox.create_view(&wgpu::TextureViewDescriptor::default());
-
-			// Create atlas and voxel uniform services
-			root.insert(VoxelUniforms::new(asset_mgr, gfx, &atlas_gfx.view));
-			root.insert(SkyboxUniforms::new(asset_mgr, gfx, &skybox));
-			root.insert(atlas_gfx);
-
-			// Create actor rendering services
-			root.insert(ActorRenderingUniforms::new(asset_mgr, gfx));
-			root.insert(ActorRenderer::default());
-
-			// Register core materials
-			material_registry.register("crucible:air", OwnedEntity::new()
-				.with_debug_label("air material descriptor"));
-
-			let proto_mat = material_registry.register("crucible:prototype", OwnedEntity::new()
-				.with_debug_label("prototype material descriptor")
-				.with(MaterialColliderDescriptor::Cubic(CollisionMeta::OPAQUE))
-				.with(MaterialVisualDescriptor::cubic_simple(stone_tex)));
-
-			// Setup base world state
-			world_loader.temp_load_region(cx, world_data, Aabb3::from_corners_max_excl(
-				WorldVec::new(-100, -50, -100).chunk(),
-				WorldVec::new(100, 50, 100).chunk() + ChunkVec::ONE,
-			));
-
-			let mut pointer = BlockVoxelPointer::new(world_data, WorldVec::ZERO);
+			let mut pointer = BlockVoxelPointer::new(&world_data, WorldVec::ZERO);
+			let proto_mat = material_registry.find_by_name("crucible:proto").unwrap();
 
 			for x in -100..=100 {
 				for y in -50..0 {
@@ -243,11 +205,18 @@ pub fn make_game_scene_root(
 					}
 				}
 			}
+
+			// Create player
+			let mut on_spawned = VecEventList::new();
+			actor_mgr.spawn(&mut on_spawned, spawn_local_player());
+			bhv.get::<ActorSpawnedInGameBehavior>()(call_cx, &mut on_spawned, root.entity());
 		}
 	}
 
 	root
 }
+
+// === Handlers === //
 
 fn make_scene_update_handler() -> SceneUpdateHandler {
 	SceneUpdateHandler::new(|bhv, call_cx, me, _main_loop| {
@@ -314,7 +283,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 				let Some(aspect) = viewport.get_s::<Viewport>(cx).curr_surface_aspect() else { return };
 			}
 			(
-				cx: [mut ChunkVoxelData; mesh::MeshUpdateCx],
+				cx: [mut ChunkVoxelData; MeshUpdateCx],
 				_call_cx: [],
 				ref gfx = engine,
 				mut world_data = me,

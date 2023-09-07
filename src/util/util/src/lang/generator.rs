@@ -80,7 +80,6 @@ impl<T, C: ?Sized + for<'a> ContinuationSig<'a>> Yield<T, C> {
 
 					output.set(Some((continuator.take().unwrap())(input)));
 				};
-
 			};
 		}
 

@@ -212,7 +212,7 @@ dependencies = [
 [[package]]
 name = "bort"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/bort.git?rev=56d3187f653a8ad4e90beb3c530dd675b11da712#56d3187f653a8ad4e90beb3c530dd675b11da712"
+source = "git+https://github.com/Radbuglet/bort.git?rev=f2f32dd96a710284fd44a8491db0fbd6509a8d2b#f2f32dd96a710284fd44a8491db0fbd6509a8d2b"
 dependencies = [
  "cfgenius",
  "derive-where",
@@ -1521,7 +1521,7 @@ dependencies = [
 [[package]]
 name = "partial-scope"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/bort.git?rev=56d3187f653a8ad4e90beb3c530dd675b11da712#56d3187f653a8ad4e90beb3c530dd675b11da712"
+source = "git+https://github.com/Radbuglet/bort.git?rev=f2f32dd96a710284fd44a8491db0fbd6509a8d2b#f2f32dd96a710284fd44a8491db0fbd6509a8d2b"
 
 [[package]]
 name = "paste"
@@ -1537,12 +1537,12 @@ checksum = "9b2a4787296e9989611394c33f193f676704af1686e70b8f8033ab5ba9a35a94"
 
 [[package]]
 name = "petgraph"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dd7d28ee937e54fe3080c91faa1c3a46c06de6252988a7f4592ba2310ef22a4"
+checksum = "e1d3afd2628e69da2be385eb6f2fd57c8ac7977ceeff6dc166ff1657b0e386a9"
 dependencies = [
  "fixedbitset",
- "indexmap 1.9.3",
+ "indexmap 2.0.0",
 ]
 
 [[package]]
@@ -1745,7 +1745,7 @@ dependencies = [
 [[package]]
 name = "saddle"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/bort.git?rev=56d3187f653a8ad4e90beb3c530dd675b11da712#56d3187f653a8ad4e90beb3c530dd675b11da712"
+source = "git+https://github.com/Radbuglet/bort.git?rev=f2f32dd96a710284fd44a8491db0fbd6509a8d2b#f2f32dd96a710284fd44a8491db0fbd6509a8d2b"
 dependencies = [
  "cfgenius",
  "derive-where",

@@ -1,11 +1,16 @@
 use std::f64::consts::{PI, TAU};
 
-use bort::{access_cx, storage, HasGlobalManagedTag};
+use bort::{
+	access_cx, alias, proc, query, storage, BehaviorRegistry, GlobalTag, HasGlobalManagedTag,
+	OwnedEntity,
+};
+
+use crucible_foundation_client::engine::gfx::camera::CameraSettings;
 use crucible_foundation_shared::{
 	actor::{kinematic::KinematicSpatial, spatial::Spatial},
 	material::{MaterialId, MaterialRegistry},
 	math::{
-		kinematic::{MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
+		kinematic::{tick_friction_coef_to_coef_qty, MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
 		Angle3D, Angle3DExt, BlockFace, EntityAabb, EntityVec,
 	},
 	voxel::{
@@ -18,14 +23,17 @@ use typed_glam::{
 	glam::{DVec3, Vec3, Vec3Swizzles},
 	traits::NumericVector,
 };
+use winit::event::{MouseButton, VirtualKeyCode};
 
-// === Contexts === //
+use crate::game::systems::entry::{
+	ActorInputBehavior, ActorSpawnedInGameBehavior, CameraProviderBehavior,
+};
+
+// === Components === //
 
 access_cx! {
 	pub trait BlockPlacementCx: ColliderCheckCx, VoxelDataWriteCx;
 }
-
-// === Constants === //
 
 // See: https://web.archive.org/web/20230313061131/https://www.mcpk.wiki/wiki/Jumping
 pub const GRAVITY: f64 = 0.08 * MC_TICKS_TO_SECS_SQUARED;
@@ -41,8 +49,6 @@ pub const PLAYER_JUMP_COOL_DOWN: u64 = 30;
 pub const PLAYER_WIDTH: f64 = 0.8;
 pub const PLAYER_HEIGHT: f64 = 1.8;
 pub const PLAYER_EYE_LEVEL: f64 = 1.6;
-
-// === Components === //
 
 #[derive(Debug)]
 pub struct LocalPlayer {
@@ -176,7 +182,7 @@ impl LocalPlayer {
 					.set_state_or_warn(
 						cx,
 						world,
-						Block::new(registry.find_by_name("crucible:prototype").unwrap().id),
+						Block::new(registry.find_by_name("crucible:proto").unwrap().id),
 					);
 				break;
 			}
@@ -216,4 +222,134 @@ pub struct LocalPlayerInputs {
 	pub left: bool,
 	pub right: bool,
 	pub jump: bool,
+}
+
+// === Prefabs === //
+
+pub fn spawn_local_player() -> OwnedEntity {
+	OwnedEntity::new()
+		.with_debug_label("local player")
+		.with_tagged(
+			GlobalTag::<LocalPlayer>,
+			LocalPlayer {
+				facing: Angle3D::ZERO,
+				fly_mode: false,
+				jump_cool_down: 0,
+				view_bob: 0.0,
+			},
+		)
+		.with_tagged(
+			GlobalTag::<Spatial>,
+			Spatial::new(LocalPlayer::new_aabb(EntityVec::ZERO)),
+		)
+		.with_tagged(
+			GlobalTag::<KinematicSpatial>,
+			KinematicSpatial::new(tick_friction_coef_to_coef_qty(
+				EntityVec::new(
+					PLAYER_AIR_FRICTION_COEF * PLAYER_BLOCK_FRICTION_COEF,
+					PLAYER_AIR_FRICTION_COEF,
+					PLAYER_AIR_FRICTION_COEF * PLAYER_BLOCK_FRICTION_COEF,
+				),
+				60.0,
+			)),
+		)
+}
+
+// === Behaviors === //
+
+alias! {
+	let registry: MaterialRegistry;
+	let world: WorldVoxelData;
+}
+
+pub fn register(bhv: &mut BehaviorRegistry) {
+	bhv.register_combined(make_spawn_behavior())
+		.register_combined(make_input_behavior())
+		.register_combined(make_camera_behavior());
+}
+
+fn make_spawn_behavior() -> ActorSpawnedInGameBehavior {
+	ActorSpawnedInGameBehavior::new(|_bhv, _call_cx, events, _scene| {
+		query! {
+			for (_event in *events; @me) + [GlobalTag::<LocalPlayer>] {
+				log::info!("Spawned player {me:?}");
+			}
+		}
+	})
+}
+
+fn make_input_behavior() -> ActorInputBehavior {
+	ActorInputBehavior::new(|_bhv, call_cx, scene_root, actor_tag, inputs| {
+		proc! {
+			as ActorInputBehavior[call_cx] do
+			(
+				cx: [
+					mut LocalPlayer,
+					ref Spatial,
+					mut KinematicSpatial
+					; ColliderCheckCx, BlockPlacementCx
+				],
+				_call_cx: [],
+				mut world = scene_root,
+				ref registry = scene_root,
+			) {
+				query! {
+					for (
+						mut player in GlobalTag::<LocalPlayer>,
+						ref spatial in GlobalTag::<Spatial>,
+						mut kinematic in GlobalTag::<KinematicSpatial>,
+					) + [actor_tag] {
+						// Apply gravity
+						kinematic.apply_acceleration(GRAVITY_VEC);
+
+						// Process mouse look
+						player.facing += inputs.mouse_delta() * f32::to_radians(0.4);
+						player.facing = player.facing.clamp_y_90().wrap_x();
+
+						// Process fly mode
+						if inputs.key(VirtualKeyCode::F).recently_pressed() {
+							player.fly_mode = !player.fly_mode;
+						}
+
+						// Process movement
+						player.process_movement(kinematic, LocalPlayerInputs {
+							forward: inputs.key(VirtualKeyCode::W).state(),
+							backward: inputs.key(VirtualKeyCode::S).state(),
+							left: inputs.key(VirtualKeyCode::A).state(),
+							right: inputs.key(VirtualKeyCode::D).state(),
+							jump: inputs.key(VirtualKeyCode::Space).state(),
+						});
+
+						// Handle block placement
+						if inputs.button(MouseButton::Right).recently_pressed() {
+							player.place_block_where_looking(cx, world, registry, spatial, 7.0);
+						}
+
+						if inputs.button(MouseButton::Left).recently_pressed() {
+							player.break_block_where_looking(cx, world, registry, spatial, 7.0);
+						}
+					}
+				}
+			}
+		}
+	})
+}
+
+fn make_camera_behavior() -> CameraProviderBehavior {
+	CameraProviderBehavior::new(|_bhv, call_cx, actor_tag, camera_mgr| {
+		proc! {
+			as CameraProviderBehavior[call_cx] do
+			(_cx: [ref Spatial, ref LocalPlayer], _call_cx: []) {
+				query! {
+					for (ref spatial in GlobalTag::<Spatial>, ref player in GlobalTag::<LocalPlayer>) + [actor_tag] {
+						camera_mgr.set_pos_rot(
+							player.eye_pos(spatial).to_glam().as_vec3(),
+							player.facing,
+							CameraSettings::Perspective { fov: 110f32.to_radians(), near: 0.1, far: 500.0 },
+						);
+					}
+				}
+			}
+		}
+	})
 }

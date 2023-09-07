@@ -7,7 +7,7 @@ use crucible_foundation_shared::{
 	math::EntityVec,
 };
 
-use super::scene_root::{ActorPhysicsApplyBehavior, ActorPhysicsResetBehavior};
+use super::entry::{ActorPhysicsApplyBehavior, ActorPhysicsResetBehavior};
 
 // === Behaviors === //
 

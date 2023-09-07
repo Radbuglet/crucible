@@ -36,7 +36,7 @@ num-traits = "0.2.15"  # These act mostly like trait aliases and should not be w
 
 [workspace.dependencies.bort]
 git = "https://github.com/Radbuglet/bort.git"
-rev = "56d3187f653a8ad4e90beb3c530dd675b11da712"
+rev = "f2f32dd96a710284fd44a8491db0fbd6509a8d2b"
 features = ["saddle"]
 
 [profile.dev]

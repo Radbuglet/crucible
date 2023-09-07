@@ -23,7 +23,7 @@ use winit::{
 	window::{WindowBuilder, WindowId},
 };
 
-use crate::game::prefabs::scene_root::make_game_scene_root;
+use crate::game::systems::entry::spawn_game_scene_root;
 
 // === Behaviors === //
 
@@ -52,7 +52,7 @@ alias! {
 pub fn main_inner() -> anyhow::Result<()> {
 	// Create the behavior registry
 	let mut call_cx = RootCollectionCallToken::acquire();
-	let bhv = BehaviorRegistry::new().with_many(crate::game::prefabs::register);
+	let bhv = BehaviorRegistry::new().with_many(crate::game::register);
 
 	// Initialize the engine
 	proc! {
@@ -128,7 +128,11 @@ pub fn main_inner() -> anyhow::Result<()> {
 			// Setup an initial scene
 			engine
 				.get_mut_s::<SceneManager>(cx)
-				.set_initial(make_game_scene_root(call_cx, engine_ref, main_viewport_ref));
+				.set_initial(spawn_game_scene_root(
+					call_cx,
+					engine_ref,
+					main_viewport_ref,
+				));
 		}
 		(cx: [], _call_cx: [], ref viewport_mgr = engine) {
 			// Show all viewports
@@ -166,7 +170,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 
 					// Update the current scene
 					let scene = scene_mgr.current();
-					scene.get_s::<SceneUpdateHandler>(cx)(&bhv, call_cx, scene, main_loop);
+					scene.get_s::<SceneUpdateHandler>(cx)(bhv.provider(), call_cx, scene, main_loop);
 				}
 				(
 					cx: [ref Viewport, mut InputManager],
@@ -220,7 +224,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 				) {
 					// Render the current scene
 					let scene = scene_mgr.current();
-					scene.get_s::<SceneRenderHandler>(cx)(&bhv, call_cx, scene, viewport, &mut frame);
+					scene.get_s::<SceneRenderHandler>(cx)(bhv.provider(), call_cx, scene, viewport, &mut frame);
 
 					// Present the frame
 					frame.present();
