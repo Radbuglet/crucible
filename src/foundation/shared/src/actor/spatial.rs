@@ -3,9 +3,8 @@ use bort::{CompMut, EventTarget, HasGlobalManagedTag};
 use crate::math::EntityVec;
 
 #[derive(Debug, Clone)]
-pub struct SpatialMoved {
-	_private: (),
-}
+#[non_exhaustive]
+pub struct SpatialMoved;
 
 #[derive(Debug, Clone, Default)]
 pub struct Spatial {
@@ -31,10 +30,6 @@ impl Spatial {
 		on_moved: &mut impl EventTarget<SpatialMoved, EntityVec>,
 	) {
 		me.pos = pos;
-		on_moved.fire(
-			CompMut::owner(me).entity(),
-			SpatialMoved { _private: () },
-			pos,
-		);
+		on_moved.fire(CompMut::owner(me).entity(), SpatialMoved, pos);
 	}
 }

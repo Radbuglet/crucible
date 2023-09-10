@@ -1,7 +1,7 @@
 use crevice::std430::AsStd430;
 use crucible_foundation_shared::{
 	math::{Color3, Tri},
-	voxel::mesh::QuadMeshLayer,
+	mesh::QuadMeshLayer,
 };
 use crucible_util::mem::array::map_arr;
 use typed_glam::glam::Affine3A;

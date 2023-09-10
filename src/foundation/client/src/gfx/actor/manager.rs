@@ -1,11 +1,27 @@
-use bort::{access_cx, CompMut, Entity, Obj};
-use crucible_foundation_shared::actor::spatial::Spatial;
+use bort::{access_cx, CompMut, Entity, HasGlobalManagedTag, Obj};
+use crucible_foundation_shared::{
+	actor::spatial::Spatial,
+	material::{MaterialId, MaterialInfo, MaterialMarker, MaterialRegistry},
+};
 use crucible_util::mem::hash::FxHashMap;
 use typed_glam::glam::Affine3A;
 
 use crate::engine::io::gfx::GfxContext;
 
 use super::renderer::{ActorMeshLayer, ActorRenderer};
+
+// === MeshRegistry === //
+
+#[non_exhaustive]
+pub struct MeshMaterialMarker;
+
+impl MaterialMarker for MeshMaterialMarker {}
+
+pub type MeshRegistry = MaterialRegistry<MeshMaterialMarker>;
+pub type MeshId = MaterialId<MeshMaterialMarker>;
+pub type MeshInfo = MaterialInfo<MeshMaterialMarker>;
+
+// === ActorMeshManager === //
 
 access_cx! {
 	pub trait ActorManagerUpdateCx = mut ActorMeshInstance;
@@ -18,6 +34,16 @@ pub struct ActorMeshManager {
 }
 
 impl ActorMeshManager {
+	pub fn register_instance(
+		&mut self,
+		target: &mut CompMut<ActorMeshInstance>,
+		target_spatial: Obj<Spatial>,
+	) {
+		let meshes = self.meshes.entry(target.mesh.obj()).or_default();
+		target.mesh_index = meshes.len();
+		meshes.push(target_spatial);
+	}
+
 	pub fn set_instance_mesh(
 		&mut self,
 		cx: &impl ActorManagerUpdateCx,
@@ -28,21 +54,21 @@ impl ActorMeshManager {
 		debug_assert_eq!(CompMut::owner(target).entity(), target_spatial.entity());
 
 		// Remove the instance from its old vector
-		self.remove_instance(cx, target);
+		self.unregister_instance(cx, target);
 
 		// Add the instance to its target vector
 		let meshes = self.meshes.entry(mesh).or_default();
-		target.mesh = Some(mesh.entity());
+		target.mesh = mesh.entity();
 		target.mesh_index = meshes.len();
 		meshes.push(target_spatial);
 	}
 
-	pub fn remove_instance(
+	pub fn unregister_instance(
 		&mut self,
 		cx: &impl ActorManagerUpdateCx,
 		target: &mut CompMut<ActorMeshInstance>,
 	) {
-		let meshes = self.meshes.get_mut(&target.mesh.take().unwrap()).unwrap();
+		let meshes = self.meshes.get_mut(&target.mesh).unwrap();
 
 		meshes.swap_remove(target.mesh_index);
 
@@ -73,6 +99,19 @@ impl ActorMeshManager {
 
 #[derive(Debug)]
 pub struct ActorMeshInstance {
-	mesh: Option<Entity>,
+	mesh: Entity,
 	mesh_index: usize,
+}
+
+impl HasGlobalManagedTag for ActorMeshInstance {
+	type Component = Self;
+}
+
+impl ActorMeshInstance {
+	pub fn new(mesh: Entity) -> Self {
+		Self {
+			mesh,
+			mesh_index: 0,
+		}
+	}
 }

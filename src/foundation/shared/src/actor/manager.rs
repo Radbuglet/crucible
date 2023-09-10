@@ -16,7 +16,7 @@ impl ActorManager {
 		let (actor, actor_ref) = actor.split_guard();
 		actor.tag(self.tag);
 		self.actors.insert(actor);
-		event.fire(actor_ref, ActorSpawned { _private: () }, ());
+		event.fire(actor_ref, ActorSpawned, ());
 		actor_ref
 	}
 
@@ -25,7 +25,7 @@ impl ActorManager {
 			return;
 		};
 		actor.untag(self.tag);
-		event.fire_owned(actor, ActorDespawned { _private: () }, ());
+		event.fire_owned(actor, ActorDespawned, ());
 	}
 
 	pub fn tag(&self) -> VirtualTag {
@@ -34,11 +34,9 @@ impl ActorManager {
 }
 
 #[derive(Debug)]
-pub struct ActorSpawned {
-	_private: (),
-}
+#[non_exhaustive]
+pub struct ActorSpawned;
 
 #[derive(Debug)]
-pub struct ActorDespawned {
-	_private: (),
-}
+#[non_exhaustive]
+pub struct ActorDespawned;

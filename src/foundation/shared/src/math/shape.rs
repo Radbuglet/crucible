@@ -298,11 +298,19 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 	where
 		V::Comp: PartialOrd,
 	{
-		Aabb3 {
+		Self {
 			origin: self.origin - other.size,
 			size: self.size + other.size,
 		}
 		.contains(other.origin)
+	}
+
+	#[must_use]
+	pub fn offset_by(&self, delta: V) -> Self {
+		Self {
+			origin: self.origin + delta,
+			size: self.size,
+		}
 	}
 }
 

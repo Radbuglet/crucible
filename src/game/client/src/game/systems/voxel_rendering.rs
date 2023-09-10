@@ -10,7 +10,7 @@ use crucible_foundation_client::{
 		pipeline::VoxelUniforms,
 	},
 };
-use crucible_foundation_shared::material::MaterialRegistry;
+use crucible_foundation_shared::voxel::data::BlockMaterialRegistry;
 use crucible_util::debug::{error::ResultExt, type_id::NamedTypeId};
 use typed_glam::glam::UVec2;
 
@@ -21,7 +21,7 @@ use super::entry::{GameInitRegistry, GameSceneInitBehavior};
 alias! {
 	let asset_mgr: AssetManager;
 	let gfx: GfxContext;
-	let materials: MaterialRegistry;
+	let materials: BlockMaterialRegistry;
 }
 
 pub fn register(bhv: &mut BehaviorRegistry) {
@@ -30,7 +30,7 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 
 pub fn push_plugins(pm: &mut GameInitRegistry) {
 	pm.register(
-		[NamedTypeId::of::<MaterialRegistry>()],
+		[NamedTypeId::of::<BlockMaterialRegistry>()],
 		GameSceneInitBehavior::new(|_bhv, call_cx, scene, engine| {
 			proc! {
 				as GameSceneInitBehavior[call_cx] do

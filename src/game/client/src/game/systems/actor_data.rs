@@ -9,17 +9,19 @@ use super::entry::{ActorSpawnedInGameBehavior, GameInitRegistry, GameSceneInitBe
 // === Behaviors === //
 
 pub fn register(bhv: &mut BehaviorRegistry) {
-	bhv.register_combined(ActorSpawnedInGameBehavior::new(
-		|_bhv, _call_cx, events, scene| {
-			let collider_mgr = &mut *scene.get_mut::<ColliderManager>();
+	bhv.register_combined(make_actor_spawn_handler());
+}
 
-			query! {
-				for (_event in events; omut collider in GlobalTag::<Collider>) {
-					collider_mgr.register(&mut collider);
-				}
+fn make_actor_spawn_handler() -> ActorSpawnedInGameBehavior {
+	ActorSpawnedInGameBehavior::new(|_bhv, _call_cx, on_spawn, scene| {
+		let collider_mgr = &mut *scene.get_mut::<ColliderManager>();
+
+		query! {
+			for (_event in on_spawn; omut collider in GlobalTag::<Collider>) {
+				collider_mgr.register(&mut collider);
 			}
-		},
-	));
+		}
+	})
 }
 
 pub fn push_plugins(pm: &mut GameInitRegistry) {

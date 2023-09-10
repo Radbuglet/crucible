@@ -1,13 +1,12 @@
 use crate::{
 	actor::collider::{Collider, ColliderMutateCx},
-	material::MaterialRegistry,
 	math::{kinematic::update_kinematic, Aabb3, Axis3, BlockFace, EntityVec, Sign, VecCompExt},
 	voxel::{
 		collision::{
 			cast_volume, filter_all_colliders, move_rigid_body, ColliderCheckCx,
 			COLLISION_TOLERANCE,
 		},
-		data::WorldVoxelData,
+		data::{BlockMaterialRegistry, WorldVoxelData},
 	},
 };
 use bort::{access_cx, CompMut, EventTarget, HasGlobalManagedTag};
@@ -52,7 +51,7 @@ impl KinematicObject {
 		&mut self,
 		cx: &impl CxApplyPhysics,
 		world: &WorldVoxelData,
-		registry: &MaterialRegistry,
+		registry: &BlockMaterialRegistry,
 		spatial: &mut CompMut<Spatial>,
 		collider: &Collider,
 		on_spatial_moved: &mut impl EventTarget<SpatialMoved, EntityVec>,
@@ -100,7 +99,7 @@ impl KinematicObject {
 	fn is_face_touching_now_inner(
 		cx: &impl CxSideOcclusion,
 		world: &WorldVoxelData,
-		registry: &MaterialRegistry,
+		registry: &BlockMaterialRegistry,
 		aabb: Aabb3<EntityVec>,
 		face: BlockFace,
 	) -> bool {
@@ -121,7 +120,7 @@ impl KinematicObject {
 		&self,
 		cx: &impl CxSideOcclusion,
 		world: &WorldVoxelData,
-		registry: &MaterialRegistry,
+		registry: &BlockMaterialRegistry,
 		collider: &Collider,
 		face: BlockFace,
 	) -> bool {
@@ -132,7 +131,7 @@ impl KinematicObject {
 		&mut self,
 		cx: &impl CxSideOcclusion,
 		world: &WorldVoxelData,
-		registry: &MaterialRegistry,
+		registry: &BlockMaterialRegistry,
 		collider: &Collider,
 	) {
 		for (face, state) in self.collision_mask.iter_mut() {

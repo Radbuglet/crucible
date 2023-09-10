@@ -1,12 +1,9 @@
 use bort::{proc, BehaviorRegistry, OwnedEntity};
 use crucible_foundation_client::gfx::voxel::mesh::ChunkVoxelMesh;
-use crucible_foundation_shared::{
-	material::MaterialRegistry,
-	voxel::{
-		collision::{CollisionMeta, MaterialColliderDescriptor},
-		data::{ChunkVoxelData, VoxelDataWriteCx, WorldVoxelData},
-		loader::{LoadedChunk, LoaderUpdateCx, WorldChunkFactory, WorldLoader},
-	},
+use crucible_foundation_shared::voxel::{
+	collision::{CollisionMeta, MaterialColliderDescriptor},
+	data::{BlockMaterialRegistry, ChunkVoxelData, VoxelDataWriteCx, WorldVoxelData},
+	loader::{LoadedChunk, LoaderUpdateCx, WorldChunkFactory, WorldLoader},
 };
 
 use super::entry::{GameInitRegistry, GameSceneInitBehavior};
@@ -25,7 +22,7 @@ pub fn push_plugins(pm: &mut GameInitRegistry) {
 				as GameSceneInitBehavior[call_cx] do
 				(cx: [;LoaderUpdateCx, VoxelDataWriteCx], _call_cx: []) {
 					// Create the material registry
-					let mut materials = MaterialRegistry::default();
+					let mut materials = BlockMaterialRegistry::default();
 					materials.register(
 						"crucible:air",
 						OwnedEntity::new().with_debug_label("air material descriptor"),

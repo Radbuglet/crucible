@@ -5,21 +5,26 @@ use bort::{
 	OwnedEntity,
 };
 
-use crucible_foundation_client::engine::gfx::camera::CameraSettings;
+use crucible_foundation_client::{
+	engine::gfx::camera::CameraSettings,
+	gfx::actor::manager::{ActorMeshInstance, MeshRegistry},
+};
 use crucible_foundation_shared::{
 	actor::{
 		collider::{Collider, TrackedCollider},
 		kinematic::KinematicObject,
 		spatial::Spatial,
 	},
-	material::{MaterialId, MaterialRegistry},
 	math::{
 		kinematic::{tick_friction_coef_to_coef_qty, MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
 		Angle3D, Angle3DExt, BlockFace, EntityAabb, EntityVec,
 	},
 	voxel::{
 		collision::{ColliderCheckCx, RayCast},
-		data::{Block, EntityVoxelPointer, VoxelDataWriteCx, WorldVoxelData},
+		data::{
+			Block, BlockMaterialId, BlockMaterialRegistry, EntityVoxelPointer, VoxelDataWriteCx,
+			WorldVoxelData,
+		},
 	},
 };
 use crucible_util::{lang::iter::ContextualIter, use_generator};
@@ -155,7 +160,7 @@ impl LocalPlayer {
 		&self,
 		cx: &impl BlockPlacementCx,
 		world: &mut WorldVoxelData,
-		registry: &MaterialRegistry,
+		registry: &BlockMaterialRegistry,
 		spatial: &Spatial,
 		max_dist: f64,
 	) {
@@ -185,7 +190,7 @@ impl LocalPlayer {
 		&self,
 		cx: &impl BlockPlacementCx,
 		world: &mut WorldVoxelData,
-		registry: &MaterialRegistry,
+		registry: &BlockMaterialRegistry,
 		spatial: &Spatial,
 		max_dist: f64,
 	) {
@@ -200,7 +205,7 @@ impl LocalPlayer {
 			if isect.block.state(cx, world).is_some_and(|v| v.is_not_air()) {
 				isect
 					.block
-					.set_state_or_warn(cx, world, Block::new(MaterialId::AIR));
+					.set_state_or_warn(cx, world, Block::new(BlockMaterialId::AIR));
 				break;
 			}
 		}
@@ -218,9 +223,10 @@ pub struct LocalPlayerInputs {
 
 // === Prefabs === //
 
-pub fn spawn_local_player() -> OwnedEntity {
+pub fn spawn_local_player(mesh_registry: &MeshRegistry) -> OwnedEntity {
 	OwnedEntity::new()
 		.with_debug_label("local player")
+		// Inherent attributes
 		.with_tagged(
 			GlobalTag::<LocalPlayer>,
 			LocalPlayer {
@@ -231,6 +237,7 @@ pub fn spawn_local_player() -> OwnedEntity {
 			},
 		)
 		.with_tagged(GlobalTag::<Spatial>, Spatial::new(EntityVec::ZERO))
+		// Physics
 		.with_tagged(
 			GlobalTag::<Collider>,
 			Collider::new(EntityAabb {
@@ -255,12 +262,22 @@ pub fn spawn_local_player() -> OwnedEntity {
 				60.0,
 			)),
 		)
+		// Rendering
+		.with_tagged(
+			GlobalTag::<ActorMeshInstance>,
+			ActorMeshInstance::new(
+				mesh_registry
+					.find_by_name("crucible:glagglesnoy")
+					.unwrap()
+					.descriptor,
+			),
+		)
 }
 
 // === Behaviors === //
 
 alias! {
-	let registry: MaterialRegistry;
+	let registry: BlockMaterialRegistry;
 	let world: WorldVoxelData;
 }
 

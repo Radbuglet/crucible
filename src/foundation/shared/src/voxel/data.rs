@@ -5,11 +5,22 @@ use crucible_util::mem::{array::boxed_arr_from_fn, c_enum::CEnumMap, hash::FxHas
 use typed_glam::traits::{CastVecFrom, SignedNumericVector3};
 
 use crate::{
-	material::MaterialId,
+	material::{MaterialId, MaterialInfo, MaterialMarker, MaterialRegistry},
 	math::{
 		BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, WorldVec, WorldVecExt, CHUNK_VOLUME,
 	},
 };
+
+// === Materials === //
+
+#[non_exhaustive]
+pub struct BlockMaterialMarker;
+
+impl MaterialMarker for BlockMaterialMarker {}
+
+pub type BlockMaterialRegistry = MaterialRegistry<BlockMaterialMarker>;
+pub type BlockMaterialInfo = MaterialInfo<BlockMaterialMarker>;
+pub type BlockMaterialId = MaterialId<BlockMaterialMarker>;
 
 // === Context === //
 
@@ -290,7 +301,7 @@ impl VoxelBlocksMut<'_> {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Block {
-	pub material: MaterialId,
+	pub material: BlockMaterialId,
 	pub variant: u8,
 	pub light: u8,
 }
@@ -298,7 +309,7 @@ pub struct Block {
 impl Block {
 	pub const AIR: Self = Self::new(MaterialId::AIR);
 
-	pub const fn new(material: MaterialId) -> Self {
+	pub const fn new(material: BlockMaterialId) -> Self {
 		Self {
 			material,
 			variant: 0,

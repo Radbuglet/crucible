@@ -12,17 +12,16 @@ use smallvec::SmallVec;
 use typed_glam::{glam::DVec2, traits::NumericVector};
 
 use crate::{
-	material::MaterialRegistry,
 	math::{
 		AaQuad, Aabb3, Axis3, BlockFace, EntityAabb, EntityVec, EntityVecExt, Line3, Sign,
 		VecCompExt, WorldVecExt,
 	},
-	voxel::data::Block,
+	mesh::{QuadMeshLayer, VolumetricMeshLayer},
 };
 
-use super::{
-	data::{BlockVoxelPointer, EntityVoxelPointer, VoxelDataReadCx, WorldVoxelData},
-	mesh::{QuadMeshLayer, VolumetricMeshLayer},
+use super::data::{
+	Block, BlockMaterialRegistry, BlockVoxelPointer, EntityVoxelPointer, VoxelDataReadCx,
+	WorldVoxelData,
 };
 
 // === Context === //
@@ -76,7 +75,7 @@ pub async fn occluding_volumes_in_block<'a>(
 	cx: &'a impl ColliderCheckCx,
 	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a WorldVoxelData,
-	registry: &'a MaterialRegistry,
+	registry: &'a BlockMaterialRegistry,
 	mut block: BlockVoxelPointer,
 ) {
 	// Decode descriptor
@@ -121,7 +120,7 @@ pub async fn occluding_faces_in_block<'a>(
 	cx: &impl ColliderCheckCx,
 	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a WorldVoxelData,
-	registry: &'a MaterialRegistry,
+	registry: &'a BlockMaterialRegistry,
 	mut block: BlockVoxelPointer,
 	face: BlockFace,
 ) {
@@ -205,7 +204,7 @@ pub async fn intersecting_faces_in_block<'a>(
 	cx: &impl ColliderCheckCx,
 	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a WorldVoxelData,
-	registry: &'a MaterialRegistry,
+	registry: &'a BlockMaterialRegistry,
 	block: BlockVoxelPointer,
 	line: Line3,
 ) {
@@ -259,7 +258,7 @@ pub const COLLISION_TOLERANCE: f64 = 0.0005;
 pub fn cast_volume(
 	cx: &impl ColliderCheckCx,
 	world: &WorldVoxelData,
-	registry: &MaterialRegistry,
+	registry: &BlockMaterialRegistry,
 	quad: AaQuad<EntityVec>,
 	delta: f64,
 	tolerance: f64,
@@ -363,7 +362,7 @@ pub async fn check_volume<'a>(
 	cx: &impl ColliderCheckCx,
 	collider_descs: Storage<MaterialColliderDescriptor>,
 	world: &'a WorldVoxelData,
-	registry: &'a MaterialRegistry,
+	registry: &'a BlockMaterialRegistry,
 	aabb: EntityAabb,
 ) {
 	let cached_loc = BlockVoxelPointer::new(world, aabb.origin.block_pos());
@@ -526,7 +525,7 @@ impl RayCast {
 		cx: &impl ColliderCheckCx,
 		collider_descs: Storage<MaterialColliderDescriptor>,
 		world: &WorldVoxelData,
-		registry: &MaterialRegistry,
+		registry: &BlockMaterialRegistry,
 		isect_buffer: &mut impl VecLike<Elem = (RayCastIntersection, CollisionMeta)>,
 	) {
 		// Step the ray forward, keeping track of its old state.
@@ -591,7 +590,7 @@ impl RayCast {
 	#[allow(clippy::type_complexity)]
 	pub async fn step_intersect_for(
 		&mut self,
-		y: &yielder![(RayCastIntersection, CollisionMeta); for<'a> (&'a WorldVoxelData, &'a MaterialRegistry)],
+		y: &yielder![(RayCastIntersection, CollisionMeta); for<'a> (&'a WorldVoxelData, &'a BlockMaterialRegistry)],
 		cx: &impl ColliderCheckCx,
 		collider_descs: Storage<MaterialColliderDescriptor>,
 		max_dist: f64,
@@ -631,7 +630,7 @@ pub struct RayCastIntersection {
 pub fn move_rigid_body(
 	cx: &impl ColliderCheckCx,
 	world: &WorldVoxelData,
-	registry: &MaterialRegistry,
+	registry: &BlockMaterialRegistry,
 	mut aabb: EntityAabb,
 	delta: EntityVec,
 	mut filter: impl FnMut(CollisionMeta) -> bool,

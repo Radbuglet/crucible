@@ -1,40 +1,62 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, marker::PhantomData};
 
 use bort::{Entity, OwnedEntity};
-use crucible_util::mem::{free_list::FreeList, hash::FxHashMap};
+use crucible_util::{
+	lang::marker::PhantomInvariant,
+	mem::{free_list::FreeList, hash::FxHashMap},
+};
+use derive_where::derive_where;
+
+pub trait MaterialMarker: 'static {}
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct MaterialId(pub u16);
+pub struct RawMaterialId(pub u16);
 
-impl MaterialId {
+impl RawMaterialId {
 	pub const AIR: Self = Self(0);
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct Material {
-	pub id: MaterialId,
+#[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MaterialId<M: MaterialMarker> {
+	_ty: PhantomInvariant<M>,
+	raw: RawMaterialId,
+}
+
+impl<M: MaterialMarker> MaterialId<M> {
+	pub const AIR: Self = Self {
+		_ty: PhantomData,
+		raw: RawMaterialId::AIR,
+	};
+}
+
+#[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct MaterialInfo<M: MaterialMarker> {
+	pub id: MaterialId<M>,
 	pub descriptor: Entity,
 }
 
-#[derive(Debug, Default)]
-pub struct MaterialRegistry {
+#[derive_where(Debug, Default)]
+pub struct MaterialRegistry<M: MaterialMarker> {
 	slots: FreeList<OwnedEntity, u16>,
-	name_map: FxHashMap<Cow<'static, str>, Material>,
+	name_map: FxHashMap<Cow<'static, str>, MaterialInfo<M>>,
 }
 
-impl MaterialRegistry {
+impl<M: MaterialMarker> MaterialRegistry<M> {
 	pub fn register(
 		&mut self,
 		name: impl Into<Cow<'static, str>>,
 		descriptor: OwnedEntity,
-	) -> Material {
+	) -> MaterialInfo<M> {
 		// Register in slot store
 		let descriptor_ref = descriptor.entity();
 		let (_, slot) = self.slots.add(descriptor);
 
 		// Construct material
-		let material_id = MaterialId(slot);
-		let material = Material {
+		let material_id = MaterialId {
+			_ty: PhantomData,
+			raw: RawMaterialId(slot),
+		};
+		let material = MaterialInfo {
 			id: material_id,
 			descriptor: descriptor_ref,
 		};
@@ -50,7 +72,7 @@ impl MaterialRegistry {
 		// Attach `MaterialDescriptorBase`
 		descriptor_ref.insert(MaterialDescriptorBase {
 			name: name_clone,
-			slot: material_id,
+			slot: material_id.raw,
 		});
 
 		material
@@ -62,20 +84,20 @@ impl MaterialRegistry {
 		self.slots.remove(slot.0);
 	}
 
-	pub fn find_by_name(&self, name: &str) -> Option<Material> {
+	pub fn find_by_name(&self, name: &str) -> Option<MaterialInfo<M>> {
 		self.name_map.get(name).copied()
 	}
 
-	pub fn find_by_id(&self, id: MaterialId) -> Material {
-		let descriptor = self.slots.get(id.0).entity();
-		Material { id, descriptor }
+	pub fn find_by_id(&self, id: MaterialId<M>) -> MaterialInfo<M> {
+		let descriptor = self.slots.get(id.raw.0).entity();
+		MaterialInfo { id, descriptor }
 	}
 }
 
 #[derive(Debug, Clone)]
 pub struct MaterialDescriptorBase {
 	name: Cow<'static, str>,
-	slot: MaterialId,
+	slot: RawMaterialId,
 }
 
 impl MaterialDescriptorBase {
@@ -83,7 +105,7 @@ impl MaterialDescriptorBase {
 		self.name.as_ref()
 	}
 
-	pub fn material(&self) -> MaterialId {
+	pub fn material(&self) -> RawMaterialId {
 		self.slot
 	}
 }

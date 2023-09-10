@@ -3,12 +3,9 @@ use std::time::{Duration, Instant};
 use bort::{access_cx, storage, CompRef, Entity};
 use crevice::std430::AsStd430;
 use crucible_foundation_shared::{
-	material::{MaterialId, MaterialRegistry},
 	math::{AaQuad, BlockFace, BlockVec, BlockVecExt, Sign, Tri, WorldVec, WorldVecExt, QUAD_UVS},
-	voxel::{
-		data::{VoxelDataReadCx, WorldVoxelData},
-		mesh::QuadMeshLayer,
-	},
+	mesh::QuadMeshLayer,
+	voxel::data::{BlockMaterialId, BlockMaterialRegistry, VoxelDataReadCx, WorldVoxelData},
 };
 use crucible_util::mem::{
 	array::map_arr,
@@ -55,7 +52,7 @@ impl WorldVoxelMesh {
 		world: &WorldVoxelData,
 		gfx: &GfxContext,
 		atlas: &AtlasTexture,
-		registry: &MaterialRegistry,
+		registry: &BlockMaterialRegistry,
 		time_limit: Option<Duration>,
 	) {
 		let started = Instant::now();
@@ -77,7 +74,7 @@ impl WorldVoxelMesh {
 			for center_pos in BlockVec::iter() {
 				// Decode material
 				let material = chunk_data.block_or_air(center_pos).material;
-				if material == MaterialId::AIR {
+				if material == BlockMaterialId::AIR {
 					continue;
 				}
 				let material = registry.find_by_id(material);

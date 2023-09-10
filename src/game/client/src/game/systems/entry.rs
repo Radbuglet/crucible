@@ -1,4 +1,4 @@
-use std::{f32::consts::PI, time::Duration};
+use std::time::Duration;
 
 use bort::{
 	alias, call_cx, delegate, proc, proc_collection, saddle_delegate, BehaviorProvider,
@@ -12,6 +12,7 @@ use crucible_foundation_client::{
 	},
 	gfx::{
 		actor::{
+			manager::{ActorManagerRenderCx, ActorMeshManager, MeshRegistry},
 			pipeline::{load_opaque_actor_pipeline, ActorRenderingUniforms},
 			renderer::ActorRenderer,
 		},
@@ -30,16 +31,14 @@ use crucible_foundation_shared::{
 		spatial::SpatialMoved,
 	},
 	bort::lifecycle::{LifecycleManager, PartialEntity},
-	material::MaterialRegistry,
-	math::{Aabb2, Aabb3, BlockFace, ChunkVec, Color3, Color4, WorldVec, WorldVecExt},
+	math::{Aabb2, Aabb3, BlockFace, ChunkVec, Color4, WorldVec, WorldVecExt},
 	voxel::{
-		data::{Block, BlockVoxelPointer, ChunkVoxelData, WorldVoxelData},
+		data::{Block, BlockMaterialRegistry, BlockVoxelPointer, ChunkVoxelData, WorldVoxelData},
 		loader::{LoaderUpdateCx, WorldLoader},
-		mesh::QuadMeshLayer,
 	},
 };
 use crucible_util::mem::c_enum::CEnum;
-use typed_glam::glam::{Affine3A, Vec2, Vec3, Vec4};
+use typed_glam::glam::{Vec2, Vec4};
 use winit::{
 	event::{MouseButton, VirtualKeyCode},
 	window::CursorGrabMode,
@@ -86,7 +85,7 @@ saddle_delegate! {
 	pub fn ActorPhysicsApplyBehavior(
 		actor_tag: VirtualTag,
 		world: &WorldVoxelData,
-		registry: &MaterialRegistry,
+		registry: &BlockMaterialRegistry,
 		on_spatial_moved: &mut VecEventList<SpatialMoved>,
 	)
 }
@@ -126,13 +125,14 @@ alias! {
 	let actor_mgr: ActorManager;
 	let actor_uniforms: ActorRenderingUniforms;
 	let actor_renderer: ActorRenderer;
+	let actor_mesh_manager: ActorMeshManager;
 	let atlas_texture: AtlasTexture;
 	let bhv: BehaviorRegistry;
-	let block_registry: MaterialRegistry;
+	let block_registry: BlockMaterialRegistry;
 	let camera_mgr: CameraManager;
 	let gfx: GfxContext;
 	let input_mgr: InputManager;
-	let material_registry: MaterialRegistry;
+	let mesh_registry: MeshRegistry;
 	let skybox_uniforms: SkyboxUniforms;
 	let collider_mgr: ColliderManager;
 	let state: GameSceneRoot;
@@ -195,7 +195,8 @@ pub fn spawn_game_scene_root(
 			ref bhv = engine,
 			mut world_loader = root,
 			mut world_data = root,
-			ref material_registry = root,
+			ref block_registry = root,
+			ref mesh_registry = root,
 		) {
 			// Populate initial world data
 			world_loader.temp_load_region(
@@ -208,7 +209,7 @@ pub fn spawn_game_scene_root(
 			);
 
 			let mut pointer = BlockVoxelPointer::new(&world_data, WorldVec::ZERO);
-			let proto_mat = material_registry.find_by_name("crucible:proto").unwrap();
+			let proto_mat = block_registry.find_by_name("crucible:proto").unwrap();
 
 			for x in -100..=100 {
 				for y in -50..0 {
@@ -221,7 +222,7 @@ pub fn spawn_game_scene_root(
 
 			// Create player
 			let mut on_spawned = VecEventList::new();
-			actor_mgr.spawn(&mut on_spawned, spawn_local_player());
+			actor_mgr.spawn(&mut on_spawned, spawn_local_player(mesh_registry));
 			bhv.get::<ActorSpawnedInGameBehavior>()(call_cx, &mut on_spawned, root.entity());
 		}
 	}
@@ -321,7 +322,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 				mut world_data = me,
 				mut world_mesh = me,
 				ref atlas_texture = me,
-				ref material_registry = me,
+				ref block_registry = me,
 			) {
 				// Consume flagged chunks
 				for dirty in world_data.flush_dirty(cx) {
@@ -339,7 +340,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					world_data,
 					gfx,
 					atlas_texture,
-					material_registry,
+					block_registry,
 					Some(Duration::from_millis(16)),
 				);
 			}
@@ -359,7 +360,8 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					ref GfxContext,
 					mut SkyboxUniforms,
 					mut VoxelUniforms,
-					mut WorldVoxelMesh,
+					mut WorldVoxelMesh;
+					ActorManagerRenderCx,
 				],
 				_call_cx: [],
 				ref gfx = engine,
@@ -371,6 +373,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 				mut world_mesh = me,
 				mut skybox_uniforms = me,
 				mut voxel_uniforms = me,
+				ref actor_mesh_manager = me,
 			) {
 				// Setup skybox rendering sub-pass
 				{
@@ -404,38 +407,6 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					viewport_depth.format(),
 				);
 
-				actor_renderer.push_model(gfx, &QuadMeshLayer::new()
-					.with_cube(
-						Aabb3::from_origin_size(Vec3::X * -0.3, Vec3::new(0.45, 0.95, 0.45), Vec3::new(0.5, 0.0, 0.5)),
-						Color3::new(0.5, 0.5, 0.5)
-					)
-					.with_cube(
-						Aabb3::from_origin_size(Vec3::X * 0.3, Vec3::new(0.45, 0.95, 0.45), Vec3::new(0.5, 0.0, 0.5)),
-						Color3::new(0.5, 0.5, 0.5)
-					)
-					.with_cube(
-						Aabb3::from_origin_size(Vec3::Y * 0.95, Vec3::splat(1.2), Vec3::new(0.5, 0.0, 0.5)),
-						Color3::new(0.5, 0.5, 0.5)
-					)
-					.with_cube(
-						Aabb3::from_origin_size(Vec3::new(-0.5, 0.95 + 0.6, 0.6), Vec3::splat(0.3), Vec3::new(0.5, 0.5, 0.5)),
-						Color3::new(0.1, 0.1, 1.0)
-					)
-					.with_cube(
-						Aabb3::from_origin_size(Vec3::new(0.5, 0.95 + 0.6, 0.6), Vec3::splat(0.3), Vec3::new(0.5, 0.5, 0.5)),
-						Color3::new(0.1, 0.1, 1.0)
-					)
-				);
-
-				actor_renderer.push_model_instance(
-					gfx,
-					Affine3A::from_translation(Vec3::Z * 10.0) * Affine3A::from_rotation_y(PI),
-				);
-				actor_renderer.push_model_instance(
-					gfx,
-					Affine3A::from_translation(Vec3::Z * -10.0),
-				);
-
 				// Setup UI rendering sub-pass
 				let mut ui = ImmRenderer::new();
 				ui.brush()
@@ -465,6 +436,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 
 				// Upload actor data
+				actor_mesh_manager.render(cx, gfx, actor_renderer);
 				actor_renderer.upload(gfx, &mut cb);
 
 				// Render skybox
