@@ -16,15 +16,13 @@ use typed_glam::glam::UVec2;
 
 use super::entry::{GameInitRegistry, GameSceneInitBehavior};
 
-// === Aliases === //
+// === Behaviors === //
 
 alias! {
 	let asset_mgr: AssetManager;
 	let gfx: GfxContext;
 	let materials: MaterialRegistry;
 }
-
-// === Behaviors === //
 
 pub fn register(bhv: &mut BehaviorRegistry) {
 	let _ = bhv;

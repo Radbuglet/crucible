@@ -7,7 +7,11 @@ use bort::{
 
 use crucible_foundation_client::engine::gfx::camera::CameraSettings;
 use crucible_foundation_shared::{
-	actor::{kinematic::KinematicSpatial, spatial::Spatial},
+	actor::{
+		collider::{Collider, TrackedCollider},
+		kinematic::KinematicObject,
+		spatial::Spatial,
+	},
 	material::{MaterialId, MaterialRegistry},
 	math::{
 		kinematic::{tick_friction_coef_to_coef_qty, MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
@@ -63,27 +67,15 @@ impl HasGlobalManagedTag for LocalPlayer {
 }
 
 impl LocalPlayer {
-	pub fn new_aabb(pos: EntityVec) -> EntityAabb {
-		EntityAabb::from_origin_size(
-			pos,
-			EntityVec::new(PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_WIDTH),
-			EntityVec::new(0.5, 0.0, 0.5),
-		)
-	}
-
 	pub fn eye_height(&self) -> f64 {
 		PLAYER_EYE_LEVEL + 0.1 * self.view_bob.sin()
 	}
 
 	pub fn eye_pos(&self, spatial: &Spatial) -> EntityVec {
-		spatial.aabb().at_percent(EntityVec::new(0.5, 0.0, 0.5)) + EntityVec::Y * self.eye_height()
+		spatial.pos() + EntityVec::Y * self.eye_height()
 	}
 
-	pub fn process_movement(
-		&mut self,
-		kinematic: &mut KinematicSpatial,
-		inputs: LocalPlayerInputs,
-	) {
+	pub fn process_movement(&mut self, kinematic: &mut KinematicObject, inputs: LocalPlayerInputs) {
 		// Compute heading
 		let mut heading = Vec3::ZERO;
 
@@ -238,13 +230,23 @@ pub fn spawn_local_player() -> OwnedEntity {
 				view_bob: 0.0,
 			},
 		)
+		.with_tagged(GlobalTag::<Spatial>, Spatial::new(EntityVec::ZERO))
 		.with_tagged(
-			GlobalTag::<Spatial>,
-			Spatial::new(LocalPlayer::new_aabb(EntityVec::ZERO)),
+			GlobalTag::<Collider>,
+			Collider::new(EntityAabb {
+				origin: EntityVec::ZERO,
+				size: EntityVec::new(PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_WIDTH),
+			}),
 		)
 		.with_tagged(
-			GlobalTag::<KinematicSpatial>,
-			KinematicSpatial::new(tick_friction_coef_to_coef_qty(
+			GlobalTag::<TrackedCollider>,
+			TrackedCollider {
+				origin_offset: EntityVec::new(PLAYER_WIDTH / 2.0, 0.0, PLAYER_WIDTH / 2.0),
+			},
+		)
+		.with_tagged(
+			GlobalTag::<KinematicObject>,
+			KinematicObject::new(tick_friction_coef_to_coef_qty(
 				EntityVec::new(
 					PLAYER_AIR_FRICTION_COEF * PLAYER_BLOCK_FRICTION_COEF,
 					PLAYER_AIR_FRICTION_COEF,
@@ -286,7 +288,7 @@ fn make_input_behavior() -> ActorInputBehavior {
 				cx: [
 					mut LocalPlayer,
 					ref Spatial,
-					mut KinematicSpatial
+					mut KinematicObject
 					; ColliderCheckCx, BlockPlacementCx
 				],
 				_call_cx: [],
@@ -297,7 +299,7 @@ fn make_input_behavior() -> ActorInputBehavior {
 					for (
 						mut player in GlobalTag::<LocalPlayer>,
 						ref spatial in GlobalTag::<Spatial>,
-						mut kinematic in GlobalTag::<KinematicSpatial>,
+						mut kinematic in GlobalTag::<KinematicObject>,
 					) + [actor_tag] {
 						// Apply gravity
 						kinematic.apply_acceleration(GRAVITY_VEC);

@@ -14,6 +14,8 @@ use crate::engine::{
 
 use super::pipeline::{ActorInstance, ActorVertex, OpaqueActorPipeline};
 
+pub type ActorMeshLayer = QuadMeshLayer<Color3>;
+
 #[derive(Debug)]
 pub struct ActorRenderer {
 	vertex_buffer: DynamicBuffer,
@@ -46,7 +48,7 @@ impl Default for ActorRenderer {
 }
 
 impl ActorRenderer {
-	pub fn push_model(&mut self, gfx: &GfxContext, model: &QuadMeshLayer<Color3>) {
+	pub fn push_model(&mut self, gfx: &GfxContext, model: &ActorMeshLayer) {
 		for (quad, color) in model.iter_cloned() {
 			let [Tri([a, b, c]), Tri([d, e, f])] = quad.as_quad_ccw().to_tris();
 			let quad_vertices = [a, b, c, d, e, f];

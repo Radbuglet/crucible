@@ -8,14 +8,12 @@ use wgpu::util::DeviceExt;
 
 use super::entry::{GameInitRegistry, GameSceneInitBehavior};
 
-// === Aliases === //
+// === Behaviors === //
 
 alias! {
 	let gfx: GfxContext;
 	let asset_mgr: AssetManager;
 }
-
-// === Behaviors === //
 
 pub fn register(bhv: &mut BehaviorRegistry) {
 	let _ = bhv;

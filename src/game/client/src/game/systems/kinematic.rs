@@ -1,7 +1,8 @@
 use bort::{proc, query, BehaviorRegistry, GlobalTag::GlobalTag};
 use crucible_foundation_shared::{
 	actor::{
-		kinematic::{self, KinematicSpatial},
+		collider::Collider,
+		kinematic::{self, KinematicObject},
 		spatial::Spatial,
 	},
 	math::EntityVec,
@@ -22,7 +23,7 @@ fn make_physics_reset_behavior() -> ActorPhysicsResetBehavior {
 			as ActorPhysicsResetBehavior[call_cx] do
 			(cx: [], _call_cx: []) {
 				query! {
-					for (mut kinematic in GlobalTag::<KinematicSpatial>) + [actor_tag] {
+					for (mut kinematic in GlobalTag::<KinematicObject>) + [actor_tag] {
 						kinematic.acceleration = EntityVec::ZERO;
 					}
 				}
@@ -32,30 +33,37 @@ fn make_physics_reset_behavior() -> ActorPhysicsResetBehavior {
 }
 
 fn make_physics_apply_behavior() -> ActorPhysicsApplyBehavior {
-	ActorPhysicsApplyBehavior::new(|_bhv, call_cx, actor_tag, spatial_mgr, world, registry| {
-		proc! {
-			as ActorPhysicsApplyBehavior[call_cx] do
-			(cx: [;kinematic::CxApplyPhysics], _call_cx: []) {
-				// TODO: Compute this.
-				let delta = 1.0 / 60.0;
+	ActorPhysicsApplyBehavior::new(
+		|_bhv, call_cx, actor_tag, world, registry, on_spatial_moved| {
+			proc! {
+				as ActorPhysicsApplyBehavior[call_cx] do
+				(
+					cx: [mut Spatial, ref Collider, mut KinematicObject; kinematic::CxApplyPhysics],
+					_call_cx: [],
+				) {
+					// TODO: Compute this.
+					let delta = 1.0 / 60.0;
 
-				query! {
-					for (
-						@_me,
-						omut spatial in GlobalTag::<Spatial>,
-						mut kinematic in GlobalTag::<KinematicSpatial>,
-					) + [actor_tag] {
-						kinematic.apply_physics(
-							cx,
-							world,
-							registry,
-							spatial_mgr,
-							&mut spatial,
-							delta,
-						);
+					query! {
+						for (
+							@_me,
+							omut spatial in GlobalTag::<Spatial>,
+							ref collider in GlobalTag::<Collider>,
+							mut kinematic in GlobalTag::<KinematicObject>,
+						) + [actor_tag] {
+							kinematic.apply_physics(
+								cx,
+								world,
+								registry,
+								&mut spatial,
+								collider,
+								on_spatial_moved,
+								delta,
+							);
+						}
 					}
 				}
 			}
-		}
-	})
+		},
+	)
 }

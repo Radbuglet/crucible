@@ -2,7 +2,7 @@ use std::{f32::consts::PI, time::Duration};
 
 use bort::{
 	alias, call_cx, delegate, proc, proc_collection, saddle_delegate, BehaviorProvider,
-	BehaviorRegistry, Entity, OwnedEntity, VecEventList, VirtualTag,
+	BehaviorRegistry, CanCallCollection, Entity, OwnedEntity, VecEventList, VirtualTag,
 };
 use crucible_foundation_client::{
 	engine::{
@@ -12,8 +12,8 @@ use crucible_foundation_client::{
 	},
 	gfx::{
 		actor::{
-			mesh::ActorRenderer,
 			pipeline::{load_opaque_actor_pipeline, ActorRenderingUniforms},
+			renderer::ActorRenderer,
 		},
 		skybox::pipeline::{load_skybox_pipeline, SkyboxUniforms},
 		ui::{brush::ImmRenderer, materials::sdf_rect::SdfRectImmBrushExt},
@@ -25,8 +25,9 @@ use crucible_foundation_client::{
 };
 use crucible_foundation_shared::{
 	actor::{
+		collider::ColliderManager,
 		manager::{ActorManager, ActorSpawned},
-		spatial::SpatialTracker,
+		spatial::SpatialMoved,
 	},
 	bort::lifecycle::{LifecycleManager, PartialEntity},
 	material::MaterialRegistry,
@@ -84,9 +85,23 @@ saddle_delegate! {
 saddle_delegate! {
 	pub fn ActorPhysicsApplyBehavior(
 		actor_tag: VirtualTag,
-		spatial_mgr: &mut SpatialTracker,
 		world: &WorldVoxelData,
 		registry: &MaterialRegistry,
+		on_spatial_moved: &mut VecEventList<SpatialMoved>,
+	)
+}
+
+saddle_delegate! {
+	pub fn SpatialUpdateApplyConstraints(
+		scene: Entity,
+		on_spatial_moved: &VecEventList<SpatialMoved>,
+	)
+}
+
+saddle_delegate! {
+	pub fn SpatialUpdateApplyUpdates(
+		scene: Entity,
+		on_spatial_moved: &VecEventList<SpatialMoved>,
 	)
 }
 
@@ -104,7 +119,7 @@ delegate! {
 
 pub type GameInitRegistry = LifecycleManager<GameSceneInitBehavior>;
 
-// === Aliases === //
+// === Behaviors === //
 
 alias! {
 	let asset_mgr: AssetManager;
@@ -119,7 +134,7 @@ alias! {
 	let input_mgr: InputManager;
 	let material_registry: MaterialRegistry;
 	let skybox_uniforms: SkyboxUniforms;
-	let spatial_mgr: SpatialTracker;
+	let collider_mgr: ColliderManager;
 	let state: GameSceneRoot;
 	let viewport_data: Viewport;
 	let viewport_depth: FullScreenTexture;
@@ -128,8 +143,6 @@ alias! {
 	let world_loader: WorldLoader;
 	let world_mesh: WorldVoxelMesh;
 }
-
-// === Behaviors === //
 
 pub fn register(bhv: &mut BehaviorRegistry) {
 	let _ = bhv;
@@ -222,13 +235,16 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 	SceneUpdateHandler::new(|bhv, call_cx, me, _main_loop| {
 		proc! {
 			as SceneUpdateHandler[call_cx] do
+			// Pre-fetch all required context
 			(_cx: [], _call_cx: [], ref state = me, ref actor_mgr = me) {
 				let main_viewport = state.viewport;
 				let actor_tag = actor_mgr.tag();
 			}
+			// Reset actor physics
 			(cx: [ref BehaviorRegistry], call_cx: [ActorPhysicsResetBehavior]) {
 				bhv.get::<ActorPhysicsResetBehavior>()(call_cx, actor_tag);
 			}
+			// Process inputs
 			(cx: [], call_cx: [ActorInputBehavior], ref viewport_data = main_viewport, ref input_mgr = main_viewport) {
 				// Handle mouse lock
 				if input_mgr.button(MouseButton::Left).recently_pressed() {
@@ -249,16 +265,32 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 				// Process inputs
 				bhv.get::<ActorInputBehavior>()(call_cx, me, actor_tag, &input_mgr);
 			}
+			// Allow actors to influence their own physics states
 			(_cx: [], call_cx: [ActorPhysicsInfluenceBehavior]) {
 				bhv.get::<ActorPhysicsInfluenceBehavior>()(call_cx, actor_tag);
 			}
-			(_cx: [], call_cx: [ActorPhysicsApplyBehavior], mut spatial_mgr = me, ref world_data = me, ref block_registry = me) {
+			// Apply actor physical states
+			(_cx: [], call_cx: [ActorPhysicsApplyBehavior], ref world_data = me, ref block_registry = me) {
+				let mut on_spatial_moved = VecEventList::new();
 				bhv.get::<ActorPhysicsApplyBehavior>()(
 					call_cx,
 					actor_tag,
-					spatial_mgr,
 					world_data,
 					block_registry,
+					&mut on_spatial_moved,
+				);
+			}
+			// Update spatials in response to this update
+			(_cx: [], call_cx: [SpatialUpdateApplyConstraints, SpatialUpdateApplyUpdates]) {
+				bhv.get::<SpatialUpdateApplyConstraints>()(
+					call_cx.as_dyn_mut(),
+					me,
+					&on_spatial_moved,
+				);
+				bhv.get::<SpatialUpdateApplyUpdates>()(
+					call_cx.as_dyn_mut(),
+					me,
+					&on_spatial_moved,
 				);
 			}
 		}

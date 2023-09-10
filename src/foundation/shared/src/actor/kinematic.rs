@@ -1,5 +1,5 @@
 use crate::{
-	actor::spatial::{Spatial, SpatialMutateCx, SpatialTracker},
+	actor::collider::{Collider, ColliderMutateCx},
 	material::MaterialRegistry,
 	math::{kinematic::update_kinematic, Aabb3, Axis3, BlockFace, EntityVec, Sign, VecCompExt},
 	voxel::{
@@ -10,20 +10,22 @@ use crate::{
 		data::WorldVoxelData,
 	},
 };
-use bort::{access_cx, CompMut, HasGlobalManagedTag};
+use bort::{access_cx, CompMut, EventTarget, HasGlobalManagedTag};
 use crucible_util::mem::c_enum::{CEnum, CEnumMap};
+
+use super::spatial::{Spatial, SpatialMoved};
 
 // === Context === //
 
 access_cx! {
 	pub trait CxSideOcclusion: ColliderCheckCx;
-	pub trait CxApplyPhysics: CxSideOcclusion, SpatialMutateCx;
+	pub trait CxApplyPhysics: CxSideOcclusion, ColliderMutateCx;
 }
 
 // === Components === //
 
 #[derive(Debug)]
-pub struct KinematicSpatial {
+pub struct KinematicObject {
 	// 6 booleans v.s. a 1 byte bitset have no impact on the size of this struct because of the
 	// alignment requirements of an f64.
 	pub collision_mask: CEnumMap<BlockFace, bool>,
@@ -32,11 +34,11 @@ pub struct KinematicSpatial {
 	pub friction: EntityVec,
 }
 
-impl HasGlobalManagedTag for KinematicSpatial {
+impl HasGlobalManagedTag for KinematicObject {
 	type Component = Self;
 }
 
-impl KinematicSpatial {
+impl KinematicObject {
 	pub fn new(friction: EntityVec) -> Self {
 		Self {
 			collision_mask: CEnumMap::default(),
@@ -51,12 +53,13 @@ impl KinematicSpatial {
 		cx: &impl CxApplyPhysics,
 		world: &WorldVoxelData,
 		registry: &MaterialRegistry,
-		spatial_mgr: &mut SpatialTracker,
 		spatial: &mut CompMut<Spatial>,
+		collider: &Collider,
+		on_spatial_moved: &mut impl EventTarget<SpatialMoved, EntityVec>,
 		delta: f64,
 	) {
 		// Clip velocities and accelerations into obstructed faces
-		self.update_face_touching_mask(cx, world, registry, spatial);
+		self.update_face_touching_mask(cx, world, registry, collider);
 
 		for axis in Axis3::variants() {
 			let clip_comp = |comp: &mut f64| {
@@ -75,15 +78,21 @@ impl KinematicSpatial {
 		}
 
 		// Update velocity and position
-		let aabb = spatial.aabb();
 		let (delta_pos, velocity) =
 			update_kinematic(self.velocity, self.acceleration, self.friction, delta);
 
 		self.velocity = velocity;
-		let new_origin =
-			move_rigid_body(cx, world, registry, aabb, delta_pos, filter_all_colliders());
 
-		spatial_mgr.update(cx, spatial, aabb.with_origin(new_origin));
+		// Apply desired position change
+		let pos_delta = {
+			let aabb = collider.aabb();
+			let new_origin =
+				move_rigid_body(cx, world, registry, aabb, delta_pos, filter_all_colliders());
+
+			new_origin - aabb.origin
+		};
+
+		Spatial::set_pos(spatial, spatial.pos() + pos_delta, on_spatial_moved);
 	}
 
 	// === Collisions === //
@@ -113,10 +122,10 @@ impl KinematicSpatial {
 		cx: &impl CxSideOcclusion,
 		world: &WorldVoxelData,
 		registry: &MaterialRegistry,
-		spatial: &Spatial,
+		collider: &Collider,
 		face: BlockFace,
 	) -> bool {
-		Self::is_face_touching_now_inner(cx, world, registry, spatial.aabb(), face)
+		Self::is_face_touching_now_inner(cx, world, registry, collider.aabb(), face)
 	}
 
 	pub fn update_face_touching_mask(
@@ -124,10 +133,10 @@ impl KinematicSpatial {
 		cx: &impl CxSideOcclusion,
 		world: &WorldVoxelData,
 		registry: &MaterialRegistry,
-		spatial: &Spatial,
+		collider: &Collider,
 	) {
 		for (face, state) in self.collision_mask.iter_mut() {
-			*state = Self::is_face_touching_now_inner(cx, world, registry, spatial.aabb(), face);
+			*state = Self::is_face_touching_now_inner(cx, world, registry, collider.aabb(), face);
 		}
 	}
 

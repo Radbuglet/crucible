@@ -1,19 +1,17 @@
 use bort::{alias, proc, BehaviorRegistry};
 use crucible_foundation_client::{
 	engine::{assets::AssetManager, io::gfx::GfxContext},
-	gfx::actor::{mesh::ActorRenderer, pipeline::ActorRenderingUniforms},
+	gfx::actor::{pipeline::ActorRenderingUniforms, renderer::ActorRenderer},
 };
 
 use super::entry::{GameInitRegistry, GameSceneInitBehavior};
 
-// === Aliases === //
+// === Behaviors === //
 
 alias! {
 	let asset_mgr: AssetManager;
 	let gfx: GfxContext;
 }
-
-// === Behaviors === //
 
 pub fn register(bhv: &mut BehaviorRegistry) {
 	let _ = bhv;
