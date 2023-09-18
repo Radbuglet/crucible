@@ -7,17 +7,23 @@ use bort::{
 
 use crucible_foundation_client::{
 	engine::gfx::camera::CameraSettings,
-	gfx::actor::manager::{ActorMeshInstance, MeshRegistry},
+	gfx::{
+		actor::manager::{ActorMeshInstance, MeshRegistry},
+		ui::materials::sdf_rect::SdfRectImmBrushExt,
+	},
 };
 use crucible_foundation_shared::{
 	actor::{
 		collider::{Collider, TrackedCollider},
+		health::HealthState,
+		inventory::InventoryData,
 		kinematic::KinematicObject,
+		manager::ActorManager,
 		spatial::Spatial,
 	},
 	math::{
 		kinematic::{tick_friction_coef_to_coef_qty, MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
-		Angle3D, Angle3DExt, BlockFace, EntityAabb, EntityVec,
+		Aabb2, Angle3D, Angle3DExt, BlockFace, Color4, EntityAabb, EntityVec,
 	},
 	voxel::{
 		collision::{ColliderCheckCx, RayCast},
@@ -29,13 +35,13 @@ use crucible_foundation_shared::{
 };
 use crucible_util::{lang::iter::ContextualIter, use_generator};
 use typed_glam::{
-	glam::{DVec3, Vec3, Vec3Swizzles},
+	glam::{DVec3, Vec2, Vec3, Vec3Swizzles},
 	traits::NumericVector,
 };
 use winit::event::{MouseButton, VirtualKeyCode};
 
 use crate::game::systems::entry::{
-	ActorInputBehavior, ActorSpawnedInGameBehavior, CameraProviderBehavior,
+	ActorInputBehavior, ActorSpawnedInGameBehavior, CameraProviderBehavior, UiRenderHudBehavior,
 };
 
 // === Components === //
@@ -65,6 +71,7 @@ pub struct LocalPlayer {
 	pub fly_mode: bool,
 	pub jump_cool_down: u64,
 	pub view_bob: f64,
+	pub inventory_slot: usize,
 }
 
 impl HasGlobalManagedTag for LocalPlayer {
@@ -234,9 +241,12 @@ pub fn spawn_local_player(mesh_registry: &MeshRegistry) -> OwnedEntity {
 				fly_mode: false,
 				jump_cool_down: 0,
 				view_bob: 0.0,
+				inventory_slot: 0,
 			},
 		)
 		.with_tagged(GlobalTag::<Spatial>, Spatial::new(EntityVec::ZERO))
+		.with_tagged(GlobalTag::<HealthState>, HealthState::new(20.0, 20.0))
+		.with_tagged(GlobalTag::<InventoryData>, InventoryData::new(4 * 9))
 		// Physics
 		.with_tagged(
 			GlobalTag::<Collider>,
@@ -277,6 +287,7 @@ pub fn spawn_local_player(mesh_registry: &MeshRegistry) -> OwnedEntity {
 // === Behaviors === //
 
 alias! {
+	let actor_mgr: ActorManager;
 	let registry: BlockMaterialRegistry;
 	let world: WorldVoxelData;
 }
@@ -284,6 +295,7 @@ alias! {
 pub fn register(bhv: &mut BehaviorRegistry) {
 	bhv.register_combined(make_spawn_behavior())
 		.register_combined(make_input_behavior())
+		.register_combined(make_hud_render_behavior())
 		.register_combined(make_camera_behavior());
 }
 
@@ -339,6 +351,22 @@ fn make_input_behavior() -> ActorInputBehavior {
 							jump: inputs.key(VirtualKeyCode::Space).state(),
 						});
 
+						for (i, k) in [
+							VirtualKeyCode::Key1,
+							VirtualKeyCode::Key2,
+							VirtualKeyCode::Key3,
+							VirtualKeyCode::Key4,
+							VirtualKeyCode::Key5,
+							VirtualKeyCode::Key6,
+							VirtualKeyCode::Key7,
+							VirtualKeyCode::Key8,
+							VirtualKeyCode::Key9,
+						].into_iter().enumerate() {
+							if inputs.key(k).recently_pressed() {
+								player.inventory_slot = i;
+							}
+						}
+
 						// Handle block placement
 						if inputs.button(MouseButton::Right).recently_pressed() {
 							player.place_block_where_looking(cx, world, registry, spatial, 7.0);
@@ -347,6 +375,70 @@ fn make_input_behavior() -> ActorInputBehavior {
 						if inputs.button(MouseButton::Left).recently_pressed() {
 							player.break_block_where_looking(cx, world, registry, spatial, 7.0);
 						}
+					}
+				}
+			}
+		}
+	})
+}
+
+fn make_hud_render_behavior() -> UiRenderHudBehavior {
+	UiRenderHudBehavior::new(|_bhv, call_cx, brush, screen_size, scene| {
+		proc! {
+			as UiRenderHudBehavior[call_cx] do
+			(_cx: [ref LocalPlayer], _call_cx: [], ref actor_mgr = scene) {
+				// Draw crosshair
+				brush.fill_rect(
+					Aabb2::from_origin_size(screen_size / 2.0, Vec2::splat(10.), Vec2::splat(0.5)),
+					Color4::new(1.0, 0.0, 0.0, 0.5),
+				);
+
+				// Draw hotbar
+				let total_w = screen_size.x * 0.6;
+				let item_fw = total_w / 9.0;
+				let item_vw = item_fw * 0.95;
+				let total_w = total_w - (item_fw - item_vw);
+
+				query! {
+					for (
+						ref player in GlobalTag::<LocalPlayer>,
+						ref health in GlobalTag::<HealthState>,
+					) + [actor_mgr.tag()] {
+						let start_x = screen_size.x / 2.0 - total_w / 2.0;
+
+						// Draw items
+						let mut x = start_x;
+						for i in 0..9 {
+							brush.fill_rect(
+								Aabb2::new(x, screen_size.y - item_fw - 50.0, item_vw, item_vw),
+								if i == player.inventory_slot {
+									Color4::new(0.4, 0.3, 1.0, 1.0)
+								} else {
+									Color4::new(0.0, 0.4, 1.0, 0.4)
+								}
+							);
+							x += item_fw;
+						}
+
+						// Draw health
+						brush.fill_rect(
+							Aabb2::new(
+								start_x,
+								screen_size.y - item_vw - 50.0 - 20.0 - 10.0,
+								total_w * health.health_percent(),
+								10.0,
+							),
+							Color4::new(1.0, 0.0, 0.0, 1.0),
+						);
+						brush.fill_rect(
+							Aabb2::new(
+								start_x,
+								screen_size.y - item_vw - 50.0 - 20.0 - 10.0,
+								total_w * health.health_percent(),
+								10.0,
+							),
+							Color4::new(0.0, 1.0, 0.0, 1.0),
+						);
 					}
 				}
 			}

@@ -17,7 +17,7 @@ use crucible_foundation_client::{
 			renderer::ActorRenderer,
 		},
 		skybox::pipeline::{load_skybox_pipeline, SkyboxUniforms},
-		ui::{brush::ImmRenderer, materials::sdf_rect::SdfRectImmBrushExt},
+		ui::brush::{ImmBrush, ImmRenderer},
 		voxel::{
 			mesh::{MeshUpdateCx, WorldVoxelMesh},
 			pipeline::{load_opaque_block_pipeline, VoxelUniforms},
@@ -31,7 +31,7 @@ use crucible_foundation_shared::{
 		spatial::SpatialMoved,
 	},
 	bort::lifecycle::{LifecycleManager, PartialEntity},
-	math::{Aabb2, Aabb3, BlockFace, ChunkVec, Color4, WorldVec, WorldVecExt},
+	math::{Aabb2, Aabb3, BlockFace, ChunkVec, WorldVec, WorldVecExt},
 	voxel::{
 		data::{Block, BlockMaterialRegistry, BlockVoxelPointer, ChunkVoxelData, WorldVoxelData},
 		loader::{LoaderUpdateCx, WorldLoader},
@@ -102,6 +102,10 @@ saddle_delegate! {
 		scene: Entity,
 		on_spatial_moved: &VecEventList<SpatialMoved>,
 	)
+}
+
+saddle_delegate! {
+	pub fn UiRenderHudBehavior(brush: &mut ImmBrush<'_>, screen_size: Vec2, scene: Entity)
 }
 
 // === GameInitManager === //
@@ -355,6 +359,20 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 				let camera_mgr_snap = camera_mgr.clone();
 			}
 			(
+				_cx: [],
+				call_cx: [UiRenderHudBehavior],
+			) {
+				// Setup UI rendering sub-pass
+				let mut ui = ImmRenderer::new();
+				let mut brush = ui.brush()
+					.transformed_rect_after(
+						Aabb2::new(-1.0, 1.0, 2.0, -2.0),
+						Aabb2::new(0.0, 0.0, viewport_size.x, viewport_size.y),
+					);
+
+				bhv.get::<UiRenderHudBehavior>()(call_cx, &mut brush, viewport_size, me);
+			}
+			(
 				cx: [
 					mut FullScreenTexture,
 					ref GfxContext,
@@ -406,18 +424,6 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					frame.texture.format(),
 					viewport_depth.format(),
 				);
-
-				// Setup UI rendering sub-pass
-				let mut ui = ImmRenderer::new();
-				ui.brush()
-					.transformed_rect_after(
-						Aabb2::new(-1.0, 1.0, 2.0, -2.0),
-						Aabb2::new(0.0, 0.0, viewport_size.x, viewport_size.y),
-					)
-					.fill_rect(
-						Aabb2::from_origin_size(viewport_size / 2.0, Vec2::splat(20.0), Vec2::splat(0.5)),
-						Color4::new(1.0, 0.0, 0.0, 0.5),
-					);
 
 				let ui = ui.prepare_render(
 					gfx,
