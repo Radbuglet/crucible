@@ -184,6 +184,10 @@ impl<V: SignedNumericVector2> Aabb2<V> {
 		}
 	}
 
+	pub fn at_percent(&self, percent: V) -> V {
+		self.origin + self.size * percent
+	}
+
 	pub fn contains(&self, point: V) -> bool
 	where
 		V::Comp: PartialOrd,

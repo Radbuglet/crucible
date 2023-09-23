@@ -31,6 +31,7 @@ use crucible_foundation_shared::{
 		spatial::SpatialMoved,
 	},
 	bort::lifecycle::{LifecycleManager, PartialEntity},
+	humanoid::item::ItemMaterialRegistry,
 	math::{Aabb2, Aabb3, BlockFace, ChunkVec, WorldVec, WorldVecExt},
 	voxel::{
 		data::{Block, BlockMaterialRegistry, BlockVoxelPointer, ChunkVoxelData, WorldVoxelData},
@@ -136,6 +137,7 @@ alias! {
 	let camera_mgr: CameraManager;
 	let gfx: GfxContext;
 	let input_mgr: InputManager;
+	let item_registry: ItemMaterialRegistry;
 	let mesh_registry: MeshRegistry;
 	let skybox_uniforms: SkyboxUniforms;
 	let collider_mgr: ColliderManager;
@@ -179,6 +181,7 @@ pub fn spawn_game_scene_root(
 		.with_many(super::actor_data::push_plugins)
 		.with_many(super::actor_rendering::push_plugins)
 		.with_many(super::core_rendering::push_plugins)
+		.with_many(super::item_data::push_plugins)
 		.with_many(super::voxel_data::push_plugins)
 		.with_many(super::voxel_rendering::push_plugins);
 
@@ -201,6 +204,7 @@ pub fn spawn_game_scene_root(
 			mut world_data = root,
 			ref block_registry = root,
 			ref mesh_registry = root,
+			ref item_registry = root,
 		) {
 			// Populate initial world data
 			world_loader.temp_load_region(
@@ -226,7 +230,15 @@ pub fn spawn_game_scene_root(
 
 			// Create player
 			let mut on_spawned = VecEventList::new();
-			actor_mgr.spawn(&mut on_spawned, spawn_local_player(mesh_registry));
+			let mut on_inventory_changed = |_, _, _| {};  // (no subscribers have been set up for this event)
+			let player = spawn_local_player(
+				actor_mgr,
+				mesh_registry,
+				item_registry,
+				&mut on_spawned,
+				&mut on_inventory_changed,
+			);
+			actor_mgr.spawn(&mut on_spawned, player);
 			bhv.get::<ActorSpawnedInGameBehavior>()(call_cx, &mut on_spawned, root.entity());
 		}
 	}

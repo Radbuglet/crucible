@@ -1,8 +1,8 @@
 use std::f64::consts::{PI, TAU};
 
 use bort::{
-	access_cx, alias, proc, query, storage, BehaviorRegistry, GlobalTag, HasGlobalManagedTag,
-	OwnedEntity,
+	access_cx, alias, proc, query, storage, BehaviorRegistry, EventTarget, GlobalTag,
+	HasGlobalManagedTag, OwnedEntity,
 };
 
 use crucible_foundation_client::{
@@ -15,11 +15,14 @@ use crucible_foundation_client::{
 use crucible_foundation_shared::{
 	actor::{
 		collider::{Collider, TrackedCollider},
-		health::HealthState,
-		inventory::InventoryData,
 		kinematic::KinematicObject,
-		manager::ActorManager,
+		manager::{ActorManager, ActorSpawned},
 		spatial::Spatial,
+	},
+	humanoid::{
+		health::HealthState,
+		inventory::{InventoryData, InventoryUpdated},
+		item::{ItemMaterialRegistry, ItemStackBase},
 	},
 	math::{
 		kinematic::{tick_friction_coef_to_coef_qty, MC_TICKS_TO_SECS, MC_TICKS_TO_SECS_SQUARED},
@@ -40,8 +43,11 @@ use typed_glam::{
 };
 use winit::event::{MouseButton, VirtualKeyCode};
 
-use crate::game::systems::entry::{
-	ActorInputBehavior, ActorSpawnedInGameBehavior, CameraProviderBehavior, UiRenderHudBehavior,
+use crate::game::systems::{
+	entry::{
+		ActorInputBehavior, ActorSpawnedInGameBehavior, CameraProviderBehavior, UiRenderHudBehavior,
+	},
+	item_data::BaseClientItemDescriptor,
 };
 
 // === Components === //
@@ -230,10 +236,35 @@ pub struct LocalPlayerInputs {
 
 // === Prefabs === //
 
-pub fn spawn_local_player(mesh_registry: &MeshRegistry) -> OwnedEntity {
-	OwnedEntity::new()
-		.with_debug_label("local player")
-		// Inherent attributes
+pub fn spawn_local_player(
+	actor_manager: &mut ActorManager,
+	mesh_registry: &MeshRegistry,
+	item_registry: &ItemMaterialRegistry,
+	on_actor_spawned: &mut impl EventTarget<ActorSpawned>,
+	on_inventory_changed: &mut impl EventTarget<InventoryUpdated>,
+) -> OwnedEntity {
+	// Create player
+	let player = OwnedEntity::new().with_debug_label("local player");
+
+	// Create inventory
+	let mut inventory = InventoryData::new(4 * 9);
+	let _ = inventory.insert_stack(
+		player.entity(),
+		on_inventory_changed,
+		actor_manager.spawn(
+			on_actor_spawned,
+			OwnedEntity::new()
+				.with_debug_label("stone item stack")
+				.with(ItemStackBase {
+					material: item_registry.find_by_name("crucible:stone").unwrap().id,
+					count: 1,
+				}),
+		),
+		|_, _| false,
+	);
+
+	// Attach components
+	player
 		.with_tagged(
 			GlobalTag::<LocalPlayer>,
 			LocalPlayer {
@@ -246,7 +277,7 @@ pub fn spawn_local_player(mesh_registry: &MeshRegistry) -> OwnedEntity {
 		)
 		.with_tagged(GlobalTag::<Spatial>, Spatial::new(EntityVec::ZERO))
 		.with_tagged(GlobalTag::<HealthState>, HealthState::new(20.0, 20.0))
-		.with_tagged(GlobalTag::<InventoryData>, InventoryData::new(4 * 9))
+		.with_tagged(GlobalTag::<InventoryData>, inventory)
 		// Physics
 		.with_tagged(
 			GlobalTag::<Collider>,
@@ -288,7 +319,8 @@ pub fn spawn_local_player(mesh_registry: &MeshRegistry) -> OwnedEntity {
 
 alias! {
 	let actor_mgr: ActorManager;
-	let registry: BlockMaterialRegistry;
+	let block_registry: BlockMaterialRegistry;
+	let item_registry: ItemMaterialRegistry;
 	let world: WorldVoxelData;
 }
 
@@ -322,7 +354,7 @@ fn make_input_behavior() -> ActorInputBehavior {
 				],
 				_call_cx: [],
 				mut world = scene_root,
-				ref registry = scene_root,
+				ref block_registry = scene_root,
 			) {
 				query! {
 					for (
@@ -369,11 +401,11 @@ fn make_input_behavior() -> ActorInputBehavior {
 
 						// Handle block placement
 						if inputs.button(MouseButton::Right).recently_pressed() {
-							player.place_block_where_looking(cx, world, registry, spatial, 7.0);
+							player.place_block_where_looking(cx, world, block_registry, spatial, 7.0);
 						}
 
 						if inputs.button(MouseButton::Left).recently_pressed() {
-							player.break_block_where_looking(cx, world, registry, spatial, 7.0);
+							player.break_block_where_looking(cx, world, block_registry, spatial, 7.0);
 						}
 					}
 				}
@@ -386,7 +418,18 @@ fn make_hud_render_behavior() -> UiRenderHudBehavior {
 	UiRenderHudBehavior::new(|_bhv, call_cx, brush, screen_size, scene| {
 		proc! {
 			as UiRenderHudBehavior[call_cx] do
-			(_cx: [ref LocalPlayer], _call_cx: [], ref actor_mgr = scene) {
+			(
+				cx: [
+					ref LocalPlayer,
+					ref HealthState,
+					ref InventoryData,
+					ref ItemStackBase,
+					ref BaseClientItemDescriptor,
+				],
+				_call_cx: [],
+				ref actor_mgr = scene,
+				ref item_registry = scene,
+			) {
 				// Draw crosshair
 				brush.fill_rect(
 					Aabb2::from_origin_size(screen_size / 2.0, Vec2::splat(10.), Vec2::splat(0.5)),
@@ -403,20 +446,39 @@ fn make_hud_render_behavior() -> UiRenderHudBehavior {
 					for (
 						ref player in GlobalTag::<LocalPlayer>,
 						ref health in GlobalTag::<HealthState>,
+						ref inventory in GlobalTag::<InventoryData>,
 					) + [actor_mgr.tag()] {
 						let start_x = screen_size.x / 2.0 - total_w / 2.0;
 
 						// Draw items
 						let mut x = start_x;
 						for i in 0..9 {
+							let item_aabb = Aabb2::new(x, screen_size.y - item_fw - 50.0, item_vw, item_vw);
 							brush.fill_rect(
-								Aabb2::new(x, screen_size.y - item_fw - 50.0, item_vw, item_vw),
+								item_aabb,
 								if i == player.inventory_slot {
 									Color4::new(0.4, 0.3, 1.0, 1.0)
 								} else {
 									Color4::new(0.0, 0.4, 1.0, 0.4)
 								}
 							);
+
+							if let Some(stack) = inventory.slot(i) {
+								let descriptor = item_registry
+									.find_by_id(stack.get_s::<ItemStackBase>(cx).material)
+									.descriptor
+									.get_s::<BaseClientItemDescriptor>(cx);
+
+								brush.fill_rect(
+									Aabb2::from_origin_size(
+										item_aabb.at_percent(Vec2::splat(0.5)),
+										item_aabb.size * 0.75,
+										Vec2::splat(0.5),
+									),
+									descriptor.color,
+								);
+							}
+
 							x += item_fw;
 						}
 
