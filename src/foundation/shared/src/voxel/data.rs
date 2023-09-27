@@ -498,7 +498,7 @@ where
 		world: &mut WorldVoxelData,
 		block: Block,
 	) {
-		if let Err(err) = self.try_set_state(cx, world, block) {
+		if let Err(err) = self.try_set_state(cx!(cx), world, block) {
 			log::warn!(
 				"Attempted to write block outside of world or in an unloaded chunk. \
 				 Specific error: {:?}, Requested position: {:?}, Material: {:?}.",

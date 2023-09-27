@@ -110,7 +110,7 @@ impl KinematicObject {
 		let additional_margin = COLLISION_TOLERANCE;
 
 		cast_volume(
-			cx,
+			cx!(cx),
 			world,
 			registry,
 			aabb.quad(face),
@@ -128,7 +128,7 @@ impl KinematicObject {
 		collider: &Collider,
 		face: BlockFace,
 	) -> bool {
-		Self::is_face_touching_now_inner(cx, world, registry, collider.aabb(), face)
+		Self::is_face_touching_now_inner(cx!(cx), world, registry, collider.aabb(), face)
 	}
 
 	pub fn update_face_touching_mask(

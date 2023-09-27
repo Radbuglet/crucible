@@ -52,7 +52,7 @@ impl ActorMeshManager {
 		debug_assert_eq!(CompMut::owner(target).entity(), target_spatial.entity());
 
 		// Remove the instance from its old vector
-		self.unregister_instance(cx, target);
+		self.unregister_instance(cx!(cx), target);
 
 		// Add the instance to its target vector
 		let meshes = self.meshes.entry(mesh).or_default();

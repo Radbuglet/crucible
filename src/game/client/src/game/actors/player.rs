@@ -344,7 +344,9 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 }
 
 fn make_spawn_behavior() -> ActorSpawnedInGameBehavior {
-	ActorSpawnedInGameBehavior::new(|_bhv, _call_cx, events, _scene| {
+	ActorSpawnedInGameBehavior::new(|_bhv, s, events, _scene| {
+		scope!(use let s);
+
 		query! {
 			for (_event in *events; @me) + [GlobalTag::<LocalPlayer>] {
 				log::info!("Spawned player {me:?}");

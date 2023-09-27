@@ -140,7 +140,7 @@ impl WorldLoader {
 		world: &mut WorldVoxelData,
 		new_region: impl Region,
 	) {
-		self.update_region(cx, world, None, Some(new_region), false);
+		self.update_region(cx!(cx), world, None, Some(new_region), false);
 	}
 
 	pub fn unload_region(
@@ -149,7 +149,7 @@ impl WorldLoader {
 		world: &mut WorldVoxelData,
 		old_region: impl Region,
 	) {
-		self.update_region(cx, world, Some(old_region), None, false);
+		self.update_region(cx!(cx), world, Some(old_region), None, false);
 	}
 
 	pub fn move_region<R: Region>(
@@ -159,7 +159,7 @@ impl WorldLoader {
 		from_region: R,
 		to_region: R,
 	) {
-		self.update_region(cx, world, Some(from_region), Some(to_region), false);
+		self.update_region(cx!(cx), world, Some(from_region), Some(to_region), false);
 	}
 
 	pub fn temp_load_region(
@@ -168,7 +168,7 @@ impl WorldLoader {
 		world: &mut WorldVoxelData,
 		new_region: impl Region,
 	) {
-		self.update_region(cx, world, None, Some(new_region), true);
+		self.update_region(cx!(cx), world, None, Some(new_region), true);
 	}
 }
 

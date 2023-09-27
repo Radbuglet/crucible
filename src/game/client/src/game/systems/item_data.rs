@@ -27,7 +27,7 @@ pub fn push_plugins(pm: &mut GameInitRegistry) {
 					.with(BaseClientItemDescriptor {
 						color: Color4::new(1.0, 0.0, 0.0, 1.0),
 					}), // .with(ItemStackInteractHandler::new(
-				    // 	|bhv, call_cx, actor, scene, is_right_click| {},
+				    // 	|bhv, s, actor, scene, is_right_click| {},
 				    // )),
 			);
 

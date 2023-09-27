@@ -459,7 +459,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 				.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 
 			// Upload actor data
-			actor_mesh_manager.render(cx, gfx, actor_renderer);
+			actor_mesh_manager.render(cx!(cx), gfx, actor_renderer);
 			actor_renderer.upload(gfx, &mut cb);
 
 			// Render skybox

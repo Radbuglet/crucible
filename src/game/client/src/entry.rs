@@ -108,7 +108,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 			))
 			.split_guard();
 
-		viewport_mgr.register(cx, main_viewport);
+		viewport_mgr.register(cx!(cx), main_viewport);
 	}
 
 	// Create engine root

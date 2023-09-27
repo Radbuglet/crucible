@@ -31,7 +31,9 @@ fn make_actor_spawn_handler() -> ActorSpawnedInGameBehavior {
 pub fn push_plugins(pm: &mut GameInitRegistry) {
 	pm.register(
 		[],
-		GameSceneInitBehavior::new(|_bhv, _call_cx, scene, _engine| {
+		GameSceneInitBehavior::new(|_bhv, s, scene, _engine| {
+			scope!(use let s);
+
 			scene.add(ColliderManager::default());
 			scene.add(ActorManager::default());
 		}),

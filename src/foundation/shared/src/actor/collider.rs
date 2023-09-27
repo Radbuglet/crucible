@@ -67,7 +67,7 @@ impl ColliderManager {
 
 	pub fn unregister(&mut self, cx: ColliderMutateCx<'_>, target: &mut CompMut<Collider>) {
 		let chunk = collider_chunk_for_aabb(target.aabb);
-		self.unregister_inner(cx, target, chunk);
+		self.unregister_inner(cx!(cx), target, chunk);
 	}
 
 	fn register_inner(&mut self, target_data: &mut CompMut<Collider>, chunk: IVec3) {
@@ -116,7 +116,7 @@ impl ColliderManager {
 
 		// If we changed chunk, move ourselves into it.
 		if old_chunk != new_chunk {
-			self.unregister_inner(cx, target, old_chunk);
+			self.unregister_inner(cx!(cx), target, old_chunk);
 			self.register_inner(target, new_chunk);
 		}
 	}
