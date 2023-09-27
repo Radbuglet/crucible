@@ -4,17 +4,15 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use bort::{delegate, saddle::access_cx, Obj, OwnedObj};
+use bort::{cx, delegate, Cx, Obj, OwnedObj};
 
 use crate::math::{Aabb3, ChunkVec, Sign};
 
-use super::data::{ChunkVoxelData, VoxelDataWriteCx, WorldVoxelData};
+use super::data::{ChunkVoxelData, WorldVoxelData};
 
 // === Context === //
 
-access_cx! {
-	pub trait LoaderUpdateCx: VoxelDataWriteCx = mut LoadedChunk;
-}
+type LoaderUpdateCx<'a> = Cx<&'a mut LoadedChunk, &'a mut ChunkVoxelData>;
 
 // === Region === //
 
@@ -81,7 +79,7 @@ impl WorldLoader {
 
 	pub fn update_region<R: Region>(
 		&mut self,
-		cx: &impl LoaderUpdateCx,
+		cx: LoaderUpdateCx<'_>,
 		world: &mut WorldVoxelData,
 		from_region: Option<R>,
 		to_region: Option<R>,
@@ -90,24 +88,26 @@ impl WorldLoader {
 		let unload_at = Instant::now() + Duration::from_secs(15);
 
 		R::compare(to_region, from_region, |pos, sign| {
-			let chunk_obj = world
-				.get_chunk(pos)
-				.unwrap_or_else(|| {
+			let chunk_obj = match world.get_chunk(pos) {
+				Some(chunk) => chunk,
+				None => {
 					let (chunk, chunk_ref) = (self.factory)(world, pos).split_guard();
-					world.insert_chunk(cx, pos, chunk);
+					world.insert_chunk(cx!(cx), pos, chunk);
 					chunk_ref
-				})
-				.entity()
-				.obj::<LoadedChunk>();
+				}
+			};
+			let chunk_obj = chunk_obj.entity().obj::<LoadedChunk>();
 
-			let mut chunk = chunk_obj.get_mut_s(cx);
+			let mut chunk = chunk_obj.get_mut_s(cx!(cx));
 
 			// If the chunk was on the deletion queue but no longer is, remove it from the queue.
 			if sign == Sign::Positive && chunk.rc == 0 && chunk.flag_loc != usize::MAX {
 				self.to_unload.swap_remove(chunk.flag_loc);
 
 				if let Some(moved) = self.to_unload.get(chunk.flag_loc) {
-					moved.get_mut_s(cx).flag_loc = chunk.flag_loc;
+					// Noalias: the chunk to be moved in will never be the same as the chunk we just
+					// removed.
+					moved.get_mut_s(cx!(noalias cx)).flag_loc = chunk.flag_loc;
 				}
 
 				chunk.flag_loc = usize::MAX;
@@ -136,7 +136,7 @@ impl WorldLoader {
 
 	pub fn load_region(
 		&mut self,
-		cx: &impl LoaderUpdateCx,
+		cx: LoaderUpdateCx<'_>,
 		world: &mut WorldVoxelData,
 		new_region: impl Region,
 	) {
@@ -145,7 +145,7 @@ impl WorldLoader {
 
 	pub fn unload_region(
 		&mut self,
-		cx: &impl LoaderUpdateCx,
+		cx: LoaderUpdateCx<'_>,
 		world: &mut WorldVoxelData,
 		old_region: impl Region,
 	) {
@@ -154,7 +154,7 @@ impl WorldLoader {
 
 	pub fn move_region<R: Region>(
 		&mut self,
-		cx: &impl LoaderUpdateCx,
+		cx: LoaderUpdateCx<'_>,
 		world: &mut WorldVoxelData,
 		from_region: R,
 		to_region: R,
@@ -164,7 +164,7 @@ impl WorldLoader {
 
 	pub fn temp_load_region(
 		&mut self,
-		cx: &impl LoaderUpdateCx,
+		cx: LoaderUpdateCx<'_>,
 		world: &mut WorldVoxelData,
 		new_region: impl Region,
 	) {

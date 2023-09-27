@@ -1,4 +1,4 @@
-use bort::{access_cx, CompMut, CompRef, Entity};
+use bort::{CompMut, CompRef, Cx, Entity};
 use crucible_util::{
 	debug::type_id::NamedTypeId,
 	mem::hash::{FxHashMap, FxHashSet},
@@ -19,14 +19,22 @@ impl PartialEntity<'_> {
 		self.target.insert(component);
 	}
 
-	pub fn get_s<'a, T: 'static>(self, cx: &'a access_cx![ref T]) -> CompRef<'a, T> {
+	pub fn get<T: 'static>(self) -> CompRef<'static, T> {
 		assert!(self.can_access.contains(&NamedTypeId::of::<T>()));
-		self.target.get_s(cx)
+		self.target.get()
 	}
 
-	pub fn get_mut_s<'a, T: 'static>(self, cx: &'a access_cx![mut T]) -> CompMut<'a, T> {
+	pub fn get_mut<'a, T: 'static>(self) -> CompMut<'static, T> {
 		assert!(self.can_access.contains(&NamedTypeId::of::<T>()));
-		self.target.get_mut_s(cx)
+		self.target.get_mut()
+	}
+
+	pub fn get_s<'a, T: 'static>(self, _cx: Cx<&'a T>) -> CompRef<'a, T> {
+		self.get()
+	}
+
+	pub fn get_mut_s<'a, T: 'static>(self, _cx: Cx<&'a mut T>) -> CompMut<'a, T> {
+		self.get_mut()
 	}
 
 	pub fn entity(self) -> Entity {

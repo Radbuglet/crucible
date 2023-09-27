@@ -1,4 +1,4 @@
-use bort::{access_cx, CompMut, Entity, HasGlobalManagedTag, Obj};
+use bort::{cx, CompMut, Cx, Entity, HasGlobalManagedTag, Obj};
 use crucible_foundation_shared::{
 	actor::spatial::Spatial,
 	material::{MaterialId, MaterialInfo, MaterialMarker, MaterialRegistry},
@@ -23,10 +23,8 @@ pub type MeshInfo = MaterialInfo<MeshMaterialMarker>;
 
 // === ActorMeshManager === //
 
-access_cx! {
-	pub trait ActorManagerUpdateCx = mut ActorMeshInstance;
-	pub trait ActorManagerRenderCx = ref ActorMeshLayer, ref Spatial;
-}
+type ActorManagerUpdateCx<'a> = Cx<&'a mut ActorMeshInstance>;
+type ActorManagerRenderCx<'a> = Cx<&'a ActorMeshLayer, &'a Spatial>;
 
 #[derive(Debug, Default)]
 pub struct ActorMeshManager {
@@ -46,7 +44,7 @@ impl ActorMeshManager {
 
 	pub fn set_instance_mesh(
 		&mut self,
-		cx: &impl ActorManagerUpdateCx,
+		cx: ActorManagerUpdateCx<'_>,
 		target: &mut CompMut<ActorMeshInstance>,
 		target_spatial: Obj<Spatial>,
 		mesh: Obj<ActorMeshLayer>,
@@ -65,7 +63,7 @@ impl ActorMeshManager {
 
 	pub fn unregister_instance(
 		&mut self,
-		cx: &impl ActorManagerUpdateCx,
+		cx: ActorManagerUpdateCx<'_>,
 		target: &mut CompMut<ActorMeshInstance>,
 	) {
 		let meshes = self.meshes.get_mut(&target.mesh).unwrap();
@@ -79,18 +77,18 @@ impl ActorMeshManager {
 
 	pub fn render(
 		&self,
-		cx: &impl ActorManagerRenderCx,
+		cx: ActorManagerRenderCx<'_>,
 		gfx: &GfxContext,
 		renderer: &mut ActorRenderer,
 	) {
 		for (mesh, instances) in &self.meshes {
-			let mesh = mesh.get_s(cx);
+			let mesh = mesh.get_s(cx!(cx));
 			renderer.push_model(gfx, &mesh);
 
 			for instance in instances {
 				renderer.push_model_instance(
 					gfx,
-					Affine3A::from_translation(instance.get_s(cx).pos().to_glam().as_vec3()),
+					Affine3A::from_translation(instance.get_s(cx!(cx)).pos().to_glam().as_vec3()),
 				);
 			}
 		}

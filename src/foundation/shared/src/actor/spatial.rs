@@ -30,6 +30,6 @@ impl Spatial {
 		on_moved: &mut impl EventTarget<SpatialMoved, EntityVec>,
 	) {
 		me.pos = pos;
-		on_moved.fire(CompMut::owner(me).entity(), SpatialMoved, pos);
+		on_moved.fire_cx(CompMut::owner(me).entity(), SpatialMoved, pos);
 	}
 }

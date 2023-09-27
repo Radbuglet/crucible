@@ -37,10 +37,10 @@ impl InventoryData {
 		let old = self.slot(index);
 		self.slots[index] = stack;
 
-		on_inventory_changed.fire(me, InventoryUpdated::StackSet(index, old, stack), ());
+		on_inventory_changed.fire(me, InventoryUpdated::StackSet(index, old, stack));
 
 		if let Some(old) = old {
-			on_inventory_changed.fire(me, InventoryUpdated::StackDestroyed(old), ());
+			on_inventory_changed.fire(me, InventoryUpdated::StackDestroyed(old));
 		}
 	}
 
@@ -53,7 +53,7 @@ impl InventoryData {
 	) {
 		if index_a != index_b {
 			self.slots.swap(index_a, index_b);
-			on_inventory_changed.fire(me, InventoryUpdated::StacksSwapped(index_a, index_b), ());
+			on_inventory_changed.fire(me, InventoryUpdated::StacksSwapped(index_a, index_b));
 		}
 	}
 
@@ -86,7 +86,7 @@ impl InventoryData {
 	) {
 		for slot in &mut self.slots {
 			if let Some(stack) = slot.take() {
-				on_inventory_changed.fire(me, InventoryUpdated::StackDestroyed(stack), ());
+				on_inventory_changed.fire(me, InventoryUpdated::StackDestroyed(stack));
 			}
 		}
 	}

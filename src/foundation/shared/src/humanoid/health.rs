@@ -44,7 +44,7 @@ impl HealthState {
 		self.health = health.clamp(0.0, self.max_health);
 
 		if old_health != health {
-			on_health_change.fire(me, HealthUpdated, ());
+			on_health_change.fire(me, HealthUpdated);
 		}
 	}
 

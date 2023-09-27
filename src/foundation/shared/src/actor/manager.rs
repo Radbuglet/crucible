@@ -16,7 +16,7 @@ impl ActorManager {
 		let (actor, actor_ref) = actor.split_guard();
 		actor.tag(self.tag);
 		self.actors.insert(actor);
-		event.fire(actor_ref, ActorSpawned, ());
+		event.fire(actor_ref, ActorSpawned);
 		actor_ref
 	}
 
@@ -25,7 +25,7 @@ impl ActorManager {
 			return;
 		};
 		actor.untag(self.tag);
-		event.fire_owned(actor, ActorDespawned, ());
+		event.fire_owned(actor, ActorDespawned);
 	}
 
 	pub fn tag(&self) -> VirtualTag {

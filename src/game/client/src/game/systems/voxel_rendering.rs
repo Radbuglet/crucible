@@ -1,4 +1,4 @@
-use bort::{alias, proc, BehaviorRegistry};
+use bort::{alias, scope, BehaviorRegistry};
 use crucible_foundation_client::{
 	engine::{
 		assets::AssetManager,
@@ -31,36 +31,36 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 pub fn push_plugins(pm: &mut GameInitRegistry) {
 	pm.register(
 		[NamedTypeId::of::<BlockMaterialRegistry>()],
-		GameSceneInitBehavior::new(|_bhv, call_cx, scene, engine| {
-			proc! {
-				as GameSceneInitBehavior[call_cx] do
-				(_cx: [], _call_cx: [], mut asset_mgr = engine, ref gfx = engine, ref materials = scene) {
-					// Create atlas
-					let mut atlas = AtlasTexture::new(UVec2::new(16, 16), UVec2::new(2, 2), 4);
-					let mut atlas_gfx =
-						AtlasTextureGfx::new(gfx, &atlas, Some("block texture atlas"));
+		GameSceneInitBehavior::new(|_bhv, s, scene, engine| {
+			scope!(
+				use let s,
+				inject { mut asset_mgr = engine, ref gfx = engine, ref materials = scene },
+			);
 
-					// Load builtin textures into atlas
-					let proto_tex = atlas.add(
-						&image::load_from_memory(include_bytes!("../res/proto_1.png"))
-							.unwrap_pretty()
-							.into_rgba32f()
-					);
-					atlas_gfx.update(gfx, &atlas);
+			// Create atlas
+			let mut atlas = AtlasTexture::new(UVec2::new(16, 16), UVec2::new(2, 2), 4);
+			let mut atlas_gfx = AtlasTextureGfx::new(gfx, &atlas, Some("block texture atlas"));
 
-					// Give textures to builtin materials
-					materials.find_by_name("crucible:proto")
-						.unwrap()
-						.descriptor
-						.insert(MaterialVisualDescriptor::cubic_simple(proto_tex));
+			// Load builtin textures into atlas
+			let proto_tex = atlas.add(
+				&image::load_from_memory(include_bytes!("../res/proto_1.png"))
+					.unwrap_pretty()
+					.into_rgba32f(),
+			);
+			atlas_gfx.update(gfx, &atlas);
 
-					// Register services
-					scene.add(VoxelUniforms::new(asset_mgr, gfx, &atlas_gfx.view));
-					scene.add(WorldVoxelMesh::default());
-					scene.add(atlas);
-					scene.add(atlas_gfx);
-				}
-			}
+			// Give textures to builtin materials
+			materials
+				.find_by_name("crucible:proto")
+				.unwrap()
+				.descriptor
+				.insert(MaterialVisualDescriptor::cubic_simple(proto_tex));
+
+			// Register services
+			scene.add(VoxelUniforms::new(asset_mgr, gfx, &atlas_gfx.view));
+			scene.add(WorldVoxelMesh::default());
+			scene.add(atlas);
+			scene.add(atlas_gfx);
 		}),
 	);
 }

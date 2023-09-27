@@ -212,11 +212,13 @@ dependencies = [
 [[package]]
 name = "bort"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/bort.git?rev=2b682e29174c2cebc44ed3390b05c4b4930371e3#2b682e29174c2cebc44ed3390b05c4b4930371e3"
+source = "git+https://github.com/Radbuglet/bort.git?rev=d325aee53fa0c19358071ff38d6deb6895bdb855#d325aee53fa0c19358071ff38d6deb6895bdb855"
 dependencies = [
  "cfgenius",
+ "compost2",
  "derive-where",
  "hashbrown 0.14.0",
+ "partial-scope",
  "rustc-hash",
  "saddle",
 ]
@@ -312,6 +314,11 @@ name = "com-rs"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf43edc576402991846b093a7ca18a3477e0ef9c588cde84964b5d3e43016642"
+
+[[package]]
+name = "compost2"
+version = "0.1.0"
+source = "git+https://github.com/Radbuglet/compost.git?rev=7727c0642b9762be5968e71b58ba3c9a04117669#7727c0642b9762be5968e71b58ba3c9a04117669"
 
 [[package]]
 name = "core-foundation"
@@ -632,12 +639,6 @@ checksum = "d329bdeac514ee06249dabc27877490f17f5d371ec693360768b838e19f3ae10"
 dependencies = [
  "simd-adler32",
 ]
-
-[[package]]
-name = "fixedbitset"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
 name = "flate2"
@@ -1521,7 +1522,7 @@ dependencies = [
 [[package]]
 name = "partial-scope"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/bort.git?rev=2b682e29174c2cebc44ed3390b05c4b4930371e3#2b682e29174c2cebc44ed3390b05c4b4930371e3"
+source = "git+https://github.com/Radbuglet/saddle.git?rev=9fd359cbb3597630496e627fcd49578b06518bfc#9fd359cbb3597630496e627fcd49578b06518bfc"
 
 [[package]]
 name = "paste"
@@ -1534,16 +1535,6 @@ name = "percent-encoding"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b2a4787296e9989611394c33f193f676704af1686e70b8f8033ab5ba9a35a94"
-
-[[package]]
-name = "petgraph"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1d3afd2628e69da2be385eb6f2fd57c8ac7977ceeff6dc166ff1657b0e386a9"
-dependencies = [
- "fixedbitset",
- "indexmap 2.0.0",
-]
 
 [[package]]
 name = "pin-project"
@@ -1745,14 +1736,9 @@ dependencies = [
 [[package]]
 name = "saddle"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/bort.git?rev=2b682e29174c2cebc44ed3390b05c4b4930371e3#2b682e29174c2cebc44ed3390b05c4b4930371e3"
+source = "git+https://github.com/Radbuglet/saddle.git?rev=9fd359cbb3597630496e627fcd49578b06518bfc#9fd359cbb3597630496e627fcd49578b06518bfc"
 dependencies = [
- "cfgenius",
- "derive-where",
- "linkme",
  "partial-scope",
- "petgraph",
- "rustc-hash",
 ]
 
 [[package]]

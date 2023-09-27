@@ -1,11 +1,8 @@
-use bort::{proc, query, BehaviorRegistry, GlobalTag::GlobalTag};
+use bort::{cx, query, scope, BehaviorRegistry, Cx, EventTarget, GlobalTag};
 use crucible_foundation_shared::{
-	actor::{
-		collider::Collider,
-		kinematic::{self, KinematicObject},
-		spatial::Spatial,
-	},
+	actor::{collider::Collider, kinematic::KinematicObject, spatial::Spatial},
 	math::EntityVec,
+	voxel::{collision::MaterialColliderDescriptor, data::ChunkVoxelData},
 };
 
 use super::entry::{ActorPhysicsApplyBehavior, ActorPhysicsResetBehavior};
@@ -18,52 +15,50 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 }
 
 fn make_physics_reset_behavior() -> ActorPhysicsResetBehavior {
-	ActorPhysicsResetBehavior::new(|_bhv, call_cx, actor_tag| {
-		proc! {
-			as ActorPhysicsResetBehavior[call_cx] do
-			(cx: [], _call_cx: []) {
-				query! {
-					for (mut kinematic in GlobalTag::<KinematicObject>) + [actor_tag] {
-						kinematic.acceleration = EntityVec::ZERO;
-					}
-				}
+	ActorPhysicsResetBehavior::new(|_bhv, s, actor_tag| {
+		scope!(use let s);
+
+		query! {
+			for (mut kinematic in GlobalTag::<KinematicObject>) + [actor_tag] {
+				kinematic.acceleration = EntityVec::ZERO;
 			}
 		}
 	})
 }
 
 fn make_physics_apply_behavior() -> ActorPhysicsApplyBehavior {
-	ActorPhysicsApplyBehavior::new(
-		|_bhv, call_cx, actor_tag, world, registry, on_spatial_moved| {
-			proc! {
-				as ActorPhysicsApplyBehavior[call_cx] do
-				(
-					cx: [mut Spatial, ref Collider, mut KinematicObject; kinematic::CxApplyPhysics],
-					_call_cx: [],
-				) {
-					// TODO: Compute this.
-					let delta = 1.0 / 60.0;
+	ActorPhysicsApplyBehavior::new(|_bhv, s, actor_tag, world, registry, on_spatial_moved| {
+		scope!(
+			use let s,
+			access cx: Cx<
+				&mut Spatial,
+				&mut Collider,
+				&mut KinematicObject,
+				&ChunkVoxelData,
+				&MaterialColliderDescriptor,
+			>,
+		);
 
-					query! {
-						for (
-							@_me,
-							omut spatial in GlobalTag::<Spatial>,
-							ref collider in GlobalTag::<Collider>,
-							mut kinematic in GlobalTag::<KinematicObject>,
-						) + [actor_tag] {
-							kinematic.apply_physics(
-								cx,
-								world,
-								registry,
-								&mut spatial,
-								collider,
-								on_spatial_moved,
-								delta,
-							);
-						}
-					}
-				}
+		// TODO: Compute this.
+		let delta = 1.0 / 60.0;
+
+		query! {
+			for (
+				@_me,
+				omut spatial in GlobalTag::<Spatial>,
+				ref collider in GlobalTag::<Collider>,
+				mut kinematic in GlobalTag::<KinematicObject>,
+			) + [actor_tag] {
+				kinematic.apply_physics(
+					cx!(cx),
+					world,
+					registry,
+					&mut spatial,
+					collider,
+					&mut |entity, ev, _| on_spatial_moved.fire(entity, ev),
+					delta,
+				);
 			}
-		},
-	)
+		}
+	})
 }

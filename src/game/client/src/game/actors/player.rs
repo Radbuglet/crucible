@@ -1,7 +1,7 @@
 use std::f64::consts::{PI, TAU};
 
 use bort::{
-	access_cx, alias, proc, query, storage, BehaviorRegistry, EventTarget, GlobalTag,
+	alias, cx, query, scope, storage, BehaviorRegistry, Cx, EventTarget, GlobalTag,
 	HasGlobalManagedTag, OwnedEntity,
 };
 
@@ -29,9 +29,9 @@ use crucible_foundation_shared::{
 		Aabb2, Angle3D, Angle3DExt, BlockFace, Color4, EntityAabb, EntityVec,
 	},
 	voxel::{
-		collision::{ColliderCheckCx, RayCast},
+		collision::{MaterialColliderDescriptor, RayCast},
 		data::{
-			Block, BlockMaterialId, BlockMaterialRegistry, EntityVoxelPointer, VoxelDataWriteCx,
+			Block, BlockMaterialId, BlockMaterialRegistry, ChunkVoxelData, EntityVoxelPointer,
 			WorldVoxelData,
 		},
 	},
@@ -52,9 +52,7 @@ use crate::game::systems::{
 
 // === Components === //
 
-access_cx! {
-	pub trait BlockPlacementCx: ColliderCheckCx, VoxelDataWriteCx;
-}
+type BlockPlacementCx<'a> = Cx<&'a MaterialColliderDescriptor, &'a mut ChunkVoxelData>;
 
 // See: https://web.archive.org/web/20230313061131/https://www.mcpk.wiki/wiki/Jumping
 pub const GRAVITY: f64 = 0.08 * MC_TICKS_TO_SECS_SQUARED;
@@ -171,7 +169,7 @@ impl LocalPlayer {
 
 	pub fn place_block_where_looking(
 		&self,
-		cx: &impl BlockPlacementCx,
+		cx: BlockPlacementCx<'_>,
 		world: &mut WorldVoxelData,
 		registry: &BlockMaterialRegistry,
 		spatial: &Spatial,
@@ -182,15 +180,21 @@ impl LocalPlayer {
 			self.facing.forward().cast(),
 		);
 
-		use_generator!(let ray[y] = ray.step_intersect_for(y, cx, storage(), max_dist));
+		use_generator!(let ray[y] = ray.step_intersect_for(y, cx!(cx), storage(), max_dist));
 
 		while let Some((mut isect, _meta)) = ray.next((world, registry)) {
-			if isect.block.state(cx, world).is_some_and(|v| v.is_not_air()) {
+			if isect
+				.block
+				.state(cx!(cx), world)
+				.is_some_and(|v| v.is_not_air())
+			{
 				isect
 					.block
-					.at_neighbor(Some((cx, world)), isect.face)
+					.at_neighbor(Some((cx!(cx), world)), isect.face)
 					.set_state_or_warn(
-						cx,
+						// Noalias: the generator only borrows these components while producing the
+						// next element.
+						cx!(noalias cx),
 						world,
 						Block::new(registry.find_by_name("crucible:proto").unwrap().id),
 					);
@@ -201,7 +205,7 @@ impl LocalPlayer {
 
 	pub fn break_block_where_looking(
 		&self,
-		cx: &impl BlockPlacementCx,
+		cx: BlockPlacementCx<'_>,
 		world: &mut WorldVoxelData,
 		registry: &BlockMaterialRegistry,
 		spatial: &Spatial,
@@ -212,13 +216,21 @@ impl LocalPlayer {
 			self.facing.forward().cast(),
 		);
 
-		use_generator!(let ray[y] = ray.step_intersect_for(y, cx, storage(), max_dist));
+		use_generator!(let ray[y] = ray.step_intersect_for(y, cx!(cx), storage(), max_dist));
 
 		while let Some((mut isect, _meta)) = ray.next((world, registry)) {
-			if isect.block.state(cx, world).is_some_and(|v| v.is_not_air()) {
-				isect
-					.block
-					.set_state_or_warn(cx, world, Block::new(BlockMaterialId::AIR));
+			if isect
+				.block
+				.state(cx!(cx), world)
+				.is_some_and(|v| v.is_not_air())
+			{
+				isect.block.set_state_or_warn(
+					// Noalias: the generator only borrows these components while producing the
+					// next element.
+					cx!(noalias cx),
+					world,
+					Block::new(BlockMaterialId::AIR),
+				);
 				break;
 			}
 		}
@@ -342,72 +354,69 @@ fn make_spawn_behavior() -> ActorSpawnedInGameBehavior {
 }
 
 fn make_input_behavior() -> ActorInputBehavior {
-	ActorInputBehavior::new(|_bhv, call_cx, scene_root, actor_tag, inputs| {
-		proc! {
-			as ActorInputBehavior[call_cx] do
-			(
-				cx: [
-					mut LocalPlayer,
-					ref Spatial,
-					mut KinematicObject
-					; ColliderCheckCx, BlockPlacementCx
-				],
-				_call_cx: [],
-				mut world = scene_root,
-				ref block_registry = scene_root,
-			) {
-				query! {
-					for (
-						mut player in GlobalTag::<LocalPlayer>,
-						ref spatial in GlobalTag::<Spatial>,
-						mut kinematic in GlobalTag::<KinematicObject>,
-					) + [actor_tag] {
-						// Apply gravity
-						kinematic.apply_acceleration(GRAVITY_VEC);
+	ActorInputBehavior::new(|_bhv, s, scene_root, actor_tag, inputs| {
+		scope!(
+			use let s,
+			access cx: Cx<
+				&mut LocalPlayer,
+				&Spatial,
+				&mut KinematicObject,
+				&mut ChunkVoxelData,
+				&MaterialColliderDescriptor,
+			>,
+			inject { mut world = scene_root, ref block_registry = scene_root }
+		);
 
-						// Process mouse look
-						player.facing += inputs.mouse_delta() * f32::to_radians(0.4);
-						player.facing = player.facing.clamp_y_90().wrap_x();
+		query! {
+			for (
+				mut player in GlobalTag::<LocalPlayer>,
+				ref spatial in GlobalTag::<Spatial>,
+				mut kinematic in GlobalTag::<KinematicObject>,
+			) + [actor_tag] {
+				// Apply gravity
+				kinematic.apply_acceleration(GRAVITY_VEC);
 
-						// Process fly mode
-						if inputs.key(VirtualKeyCode::F).recently_pressed() {
-							player.fly_mode = !player.fly_mode;
-						}
+				// Process mouse look
+				player.facing += inputs.mouse_delta() * f32::to_radians(0.4);
+				player.facing = player.facing.clamp_y_90().wrap_x();
 
-						// Process movement
-						player.process_movement(kinematic, LocalPlayerInputs {
-							forward: inputs.key(VirtualKeyCode::W).state(),
-							backward: inputs.key(VirtualKeyCode::S).state(),
-							left: inputs.key(VirtualKeyCode::A).state(),
-							right: inputs.key(VirtualKeyCode::D).state(),
-							jump: inputs.key(VirtualKeyCode::Space).state(),
-						});
+				// Process fly mode
+				if inputs.key(VirtualKeyCode::F).recently_pressed() {
+					player.fly_mode = !player.fly_mode;
+				}
 
-						for (i, k) in [
-							VirtualKeyCode::Key1,
-							VirtualKeyCode::Key2,
-							VirtualKeyCode::Key3,
-							VirtualKeyCode::Key4,
-							VirtualKeyCode::Key5,
-							VirtualKeyCode::Key6,
-							VirtualKeyCode::Key7,
-							VirtualKeyCode::Key8,
-							VirtualKeyCode::Key9,
-						].into_iter().enumerate() {
-							if inputs.key(k).recently_pressed() {
-								player.inventory_slot = i;
-							}
-						}
+				// Process movement
+				player.process_movement(kinematic, LocalPlayerInputs {
+					forward: inputs.key(VirtualKeyCode::W).state(),
+					backward: inputs.key(VirtualKeyCode::S).state(),
+					left: inputs.key(VirtualKeyCode::A).state(),
+					right: inputs.key(VirtualKeyCode::D).state(),
+					jump: inputs.key(VirtualKeyCode::Space).state(),
+				});
 
-						// Handle block placement
-						if inputs.button(MouseButton::Right).recently_pressed() {
-							player.place_block_where_looking(cx, world, block_registry, spatial, 7.0);
-						}
-
-						if inputs.button(MouseButton::Left).recently_pressed() {
-							player.break_block_where_looking(cx, world, block_registry, spatial, 7.0);
-						}
+				for (i, k) in [
+					VirtualKeyCode::Key1,
+					VirtualKeyCode::Key2,
+					VirtualKeyCode::Key3,
+					VirtualKeyCode::Key4,
+					VirtualKeyCode::Key5,
+					VirtualKeyCode::Key6,
+					VirtualKeyCode::Key7,
+					VirtualKeyCode::Key8,
+					VirtualKeyCode::Key9,
+				].into_iter().enumerate() {
+					if inputs.key(k).recently_pressed() {
+						player.inventory_slot = i;
 					}
+				}
+
+				// Handle block placement
+				if inputs.button(MouseButton::Right).recently_pressed() {
+					player.place_block_where_looking(cx!(cx), world, block_registry, spatial, 7.0);
+				}
+
+				if inputs.button(MouseButton::Left).recently_pressed() {
+					player.break_block_where_looking(cx!(cx), world, block_registry, spatial, 7.0);
 				}
 			}
 		}
@@ -415,113 +424,106 @@ fn make_input_behavior() -> ActorInputBehavior {
 }
 
 fn make_hud_render_behavior() -> UiRenderHudBehavior {
-	UiRenderHudBehavior::new(|_bhv, call_cx, brush, screen_size, scene| {
-		proc! {
-			as UiRenderHudBehavior[call_cx] do
-			(
-				cx: [
-					ref LocalPlayer,
-					ref HealthState,
-					ref InventoryData,
-					ref ItemStackBase,
-					ref BaseClientItemDescriptor,
-				],
-				_call_cx: [],
-				ref actor_mgr = scene,
-				ref item_registry = scene,
-			) {
-				// Draw crosshair
-				brush.fill_rect(
-					Aabb2::from_origin_size(screen_size / 2.0, Vec2::splat(10.), Vec2::splat(0.5)),
-					Color4::new(1.0, 0.0, 0.0, 0.5),
-				);
+	UiRenderHudBehavior::new(|_bhv, s, brush, screen_size, scene| {
+		scope!(
+			use let s,
+			access cx: Cx<
+				&LocalPlayer,
+				&HealthState,
+				&InventoryData,
+				&ItemStackBase,
+				&BaseClientItemDescriptor,
+			>,
+			inject { ref actor_mgr = scene, ref item_registry = scene }
+		);
 
-				// Draw hotbar
-				let total_w = screen_size.x * 0.6;
-				let item_fw = total_w / 9.0;
-				let item_vw = item_fw * 0.95;
-				let total_w = total_w - (item_fw - item_vw);
+		// Draw crosshair
+		brush.fill_rect(
+			Aabb2::from_origin_size(screen_size / 2.0, Vec2::splat(10.), Vec2::splat(0.5)),
+			Color4::new(1.0, 0.0, 0.0, 0.5),
+		);
 
-				query! {
-					for (
-						ref player in GlobalTag::<LocalPlayer>,
-						ref health in GlobalTag::<HealthState>,
-						ref inventory in GlobalTag::<InventoryData>,
-					) + [actor_mgr.tag()] {
-						let start_x = screen_size.x / 2.0 - total_w / 2.0;
+		// Draw hotbar
+		let total_w = screen_size.x * 0.6;
+		let item_fw = total_w / 9.0;
+		let item_vw = item_fw * 0.95;
+		let total_w = total_w - (item_fw - item_vw);
 
-						// Draw items
-						let mut x = start_x;
-						for i in 0..9 {
-							let item_aabb = Aabb2::new(x, screen_size.y - item_fw - 50.0, item_vw, item_vw);
-							brush.fill_rect(
-								item_aabb,
-								if i == player.inventory_slot {
-									Color4::new(0.4, 0.3, 1.0, 1.0)
-								} else {
-									Color4::new(0.0, 0.4, 1.0, 0.4)
-								}
-							);
+		query! {
+			for (
+				ref player in GlobalTag::<LocalPlayer>,
+				ref health in GlobalTag::<HealthState>,
+				ref inventory in GlobalTag::<InventoryData>,
+			) + [actor_mgr.tag()] {
+				let start_x = screen_size.x / 2.0 - total_w / 2.0;
 
-							if let Some(stack) = inventory.slot(i) {
-								let descriptor = item_registry
-									.find_by_id(stack.get_s::<ItemStackBase>(cx).material)
-									.descriptor
-									.get_s::<BaseClientItemDescriptor>(cx);
-
-								brush.fill_rect(
-									Aabb2::from_origin_size(
-										item_aabb.at_percent(Vec2::splat(0.5)),
-										item_aabb.size * 0.75,
-										Vec2::splat(0.5),
-									),
-									descriptor.color,
-								);
-							}
-
-							x += item_fw;
+				// Draw items
+				let mut x = start_x;
+				for i in 0..9 {
+					let item_aabb = Aabb2::new(x, screen_size.y - item_fw - 50.0, item_vw, item_vw);
+					brush.fill_rect(
+						item_aabb,
+						if i == player.inventory_slot {
+							Color4::new(0.4, 0.3, 1.0, 1.0)
+						} else {
+							Color4::new(0.0, 0.4, 1.0, 0.4)
 						}
+					);
 
-						// Draw health
+					if let Some(stack) = inventory.slot(i) {
+						let descriptor = item_registry
+							.find_by_id(stack.get_s::<ItemStackBase>(cx!(cx)).material)
+							.descriptor
+							.get_s::<BaseClientItemDescriptor>(cx!(cx));
+
 						brush.fill_rect(
-							Aabb2::new(
-								start_x,
-								screen_size.y - item_vw - 50.0 - 20.0 - 10.0,
-								total_w * health.health_percent(),
-								10.0,
+							Aabb2::from_origin_size(
+								item_aabb.at_percent(Vec2::splat(0.5)),
+								item_aabb.size * 0.75,
+								Vec2::splat(0.5),
 							),
-							Color4::new(1.0, 0.0, 0.0, 1.0),
-						);
-						brush.fill_rect(
-							Aabb2::new(
-								start_x,
-								screen_size.y - item_vw - 50.0 - 20.0 - 10.0,
-								total_w * health.health_percent(),
-								10.0,
-							),
-							Color4::new(0.0, 1.0, 0.0, 1.0),
+							descriptor.color,
 						);
 					}
+
+					x += item_fw;
 				}
+
+				// Draw health
+				brush.fill_rect(
+					Aabb2::new(
+						start_x,
+						screen_size.y - item_vw - 50.0 - 20.0 - 10.0,
+						total_w * health.health_percent(),
+						10.0,
+					),
+					Color4::new(1.0, 0.0, 0.0, 1.0),
+				);
+				brush.fill_rect(
+					Aabb2::new(
+						start_x,
+						screen_size.y - item_vw - 50.0 - 20.0 - 10.0,
+						total_w * health.health_percent(),
+						10.0,
+					),
+					Color4::new(0.0, 1.0, 0.0, 1.0),
+				);
 			}
 		}
 	})
 }
 
 fn make_camera_behavior() -> CameraProviderBehavior {
-	CameraProviderBehavior::new(|_bhv, call_cx, actor_tag, camera_mgr| {
-		proc! {
-			as CameraProviderBehavior[call_cx] do
-			(_cx: [ref Spatial, ref LocalPlayer], _call_cx: []) {
-				query! {
-					for (ref spatial in GlobalTag::<Spatial>, ref player in GlobalTag::<LocalPlayer>) + [actor_tag] {
-						camera_mgr.set_pos_rot(
-							player.eye_pos(spatial).to_glam().as_vec3(),
-							player.facing,
-							CameraSettings::Perspective { fov: 110f32.to_radians(), near: 0.1, far: 500.0 },
-						);
-					}
-				}
+	CameraProviderBehavior::new(|_bhv, s, actor_tag, camera_mgr| {
+		scope!(use let s, access _cx: Cx<&Spatial, &LocalPlayer>);
+
+		query! {
+			for (ref spatial in GlobalTag::<Spatial>, ref player in GlobalTag::<LocalPlayer>) + [actor_tag] {
+				camera_mgr.set_pos_rot(
+					player.eye_pos(spatial).to_glam().as_vec3(),
+					player.facing,
+					CameraSettings::Perspective { fov: 110f32.to_radians(), near: 0.1, far: 500.0 },
+				);
 			}
 		}
 	})

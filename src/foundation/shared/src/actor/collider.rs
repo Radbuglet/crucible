@@ -22,7 +22,7 @@
 //! concatenate their entity lists together to form a candidate list. For AABBs less than
 //! `HALF_GRID_SIZE`, we will be querying at most 8 chunks.
 
-use bort::{access_cx, CompMut, HasGlobalManagedTag, Obj};
+use bort::{cx, CompMut, Cx, HasGlobalManagedTag, Obj};
 use crucible_util::{lang::iter::VolumetricIter, mem::hash::FxHashMap};
 use typed_glam::{ext::VecExt, glam::IVec3};
 
@@ -47,10 +47,8 @@ fn collider_chunk_for_aabb(aabb: EntityAabb) -> IVec3 {
 
 // === ColliderTracker === //
 
-access_cx! {
-	pub trait ColliderMutateCx = mut Collider;
-	pub trait ColliderQueryCx = ref Collider;
-}
+type ColliderMutateCx<'a> = Cx<&'a mut Collider>;
+type ColliderQueryCx<'a> = Cx<&'a Collider>;
 
 #[derive(Debug, Default)]
 pub struct ColliderManager {
@@ -67,7 +65,7 @@ impl ColliderManager {
 		self.register_inner(target, chunk);
 	}
 
-	pub fn unregister(&mut self, cx: &impl ColliderMutateCx, target: &mut CompMut<Collider>) {
+	pub fn unregister(&mut self, cx: ColliderMutateCx<'_>, target: &mut CompMut<Collider>) {
 		let chunk = collider_chunk_for_aabb(target.aabb);
 		self.unregister_inner(cx, target, chunk);
 	}
@@ -80,7 +78,7 @@ impl ColliderManager {
 
 	fn unregister_inner(
 		&mut self,
-		cx: &impl ColliderMutateCx,
+		cx: ColliderMutateCx<'_>,
 		target_data: &mut Collider,
 		chunk: IVec3,
 	) {
@@ -107,7 +105,7 @@ impl ColliderManager {
 
 	pub fn update_aabb_directly(
 		&mut self,
-		cx: &impl ColliderMutateCx,
+		cx: ColliderMutateCx<'_>,
 		target: &mut CompMut<Collider>,
 		aabb: EntityAabb,
 	) {
@@ -125,7 +123,7 @@ impl ColliderManager {
 
 	pub fn query_in<'a>(
 		&'a self,
-		cx: &'a impl ColliderQueryCx,
+		cx: ColliderQueryCx<'a>,
 		aabb: EntityAabb,
 	) -> impl Iterator<Item = Obj<Collider>> + 'a {
 		// Determine candidate chunks.
@@ -151,7 +149,7 @@ impl ColliderManager {
 		});
 
 		// Filter out non-overlapping candidates and yield to the caller
-		candidates.filter(move |collider| aabb.intersects(collider.get_s(cx).aabb))
+		candidates.filter(move |collider| aabb.intersects(collider.get_s(cx!(cx)).aabb))
 	}
 }
 

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use bort::{
-	alias, call_cx, delegate, proc, proc_collection, saddle_delegate, BehaviorProvider,
-	BehaviorRegistry, CanCallCollection, Entity, OwnedEntity, VecEventList, VirtualTag,
+	alias, cx, delegate, saddle_delegate, scope, BehaviorProvider, BehaviorRegistry, Cx, Entity,
+	OwnedEntity, Scope, VecEventList, VirtualTag,
 };
 use crucible_foundation_client::{
 	engine::{
@@ -12,14 +12,14 @@ use crucible_foundation_client::{
 	},
 	gfx::{
 		actor::{
-			manager::{ActorManagerRenderCx, ActorMeshManager, MeshRegistry},
+			manager::{ActorMeshManager, MeshRegistry},
 			pipeline::{load_opaque_actor_pipeline, ActorRenderingUniforms},
-			renderer::ActorRenderer,
+			renderer::{ActorMeshLayer, ActorRenderer},
 		},
 		skybox::pipeline::{load_skybox_pipeline, SkyboxUniforms},
 		ui::brush::{ImmBrush, ImmRenderer},
 		voxel::{
-			mesh::{MeshUpdateCx, WorldVoxelMesh},
+			mesh::WorldVoxelMesh,
 			pipeline::{load_opaque_block_pipeline, VoxelUniforms},
 		},
 	},
@@ -28,14 +28,14 @@ use crucible_foundation_shared::{
 	actor::{
 		collider::ColliderManager,
 		manager::{ActorManager, ActorSpawned},
-		spatial::SpatialMoved,
+		spatial::{Spatial, SpatialMoved},
 	},
 	bort::lifecycle::{LifecycleManager, PartialEntity},
 	humanoid::item::ItemMaterialRegistry,
 	math::{Aabb2, Aabb3, BlockFace, ChunkVec, WorldVec, WorldVecExt},
 	voxel::{
 		data::{Block, BlockMaterialRegistry, BlockVoxelPointer, ChunkVoxelData, WorldVoxelData},
-		loader::{LoaderUpdateCx, WorldLoader},
+		loader::{LoadedChunk, WorldLoader},
 	},
 };
 use crucible_util::mem::c_enum::CEnum;
@@ -46,7 +46,7 @@ use winit::{
 };
 
 use crate::{
-	entry::{SceneInitBehavior, SceneRenderHandler, SceneUpdateHandler},
+	entry::{SceneInitScope, SceneRenderHandler, SceneUpdateHandler},
 	game::actors::player::spawn_local_player,
 };
 
@@ -111,14 +111,17 @@ saddle_delegate! {
 
 // === GameInitManager === //
 
+scope! {
+	pub GameSceneInitScope;
+}
+
 delegate! {
 	pub fn GameSceneInitBehavior(
 		bhv: BehaviorProvider<'_>,
-		call_cx: &mut call_cx![GameSceneInitBehavior],
+		s: &mut GameSceneInitScope,
 		scene: PartialEntity<'_>,
 		engine: Entity,
 	)
-	as deriving proc_collection
 }
 
 pub type GameInitRegistry = LifecycleManager<GameSceneInitBehavior>;
@@ -165,7 +168,7 @@ pub struct GameSceneRoot {
 // === Prefabs === //
 
 pub fn spawn_game_scene_root(
-	call_cx: &mut call_cx![SceneInitBehavior],
+	s: &mut SceneInitScope,
 	engine: Entity,
 	viewport: Entity,
 ) -> OwnedEntity {
@@ -185,62 +188,67 @@ pub fn spawn_game_scene_root(
 		.with_many(super::voxel_data::push_plugins)
 		.with_many(super::voxel_rendering::push_plugins);
 
-	proc! {
-		as SceneInitBehavior[call_cx] do
-		(_cx: [], call_cx: [GameSceneInitBehavior], ref bhv = engine) {
-			pm.execute(|delegate, scene| delegate(bhv.provider(), call_cx, scene, engine), root.entity());
-		}
+	scope! {
+		use s, inject { ref bhv = engine }:
+		pm.execute(
+			|delegate, scene| delegate(
+				bhv.provider(),
+				s.decl_call(),
+				scene,
+				engine,
+			),
+			root.entity(),
+		);
 	}
 
 	// Setup initial scene
-	proc! {
-		as SceneInitBehavior[call_cx] do
-		(
-			cx: [; LoaderUpdateCx],
-			call_cx: [ActorSpawnedInGameBehavior],
-			mut actor_mgr = root,
-			ref bhv = engine,
-			mut world_loader = root,
-			mut world_data = root,
-			ref block_registry = root,
-			ref mesh_registry = root,
-			ref item_registry = root,
-		) {
-			// Populate initial world data
-			world_loader.temp_load_region(
-				cx,
-				world_data,
-				Aabb3::from_corners_max_excl(
-					WorldVec::new(-100, -50, -100).chunk(),
-					WorldVec::new(100, 50, 100).chunk() + ChunkVec::ONE,
-				),
-			);
+	scope! {
+		use s,
+			access cx: Cx<&mut LoadedChunk, &mut ChunkVoxelData>,
+			inject {
+				mut actor_mgr = root,
+				ref bhv = engine,
+				mut world_loader = root,
+				mut world_data = root,
+				ref block_registry = root,
+				ref mesh_registry = root,
+				ref item_registry = root,
+			}:
 
-			let mut pointer = BlockVoxelPointer::new(&world_data, WorldVec::ZERO);
-			let proto_mat = block_registry.find_by_name("crucible:proto").unwrap();
+		// Populate initial world data
+		world_loader.temp_load_region(
+			cx!(cx),
+			world_data,
+			Aabb3::from_corners_max_excl(
+				WorldVec::new(-100, -50, -100).chunk(),
+				WorldVec::new(100, 50, 100).chunk() + ChunkVec::ONE,
+			),
+		);
 
-			for x in -100..=100 {
-				for y in -50..0 {
-					for z in -100..=100 {
-						pointer.set_pos(Some((cx, world_data)), WorldVec::new(x, y, z));
-						pointer.set_state_or_warn(cx, world_data, Block::new(proto_mat.id));
-					}
+		let mut pointer = BlockVoxelPointer::new(&world_data, WorldVec::ZERO);
+		let proto_mat = block_registry.find_by_name("crucible:proto").unwrap();
+
+		for x in -100..=100 {
+			for y in -50..0 {
+				for z in -100..=100 {
+					pointer.set_pos(Some((cx!(cx), world_data)), WorldVec::new(x, y, z));
+					pointer.set_state_or_warn(cx!(cx), world_data, Block::new(proto_mat.id));
 				}
 			}
-
-			// Create player
-			let mut on_spawned = VecEventList::new();
-			let mut on_inventory_changed = |_, _, _| {};  // (no subscribers have been set up for this event)
-			let player = spawn_local_player(
-				actor_mgr,
-				mesh_registry,
-				item_registry,
-				&mut on_spawned,
-				&mut on_inventory_changed,
-			);
-			actor_mgr.spawn(&mut on_spawned, player);
-			bhv.get::<ActorSpawnedInGameBehavior>()(call_cx, &mut on_spawned, root.entity());
 		}
+
+		// Create player
+		let mut on_spawned = VecEventList::new();
+		let mut on_inventory_changed = |_, _, _| {};  // (no subscribers have been set up for this event)
+		let player = spawn_local_player(
+			actor_mgr,
+			mesh_registry,
+			item_registry,
+			&mut on_spawned,
+			&mut on_inventory_changed,
+		);
+		actor_mgr.spawn(&mut on_spawned, player);
+		bhv.get::<ActorSpawnedInGameBehavior>()(s.decl_call(), &mut on_spawned, root.entity());
 	}
 
 	root
@@ -249,323 +257,319 @@ pub fn spawn_game_scene_root(
 // === Handlers === //
 
 fn make_scene_update_handler() -> SceneUpdateHandler {
-	SceneUpdateHandler::new(|bhv, call_cx, me, _main_loop| {
-		proc! {
-			as SceneUpdateHandler[call_cx] do
-			// Pre-fetch all required context
-			(_cx: [], _call_cx: [], ref state = me, ref actor_mgr = me) {
-				let main_viewport = state.viewport;
-				let actor_tag = actor_mgr.tag();
-			}
-			// Reset actor physics
-			(cx: [ref BehaviorRegistry], call_cx: [ActorPhysicsResetBehavior]) {
-				bhv.get::<ActorPhysicsResetBehavior>()(call_cx, actor_tag);
-			}
-			// Process inputs
-			(cx: [], call_cx: [ActorInputBehavior], ref viewport_data = main_viewport, ref input_mgr = main_viewport) {
-				// Handle mouse lock
-				if input_mgr.button(MouseButton::Left).recently_pressed() {
-					viewport_data.window().set_cursor_visible(false);
+	SceneUpdateHandler::new(|bhv, s, me, _main_loop| {
+		// Pre-fetch all required context
+		scope! {
+			use s, inject { ref state = me, ref actor_mgr = me }:
+			let main_viewport = state.viewport;
+			let actor_tag = actor_mgr.tag();
+		}
 
-					for mode in [CursorGrabMode::Locked, CursorGrabMode::Confined] {
-						if viewport_data.window().set_cursor_grab(mode).is_ok() {
-							break;
-						}
+		// Reset actor physics
+		scope! { use s:
+			bhv.get::<ActorPhysicsResetBehavior>()(s.decl_call(), actor_tag);
+		}
+
+		// Process inputs
+		scope! {
+			use s, inject { ref viewport_data = main_viewport, ref input_mgr = main_viewport }:
+			// Handle mouse lock
+			if input_mgr.button(MouseButton::Left).recently_pressed() {
+				viewport_data.window().set_cursor_visible(false);
+
+				for mode in [CursorGrabMode::Locked, CursorGrabMode::Confined] {
+					if viewport_data.window().set_cursor_grab(mode).is_ok() {
+						break;
 					}
 				}
+			}
 
-				if input_mgr.key(VirtualKeyCode::Escape).recently_pressed() {
-					let _ = viewport_data.window().set_cursor_grab(CursorGrabMode::None);
-					viewport_data.window().set_cursor_visible(true);
-				}
+			if input_mgr.key(VirtualKeyCode::Escape).recently_pressed() {
+				let _ = viewport_data.window().set_cursor_grab(CursorGrabMode::None);
+				viewport_data.window().set_cursor_visible(true);
+			}
 
-				// Process inputs
-				bhv.get::<ActorInputBehavior>()(call_cx, me, actor_tag, &input_mgr);
-			}
-			// Allow actors to influence their own physics states
-			(_cx: [], call_cx: [ActorPhysicsInfluenceBehavior]) {
-				bhv.get::<ActorPhysicsInfluenceBehavior>()(call_cx, actor_tag);
-			}
-			// Apply actor physical states
-			(_cx: [], call_cx: [ActorPhysicsApplyBehavior], ref world_data = me, ref block_registry = me) {
-				let mut on_spatial_moved = VecEventList::new();
-				bhv.get::<ActorPhysicsApplyBehavior>()(
-					call_cx,
-					actor_tag,
-					world_data,
-					block_registry,
-					&mut on_spatial_moved,
-				);
-			}
-			// Update spatials in response to this update
-			(_cx: [], call_cx: [SpatialUpdateApplyConstraints, SpatialUpdateApplyUpdates]) {
-				bhv.get::<SpatialUpdateApplyConstraints>()(
-					call_cx.as_dyn_mut(),
-					me,
-					&on_spatial_moved,
-				);
-				bhv.get::<SpatialUpdateApplyUpdates>()(
-					call_cx.as_dyn_mut(),
-					me,
-					&on_spatial_moved,
-				);
-			}
+			// Process inputs
+			bhv.get::<ActorInputBehavior>()(s.decl_call(), me, actor_tag, &input_mgr);
 		}
+
+		// Allow actors to influence their own physics states
+		bhv.get::<ActorPhysicsInfluenceBehavior>()(s.decl_call(), actor_tag);
+
+		// Apply actor physical states
+		scope! { use s, inject { ref world_data = me, ref block_registry = me }:
+			let mut on_spatial_moved = VecEventList::new();
+			bhv.get::<ActorPhysicsApplyBehavior>()(
+				s.decl_call(),
+				actor_tag,
+				world_data,
+				block_registry,
+				&mut on_spatial_moved,
+			);
+		}
+
+		// Update spatials in response to this update
+		bhv.get::<SpatialUpdateApplyConstraints>()(s.decl_call(), me, &on_spatial_moved);
+		bhv.get::<SpatialUpdateApplyUpdates>()(s.decl_call(), me, &on_spatial_moved);
 	})
 }
 
 fn make_scene_render_handler() -> SceneRenderHandler {
-	SceneRenderHandler::new(|bhv, call_cx, me, viewport, frame| {
-		proc! {
-			as SceneRenderHandler[call_cx] do
-			(cx: [ref Viewport], _call_cx: [], ref state = me, ref actor_mgr = me) {
-				let engine = state.engine;
-				let main_viewport = state.viewport;
-				let actor_tag = actor_mgr.tag();
+	SceneRenderHandler::new(|bhv, s, me, viewport, frame| {
+		scope! { use s, access cx: Cx<&Viewport>, inject { ref state = me, ref actor_mgr = me }:
+			let engine = state.engine;
+			let main_viewport = state.viewport;
+			let actor_tag = actor_mgr.tag();
 
-				if viewport != main_viewport {
-					return;
-				}
-
-				let Some(viewport_size) = viewport.get_s::<Viewport>(cx).curr_surface_size() else { return };
-				let viewport_size = viewport_size.as_vec2();
-				let Some(aspect) = viewport.get_s::<Viewport>(cx).curr_surface_aspect() else { return };
+			if viewport != main_viewport {
+				return;
 			}
-			(
-				cx: [mut ChunkVoxelData; MeshUpdateCx],
-				_call_cx: [],
-				ref gfx = engine,
-				mut world_data = me,
-				mut world_mesh = me,
-				ref atlas_texture = me,
-				ref block_registry = me,
-			) {
-				// Consume flagged chunks
-				for dirty in world_data.flush_dirty(cx) {
-					world_mesh.flag_chunk(dirty.entity());
 
-					for neighbor in BlockFace::variants() {
-						let Some(neighbor) = world_data.read_chunk(cx, dirty).neighbor(neighbor) else { continue };
-						world_mesh.flag_chunk(neighbor.entity());
-					}
+			let Some(viewport_size) = viewport.get_s::<Viewport>(cx!(cx)).curr_surface_size() else { return };
+			let viewport_size = viewport_size.as_vec2();
+			let Some(aspect) = viewport.get_s::<Viewport>(cx!(cx)).curr_surface_aspect() else { return };
+		}
+
+		scope! {
+			use s,
+				access cx: Cx<&mut ChunkVoxelData>,
+				inject {
+					ref gfx = engine,
+					mut world_data = me,
+					mut world_mesh = me,
+					ref atlas_texture = me,
+					ref block_registry = me,
+				}:
+
+			// Consume flagged chunks
+			for dirty in world_data.flush_dirty(cx!(cx)) {
+				world_mesh.flag_chunk(dirty.entity());
+
+				for neighbor in BlockFace::variants() {
+					let Some(neighbor) = world_data
+						.read_chunk(cx!(cx), dirty)
+						.neighbor(neighbor)
+					else {
+						continue
+					};
+					world_mesh.flag_chunk(neighbor.entity());
 				}
+			}
 
-				// Update the world
-				world_mesh.update_chunks(
-					cx,
-					world_data,
-					gfx,
-					atlas_texture,
-					block_registry,
-					Some(Duration::from_millis(16)),
+			// Update the world
+			world_mesh.update_chunks(
+				cx!(cx),
+				world_data,
+				gfx,
+				atlas_texture,
+				block_registry,
+				Some(Duration::from_millis(16)),
+			);
+		}
+
+		scope! {
+			use s, access cx: Cx<&mut CameraManager>, inject { mut camera_mgr = me }:
+
+			// Determine the active camera
+			camera_mgr.unset();
+			bhv.get::<CameraProviderBehavior>()(
+				s.decl_call(),
+				actor_tag,
+				camera_mgr,
+			);
+
+			let camera_mgr_snap = camera_mgr.clone();
+		}
+
+		scope! {
+			use s:
+			// Setup UI rendering sub-pass
+			let mut ui = ImmRenderer::new();
+			let mut brush = ui.brush()
+				.transformed_rect_after(
+					Aabb2::new(-1.0, 1.0, 2.0, -2.0),
+					Aabb2::new(0.0, 0.0, viewport_size.x, viewport_size.y),
+				);
+
+			bhv.get::<UiRenderHudBehavior>()(s.decl_call(), &mut brush, viewport_size, me);
+		}
+
+		scope! {
+			use s,
+				access cx: Cx<&ActorMeshLayer, &Spatial>,
+				inject {
+					ref gfx = engine,
+					mut actor_renderer = me,
+					ref actor_uniforms = me,
+					mut asset_mgr = engine,
+					ref viewport_data = viewport,
+					mut viewport_depth = viewport,
+					mut world_mesh = me,
+					mut skybox_uniforms = me,
+					mut voxel_uniforms = me,
+					ref actor_mesh_manager = me,
+				}:
+
+			// Setup skybox rendering sub-pass
+			{
+				let i_proj = camera_mgr_snap.get_proj_xform(aspect).inverse();
+				let mut i_view = camera_mgr_snap.get_view_xform().inverse();
+				i_view.w_axis = Vec4::new(0.0, 0.0, 0.0, i_view.w_axis.w);
+
+				skybox_uniforms.set_camera_matrix(
+					&gfx,
+					i_view * i_proj,
 				);
 			}
-			(cx: [mut CameraManager], call_cx: [CameraProviderBehavior], mut camera_mgr = me) {
-				// Determine the active camera
-				camera_mgr.unset();
-				bhv.get::<CameraProviderBehavior>()(
-					call_cx,
-					actor_tag,
-					camera_mgr,
-				);
-				let camera_mgr_snap = camera_mgr.clone();
-			}
-			(
-				_cx: [],
-				call_cx: [UiRenderHudBehavior],
-			) {
-				// Setup UI rendering sub-pass
-				let mut ui = ImmRenderer::new();
-				let mut brush = ui.brush()
-					.transformed_rect_after(
-						Aabb2::new(-1.0, 1.0, 2.0, -2.0),
-						Aabb2::new(0.0, 0.0, viewport_size.x, viewport_size.y),
-					);
+			let skybox_pipeline = load_skybox_pipeline(asset_mgr, gfx, frame.texture.format());
 
-				bhv.get::<UiRenderHudBehavior>()(call_cx, &mut brush, viewport_size, me);
-			}
-			(
-				cx: [
-					mut FullScreenTexture,
-					ref GfxContext,
-					mut SkyboxUniforms,
-					mut VoxelUniforms,
-					mut WorldVoxelMesh;
-					ActorManagerRenderCx,
-				],
-				_call_cx: [],
-				ref gfx = engine,
-				mut actor_renderer = me,
-				ref actor_uniforms = me,
-				mut asset_mgr = engine,
-				ref viewport_data = viewport,
-				mut viewport_depth = viewport,
-				mut world_mesh = me,
-				mut skybox_uniforms = me,
-				mut voxel_uniforms = me,
-				ref actor_mesh_manager = me,
-			) {
-				// Setup skybox rendering sub-pass
-				{
-					let i_proj = camera_mgr_snap.get_proj_xform(aspect).inverse();
-					let mut i_view = camera_mgr_snap.get_view_xform().inverse();
-					i_view.w_axis = Vec4::new(0.0, 0.0, 0.0, i_view.w_axis.w);
+			// Setup world rendering sub-pass
+			voxel_uniforms.set_camera_matrix(&gfx, camera_mgr_snap.get_camera_xform(aspect));
+			let world_mesh_subpass = world_mesh.prepare_chunk_draw_pass();
+			let voxel_pipeline = load_opaque_block_pipeline(
+				asset_mgr,
+				gfx,
+				frame.texture.format(),
+				viewport_depth.format(),
+			);
 
-					skybox_uniforms.set_camera_matrix(
-						&gfx,
-						i_view * i_proj,
-					);
-				}
-				let skybox_pipeline = load_skybox_pipeline(asset_mgr, gfx, frame.texture.format());
+			// Setup actor rendering
+			actor_uniforms.set_camera_matrix(gfx, camera_mgr_snap.get_camera_xform(aspect));
+			let actor_pipeline = load_opaque_actor_pipeline(
+				asset_mgr,
+				gfx,
+				frame.texture.format(),
+				viewport_depth.format(),
+			);
 
-				// Setup world rendering sub-pass
-				voxel_uniforms.set_camera_matrix(&gfx, camera_mgr_snap.get_camera_xform(aspect));
-				let world_mesh_subpass = world_mesh.prepare_chunk_draw_pass();
-				let voxel_pipeline = load_opaque_block_pipeline(
-					asset_mgr,
-					gfx,
-					frame.texture.format(),
-					viewport_depth.format(),
-				);
+			let ui = ui.prepare_render(
+				gfx,
+				asset_mgr,
+				frame.texture.format(),
+				viewport_depth.format(),
+			);
 
-				// Setup actor rendering
-				actor_uniforms.set_camera_matrix(gfx, camera_mgr_snap.get_camera_xform(aspect));
-				let actor_pipeline = load_opaque_actor_pipeline(
-					asset_mgr,
-					gfx,
-					frame.texture.format(),
-					viewport_depth.format(),
-				);
+			// Begin rendering
+			let frame_view = frame
+				.texture
+				.create_view(&wgpu::TextureViewDescriptor::default());
 
-				let ui = ui.prepare_render(
-					gfx,
-					asset_mgr,
-					frame.texture.format(),
-					viewport_depth.format(),
-				);
+			let mut cb = gfx
+				.device
+				.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 
-				// Begin rendering
-				let frame_view = frame
-					.texture
-					.create_view(&wgpu::TextureViewDescriptor::default());
+			// Upload actor data
+			actor_mesh_manager.render(cx, gfx, actor_renderer);
+			actor_renderer.upload(gfx, &mut cb);
 
-				let mut cb = gfx
-					.device
-					.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-
-				// Upload actor data
-				actor_mesh_manager.render(cx, gfx, actor_renderer);
-				actor_renderer.upload(gfx, &mut cb);
-
-				// Render skybox
-				{
-					let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
-						label: None,
-						color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-							view: &frame_view,
-							resolve_target: None,
-							ops: wgpu::Operations {
-								load: wgpu::LoadOp::Clear(wgpu::Color {
-									r: 0.1,
-									g: 0.1,
-									b: 0.1,
-									a: 1.0,
-								}),
-								store: true,
-							},
-						})],
-						depth_stencil_attachment: None,
-					});
-
-					skybox_pipeline.bind_pipeline(&mut pass);
-					skybox_uniforms.write_pass_state(&mut pass);
-					pass.draw(0..6, 0..1);
-				}
-
-				// Render voxels
-				{
-					let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
-						label: None,
-						color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-							view: &frame_view,
-							resolve_target: None,
-							ops: wgpu::Operations {
-								load: wgpu::LoadOp::Load,
-								store: true,
-							},
-						})],
-						depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-							view: viewport_depth.acquire_view(&gfx, &viewport_data),
-							depth_ops: Some(wgpu::Operations {
-								load: wgpu::LoadOp::Clear(1.0),
-								store: true,
+			// Render skybox
+			{
+				let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
+					label: None,
+					color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+						view: &frame_view,
+						resolve_target: None,
+						ops: wgpu::Operations {
+							load: wgpu::LoadOp::Clear(wgpu::Color {
+								r: 0.1,
+								g: 0.1,
+								b: 0.1,
+								a: 1.0,
 							}),
-							stencil_ops: None,
-						}),
-					});
+							store: true,
+						},
+					})],
+					depth_stencil_attachment: None,
+				});
 
-					voxel_pipeline.bind_pipeline(&mut pass);
-					voxel_uniforms.write_pass_state(&mut pass);
-					world_mesh_subpass.push(voxel_uniforms, &mut pass);
-				}
-
-				// Render actors
-				{
-					let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
-						label: None,
-						color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-							view: &frame_view,
-							resolve_target: None,
-							ops: wgpu::Operations {
-								load: wgpu::LoadOp::Load,
-								store: true,
-							},
-						})],
-						depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-							view: viewport_depth.acquire_view(&gfx, &viewport_data),
-							depth_ops: Some(wgpu::Operations {
-								load: wgpu::LoadOp::Load,
-								store: true,
-							}),
-							stencil_ops: None,
-						}),
-					});
-
-					actor_pipeline.bind_pipeline(&mut pass);
-					actor_uniforms.write_pass_state(&mut pass);
-					actor_renderer.render(&mut pass);
-				}
-
-				// Render UI
-				{
-					let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
-						label: None,
-						color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-							view: &frame_view,
-							resolve_target: None,
-							ops: wgpu::Operations {
-								load: wgpu::LoadOp::Load,
-								store: true,
-							},
-						})],
-						depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-							view: viewport_depth.acquire_view(&gfx, &viewport_data),
-							depth_ops: Some(wgpu::Operations {
-								load: wgpu::LoadOp::Clear(0.0),
-								store: true,
-							}),
-							stencil_ops: None,
-						}),
-					});
-
-					ui.render(&mut pass);
-				}
-				drop(ui);
-
-				// Finish rendering
-				gfx.queue.submit([cb.finish()]);
-				actor_renderer.reset_and_release();
+				skybox_pipeline.bind_pipeline(&mut pass);
+				skybox_uniforms.write_pass_state(&mut pass);
+				pass.draw(0..6, 0..1);
 			}
+
+			// Render voxels
+			{
+				let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
+					label: None,
+					color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+						view: &frame_view,
+						resolve_target: None,
+						ops: wgpu::Operations {
+							load: wgpu::LoadOp::Load,
+							store: true,
+						},
+					})],
+					depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+						view: viewport_depth.acquire_view(&gfx, &viewport_data),
+						depth_ops: Some(wgpu::Operations {
+							load: wgpu::LoadOp::Clear(1.0),
+							store: true,
+						}),
+						stencil_ops: None,
+					}),
+				});
+
+				voxel_pipeline.bind_pipeline(&mut pass);
+				voxel_uniforms.write_pass_state(&mut pass);
+				world_mesh_subpass.push(voxel_uniforms, &mut pass);
+			}
+
+			// Render actors
+			{
+				let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
+					label: None,
+					color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+						view: &frame_view,
+						resolve_target: None,
+						ops: wgpu::Operations {
+							load: wgpu::LoadOp::Load,
+							store: true,
+						},
+					})],
+					depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+						view: viewport_depth.acquire_view(&gfx, &viewport_data),
+						depth_ops: Some(wgpu::Operations {
+							load: wgpu::LoadOp::Load,
+							store: true,
+						}),
+						stencil_ops: None,
+					}),
+				});
+
+				actor_pipeline.bind_pipeline(&mut pass);
+				actor_uniforms.write_pass_state(&mut pass);
+				actor_renderer.render(&mut pass);
+			}
+
+			// Render UI
+			{
+				let mut pass = cb.begin_render_pass(&wgpu::RenderPassDescriptor {
+					label: None,
+					color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+						view: &frame_view,
+						resolve_target: None,
+						ops: wgpu::Operations {
+							load: wgpu::LoadOp::Load,
+							store: true,
+						},
+					})],
+					depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+						view: viewport_depth.acquire_view(&gfx, &viewport_data),
+						depth_ops: Some(wgpu::Operations {
+							load: wgpu::LoadOp::Clear(0.0),
+							store: true,
+						}),
+						stencil_ops: None,
+					}),
+				});
+
+				ui.render(&mut pass);
+			}
+			drop(ui);
+
+			// Finish rendering
+			gfx.queue.submit([cb.finish()]);
+			actor_renderer.reset_and_release();
 		}
 	})
 }

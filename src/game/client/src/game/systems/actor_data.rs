@@ -1,4 +1,4 @@
-use bort::{query, BehaviorRegistry, GlobalTag};
+use bort::{query, scope, BehaviorRegistry, Cx, GlobalTag};
 use crucible_foundation_shared::actor::{
 	collider::{Collider, ColliderManager},
 	manager::ActorManager,
@@ -13,8 +13,12 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 }
 
 fn make_actor_spawn_handler() -> ActorSpawnedInGameBehavior {
-	ActorSpawnedInGameBehavior::new(|_bhv, _call_cx, on_spawn, scene| {
-		let collider_mgr = &mut *scene.get_mut::<ColliderManager>();
+	ActorSpawnedInGameBehavior::new(|_bhv, s, on_spawn, scene| {
+		scope!(
+			use let s,
+			access _cx: Cx<&mut Collider>,
+			inject { mut collider_mgr as ColliderManager = scene },
+		);
 
 		query! {
 			for (_event in on_spawn; omut collider in GlobalTag::<Collider>) {

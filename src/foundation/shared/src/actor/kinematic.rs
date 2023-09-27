@@ -1,25 +1,23 @@
 use crate::{
-	actor::collider::{Collider, ColliderMutateCx},
+	actor::collider::Collider,
 	math::{kinematic::update_kinematic, Aabb3, Axis3, BlockFace, EntityVec, Sign, VecCompExt},
 	voxel::{
 		collision::{
-			cast_volume, filter_all_colliders, move_rigid_body, ColliderCheckCx,
+			cast_volume, filter_all_colliders, move_rigid_body, MaterialColliderDescriptor,
 			COLLISION_TOLERANCE,
 		},
-		data::{BlockMaterialRegistry, WorldVoxelData},
+		data::{BlockMaterialRegistry, ChunkVoxelData, WorldVoxelData},
 	},
 };
-use bort::{access_cx, CompMut, EventTarget, HasGlobalManagedTag};
+use bort::{cx, CompMut, Cx, EventTarget, HasGlobalManagedTag};
 use crucible_util::mem::c_enum::{CEnum, CEnumMap};
 
 use super::spatial::{Spatial, SpatialMoved};
 
 // === Context === //
 
-access_cx! {
-	pub trait CxSideOcclusion: ColliderCheckCx;
-	pub trait CxApplyPhysics: CxSideOcclusion, ColliderMutateCx;
-}
+type CxSideOcclusion<'a> = Cx<&'a ChunkVoxelData, &'a MaterialColliderDescriptor>;
+type CxApplyPhysics<'a> = Cx<&'a ChunkVoxelData, &'a MaterialColliderDescriptor, &'a mut Collider>;
 
 // === Components === //
 
@@ -49,7 +47,7 @@ impl KinematicObject {
 
 	pub fn apply_physics(
 		&mut self,
-		cx: &impl CxApplyPhysics,
+		cx: CxApplyPhysics<'_>,
 		world: &WorldVoxelData,
 		registry: &BlockMaterialRegistry,
 		spatial: &mut CompMut<Spatial>,
@@ -58,7 +56,7 @@ impl KinematicObject {
 		delta: f64,
 	) {
 		// Clip velocities and accelerations into obstructed faces
-		self.update_face_touching_mask(cx, world, registry, collider);
+		self.update_face_touching_mask(cx!(cx), world, registry, collider);
 
 		for axis in Axis3::variants() {
 			let clip_comp = |comp: &mut f64| {
@@ -85,8 +83,14 @@ impl KinematicObject {
 		// Apply desired position change
 		let pos_delta = {
 			let aabb = collider.aabb();
-			let new_origin =
-				move_rigid_body(cx, world, registry, aabb, delta_pos, filter_all_colliders());
+			let new_origin = move_rigid_body(
+				cx!(cx),
+				world,
+				registry,
+				aabb,
+				delta_pos,
+				filter_all_colliders(),
+			);
 
 			new_origin - aabb.origin
 		};
@@ -97,7 +101,7 @@ impl KinematicObject {
 	// === Collisions === //
 
 	fn is_face_touching_now_inner(
-		cx: &impl CxSideOcclusion,
+		cx: CxSideOcclusion<'_>,
 		world: &WorldVoxelData,
 		registry: &BlockMaterialRegistry,
 		aabb: Aabb3<EntityVec>,
@@ -118,7 +122,7 @@ impl KinematicObject {
 
 	pub fn is_face_touching_now(
 		&self,
-		cx: &impl CxSideOcclusion,
+		cx: CxSideOcclusion<'_>,
 		world: &WorldVoxelData,
 		registry: &BlockMaterialRegistry,
 		collider: &Collider,
@@ -129,13 +133,14 @@ impl KinematicObject {
 
 	pub fn update_face_touching_mask(
 		&mut self,
-		cx: &impl CxSideOcclusion,
+		cx: CxSideOcclusion<'_>,
 		world: &WorldVoxelData,
 		registry: &BlockMaterialRegistry,
 		collider: &Collider,
 	) {
 		for (face, state) in self.collision_mask.iter_mut() {
-			*state = Self::is_face_touching_now_inner(cx, world, registry, collider.aabb(), face);
+			*state =
+				Self::is_face_touching_now_inner(cx!(cx), world, registry, collider.aabb(), face);
 		}
 	}
 

@@ -1,3 +1,5 @@
+#![allow(unconditional_recursion)] // TODO: Remove
+
 use std::{
 	fmt::{Debug, Display},
 	hash::Hash,
