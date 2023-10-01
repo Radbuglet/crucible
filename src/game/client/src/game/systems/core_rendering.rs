@@ -6,9 +6,7 @@ use crucible_foundation_client::{
 use crucible_util::debug::error::ResultExt;
 use wgpu::util::DeviceExt;
 
-use super::entry::{GameInitRegistry, GameSceneInitBehavior};
-
-// === Behaviors === //
+use super::entry::GameSceneInitBehavior;
 
 alias! {
 	let gfx: GfxContext;
@@ -16,11 +14,7 @@ alias! {
 }
 
 pub fn register(bhv: &mut BehaviorRegistry) {
-	let _ = bhv;
-}
-
-pub fn push_plugins(pm: &mut GameInitRegistry) {
-	pm.register(
+	bhv.register_cx(
 		[],
 		GameSceneInitBehavior::new(|_bhv, s, scene, engine| {
 			scope!(use let s, inject { mut asset_mgr = engine, ref gfx = engine });

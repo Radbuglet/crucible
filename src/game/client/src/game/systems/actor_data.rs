@@ -4,32 +4,10 @@ use crucible_foundation_shared::actor::{
 	manager::ActorManager,
 };
 
-use super::entry::{ActorSpawnedInGameBehavior, GameInitRegistry, GameSceneInitBehavior};
-
-// === Behaviors === //
+use super::entry::{ActorSpawnedInGameBehavior, GameSceneInitBehavior};
 
 pub fn register(bhv: &mut BehaviorRegistry) {
-	bhv.register_combined(make_actor_spawn_handler());
-}
-
-fn make_actor_spawn_handler() -> ActorSpawnedInGameBehavior {
-	ActorSpawnedInGameBehavior::new(|_bhv, s, on_spawn, scene| {
-		scope!(
-			use let s,
-			access _cx: Cx<&mut Collider>,
-			inject { mut collider_mgr as ColliderManager = scene },
-		);
-
-		query! {
-			for (_event in on_spawn; omut collider in GlobalTag::<Collider>) {
-				collider_mgr.register(&mut collider);
-			}
-		}
-	})
-}
-
-pub fn push_plugins(pm: &mut GameInitRegistry) {
-	pm.register(
+	bhv.register_cx(
 		[],
 		GameSceneInitBehavior::new(|_bhv, s, scene, _engine| {
 			scope!(use let s);
@@ -38,4 +16,20 @@ pub fn push_plugins(pm: &mut GameInitRegistry) {
 			scene.add(ActorManager::default());
 		}),
 	);
+
+	bhv.register(ActorSpawnedInGameBehavior::new(
+		|_bhv, s, on_spawn, scene| {
+			scope!(
+				use let s,
+				access _cx: Cx<&mut Collider>,
+				inject { mut collider_mgr as ColliderManager = scene },
+			);
+
+			query! {
+				for (_event in on_spawn; omut collider in GlobalTag::<Collider>) {
+					collider_mgr.register(&mut collider);
+				}
+			}
+		},
+	));
 }

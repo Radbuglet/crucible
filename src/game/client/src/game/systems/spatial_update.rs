@@ -1,4 +1,4 @@
-use bort::{cx, alias, query, scope, BehaviorRegistry, Cx, GlobalTag};
+use bort::{alias, cx, query, scope, BehaviorRegistry, Cx, GlobalTag};
 use crucible_foundation_shared::actor::{
 	collider::{Collider, ColliderManager, TrackedCollider},
 	spatial::Spatial,
@@ -13,7 +13,7 @@ alias! {
 }
 
 pub fn register(bhv: &mut BehaviorRegistry) {
-	bhv.register_combined(SpatialUpdateApplyUpdates::new(
+	bhv.register(SpatialUpdateApplyUpdates::new(
 		|_bhv, s, scene, on_spatial_moved| {
 			scope!(
 				use let s,

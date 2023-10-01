@@ -13,9 +13,7 @@ use crucible_foundation_shared::{
 };
 use typed_glam::glam::Vec3;
 
-use super::entry::{ActorSpawnedInGameBehavior, GameInitRegistry, GameSceneInitBehavior};
-
-// === Behaviors === //
+use super::entry::{ActorSpawnedInGameBehavior, GameSceneInitBehavior};
 
 alias! {
 	let asset_mgr: AssetManager;
@@ -24,32 +22,7 @@ alias! {
 }
 
 pub fn register(bhv: &mut BehaviorRegistry) {
-	bhv.register_combined(make_actor_spawn_handler());
-}
-
-fn make_actor_spawn_handler() -> ActorSpawnedInGameBehavior {
-	ActorSpawnedInGameBehavior::new(|_bhv, s, on_spawned, scene| {
-		scope! {
-			use let s,
-			access cx: Cx<&mut ActorMeshInstance>,
-			inject { mut mesh_manager = scene }
-		}
-
-		query! {
-			for (
-				_ev in on_spawned;
-				@me,
-				omut instance in GlobalTag::<ActorMeshInstance>,
-				slot spatial in GlobalTag::<Spatial>,
-			) {
-				mesh_manager.register_instance(&mut instance, Obj::from_raw_parts(me, spatial));
-			}
-		}
-	})
-}
-
-pub fn push_plugins(pm: &mut GameInitRegistry) {
-	pm.register(
+	bhv.register_cx(
 		[],
 		GameSceneInitBehavior::new(|_bhv, s, scene, engine| {
 			scope! {
@@ -122,4 +95,25 @@ pub fn push_plugins(pm: &mut GameInitRegistry) {
 			scene.add(registry);
 		}),
 	);
+
+	bhv.register(ActorSpawnedInGameBehavior::new(
+		|_bhv, s, on_spawned, scene| {
+			scope! {
+				use let s,
+				access cx: Cx<&mut ActorMeshInstance>,
+				inject { mut mesh_manager = scene }
+			}
+
+			query! {
+				for (
+					_ev in on_spawned;
+					@me,
+					omut instance in GlobalTag::<ActorMeshInstance>,
+					slot spatial in GlobalTag::<Spatial>,
+				) {
+					mesh_manager.register_instance(&mut instance, Obj::from_raw_parts(me, spatial));
+				}
+			}
+		},
+	));
 }

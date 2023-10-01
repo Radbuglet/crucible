@@ -212,7 +212,7 @@ dependencies = [
 [[package]]
 name = "bort"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/bort.git?rev=d325aee53fa0c19358071ff38d6deb6895bdb855#d325aee53fa0c19358071ff38d6deb6895bdb855"
+source = "git+https://github.com/Radbuglet/bort.git?rev=a41045693d08d3195d25ea76753d2afe05fdc6b2#a41045693d08d3195d25ea76753d2afe05fdc6b2"
 dependencies = [
  "cfgenius",
  "compost2",

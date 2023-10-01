@@ -337,10 +337,10 @@ alias! {
 }
 
 pub fn register(bhv: &mut BehaviorRegistry) {
-	bhv.register_combined(make_spawn_behavior())
-		.register_combined(make_input_behavior())
-		.register_combined(make_hud_render_behavior())
-		.register_combined(make_camera_behavior());
+	bhv.register(make_spawn_behavior())
+		.register(make_input_behavior())
+		.register(make_hud_render_behavior())
+		.register(make_camera_behavior());
 }
 
 fn make_spawn_behavior() -> ActorSpawnedInGameBehavior {

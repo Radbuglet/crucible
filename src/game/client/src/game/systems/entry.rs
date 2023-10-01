@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use bort::{
-	alias, cx, delegate, saddle_delegate, scope, BehaviorProvider, BehaviorRegistry, Cx, Entity,
-	OwnedEntity, Scope, VecEventList, VirtualTag,
+	alias, behavior_s, cx, scope, BehaviorRegistry, Cx, Entity, InitializerBehaviorList,
+	OwnedEntity, PartialEntity, Scope, VecEventList, VirtualTag,
 };
 use crucible_foundation_client::{
 	engine::{
@@ -30,7 +30,6 @@ use crucible_foundation_shared::{
 		manager::{ActorManager, ActorSpawned},
 		spatial::{Spatial, SpatialMoved},
 	},
-	bort::lifecycle::{LifecycleManager, PartialEntity},
 	humanoid::item::ItemMaterialRegistry,
 	math::{Aabb2, Aabb3, BlockFace, ChunkVec, WorldVec, WorldVecExt},
 	voxel::{
@@ -52,21 +51,29 @@ use crate::{
 
 // === Delegates === //
 
-saddle_delegate! {
+behavior_s! {
+	pub fn GameSceneInitBehavior(
+		scene: PartialEntity<'_>,
+		engine: Entity,
+	)
+	as list InitializerBehaviorList<Self>
+}
+
+behavior_s! {
 	pub fn ActorSpawnedInGameBehavior(
 		events: &mut VecEventList<ActorSpawned>,
 		engine: Entity,
 	)
 }
 
-saddle_delegate! {
+behavior_s! {
 	pub fn CameraProviderBehavior(
 		actor_tag: VirtualTag,
 		mgr: &mut CameraManager
 	)
 }
 
-saddle_delegate! {
+behavior_s! {
 	pub fn ActorInputBehavior(
 		scene: Entity,
 		actor_tag: VirtualTag,
@@ -74,15 +81,15 @@ saddle_delegate! {
 	)
 }
 
-saddle_delegate! {
+behavior_s! {
 	pub fn ActorPhysicsResetBehavior(actor_tag: VirtualTag)
 }
 
-saddle_delegate! {
+behavior_s! {
 	pub fn ActorPhysicsInfluenceBehavior(actor_tag: VirtualTag)
 }
 
-saddle_delegate! {
+behavior_s! {
 	pub fn ActorPhysicsApplyBehavior(
 		actor_tag: VirtualTag,
 		world: &WorldVoxelData,
@@ -91,40 +98,23 @@ saddle_delegate! {
 	)
 }
 
-saddle_delegate! {
+behavior_s! {
 	pub fn SpatialUpdateApplyConstraints(
 		scene: Entity,
 		on_spatial_moved: &VecEventList<SpatialMoved>,
 	)
 }
 
-saddle_delegate! {
+behavior_s! {
 	pub fn SpatialUpdateApplyUpdates(
 		scene: Entity,
 		on_spatial_moved: &VecEventList<SpatialMoved>,
 	)
 }
 
-saddle_delegate! {
+behavior_s! {
 	pub fn UiRenderHudBehavior(brush: &mut ImmBrush<'_>, screen_size: Vec2, scene: Entity)
 }
-
-// === GameInitManager === //
-
-scope! {
-	pub GameSceneInitScope;
-}
-
-delegate! {
-	pub fn GameSceneInitBehavior(
-		bhv: BehaviorProvider<'_>,
-		s: &mut GameSceneInitScope,
-		scene: PartialEntity<'_>,
-		engine: Entity,
-	)
-}
-
-pub type GameInitRegistry = LifecycleManager<GameSceneInitBehavior>;
 
 // === Behaviors === //
 
@@ -179,20 +169,12 @@ pub fn spawn_game_scene_root(
 		.with(make_scene_update_handler())
 		.with(make_scene_render_handler());
 
-	// Run external initializers
-	let pm = GameInitRegistry::new()
-		.with_many(super::actor_data::push_plugins)
-		.with_many(super::actor_rendering::push_plugins)
-		.with_many(super::core_rendering::push_plugins)
-		.with_many(super::item_data::push_plugins)
-		.with_many(super::voxel_data::push_plugins)
-		.with_many(super::voxel_rendering::push_plugins);
-
 	scope! {
 		use s, inject { ref bhv = engine }:
-		pm.execute(
-			|delegate, scene| delegate(
-				bhv.provider(),
+		bhv
+			.get::<GameSceneInitBehavior>()
+			.execute(|delegate, scene| delegate(
+				bhv,
 				s.decl_call(),
 				scene,
 				engine,
@@ -248,7 +230,7 @@ pub fn spawn_game_scene_root(
 			&mut on_inventory_changed,
 		);
 		actor_mgr.spawn(&mut on_spawned, player);
-		bhv.get::<ActorSpawnedInGameBehavior>()(s.decl_call(), &mut on_spawned, root.entity());
+		bhv.get::<ActorSpawnedInGameBehavior>()(bhv, s.decl_call(), &mut on_spawned, root.entity());
 	}
 
 	root
@@ -267,7 +249,7 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 
 		// Reset actor physics
 		scope! { use s:
-			bhv.get::<ActorPhysicsResetBehavior>()(s.decl_call(), actor_tag);
+			bhv.get::<ActorPhysicsResetBehavior>()(bhv, s.decl_call(), actor_tag);
 		}
 
 		// Process inputs
@@ -290,16 +272,17 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 			}
 
 			// Process inputs
-			bhv.get::<ActorInputBehavior>()(s.decl_call(), me, actor_tag, &input_mgr);
+			bhv.get::<ActorInputBehavior>()(bhv, s.decl_call(), me, actor_tag, &input_mgr);
 		}
 
 		// Allow actors to influence their own physics states
-		bhv.get::<ActorPhysicsInfluenceBehavior>()(s.decl_call(), actor_tag);
+		bhv.get::<ActorPhysicsInfluenceBehavior>()(bhv, s.decl_call(), actor_tag);
 
 		// Apply actor physical states
 		scope! { use s, inject { ref world_data = me, ref block_registry = me }:
 			let mut on_spatial_moved = VecEventList::new();
 			bhv.get::<ActorPhysicsApplyBehavior>()(
+				bhv,
 				s.decl_call(),
 				actor_tag,
 				world_data,
@@ -309,8 +292,8 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 		}
 
 		// Update spatials in response to this update
-		bhv.get::<SpatialUpdateApplyConstraints>()(s.decl_call(), me, &on_spatial_moved);
-		bhv.get::<SpatialUpdateApplyUpdates>()(s.decl_call(), me, &on_spatial_moved);
+		bhv.get::<SpatialUpdateApplyConstraints>()(bhv, s.decl_call(), me, &on_spatial_moved);
+		bhv.get::<SpatialUpdateApplyUpdates>()(bhv, s.decl_call(), me, &on_spatial_moved);
 	})
 }
 
@@ -373,6 +356,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 			// Determine the active camera
 			camera_mgr.unset();
 			bhv.get::<CameraProviderBehavior>()(
+				bhv,
 				s.decl_call(),
 				actor_tag,
 				camera_mgr,
@@ -391,7 +375,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					Aabb2::new(0.0, 0.0, viewport_size.x, viewport_size.y),
 				);
 
-			bhv.get::<UiRenderHudBehavior>()(s.decl_call(), &mut brush, viewport_size, me);
+			bhv.get::<UiRenderHudBehavior>()(bhv, s.decl_call(), &mut brush, viewport_size, me);
 		}
 
 		scope! {

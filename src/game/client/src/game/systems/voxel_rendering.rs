@@ -1,3 +1,5 @@
+use std::any::TypeId;
+
 use bort::{alias, scope, BehaviorRegistry};
 use crucible_foundation_client::{
 	engine::{
@@ -11,12 +13,10 @@ use crucible_foundation_client::{
 	},
 };
 use crucible_foundation_shared::voxel::data::BlockMaterialRegistry;
-use crucible_util::debug::{error::ResultExt, type_id::NamedTypeId};
+use crucible_util::debug::error::ResultExt;
 use typed_glam::glam::UVec2;
 
-use super::entry::{GameInitRegistry, GameSceneInitBehavior};
-
-// === Behaviors === //
+use super::entry::GameSceneInitBehavior;
 
 alias! {
 	let asset_mgr: AssetManager;
@@ -25,12 +25,8 @@ alias! {
 }
 
 pub fn register(bhv: &mut BehaviorRegistry) {
-	let _ = bhv;
-}
-
-pub fn push_plugins(pm: &mut GameInitRegistry) {
-	pm.register(
-		[NamedTypeId::of::<BlockMaterialRegistry>()],
+	bhv.register_cx(
+		[TypeId::of::<BlockMaterialRegistry>()],
 		GameSceneInitBehavior::new(|_bhv, s, scene, engine| {
 			scope!(
 				use let s,

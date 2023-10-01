@@ -6,16 +6,12 @@ use crucible_foundation_shared::voxel::{
 	loader::{LoadedChunk, WorldChunkFactory, WorldLoader},
 };
 
-use super::entry::{GameInitRegistry, GameSceneInitBehavior};
+use super::entry::GameSceneInitBehavior;
 
 // === Behaviors === //
 
 pub fn register(bhv: &mut BehaviorRegistry) {
-	let _ = bhv;
-}
-
-pub fn push_plugins(pm: &mut GameInitRegistry) {
-	pm.register(
+	bhv.register_cx(
 		[],
 		GameSceneInitBehavior::new(|_bhv, s, scene, _engine| {
 			scope!(use let s, access cx: Cx<&mut LoadedChunk, &mut ChunkVoxelData>);

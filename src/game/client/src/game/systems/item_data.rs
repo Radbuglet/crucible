@@ -1,16 +1,10 @@
-use bort::{delegate, scope, BehaviorProvider, BehaviorRegistry, Entity, OwnedEntity};
+use bort::{delegate, scope, BehaviorRegistry, Entity, OwnedEntity};
 use crucible_foundation_shared::{humanoid::item::ItemMaterialRegistry, math::Color4};
 
-use super::entry::{GameInitRegistry, GameSceneInitBehavior};
-
-// === Behaviors === //
+use super::entry::GameSceneInitBehavior;
 
 pub fn register(bhv: &mut BehaviorRegistry) {
-	let _ = bhv;
-}
-
-pub fn push_plugins(pm: &mut GameInitRegistry) {
-	pm.register(
+	bhv.register_cx(
 		[],
 		GameSceneInitBehavior::new(|_bhv, s, scene, _engine| {
 			scope!(use let s);
@@ -47,7 +41,7 @@ scope!(pub ItemStackInteractScope);
 
 delegate! {
 	pub fn ItemStackInteractHandler(
-		bhv: BehaviorProvider<'_>,
+		bhv: &BehaviorRegistry,
 		s: &mut ItemStackInteractScope,
 		actor: Entity,
 		scene: Entity,

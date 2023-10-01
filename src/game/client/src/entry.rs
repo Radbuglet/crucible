@@ -1,6 +1,6 @@
 use anyhow::Context;
 use bort::{
-	alias, cx, saddle_delegate, scope, storage, BehaviorRegistry, Cx, Entity, OwnedEntity, Scope,
+	alias, behavior_s, cx, scope, storage, BehaviorRegistry, Cx, Entity, OwnedEntity, Scope,
 };
 use crucible_foundation_client::engine::{
 	assets::AssetManager,
@@ -31,11 +31,11 @@ scope! {
 	pub SceneInitScope;
 }
 
-saddle_delegate! {
+behavior_s! {
 	pub fn SceneUpdateHandler(me: Entity, main_loop: &mut MainLoop)
 }
 
-saddle_delegate! {
+behavior_s! {
 	pub fn SceneRenderHandler(me: Entity, viewport: Entity, frame: &mut wgpu::SurfaceTexture)
 }
 
@@ -51,9 +51,7 @@ alias! {
 pub fn main_inner() -> anyhow::Result<()> {
 	// Create the behavior registry
 	let s = EngineEntryScope::new();
-	let bhv = BehaviorRegistry::new().with_many(crate::game::register);
-
-	// === Initialize the engine === //
+	let bhv = BehaviorRegistry::from_fn(crate::game::register);
 
 	// Create the event loop
 	let event_loop: EventLoop<WinitUserdata> = EventLoopBuilder::with_user_event().build();
@@ -159,7 +157,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 				// Update the current scene
 				let scene = scene_mgr.current();
 				scene.get_s::<SceneUpdateHandler>(cx)(
-					bhv.provider(),
+					bhv,
 					s.decl_call(),
 					scene,
 					main_loop,
@@ -215,7 +213,7 @@ pub fn main_inner() -> anyhow::Result<()> {
 				// Render the current scene
 				let scene = scene_mgr.current();
 				scene.get_s::<SceneRenderHandler>(cx)(
-					bhv.provider(),
+					bhv,
 					s.decl_call(),
 					scene,
 					viewport,
