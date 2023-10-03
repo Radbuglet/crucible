@@ -264,7 +264,7 @@ pub fn write_texture_data_raw(gfx: &GfxContext, texture: &wgpu::Texture, data: &
 
 			gfx.queue.write_texture(
 				wgpu::ImageCopyTexture {
-					texture: &texture,
+					texture,
 					mip_level: mip,
 					origin: wgpu::Origin3d {
 						x: 0,

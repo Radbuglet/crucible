@@ -1,7 +1,7 @@
-use std::any::type_name;
+use std::{any::type_name, hash::BuildHasher};
 
 use bort::{storage, CompRef, Entity, OwnedEntity};
-use crucible_util::lang::{polyfill::BuildHasherPoly, tuple::ToOwnedTupleEq};
+use crucible_util::lang::tuple::ToOwnedTupleEq;
 use hashbrown::{hash_map::RawEntryMut, HashMap};
 
 #[derive(Debug, Default)]
@@ -54,7 +54,7 @@ impl AssetManager {
 		let func = Self::closure_identifier::<L, R> as usize;
 
 		// Now, hash the combination of the function pointer and the arguments.
-		let hash = self.assets.hasher().p_hash_one(&(func, &args));
+		let hash = self.assets.hasher().hash_one((func, &args));
 
 		// Now, fetch the asset...
 		let entry = self.assets.raw_entry_mut().from_hash(hash, |candidate| {
@@ -70,8 +70,8 @@ impl AssetManager {
 
 			// See if the candidate has the appropriate arguments
 			let Some(candidate_args) = args_storage.try_get(candidate.args.entity()) else {
-					return false
-				};
+				return false;
+			};
 
 			// Finally, ensure that they are equal
 			args.is_eq_owned(&candidate_args)
@@ -114,7 +114,8 @@ impl AssetManager {
 		let res_ref = vals_storage.get(res_ent.entity());
 
 		// Insert it into the store
-		let RawEntryMut::Occupied(mut entry) = self.assets
+		let RawEntryMut::Occupied(mut entry) = self
+			.assets
 			.raw_entry_mut()
 			.from_hash(hash, |candidate| candidate.args.entity() == args_entity)
 		else {

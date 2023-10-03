@@ -241,7 +241,7 @@ impl ChunkVoxelDataMut<'_> {
 	}
 
 	pub fn load_blocks(&mut self, data: Option<Box<[Block; CHUNK_VOLUME as usize]>>) {
-		self.chunk_state.blocks = Some(data.unwrap_or_else(|| default_block_vector()));
+		self.chunk_state.blocks = Some(data.unwrap_or_else(default_block_vector));
 	}
 
 	pub fn blocks_mut(&mut self) -> Option<VoxelBlocksMut<'_>> {

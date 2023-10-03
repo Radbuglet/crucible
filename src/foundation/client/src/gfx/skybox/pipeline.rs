@@ -101,7 +101,7 @@ impl SkyboxUniforms {
 		let bind_group = SkyboxRenderingBindUniform {
 			uniforms: buffer.as_entire_buffer_binding().into(),
 			panorama,
-			panorama_sampler: &*SamplerAssetDescriptor::FILTER_CLAMP_EDGES.load(assets, gfx),
+			panorama_sampler: &SamplerAssetDescriptor::FILTER_CLAMP_EDGES.load(assets, gfx),
 		}
 		.load_instance(assets, gfx, &());
 

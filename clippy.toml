@@ -1,11 +1,11 @@
 disallowed-methods = [
-	# Bort
-	"bort::entity::Entity::get",
-	"bort::entity::Entity::get_mut",
-	"bort::entity::OwnedEntity::get",
-	"bort::entity::OwnedEntity::get_mut",
-	"bort::obj::Obj::get",
-	"bort::obj::Obj::get_mut",
-	"bort::obj::OwnedObj::get",
-	"bort::obj::OwnedObj::get_mut",
+	# # Bort
+	# "bort::entity::Entity::get",
+	# "bort::entity::Entity::get_mut",
+	# "bort::entity::OwnedEntity::get",
+	# "bort::entity::OwnedEntity::get_mut",
+	# "bort::obj::Obj::get",
+	# "bort::obj::Obj::get_mut",
+	# "bort::obj::OwnedObj::get",
+	# "bort::obj::OwnedObj::get_mut",
 ]

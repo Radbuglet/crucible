@@ -105,7 +105,7 @@ impl VertexBufferLayout<()> {
 }
 
 impl VertexBufferLayoutBuilder {
-	const OVERFLOW_ERR: &str = "attribute offset overflowed";
+	const OVERFLOW_ERR: &'static str = "attribute offset overflowed";
 
 	pub fn new() -> Self {
 		Self::default()

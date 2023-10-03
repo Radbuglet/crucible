@@ -130,7 +130,7 @@ impl LocalPlayer {
 
 			if bob_speed > 0.1 && kinematic.was_face_touching(BlockFace::NegativeY) {
 				self.view_bob += bob_speed;
-				self.view_bob = self.view_bob % TAU;
+				self.view_bob %= TAU;
 			} else {
 				let closest_origin = if (self.view_bob - PI).abs() < PI / 2.0 {
 					PI

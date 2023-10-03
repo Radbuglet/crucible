@@ -92,8 +92,8 @@ impl AtlasTexture {
 		let offset = free_tile * self.tile_size;
 
 		for layer in &mut self.atlas {
-			let factor_x = layer.width() as f64 / atlas_size.x as f64;
-			let factor_y = layer.height() as f64 / atlas_size.y as f64;
+			let factor_x = layer.width() as f64 / atlas_size.x;
+			let factor_y = layer.height() as f64 / atlas_size.y;
 
 			imageops::replace(
 				layer,
@@ -140,7 +140,7 @@ pub struct AtlasTextureGfx {
 
 impl AtlasTextureGfx {
 	pub fn new(gfx: &GfxContext, atlas: &AtlasTexture, label: Option<&str>) -> Self {
-		let tex_dim: UVec2 = atlas.atlas_size().into();
+		let tex_dim = atlas.atlas_size();
 		let texture = gfx.device.create_texture(&wgpu::TextureDescriptor {
 			label,
 			size: wgpu::Extent3d {
@@ -165,12 +165,12 @@ impl AtlasTextureGfx {
 	}
 
 	pub fn update(&mut self, gfx: &GfxContext, atlas: &AtlasTexture) {
-		let dim: UVec2 = atlas.atlas_size().into();
+		let dim = atlas.atlas_size();
 		debug_assert_eq!(dim, self.tex_dim);
 
 		let mut mips_data = Vec::new();
 		for layer in atlas.textures() {
-			mips_data.extend(bytemuck::cast_slice(&layer));
+			mips_data.extend(bytemuck::cast_slice(layer));
 		}
 
 		write_texture_data_raw(gfx, &self.texture, &mips_data);

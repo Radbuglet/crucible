@@ -32,8 +32,7 @@ impl Default for InputManager {
 impl InputManager {
 	pub fn handle_window_event(&mut self, event: &WindowEvent) {
 		fn set_state_in_map<K: Hash + Eq>(map: &mut FxHashMap<K, BoolAction>, key: K, value: bool) {
-			let action = map.entry(key).or_insert_with(Default::default);
-			action.set_state(value);
+			map.entry(key).or_default().set_state(value);
 		}
 
 		match event {
@@ -107,7 +106,7 @@ impl InputManager {
 		self.keys
 			.get(&keycode)
 			.map(Clone::clone)
-			.unwrap_or_else(Default::default)
+			.unwrap_or_default()
 	}
 
 	/// Gets a copy of the mouse button's state.
@@ -115,7 +114,7 @@ impl InputManager {
 		self.mouse_buttons
 			.get(&button)
 			.map(Clone::clone)
-			.unwrap_or_else(Default::default)
+			.unwrap_or_default()
 	}
 
 	/// Gets the position of the mouse in physical (i.e. display pixel) space. Returns `None` if the

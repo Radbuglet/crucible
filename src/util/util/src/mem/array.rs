@@ -115,7 +115,7 @@ pub fn arr_from_iter<T, I: IntoIterator<Item = T>, const N: usize>(iter: I) -> [
 }
 
 pub fn zip_arr<A, B, const N: usize>(a: [A; N], b: [B; N]) -> [(A, B); N] {
-	arr_from_iter(a.into_iter().zip(b.into_iter()))
+	arr_from_iter(a.into_iter().zip(b))
 }
 
 pub fn map_arr<A, B, F, const N: usize>(a: [A; N], f: F) -> [B; N]

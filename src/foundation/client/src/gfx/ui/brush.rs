@@ -219,7 +219,7 @@ impl ImmRendererInner {
 					return false;
 				};
 
-				config.is_eq_owned(&candidate_config)
+				config.is_eq_owned(candidate_config)
 			});
 
 		// Fill in the entry and return an ID

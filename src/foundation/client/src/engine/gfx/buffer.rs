@@ -149,7 +149,7 @@ impl DynamicBuffer {
 		}
 
 		// For the remaining chunks...
-		for chunk in remainder_data.chunks(self.chunk_size as usize) {
+		for chunk in remainder_data.chunks(self.chunk_size) {
 			// Acquire a buffer to store it.
 			let chunk_buf = self.chunk_pool.acquire(
 				gfx,
@@ -206,6 +206,10 @@ impl DynamicBuffer {
 		}
 	}
 
+	pub fn is_empty(&self) -> bool {
+		self.len() == 0
+	}
+
 	pub fn upload(&mut self, gfx: &GfxContext, cb: &mut wgpu::CommandEncoder) {
 		// Ensure that our buffer is big enough
 		self.ensure_appropriate_buffer(gfx);
@@ -218,7 +222,7 @@ impl DynamicBuffer {
 
 		for chunk in &self.written_chunks {
 			chunk.unmap();
-			cb.copy_buffer_to_buffer(&chunk, 0, &buffer, dst_offset, chunk_size);
+			cb.copy_buffer_to_buffer(chunk, 0, buffer, dst_offset, chunk_size);
 			dst_offset += chunk_size;
 		}
 	}

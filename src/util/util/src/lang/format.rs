@@ -1,4 +1,4 @@
-use std::{fmt, cell::Cell};
+use std::{cell::Cell, fmt};
 
 pub fn display_from_fn(
 	f: impl FnOnce(&mut fmt::Formatter<'_>) -> fmt::Result,

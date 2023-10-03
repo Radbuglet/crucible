@@ -1,7 +1,4 @@
-use std::{
-	hash::{self, Hasher},
-	ops::{Bound, RangeBounds},
-};
+use std::ops::{Bound, RangeBounds};
 
 use super::std_traits::OptionLike;
 
@@ -69,15 +66,3 @@ impl<T> BoundPoly for Bound<T> {
 		}
 	}
 }
-
-// === Hasher === //
-
-pub trait BuildHasherPoly: hash::BuildHasher {
-	fn p_hash_one<H: ?Sized + hash::Hash>(&self, target: &H) -> u64 {
-		let mut hasher = self.build_hasher();
-		target.hash(&mut hasher);
-		hasher.finish()
-	}
-}
-
-impl<T: ?Sized + hash::BuildHasher> BuildHasherPoly for T {}

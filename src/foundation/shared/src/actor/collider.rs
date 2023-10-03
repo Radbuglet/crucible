@@ -71,7 +71,7 @@ impl ColliderManager {
 	}
 
 	fn register_inner(&mut self, target_data: &mut CompMut<Collider>, chunk: IVec3) {
-		let colliders = self.chunks.entry(chunk).or_insert_with(Default::default);
+		let colliders = self.chunks.entry(chunk).or_default();
 		target_data.index = colliders.len();
 		colliders.push(CompMut::owner(target_data));
 	}

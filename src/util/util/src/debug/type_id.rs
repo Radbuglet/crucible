@@ -1,3 +1,5 @@
+#![allow(clippy::non_canonical_partial_ord_impl)] // Reason: false positive
+
 use std::{any::TypeId, borrow::Borrow, fmt};
 
 #[derive(Copy, Clone)]
