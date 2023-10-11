@@ -1,7 +1,7 @@
-pub mod actors;
-pub mod systems;
+pub mod base;
+pub mod content;
 
 pub fn register(bhv: &mut bort::BehaviorRegistry) {
-	bhv.register_many(actors::register)
-		.register_many(systems::register);
+	bhv.register_many(content::register)
+		.register_many(base::register);
 }

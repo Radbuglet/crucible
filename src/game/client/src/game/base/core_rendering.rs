@@ -6,7 +6,7 @@ use crucible_foundation_client::{
 use crucible_util::debug::error::ResultExt;
 use wgpu::util::DeviceExt;
 
-use super::entry::GameSceneInitBehavior;
+use super::behaviors::GameSceneInitBehavior;
 
 alias! {
 	let gfx: GfxContext;

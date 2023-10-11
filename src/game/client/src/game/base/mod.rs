@@ -1,5 +1,6 @@
 pub mod actor_data;
 pub mod actor_rendering;
+pub mod behaviors;
 pub mod core_rendering;
 pub mod entry;
 pub mod item_data;

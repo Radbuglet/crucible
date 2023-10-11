@@ -1,7 +1,7 @@
 use bort::{delegate, scope, BehaviorRegistry, Entity, OwnedEntity};
 use crucible_foundation_shared::{humanoid::item::ItemMaterialRegistry, math::Color4};
 
-use super::entry::GameSceneInitBehavior;
+use super::behaviors::GameSceneInitBehavior;
 
 pub fn register(bhv: &mut BehaviorRegistry) {
 	bhv.register_cx(

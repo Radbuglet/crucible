@@ -5,9 +5,7 @@ use crucible_foundation_shared::{
 	voxel::{collision::MaterialColliderDescriptor, data::ChunkVoxelData},
 };
 
-use super::entry::{ActorPhysicsApplyBehavior, ActorPhysicsResetBehavior};
-
-// === Behaviors === //
+use super::behaviors::{ActorPhysicsApplyBehavior, ActorPhysicsResetBehavior};
 
 pub fn register(bhv: &mut BehaviorRegistry) {
 	bhv.register(ActorPhysicsResetBehavior::new(|_bhv, s, actor_tag| {

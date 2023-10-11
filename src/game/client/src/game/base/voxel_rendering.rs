@@ -16,7 +16,7 @@ use crucible_foundation_shared::voxel::data::BlockMaterialRegistry;
 use crucible_util::debug::error::ResultExt;
 use typed_glam::glam::UVec2;
 
-use super::entry::GameSceneInitBehavior;
+use super::behaviors::GameSceneInitBehavior;
 
 alias! {
 	let asset_mgr: AssetManager;

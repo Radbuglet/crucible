@@ -22,7 +22,7 @@ use winit::{
 	window::{WindowBuilder, WindowId},
 };
 
-use crate::game::systems::entry::spawn_game_scene_root;
+use crate::game::base::entry::spawn_game_scene_root;
 
 // === Behaviors === //
 

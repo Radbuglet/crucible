@@ -4,9 +4,7 @@ use crucible_foundation_shared::actor::{
 	spatial::Spatial,
 };
 
-use super::entry::SpatialUpdateApplyUpdates;
-
-// === Behaviors === //
+use super::behaviors::SpatialUpdateApplyUpdates;
 
 alias! {
 	let collider_mgr: ColliderManager;

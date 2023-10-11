@@ -13,7 +13,7 @@ use crucible_foundation_shared::{
 };
 use typed_glam::glam::Vec3;
 
-use super::entry::{ActorSpawnedInGameBehavior, GameSceneInitBehavior};
+use super::behaviors::{ActorSpawnedInGameBehavior, GameSceneInitBehavior};
 
 alias! {
 	let asset_mgr: AssetManager;

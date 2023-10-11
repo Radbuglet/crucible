@@ -6,9 +6,7 @@ use crucible_foundation_shared::voxel::{
 	loader::{LoadedChunk, WorldChunkFactory, WorldLoader},
 };
 
-use super::entry::GameSceneInitBehavior;
-
-// === Behaviors === //
+use super::behaviors::GameSceneInitBehavior;
 
 pub fn register(bhv: &mut BehaviorRegistry) {
 	bhv.register_cx(

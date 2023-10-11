@@ -43,8 +43,8 @@ use typed_glam::{
 };
 use winit::event::{MouseButton, VirtualKeyCode};
 
-use crate::game::systems::{
-	entry::{
+use crate::game::base::{
+	behaviors::{
 		ActorInputBehavior, ActorSpawnedInGameBehavior, CameraProviderBehavior, UiRenderHudBehavior,
 	},
 	item_data::BaseClientItemDescriptor,

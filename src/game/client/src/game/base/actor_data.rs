@@ -4,7 +4,7 @@ use crucible_foundation_shared::actor::{
 	manager::ActorManager,
 };
 
-use super::entry::{ActorSpawnedInGameBehavior, GameSceneInitBehavior};
+use super::behaviors::{ActorSpawnedInGameBehavior, GameSceneInitBehavior};
 
 pub fn register(bhv: &mut BehaviorRegistry) {
 	bhv.register_cx(

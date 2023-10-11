@@ -1,9 +1,6 @@
 use std::time::Duration;
 
-use bort::{
-	alias, behavior_s, cx, scope, BehaviorRegistry, Cx, Entity, InitializerBehaviorList,
-	OwnedEntity, PartialEntity, Scope, VecEventList, VirtualTag,
-};
+use bort::{alias, cx, scope, BehaviorRegistry, Cx, Entity, OwnedEntity, Scope, VecEventList};
 use crucible_foundation_client::{
 	engine::{
 		assets::AssetManager,
@@ -17,7 +14,7 @@ use crucible_foundation_client::{
 			renderer::{ActorMeshLayer, ActorRenderer},
 		},
 		skybox::pipeline::{load_skybox_pipeline, SkyboxUniforms},
-		ui::brush::{ImmBrush, ImmRenderer},
+		ui::brush::ImmRenderer,
 		voxel::{
 			mesh::WorldVoxelMesh,
 			pipeline::{load_opaque_block_pipeline, VoxelUniforms},
@@ -25,11 +22,7 @@ use crucible_foundation_client::{
 	},
 };
 use crucible_foundation_shared::{
-	actor::{
-		collider::ColliderManager,
-		manager::{ActorManager, ActorSpawned},
-		spatial::{Spatial, SpatialMoved},
-	},
+	actor::{collider::ColliderManager, manager::ActorManager, spatial::Spatial},
 	humanoid::item::ItemMaterialRegistry,
 	math::{Aabb2, Aabb3, BlockFace, ChunkVec, WorldVec, WorldVecExt},
 	voxel::{
@@ -38,7 +31,7 @@ use crucible_foundation_shared::{
 	},
 };
 use crucible_util::mem::c_enum::CEnum;
-use typed_glam::glam::{Vec2, Vec4};
+use typed_glam::glam::Vec4;
 use winit::{
 	event::{MouseButton, VirtualKeyCode},
 	window::CursorGrabMode,
@@ -46,75 +39,15 @@ use winit::{
 
 use crate::{
 	entry::{SceneInitScope, SceneRenderHandler, SceneUpdateHandler},
-	game::actors::player::spawn_local_player,
+	game::content::player::spawn_local_player,
 };
 
-// === Delegates === //
-
-behavior_s! {
-	pub fn GameSceneInitBehavior(
-		scene: PartialEntity<'_>,
-		engine: Entity,
-	)
-	as list InitializerBehaviorList<Self>
-}
-
-behavior_s! {
-	pub fn ActorSpawnedInGameBehavior(
-		events: &mut VecEventList<ActorSpawned>,
-		engine: Entity,
-	)
-}
-
-behavior_s! {
-	pub fn CameraProviderBehavior(
-		actor_tag: VirtualTag,
-		mgr: &mut CameraManager
-	)
-}
-
-behavior_s! {
-	pub fn ActorInputBehavior(
-		scene: Entity,
-		actor_tag: VirtualTag,
-		input: &InputManager,
-	)
-}
-
-behavior_s! {
-	pub fn ActorPhysicsResetBehavior(actor_tag: VirtualTag)
-}
-
-behavior_s! {
-	pub fn ActorPhysicsInfluenceBehavior(actor_tag: VirtualTag)
-}
-
-behavior_s! {
-	pub fn ActorPhysicsApplyBehavior(
-		actor_tag: VirtualTag,
-		world: &WorldVoxelData,
-		registry: &BlockMaterialRegistry,
-		on_spatial_moved: &mut VecEventList<SpatialMoved>,
-	)
-}
-
-behavior_s! {
-	pub fn SpatialUpdateApplyConstraints(
-		scene: Entity,
-		on_spatial_moved: &VecEventList<SpatialMoved>,
-	)
-}
-
-behavior_s! {
-	pub fn SpatialUpdateApplyUpdates(
-		scene: Entity,
-		on_spatial_moved: &VecEventList<SpatialMoved>,
-	)
-}
-
-behavior_s! {
-	pub fn UiRenderHudBehavior(brush: &mut ImmBrush<'_>, screen_size: Vec2, scene: Entity)
-}
+use super::behaviors::{
+	ActorInputBehavior, ActorPhysicsApplyBehavior, ActorPhysicsInfluenceBehavior,
+	ActorPhysicsResetBehavior, ActorSpawnedInGameBehavior, CameraProviderBehavior,
+	GameSceneInitBehavior, SpatialUpdateApplyConstraints, SpatialUpdateApplyUpdates,
+	UiRenderHudBehavior,
+};
 
 // === Behaviors === //
 
