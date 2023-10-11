@@ -43,6 +43,10 @@ pub struct WorldVoxelData {
 impl WorldVoxelData {
 	// === Core Methods === //
 
+	#[clippy::dangerous(
+		direct_chunk_loading,
+		reason = "chunk loading should be handled by the dedicated chunk loading system"
+	)]
 	pub fn insert_chunk(
 		&mut self,
 		cx: VoxelDataWriteCx<'_>,
@@ -86,6 +90,10 @@ impl WorldVoxelData {
 		old
 	}
 
+	#[clippy::dangerous(
+		direct_chunk_loading,
+		reason = "chunk loading should be handled by the dedicated chunk loading system"
+	)]
 	pub fn remove_chunk(
 		&mut self,
 		cx: VoxelDataWriteCx<'_>,
@@ -126,6 +134,10 @@ impl WorldVoxelData {
 		}
 	}
 
+	#[clippy::dangerous(
+		direct_voxel_data_flush,
+		reason = "the world should only be flushed by its dedicated chunk update system"
+	)]
 	pub fn flush_dirty(&mut self, cx: VoxelDataWriteCx<'_>) -> Vec<Obj<ChunkVoxelData>> {
 		let dirty = mem::take(&mut self.dirty);
 

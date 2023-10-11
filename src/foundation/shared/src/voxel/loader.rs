@@ -77,6 +77,10 @@ impl WorldLoader {
 		}
 	}
 
+	#[clippy::dangerous(
+		direct_chunk_loading,
+		reason = "chunk loading should be handled by the dedicated chunk loading system"
+	)]
 	pub fn update_region<R: Region>(
 		&mut self,
 		cx: LoaderUpdateCx<'_>,
@@ -134,6 +138,10 @@ impl WorldLoader {
 		});
 	}
 
+	#[clippy::dangerous(
+		direct_chunk_loading,
+		reason = "chunk loading should be handled by the dedicated chunk loading system"
+	)]
 	pub fn load_region(
 		&mut self,
 		cx: LoaderUpdateCx<'_>,
@@ -143,6 +151,10 @@ impl WorldLoader {
 		self.update_region(cx!(cx), world, None, Some(new_region), false);
 	}
 
+	#[clippy::dangerous(
+		direct_chunk_loading,
+		reason = "chunk loading should be handled by the dedicated chunk loading system"
+	)]
 	pub fn unload_region(
 		&mut self,
 		cx: LoaderUpdateCx<'_>,
@@ -152,6 +164,10 @@ impl WorldLoader {
 		self.update_region(cx!(cx), world, Some(old_region), None, false);
 	}
 
+	#[clippy::dangerous(
+		direct_chunk_loading,
+		reason = "chunk loading should be handled by the dedicated chunk loading system"
+	)]
 	pub fn move_region<R: Region>(
 		&mut self,
 		cx: LoaderUpdateCx<'_>,
@@ -168,6 +184,7 @@ impl WorldLoader {
 		world: &mut WorldVoxelData,
 		new_region: impl Region,
 	) {
+		#[clippy::accept_danger(direct_chunk_loading, reason = "this use is safe")]
 		self.update_region(cx!(cx), world, None, Some(new_region), true);
 	}
 }

@@ -34,6 +34,7 @@ impl HealthState {
 		self.max_health
 	}
 
+	#[clippy::dangerous(direct_health_setting, reason = "send an event instead")]
 	pub fn set_health(
 		&mut self,
 		me: Entity,
@@ -48,6 +49,7 @@ impl HealthState {
 		}
 	}
 
+	#[clippy::dangerous(direct_health_setting, reason = "send an event instead")]
 	pub fn set_max_health(
 		&mut self,
 		me: Entity,

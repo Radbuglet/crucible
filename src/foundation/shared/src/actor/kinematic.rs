@@ -45,6 +45,10 @@ impl KinematicObject {
 		}
 	}
 
+	#[clippy::dangerous(
+		direct_kinematic_updating,
+		reason = "physics updating should be deferred to its dedicated system"
+	)]
 	pub fn apply_physics(
 		&mut self,
 		cx: CxApplyPhysics<'_>,

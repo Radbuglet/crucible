@@ -60,11 +60,13 @@ impl ColliderManager {
 		Self::default()
 	}
 
+	#[clippy::dangerous(direct_collider_access, reason = "spawn an actor instead")]
 	pub fn register(&mut self, target: &mut CompMut<Collider>) {
 		let chunk = collider_chunk_for_aabb(target.aabb);
 		self.register_inner(target, chunk);
 	}
 
+	#[clippy::dangerous(direct_collider_access, reason = "despawn an actor instead")]
 	pub fn unregister(&mut self, cx: ColliderMutateCx<'_>, target: &mut CompMut<Collider>) {
 		let chunk = collider_chunk_for_aabb(target.aabb);
 		self.unregister_inner(cx!(cx), target, chunk);
@@ -103,7 +105,8 @@ impl ColliderManager {
 		}
 	}
 
-	pub fn update_aabb_directly(
+	#[clippy::dangerous(direct_collider_access, reason = "update the spatial instead")]
+	pub fn update_aabb(
 		&mut self,
 		cx: ColliderMutateCx<'_>,
 		target: &mut CompMut<Collider>,

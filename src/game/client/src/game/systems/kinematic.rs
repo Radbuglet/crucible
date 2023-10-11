@@ -43,6 +43,7 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 					ref collider in GlobalTag::<Collider>,
 					mut kinematic in GlobalTag::<KinematicObject>,
 				) + [actor_tag] {
+					#[clippy::accept_danger(direct_kinematic_updating, reason = "this is that system!")]
 					kinematic.apply_physics(
 						cx!(cx),
 						world,

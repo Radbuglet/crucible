@@ -30,7 +30,9 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 				) {
 					let mut aabb = collider.aabb();
 					aabb.origin = spatial.pos() - tracked.origin_offset;
-					collider_mgr.update_aabb_directly(cx!(cx), &mut collider, aabb);
+
+					#[clippy::accept_danger(direct_collider_access)]
+					collider_mgr.update_aabb(cx!(cx), &mut collider, aabb);
 				}
 			}
 		},

@@ -111,6 +111,7 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 					omut instance in GlobalTag::<ActorMeshInstance>,
 					slot spatial in GlobalTag::<Spatial>,
 				) {
+					#[clippy::accept_danger(direct_mesh_management, reason = "this is that system!")]
 					mesh_manager.register_instance(&mut instance, Obj::from_raw_parts(me, spatial));
 				}
 			}

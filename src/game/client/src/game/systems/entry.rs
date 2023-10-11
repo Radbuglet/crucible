@@ -325,7 +325,10 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 				}:
 
 			// Consume flagged chunks
-			for dirty in world_data.flush_dirty(cx!(cx)) {
+			#[clippy::accept_danger(direct_voxel_data_flush, reason = "this is that system!")]
+			let dirty_chunks = world_data.flush_dirty(cx!(cx));
+
+			for dirty in dirty_chunks {
 				world_mesh.flag_chunk(dirty.entity());
 
 				for neighbor in BlockFace::variants() {

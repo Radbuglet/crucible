@@ -32,6 +32,7 @@ pub struct ActorMeshManager {
 }
 
 impl ActorMeshManager {
+	#[clippy::dangerous(direct_mesh_management, reason = "spawn the actor instead")]
 	pub fn register_instance(
 		&mut self,
 		target: &mut CompMut<ActorMeshInstance>,
@@ -42,6 +43,7 @@ impl ActorMeshManager {
 		meshes.push(target_spatial);
 	}
 
+	#[clippy::dangerous(direct_mesh_management, reason = "send an event instead")]
 	pub fn set_instance_mesh(
 		&mut self,
 		cx: ActorManagerUpdateCx<'_>,
@@ -61,6 +63,7 @@ impl ActorMeshManager {
 		meshes.push(target_spatial);
 	}
 
+	#[clippy::dangerous(direct_mesh_management, reason = "despawn the actor instead")]
 	pub fn unregister_instance(
 		&mut self,
 		cx: ActorManagerUpdateCx<'_>,

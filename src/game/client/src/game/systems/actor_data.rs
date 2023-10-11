@@ -27,6 +27,7 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 
 			query! {
 				for (_event in on_spawn; omut collider in GlobalTag::<Collider>) {
+					#[clippy::accept_danger(direct_collider_access, reason = "this is that system!")]
 					collider_mgr.register(&mut collider);
 				}
 			}

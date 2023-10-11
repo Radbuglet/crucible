@@ -27,6 +27,7 @@ impl InventoryData {
 		self.slots[index]
 	}
 
+	#[clippy::dangerous(direct_inventory_manipulation, reason = "send an event instead")]
 	pub fn set_slot(
 		&mut self,
 		me: Entity,
@@ -44,6 +45,7 @@ impl InventoryData {
 		}
 	}
 
+	#[clippy::dangerous(direct_inventory_manipulation, reason = "send an event instead")]
 	pub fn swap_slots(
 		&mut self,
 		me: Entity,
@@ -58,6 +60,7 @@ impl InventoryData {
 	}
 
 	#[must_use]
+	#[clippy::dangerous(direct_inventory_manipulation, reason = "send an event instead")]
 	pub fn insert_stack(
 		&mut self,
 		me: Entity,
@@ -79,6 +82,7 @@ impl InventoryData {
 		Some(stack)
 	}
 
+	#[clippy::dangerous(direct_inventory_manipulation, reason = "send an event instead")]
 	pub fn clear(
 		&mut self,
 		me: Entity,
