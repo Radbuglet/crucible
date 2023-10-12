@@ -1,4 +1,4 @@
-use bort::{alias, query, scope, BehaviorRegistry, Cx, GlobalTag, Obj, OwnedObj};
+use bort::{alias, cx, query, scope, BehaviorRegistry, Cx, GlobalTag, Obj, OwnedObj, VecEventList};
 use crucible_foundation_client::{
 	engine::{assets::AssetManager, io::gfx::GfxContext},
 	gfx::actor::{
@@ -8,12 +8,12 @@ use crucible_foundation_client::{
 	},
 };
 use crucible_foundation_shared::{
-	actor::spatial::Spatial,
+	actor::{manager::ActorSpawned, spatial::Spatial},
 	math::{Aabb3, Color3},
 };
 use typed_glam::glam::Vec3;
 
-use super::behaviors::{ActorSpawnedInGameBehavior, GameSceneInitBehavior};
+use super::behaviors::{InitGame, UpdateHandleEarlyEvents};
 
 alias! {
 	let asset_mgr: AssetManager;
@@ -24,7 +24,7 @@ alias! {
 pub fn register(bhv: &mut BehaviorRegistry) {
 	bhv.register_cx(
 		[],
-		GameSceneInitBehavior::new(|_bhv, s, scene, engine| {
+		InitGame::new(|_bhv, s, scene, engine| {
 			scope! {
 				use let s,
 				inject { mut asset_mgr = engine, ref gfx = engine }
@@ -96,25 +96,23 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 		}),
 	);
 
-	bhv.register(ActorSpawnedInGameBehavior::new(
-		|_bhv, s, on_spawned, scene| {
-			scope! {
-				use let s,
-				access cx: Cx<&mut ActorMeshInstance>,
-				inject { mut mesh_manager = scene }
-			}
+	bhv.register(UpdateHandleEarlyEvents::new(|_bhv, s, events, scene| {
+		scope! {
+			use let s,
+			access cx: Cx<&mut ActorMeshInstance, &VecEventList<ActorSpawned>>,
+			inject { mut mesh_manager = scene }
+		}
 
-			query! {
-				for (
-					_ev in on_spawned;
-					@me,
-					omut instance in GlobalTag::<ActorMeshInstance>,
-					slot spatial in GlobalTag::<Spatial>,
-				) {
-					#[clippy::accept_danger(direct_mesh_management, reason = "this is that system!")]
-					mesh_manager.register_instance(&mut instance, Obj::from_raw_parts(me, spatial));
-				}
+		query! {
+			for (
+				_ev in events.get_s::<ActorSpawned>(cx!(cx));
+				@me,
+				omut instance in GlobalTag::<ActorMeshInstance>,
+				slot spatial in GlobalTag::<Spatial>,
+			) {
+				#[clippy::accept_danger(direct_mesh_management, reason = "this is that system!")]
+				mesh_manager.register_instance(&mut instance, Obj::from_raw_parts(me, spatial));
 			}
-		},
-	));
+		}
+	}));
 }

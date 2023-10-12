@@ -5,10 +5,10 @@ use crucible_foundation_shared::{
 	voxel::{collision::MaterialColliderDescriptor, data::ChunkVoxelData},
 };
 
-use super::behaviors::{ActorPhysicsApplyBehavior, ActorPhysicsResetBehavior};
+use super::behaviors::{UpdateApplyPhysics, UpdateTickReset};
 
 pub fn register(bhv: &mut BehaviorRegistry) {
-	bhv.register(ActorPhysicsResetBehavior::new(|_bhv, s, actor_tag| {
+	bhv.register(UpdateTickReset::new(|_bhv, s, _events, actor_tag| {
 		scope!(use let s);
 
 		query! {
@@ -18,8 +18,8 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 		}
 	}));
 
-	bhv.register(ActorPhysicsApplyBehavior::new(
-		|_bhv, s, actor_tag, world, registry, on_spatial_moved| {
+	bhv.register(UpdateApplyPhysics::new(
+		|_bhv, s, actor_tag, world, registry| {
 			scope!(
 				use let s,
 				access cx: Cx<
@@ -37,7 +37,7 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 			query! {
 				for (
 					@_me,
-					omut spatial in GlobalTag::<Spatial>,
+					mut spatial in GlobalTag::<Spatial>,
 					ref collider in GlobalTag::<Collider>,
 					mut kinematic in GlobalTag::<KinematicObject>,
 				) + [actor_tag] {
@@ -46,9 +46,8 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 						cx!(cx),
 						world,
 						registry,
-						&mut spatial,
+						spatial,
 						collider,
-						on_spatial_moved,
 						delta,
 					);
 				}

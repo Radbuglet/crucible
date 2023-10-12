@@ -6,7 +6,7 @@ use crucible_foundation_client::{
 use crucible_util::debug::error::ResultExt;
 use wgpu::util::DeviceExt;
 
-use super::behaviors::GameSceneInitBehavior;
+use super::behaviors::InitGame;
 
 alias! {
 	let gfx: GfxContext;
@@ -16,7 +16,7 @@ alias! {
 pub fn register(bhv: &mut BehaviorRegistry) {
 	bhv.register_cx(
 		[],
-		GameSceneInitBehavior::new(|_bhv, s, scene, engine| {
+		InitGame::new(|_bhv, s, scene, engine| {
 			scope!(use let s, inject { mut asset_mgr = engine, ref gfx = engine });
 
 			// Create camera manager

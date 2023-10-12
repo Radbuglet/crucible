@@ -2,7 +2,7 @@ use std::f64::consts::{PI, TAU};
 
 use bort::{
 	alias, cx, query, scope, storage, BehaviorRegistry, Cx, EventTarget, GlobalTag,
-	HasGlobalManagedTag, OwnedEntity,
+	HasGlobalManagedTag, OwnedEntity, VecEventList,
 };
 
 use crucible_foundation_client::{
@@ -45,7 +45,8 @@ use winit::event::{MouseButton, VirtualKeyCode};
 
 use crate::game::base::{
 	behaviors::{
-		ActorInputBehavior, ActorSpawnedInGameBehavior, CameraProviderBehavior, UiRenderHudBehavior,
+		RenderDrawUiBehavior, RenderProvideCameraBehavior, UpdateHandleEarlyEvents,
+		UpdateHandleInputs,
 	},
 	item_data::BaseClientItemDescriptor,
 };
@@ -88,7 +89,7 @@ impl LocalPlayer {
 	}
 
 	pub fn eye_pos(&self, spatial: &Spatial) -> EntityVec {
-		spatial.pos() + EntityVec::Y * self.eye_height()
+		spatial.pos + EntityVec::Y * self.eye_height()
 	}
 
 	pub fn process_movement(&mut self, kinematic: &mut KinematicObject, inputs: LocalPlayerInputs) {
@@ -287,7 +288,12 @@ pub fn spawn_local_player(
 				inventory_slot: 0,
 			},
 		)
-		.with_tagged(GlobalTag::<Spatial>, Spatial::new(EntityVec::ZERO))
+		.with_tagged(
+			GlobalTag::<Spatial>,
+			Spatial {
+				pos: EntityVec::ZERO,
+			},
+		)
 		.with_tagged(GlobalTag::<HealthState>, HealthState::new(20.0, 20.0))
 		.with_tagged(GlobalTag::<InventoryData>, inventory)
 		// Physics
@@ -343,20 +349,20 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 		.register(make_camera_behavior());
 }
 
-fn make_spawn_behavior() -> ActorSpawnedInGameBehavior {
-	ActorSpawnedInGameBehavior::new(|_bhv, s, events, _scene| {
-		scope!(use let s);
+fn make_spawn_behavior() -> UpdateHandleEarlyEvents {
+	UpdateHandleEarlyEvents::new(|_bhv, s, events, _scene| {
+		scope!(use let s, access cx: Cx<&VecEventList<ActorSpawned>>);
 
 		query! {
-			for (_event in *events; @me) + [GlobalTag::<LocalPlayer>] {
+			for (_event in events.get_s::<ActorSpawned>(cx!(cx)); @me) + [GlobalTag::<LocalPlayer>] {
 				log::info!("Spawned player {me:?}");
 			}
 		}
 	})
 }
 
-fn make_input_behavior() -> ActorInputBehavior {
-	ActorInputBehavior::new(|_bhv, s, scene_root, actor_tag, inputs| {
+fn make_input_behavior() -> UpdateHandleInputs {
+	UpdateHandleInputs::new(|_bhv, s, _events, scene_root, actor_tag, inputs| {
 		scope!(
 			use let s,
 			access cx: Cx<
@@ -425,8 +431,8 @@ fn make_input_behavior() -> ActorInputBehavior {
 	})
 }
 
-fn make_hud_render_behavior() -> UiRenderHudBehavior {
-	UiRenderHudBehavior::new(|_bhv, s, brush, screen_size, scene| {
+fn make_hud_render_behavior() -> RenderDrawUiBehavior {
+	RenderDrawUiBehavior::new(|_bhv, s, brush, screen_size, scene| {
 		scope!(
 			use let s,
 			access cx: Cx<
@@ -515,8 +521,8 @@ fn make_hud_render_behavior() -> UiRenderHudBehavior {
 	})
 }
 
-fn make_camera_behavior() -> CameraProviderBehavior {
-	CameraProviderBehavior::new(|_bhv, s, actor_tag, camera_mgr| {
+fn make_camera_behavior() -> RenderProvideCameraBehavior {
+	RenderProvideCameraBehavior::new(|_bhv, s, actor_tag, camera_mgr| {
 		scope!(use let s, access _cx: Cx<&Spatial, &LocalPlayer>);
 
 		query! {

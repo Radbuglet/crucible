@@ -16,7 +16,7 @@ use crucible_foundation_shared::voxel::data::BlockMaterialRegistry;
 use crucible_util::debug::error::ResultExt;
 use typed_glam::glam::UVec2;
 
-use super::behaviors::GameSceneInitBehavior;
+use super::behaviors::InitGame;
 
 alias! {
 	let asset_mgr: AssetManager;
@@ -27,7 +27,7 @@ alias! {
 pub fn register(bhv: &mut BehaviorRegistry) {
 	bhv.register_cx(
 		[TypeId::of::<BlockMaterialRegistry>()],
-		GameSceneInitBehavior::new(|_bhv, s, scene, engine| {
+		InitGame::new(|_bhv, s, scene, engine| {
 			scope!(
 				use let s,
 				inject { mut asset_mgr = engine, ref gfx = engine, ref materials = scene },

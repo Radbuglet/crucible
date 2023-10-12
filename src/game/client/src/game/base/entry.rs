@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bort::{alias, cx, scope, BehaviorRegistry, Cx, Entity, OwnedEntity, Scope, VecEventList};
+use bort::{alias, cx, scope, BehaviorRegistry, Cx, Entity, EventGroup, OwnedEntity, Scope};
 use crucible_foundation_client::{
 	engine::{
 		assets::AssetManager,
@@ -43,10 +43,9 @@ use crate::{
 };
 
 use super::behaviors::{
-	ActorInputBehavior, ActorPhysicsApplyBehavior, ActorPhysicsInfluenceBehavior,
-	ActorPhysicsResetBehavior, ActorSpawnedInGameBehavior, CameraProviderBehavior,
-	GameSceneInitBehavior, SpatialUpdateApplyConstraints, SpatialUpdateApplyUpdates,
-	UiRenderHudBehavior,
+	InitGame, RenderDrawUiBehavior, RenderProvideCameraBehavior, UpdateApplyPhysics,
+	UpdateApplySpatialConstraints, UpdateHandleEarlyEvents, UpdateHandleInputs, UpdatePrePhysics,
+	UpdatePropagateSpatials, UpdateTickReset,
 };
 
 // === Behaviors === //
@@ -105,7 +104,7 @@ pub fn spawn_game_scene_root(
 	scope! {
 		use s, inject { ref bhv = engine }:
 		bhv
-			.get::<GameSceneInitBehavior>()
+			.get::<InitGame>()
 			.execute(|delegate, scene| delegate(
 				bhv,
 				s.decl_call(),
@@ -153,17 +152,17 @@ pub fn spawn_game_scene_root(
 		}
 
 		// Create player
-		let mut on_spawned = VecEventList::new();
+		let mut events = EventGroup::new();
 		let mut on_inventory_changed = |_, _, _| {};  // (no subscribers have been set up for this event)
 		let player = spawn_local_player(
 			actor_mgr,
 			mesh_registry,
 			item_registry,
-			&mut on_spawned,
+			&mut events,
 			&mut on_inventory_changed,
 		);
-		actor_mgr.spawn(&mut on_spawned, player);
-		bhv.get::<ActorSpawnedInGameBehavior>()(bhv, s.decl_call(), &mut on_spawned, root.entity());
+		actor_mgr.spawn(&mut events, player);
+		bhv.get::<UpdateHandleEarlyEvents>()(bhv, s.decl_call(), &mut events, root.entity());
 	}
 
 	root
@@ -180,9 +179,12 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 			let actor_tag = actor_mgr.tag();
 		}
 
+		// Define an event group
+		let mut events = EventGroup::new();
+
 		// Reset actor physics
 		scope! { use s:
-			bhv.get::<ActorPhysicsResetBehavior>()(bhv, s.decl_call(), actor_tag);
+			bhv.get::<UpdateTickReset>()(bhv, s.decl_call(), &mut events, actor_tag);
 		}
 
 		// Process inputs
@@ -205,28 +207,26 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 			}
 
 			// Process inputs
-			bhv.get::<ActorInputBehavior>()(bhv, s.decl_call(), me, actor_tag, &input_mgr);
+			bhv.get::<UpdateHandleInputs>()(bhv, s.decl_call(), &mut events, me, actor_tag, &input_mgr);
 		}
 
 		// Allow actors to influence their own physics states
-		bhv.get::<ActorPhysicsInfluenceBehavior>()(bhv, s.decl_call(), actor_tag);
+		bhv.get::<UpdatePrePhysics>()(bhv, s.decl_call(), &mut events, actor_tag);
 
 		// Apply actor physical states
 		scope! { use s, inject { ref world_data = me, ref block_registry = me }:
-			let mut on_spatial_moved = VecEventList::new();
-			bhv.get::<ActorPhysicsApplyBehavior>()(
+			bhv.get::<UpdateApplyPhysics>()(
 				bhv,
 				s.decl_call(),
 				actor_tag,
 				world_data,
 				block_registry,
-				&mut on_spatial_moved,
 			);
 		}
 
 		// Update spatials in response to this update
-		bhv.get::<SpatialUpdateApplyConstraints>()(bhv, s.decl_call(), me, &on_spatial_moved);
-		bhv.get::<SpatialUpdateApplyUpdates>()(bhv, s.decl_call(), me, &on_spatial_moved);
+		bhv.get::<UpdateApplySpatialConstraints>()(bhv, s.decl_call(), me);
+		bhv.get::<UpdatePropagateSpatials>()(bhv, s.decl_call(), me);
 	})
 }
 
@@ -291,7 +291,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 
 			// Determine the active camera
 			camera_mgr.unset();
-			bhv.get::<CameraProviderBehavior>()(
+			bhv.get::<RenderProvideCameraBehavior>()(
 				bhv,
 				s.decl_call(),
 				actor_tag,
@@ -311,7 +311,7 @@ fn make_scene_render_handler() -> SceneRenderHandler {
 					Aabb2::new(0.0, 0.0, viewport_size.x, viewport_size.y),
 				);
 
-			bhv.get::<UiRenderHudBehavior>()(bhv, s.decl_call(), &mut brush, viewport_size, me);
+			bhv.get::<RenderDrawUiBehavior>()(bhv, s.decl_call(), &mut brush, viewport_size, me);
 		}
 
 		scope! {

@@ -91,7 +91,7 @@ impl ActorMeshManager {
 			for instance in instances {
 				renderer.push_model_instance(
 					gfx,
-					Affine3A::from_translation(instance.get_s(cx!(cx)).pos().to_glam().as_vec3()),
+					Affine3A::from_translation(instance.get_s(cx!(cx)).pos.to_glam().as_vec3()),
 				);
 			}
 		}

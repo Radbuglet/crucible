@@ -9,10 +9,10 @@ use crate::{
 		data::{BlockMaterialRegistry, ChunkVoxelData, WorldVoxelData},
 	},
 };
-use bort::{cx, CompMut, Cx, EventTarget, HasGlobalManagedTag};
+use bort::{cx, Cx, HasGlobalManagedTag};
 use crucible_util::mem::c_enum::{CEnum, CEnumMap};
 
-use super::spatial::{Spatial, SpatialMoved};
+use super::spatial::Spatial;
 
 // === Context === //
 
@@ -54,9 +54,8 @@ impl KinematicObject {
 		cx: CxApplyPhysics<'_>,
 		world: &WorldVoxelData,
 		registry: &BlockMaterialRegistry,
-		spatial: &mut CompMut<Spatial>,
+		spatial: &mut Spatial,
 		collider: &Collider,
-		on_spatial_moved: &mut impl EventTarget<SpatialMoved, EntityVec>,
 		delta: f64,
 	) {
 		// Clip velocities and accelerations into obstructed faces
@@ -99,7 +98,7 @@ impl KinematicObject {
 			new_origin - aabb.origin
 		};
 
-		Spatial::set_pos(spatial, spatial.pos() + pos_delta, on_spatial_moved);
+		spatial.pos += pos_delta;
 	}
 
 	// === Collisions === //

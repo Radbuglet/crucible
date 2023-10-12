@@ -6,12 +6,12 @@ use crucible_foundation_shared::voxel::{
 	loader::{LoadedChunk, WorldChunkFactory, WorldLoader},
 };
 
-use super::behaviors::GameSceneInitBehavior;
+use super::behaviors::InitGame;
 
 pub fn register(bhv: &mut BehaviorRegistry) {
 	bhv.register_cx(
 		[],
-		GameSceneInitBehavior::new(|_bhv, s, scene, _engine| {
+		InitGame::new(|_bhv, s, scene, _engine| {
 			scope!(use let s, access cx: Cx<&mut LoadedChunk, &mut ChunkVoxelData>);
 
 			// Create the material registry

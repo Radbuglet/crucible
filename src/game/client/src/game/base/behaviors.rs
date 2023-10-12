@@ -1,38 +1,42 @@
-use bort::{behavior_s, Entity, InitializerBehaviorList, PartialEntity, VecEventList, VirtualTag};
+use bort::{
+	behavior_s, Entity, EventGroup, EventGroupMarkerWith, InitializerBehaviorList, PartialEntity,
+	VecEventList, VirtualTag,
+};
 use crucible_foundation_client::{
 	engine::{gfx::camera::CameraManager, io::input::InputManager},
 	gfx::ui::brush::ImmBrush,
 };
 use crucible_foundation_shared::{
-	actor::{manager::ActorSpawned, spatial::SpatialMoved},
+	actor::manager::ActorSpawned,
 	voxel::data::{BlockMaterialRegistry, WorldVoxelData},
 };
 use typed_glam::glam::Vec2;
 
+// === Event Groups === //
+
+pub type UpdateEventGroup = EventGroup<dyn UpdateEventGroupMarker>;
+
+pub trait UpdateEventGroupMarker: EventGroupMarkerWith<VecEventList<ActorSpawned>> {}
+
+// === Behaviors === //
+
+// Initialization
 behavior_s! {
-	pub fn GameSceneInitBehavior(
+	pub fn InitGame(
 		scene: PartialEntity<'_>,
 		engine: Entity,
 	)
 	as list InitializerBehaviorList<Self>
 }
 
+// Updating
 behavior_s! {
-	pub fn ActorSpawnedInGameBehavior(
-		events: &mut VecEventList<ActorSpawned>,
-		engine: Entity,
-	)
+	pub fn UpdateTickReset(events: &mut UpdateEventGroup, actor_tag: VirtualTag)
 }
 
 behavior_s! {
-	pub fn CameraProviderBehavior(
-		actor_tag: VirtualTag,
-		mgr: &mut CameraManager
-	)
-}
-
-behavior_s! {
-	pub fn ActorInputBehavior(
+	pub fn UpdateHandleInputs(
+		events: &mut UpdateEventGroup,
 		scene: Entity,
 		actor_tag: VirtualTag,
 		input: &InputManager,
@@ -40,36 +44,40 @@ behavior_s! {
 }
 
 behavior_s! {
-	pub fn ActorPhysicsResetBehavior(actor_tag: VirtualTag)
+	pub fn UpdatePrePhysics(events: &mut UpdateEventGroup, actor_tag: VirtualTag)
 }
 
 behavior_s! {
-	pub fn ActorPhysicsInfluenceBehavior(actor_tag: VirtualTag)
+	pub fn UpdateHandleEarlyEvents(
+		events: &mut UpdateEventGroup,
+		engine: Entity,
+	)
 }
 
 behavior_s! {
-	pub fn ActorPhysicsApplyBehavior(
+	pub fn UpdateApplyPhysics(
 		actor_tag: VirtualTag,
 		world: &WorldVoxelData,
 		registry: &BlockMaterialRegistry,
-		on_spatial_moved: &mut VecEventList<SpatialMoved>,
 	)
 }
 
 behavior_s! {
-	pub fn SpatialUpdateApplyConstraints(
-		scene: Entity,
-		on_spatial_moved: &VecEventList<SpatialMoved>,
+	pub fn UpdateApplySpatialConstraints(scene: Entity)
+}
+
+behavior_s! {
+	pub fn UpdatePropagateSpatials(scene: Entity)
+}
+
+// Rendering
+behavior_s! {
+	pub fn RenderProvideCameraBehavior(
+		actor_tag: VirtualTag,
+		mgr: &mut CameraManager
 	)
 }
 
 behavior_s! {
-	pub fn SpatialUpdateApplyUpdates(
-		scene: Entity,
-		on_spatial_moved: &VecEventList<SpatialMoved>,
-	)
-}
-
-behavior_s! {
-	pub fn UiRenderHudBehavior(brush: &mut ImmBrush<'_>, screen_size: Vec2, scene: Entity)
+	pub fn RenderDrawUiBehavior(brush: &mut ImmBrush<'_>, screen_size: Vec2, scene: Entity)
 }
