@@ -2,7 +2,7 @@ use bort::{alias, cx, query, scope, BehaviorRegistry, Cx, GlobalTag, Obj, OwnedO
 use crucible_foundation_client::{
 	engine::{assets::AssetManager, io::gfx::GfxContext},
 	gfx::actor::{
-		manager::{ActorMeshInstance, ActorMeshManager, MeshRegistry},
+		manager::{MeshInstance, MeshManager, MeshRegistry},
 		pipeline::ActorRenderingUniforms,
 		renderer::{ActorMeshLayer, ActorRenderer},
 	},
@@ -11,6 +11,7 @@ use crucible_foundation_shared::{
 	actor::{manager::ActorSpawned, spatial::Spatial},
 	math::{Aabb3, Color3},
 };
+use crucible_util::debug::type_id::NamedTypeId;
 use typed_glam::glam::Vec3;
 
 use super::behaviors::{InitGame, UpdateHandleEarlyEvents};
@@ -18,7 +19,7 @@ use super::behaviors::{InitGame, UpdateHandleEarlyEvents};
 alias! {
 	let asset_mgr: AssetManager;
 	let gfx: GfxContext;
-	let mesh_manager: ActorMeshManager;
+	let mesh_manager: MeshManager;
 }
 
 pub fn register(bhv: &mut BehaviorRegistry) {
@@ -32,7 +33,7 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 
 			scene.add(ActorRenderingUniforms::new(asset_mgr, gfx));
 			scene.add(ActorRenderer::default());
-			scene.add(ActorMeshManager::default());
+			scene.add(MeshManager::default());
 
 			// Create a registry for all our meshes
 			let mut registry = MeshRegistry::default();
@@ -96,23 +97,26 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 		}),
 	);
 
-	bhv.register(UpdateHandleEarlyEvents::new(|_bhv, s, events, scene| {
-		scope! {
-			use let s,
-			access cx: Cx<&mut ActorMeshInstance, &VecEventList<ActorSpawned>>,
-			inject { mut mesh_manager = scene }
-		}
-
-		query! {
-			for (
-				_ev in events.get_s::<ActorSpawned>(cx!(cx));
-				@me,
-				omut instance in GlobalTag::<ActorMeshInstance>,
-				slot spatial in GlobalTag::<Spatial>,
-			) {
-				#[clippy::accept_danger(direct_mesh_management, reason = "this is that system!")]
-				mesh_manager.register_instance(&mut instance, Obj::from_raw_parts(me, spatial));
+	bhv.register_cx(
+		([NamedTypeId::of::<ActorSpawned>()], []),
+		UpdateHandleEarlyEvents::new(|_bhv, s, events, scene| {
+			scope! {
+				use let s,
+				access cx: Cx<&mut MeshInstance, &VecEventList<ActorSpawned>>,
+				inject { mut mesh_manager = scene }
 			}
-		}
-	}));
+
+			query! {
+				for (
+					_ev in events.get_s::<ActorSpawned>(cx!(cx));
+					@me,
+					omut instance in GlobalTag::<MeshInstance>,
+					slot spatial in GlobalTag::<Spatial>,
+				) {
+					#[clippy::accept_danger(direct_mesh_management, reason = "this is that system!")]
+					mesh_manager.register_instance(&mut instance, Obj::from_raw_parts(me, spatial));
+				}
+			}
+		}),
+	);
 }

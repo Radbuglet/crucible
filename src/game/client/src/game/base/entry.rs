@@ -9,7 +9,7 @@ use crucible_foundation_client::{
 	},
 	gfx::{
 		actor::{
-			manager::{ActorMeshManager, MeshRegistry},
+			manager::{MeshManager, MeshRegistry},
 			pipeline::{load_opaque_actor_pipeline, ActorRenderingUniforms},
 			renderer::{ActorMeshLayer, ActorRenderer},
 		},
@@ -55,7 +55,7 @@ alias! {
 	let actor_mgr: ActorManager;
 	let actor_uniforms: ActorRenderingUniforms;
 	let actor_renderer: ActorRenderer;
-	let actor_mesh_manager: ActorMeshManager;
+	let actor_mesh_manager: MeshManager;
 	let atlas_texture: AtlasTexture;
 	let bhv: BehaviorRegistry;
 	let block_registry: BlockMaterialRegistry;
@@ -211,7 +211,7 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 		}
 
 		// Allow actors to influence their own physics states
-		bhv.get::<UpdatePrePhysics>()(bhv, s.decl_call(), &mut events, actor_tag);
+		bhv.get::<UpdatePrePhysics>()(bhv, s.decl_call(), &mut events, me);
 
 		// Apply actor physical states
 		scope! { use s, inject { ref world_data = me, ref block_registry = me }:

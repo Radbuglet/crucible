@@ -1,6 +1,6 @@
 use bort::{
-	behavior_s, Entity, EventGroup, EventGroupMarkerWith, InitializerBehaviorList, PartialEntity,
-	VecEventList, VirtualTag,
+	behavior_s, Entity, EventGroup, EventGroupMarkerWith, InitializerBehaviorList,
+	OrderedBehaviorList, PartialEntity, VecEventList, VirtualTag,
 };
 use crucible_foundation_client::{
 	engine::{gfx::camera::CameraManager, io::input::InputManager},
@@ -8,15 +8,20 @@ use crucible_foundation_client::{
 };
 use crucible_foundation_shared::{
 	actor::manager::ActorSpawned,
+	humanoid::health::HealthUpdated,
 	voxel::data::{BlockMaterialRegistry, WorldVoxelData},
 };
+use crucible_util::debug::type_id::NamedTypeId;
 use typed_glam::glam::Vec2;
 
 // === Event Groups === //
 
 pub type UpdateEventGroup = EventGroup<dyn UpdateEventGroupMarker>;
 
-pub trait UpdateEventGroupMarker: EventGroupMarkerWith<VecEventList<ActorSpawned>> {}
+pub trait UpdateEventGroupMarker:
+	EventGroupMarkerWith<VecEventList<ActorSpawned>> + EventGroupMarkerWith<VecEventList<HealthUpdated>>
+{
+}
 
 // === Behaviors === //
 
@@ -44,7 +49,7 @@ behavior_s! {
 }
 
 behavior_s! {
-	pub fn UpdatePrePhysics(events: &mut UpdateEventGroup, actor_tag: VirtualTag)
+	pub fn UpdatePrePhysics(events: &mut UpdateEventGroup, scene: Entity)
 }
 
 behavior_s! {
@@ -52,6 +57,7 @@ behavior_s! {
 		events: &mut UpdateEventGroup,
 		engine: Entity,
 	)
+	as list OrderedBehaviorList<Self, NamedTypeId>
 }
 
 behavior_s! {

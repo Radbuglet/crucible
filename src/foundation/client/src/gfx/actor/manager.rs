@@ -23,19 +23,19 @@ pub type MeshInfo = MaterialInfo<MeshMaterialMarker>;
 
 // === ActorMeshManager === //
 
-type ActorManagerUpdateCx<'a> = Cx<&'a mut ActorMeshInstance>;
-type ActorManagerRenderCx<'a> = Cx<&'a ActorMeshLayer, &'a Spatial>;
+type MeshManagerUpdateCx<'a> = Cx<&'a mut MeshInstance>;
+type MeshManagerRenderCx<'a> = Cx<&'a ActorMeshLayer, &'a Spatial>;
 
 #[derive(Debug, Default)]
-pub struct ActorMeshManager {
+pub struct MeshManager {
 	meshes: FxHashMap<Obj<ActorMeshLayer>, Vec<Obj<Spatial>>>,
 }
 
-impl ActorMeshManager {
+impl MeshManager {
 	#[clippy::dangerous(direct_mesh_management, reason = "spawn the actor instead")]
 	pub fn register_instance(
 		&mut self,
-		target: &mut CompMut<ActorMeshInstance>,
+		target: &mut CompMut<MeshInstance>,
 		target_spatial: Obj<Spatial>,
 	) {
 		let meshes = self.meshes.entry(target.mesh.obj()).or_default();
@@ -46,8 +46,8 @@ impl ActorMeshManager {
 	#[clippy::dangerous(direct_mesh_management, reason = "send an event instead")]
 	pub fn set_instance_mesh(
 		&mut self,
-		cx: ActorManagerUpdateCx<'_>,
-		target: &mut CompMut<ActorMeshInstance>,
+		cx: MeshManagerUpdateCx<'_>,
+		target: &mut CompMut<MeshInstance>,
 		target_spatial: Obj<Spatial>,
 		mesh: Obj<ActorMeshLayer>,
 	) {
@@ -66,21 +66,21 @@ impl ActorMeshManager {
 	#[clippy::dangerous(direct_mesh_management, reason = "despawn the actor instead")]
 	pub fn unregister_instance(
 		&mut self,
-		cx: ActorManagerUpdateCx<'_>,
-		target: &mut CompMut<ActorMeshInstance>,
+		cx: MeshManagerUpdateCx<'_>,
+		target: &mut CompMut<MeshInstance>,
 	) {
 		let meshes = self.meshes.get_mut(&target.mesh).unwrap();
 
 		meshes.swap_remove(target.mesh_index);
 
 		if let Some(moved) = meshes.get(target.mesh_index) {
-			moved.entity().get_mut_s::<ActorMeshInstance>(cx).mesh_index = target.mesh_index;
+			moved.entity().get_mut_s::<MeshInstance>(cx).mesh_index = target.mesh_index;
 		}
 	}
 
 	pub fn render(
 		&self,
-		cx: ActorManagerRenderCx<'_>,
+		cx: MeshManagerRenderCx<'_>,
 		gfx: &GfxContext,
 		renderer: &mut ActorRenderer,
 	) {
@@ -99,16 +99,16 @@ impl ActorMeshManager {
 }
 
 #[derive(Debug)]
-pub struct ActorMeshInstance {
+pub struct MeshInstance {
 	mesh: Entity,
 	mesh_index: usize,
 }
 
-impl HasGlobalManagedTag for ActorMeshInstance {
+impl HasGlobalManagedTag for MeshInstance {
 	type Component = Self;
 }
 
-impl ActorMeshInstance {
+impl MeshInstance {
 	pub fn new(mesh: Entity) -> Self {
 		Self {
 			mesh,

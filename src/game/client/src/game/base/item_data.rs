@@ -20,9 +20,7 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 					.with_debug_label("stone material descriptor")
 					.with(BaseClientItemDescriptor {
 						color: Color4::new(1.0, 0.0, 0.0, 1.0),
-					}), // .with(ItemStackInteractHandler::new(
-				    // 	|bhv, s, actor, scene, is_right_click| {},
-				    // )),
+					}),
 			);
 
 			scene.add(registry);
