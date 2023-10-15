@@ -8,7 +8,7 @@ use crucible_foundation_client::{
 };
 use crucible_foundation_shared::{
 	actor::manager::ActorSpawned,
-	humanoid::health::HealthUpdated,
+	humanoid::{health::HealthUpdated, inventory::InventoryUpdated},
 	voxel::data::{BlockMaterialRegistry, WorldVoxelData},
 };
 use crucible_util::debug::type_id::NamedTypeId;
@@ -16,10 +16,12 @@ use typed_glam::glam::Vec2;
 
 // === Event Groups === //
 
-pub type UpdateEventGroup = EventGroup<dyn UpdateEventGroupMarker>;
+pub type GameBaseEventGroup = EventGroup<dyn GameBaseEventGroupMarker>;
 
-pub trait UpdateEventGroupMarker:
-	EventGroupMarkerWith<VecEventList<ActorSpawned>> + EventGroupMarkerWith<VecEventList<HealthUpdated>>
+pub trait GameBaseEventGroupMarker:
+	EventGroupMarkerWith<VecEventList<ActorSpawned>>
+	+ EventGroupMarkerWith<VecEventList<HealthUpdated>>
+	+ EventGroupMarkerWith<VecEventList<InventoryUpdated>>
 {
 }
 
@@ -36,12 +38,12 @@ behavior_s! {
 
 // Updating
 behavior_s! {
-	pub fn UpdateTickReset(events: &mut UpdateEventGroup, actor_tag: VirtualTag)
+	pub fn UpdateTickReset(events: &mut GameBaseEventGroup, actor_tag: VirtualTag)
 }
 
 behavior_s! {
 	pub fn UpdateHandleInputs(
-		events: &mut UpdateEventGroup,
+		events: &mut GameBaseEventGroup,
 		scene: Entity,
 		actor_tag: VirtualTag,
 		input: &InputManager,
@@ -49,12 +51,12 @@ behavior_s! {
 }
 
 behavior_s! {
-	pub fn UpdatePrePhysics(events: &mut UpdateEventGroup, scene: Entity)
+	pub fn UpdatePrePhysics(events: &mut GameBaseEventGroup, scene: Entity)
 }
 
 behavior_s! {
 	pub fn UpdateHandleEarlyEvents(
-		events: &mut UpdateEventGroup,
+		events: &mut GameBaseEventGroup,
 		engine: Entity,
 	)
 	as list OrderedBehaviorList<Self, NamedTypeId>

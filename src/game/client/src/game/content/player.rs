@@ -21,7 +21,7 @@ use crucible_foundation_shared::{
 	},
 	humanoid::{
 		health::HealthState,
-		inventory::{InventoryData, InventoryUpdated},
+		inventory::InventoryData,
 		item::{ItemMaterialRegistry, ItemStackBase},
 	},
 	math::{
@@ -43,13 +43,24 @@ use typed_glam::{
 };
 use winit::event::{MouseButton, VirtualKeyCode};
 
-use crate::game::base::{
-	behaviors::{
-		RenderDrawUiBehavior, RenderProvideCameraBehavior, UpdateHandleEarlyEvents,
-		UpdateHandleInputs,
+use crate::game::{
+	base::{
+		behaviors::{
+			GameBaseEventGroup, RenderDrawUiBehavior, RenderProvideCameraBehavior,
+			UpdateHandleEarlyEvents, UpdateHandleInputs,
+		},
+		item_data::BaseClientItemDescriptor,
 	},
-	item_data::BaseClientItemDescriptor,
+	content::behaviors::GameContentEventGroup,
 };
+
+// === Events === //
+
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct PlayerInteractEvent {
+	pub is_right: bool,
+}
 
 // === Components === //
 
@@ -254,28 +265,23 @@ pub fn spawn_local_player(
 	actor_manager: &mut ActorManager,
 	mesh_registry: &MeshRegistry,
 	item_registry: &ItemMaterialRegistry,
-	on_actor_spawned: &mut impl EventTarget<ActorSpawned>,
-	on_inventory_changed: &mut impl EventTarget<InventoryUpdated>,
+	events: &mut GameBaseEventGroup,
 ) -> OwnedEntity {
 	// Create player
 	let player = OwnedEntity::new().with_debug_label("local player");
 
 	// Create inventory
 	let mut inventory = InventoryData::new(4 * 9);
-	let _ = inventory.insert_stack(
-		player.entity(),
-		on_inventory_changed,
-		actor_manager.spawn(
-			on_actor_spawned,
-			OwnedEntity::new()
-				.with_debug_label("stone item stack")
-				.with(ItemStackBase {
-					material: item_registry.find_by_name("crucible:stone").unwrap().id,
-					count: 1,
-				}),
-		),
-		|_, _| false,
+	let stack = actor_manager.spawn(
+		events,
+		OwnedEntity::new()
+			.with_debug_label("stone item stack")
+			.with(ItemStackBase {
+				material: item_registry.find_by_name("crucible:stone").unwrap().id,
+				count: 1,
+			}),
 	);
+	let _ = inventory.insert_stack(player.entity(), events, stack, |_, _| false);
 
 	// Attach components
 	player
@@ -358,12 +364,13 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 	);
 
 	bhv.register(UpdateHandleInputs::new(
-		|_bhv, s, _events, scene_root, actor_tag, inputs| {
+		|_bhv, s, events, scene_root, actor_tag, inputs| {
+			let events: &mut GameContentEventGroup = events.cast_mut();
+
 			scope!(
 				use let s,
 				access cx: Cx<
 					&mut LocalPlayer,
-					&Spatial,
 					&mut KinematicObject,
 					&mut ChunkVoxelData,
 					&MaterialColliderDescriptor,
@@ -373,8 +380,8 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 
 			query! {
 				for (
+					@me,
 					mut player in GlobalTag::<LocalPlayer>,
-					ref spatial in GlobalTag::<Spatial>,
 					mut kinematic in GlobalTag::<KinematicObject>,
 				) + [actor_tag] {
 					// Apply gravity
@@ -416,21 +423,11 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 
 					// Handle block placement
 					if inputs.button(MouseButton::Right).recently_pressed() {
-						player.place_block_where_looking(
-							// Context
-							cx!(cx),
-							world,
-							block_registry,
-							spatial,
-							// Distance
-							7.0,
-							// Material
-							block_registry.find_by_name("crucible:bricks").unwrap().id,
-						);
+						events.fire(me, PlayerInteractEvent { is_right: true });
 					}
 
 					if inputs.button(MouseButton::Left).recently_pressed() {
-						player.break_block_where_looking(cx!(cx), world, block_registry, spatial, 7.0);
+						events.fire(me, PlayerInteractEvent { is_right: false });
 					}
 				}
 			}

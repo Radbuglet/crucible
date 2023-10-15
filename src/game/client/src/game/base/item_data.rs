@@ -1,4 +1,4 @@
-use bort::{delegate, scope, BehaviorRegistry, Entity, OwnedEntity};
+use bort::{scope, BehaviorRegistry, OwnedEntity};
 use crucible_foundation_shared::{humanoid::item::ItemMaterialRegistry, math::Color4};
 
 use super::behaviors::InitGame;
@@ -33,16 +33,4 @@ pub fn register(bhv: &mut BehaviorRegistry) {
 #[derive(Debug, Clone)]
 pub struct BaseClientItemDescriptor {
 	pub color: Color4,
-}
-
-scope!(pub ItemStackInteractScope);
-
-delegate! {
-	pub fn ItemStackInteractHandler(
-		bhv: &BehaviorRegistry,
-		s: &mut ItemStackInteractScope,
-		actor: Entity,
-		scene: Entity,
-		is_right_click: bool,
-	)
 }

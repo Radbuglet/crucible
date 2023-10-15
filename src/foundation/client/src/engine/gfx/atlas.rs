@@ -164,6 +164,10 @@ impl AtlasTextureGfx {
 		}
 	}
 
+	#[clippy::dangerous(
+		manual_atlas_updating,
+		reason = "atlases should be told to update via an event"
+	)]
 	pub fn update(&mut self, gfx: &GfxContext, atlas: &AtlasTexture) {
 		let dim = atlas.atlas_size();
 		debug_assert_eq!(dim, self.tex_dim);

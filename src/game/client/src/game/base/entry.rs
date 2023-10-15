@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bort::{alias, cx, scope, BehaviorRegistry, Cx, Entity, EventGroup, OwnedEntity, Scope};
+use bort::{alias, cx, scope, BehaviorRegistry, Cx, Entity, OwnedEntity, Scope};
 use crucible_foundation_client::{
 	engine::{
 		assets::AssetManager,
@@ -23,7 +23,10 @@ use crucible_foundation_client::{
 };
 use crucible_foundation_shared::{
 	actor::{collider::ColliderManager, manager::ActorManager, spatial::Spatial},
-	humanoid::item::ItemMaterialRegistry,
+	humanoid::{
+		inventory::InventoryData,
+		item::{ItemMaterialRegistry, ItemStackBase},
+	},
 	math::{Aabb2, Aabb3, BlockFace, ChunkVec, WorldVec, WorldVecExt},
 	voxel::{
 		data::{Block, BlockMaterialRegistry, BlockVoxelPointer, ChunkVoxelData, WorldVoxelData},
@@ -39,7 +42,7 @@ use winit::{
 
 use crate::{
 	entry::{SceneInitScope, SceneRenderHandler, SceneUpdateHandler},
-	game::content::player::spawn_local_player,
+	game::{base::behaviors::GameBaseEventGroup, content::player::spawn_local_player},
 };
 
 use super::behaviors::{
@@ -60,6 +63,7 @@ alias! {
 	let bhv: BehaviorRegistry;
 	let block_registry: BlockMaterialRegistry;
 	let camera_mgr: CameraManager;
+	let game_events: GameBaseEventGroup;
 	let gfx: GfxContext;
 	let input_mgr: InputManager;
 	let item_registry: ItemMaterialRegistry;
@@ -98,6 +102,7 @@ pub fn spawn_game_scene_root(
 	let root = OwnedEntity::new()
 		.with_debug_label("game scene root")
 		.with(GameSceneRoot { engine, viewport })
+		.with(GameBaseEventGroup::new())
 		.with(make_scene_update_handler())
 		.with(make_scene_render_handler());
 
@@ -118,12 +123,13 @@ pub fn spawn_game_scene_root(
 	// Setup initial scene
 	scope! {
 		use s,
-			access cx: Cx<&mut LoadedChunk, &mut ChunkVoxelData>,
+			access cx: Cx<&mut LoadedChunk, &mut ChunkVoxelData, &mut InventoryData>,
 			inject {
 				mut actor_mgr = root,
 				ref bhv = engine,
 				mut world_loader = root,
 				mut world_data = root,
+				mut game_events = root,
 				ref block_registry = root,
 				ref mesh_registry = root,
 				ref item_registry = root,
@@ -152,17 +158,27 @@ pub fn spawn_game_scene_root(
 		}
 
 		// Create player
-		let mut events = EventGroup::new();
-		let mut on_inventory_changed = |_, _, _| {};  // (no subscribers have been set up for this event)
 		let player = spawn_local_player(
 			actor_mgr,
 			mesh_registry,
 			item_registry,
-			&mut events,
-			&mut on_inventory_changed,
+			game_events,
 		);
-		actor_mgr.spawn(&mut events, player);
-		bhv.get::<UpdateHandleEarlyEvents>()(bhv, s.decl_call(), &mut events, root.entity());
+
+		let stack = actor_mgr.spawn(game_events, OwnedEntity::new()
+			.with_debug_label("bricks item stack")
+			.with(ItemStackBase {
+				material: item_registry.find_by_name("crucible:bricks").unwrap().id,
+				count: 1,
+			}));
+
+		let _ = player.get_mut_s::<InventoryData>(cx!(cx)).insert_stack(
+			player.entity(),
+			game_events,
+			stack,
+			|_, _| false,
+		);
+		actor_mgr.spawn(game_events, player);
 	}
 
 	root
@@ -179,17 +195,18 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 			let actor_tag = actor_mgr.tag();
 		}
 
-		// Define an event group
-		let mut events = EventGroup::new();
-
 		// Reset actor physics
-		scope! { use s:
-			bhv.get::<UpdateTickReset>()(bhv, s.decl_call(), &mut events, actor_tag);
+		scope! { use s, inject { mut game_events = me }:
+			bhv.get::<UpdateTickReset>()(bhv, s.decl_call(), game_events, actor_tag);
 		}
 
 		// Process inputs
 		scope! {
-			use s, inject { ref viewport_data = main_viewport, ref input_mgr = main_viewport }:
+			use s, inject {
+				ref viewport_data = main_viewport,
+				ref input_mgr = main_viewport,
+				mut game_events = me
+			}:
 			// Handle mouse lock
 			if input_mgr.button(MouseButton::Left).recently_pressed() {
 				viewport_data.window().set_cursor_visible(false);
@@ -207,11 +224,21 @@ fn make_scene_update_handler() -> SceneUpdateHandler {
 			}
 
 			// Process inputs
-			bhv.get::<UpdateHandleInputs>()(bhv, s.decl_call(), &mut events, me, actor_tag, &input_mgr);
+			bhv.get::<UpdateHandleInputs>()(bhv, s.decl_call(), game_events, me, actor_tag, &input_mgr);
 		}
 
-		// Allow actors to influence their own physics states
-		bhv.get::<UpdatePrePhysics>()(bhv, s.decl_call(), &mut events, me);
+		scope! {
+			use s, inject { mut game_events = me }:
+
+			// Allow actors to influence their own physics states
+			bhv.get::<UpdatePrePhysics>()(bhv, s.decl_call(), game_events, me);
+
+			// Handle the generated events
+			bhv.get::<UpdateHandleEarlyEvents>()(bhv, s.decl_call(), game_events, me);
+
+			// Clear the events
+			*game_events = GameBaseEventGroup::new();
+		}
 
 		// Apply actor physical states
 		scope! { use s, inject { ref world_data = me, ref block_registry = me }:
