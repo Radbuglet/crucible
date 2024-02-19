@@ -1,0 +1,11 @@
+[package]
+name = "crucible-util"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.79"
+backtrace = "0.3.69"
+log = "0.4.20"
+path-clean = "1.0.1"
+tokio = { version = "1.36.0", features = ["fs"] }

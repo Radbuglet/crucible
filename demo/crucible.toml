@@ -1,0 +1,7 @@
+# Hello!
+
+[bin]
+server = "server.wasm"
+client = "server.wasm"
+
+[res]
