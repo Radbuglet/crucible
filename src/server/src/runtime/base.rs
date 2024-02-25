@@ -1,15 +1,17 @@
-use crt_marshal_host::CtxHasMainMemory;
+use crt_marshal_host::WasmPtr;
 
 pub struct RuntimeContext {
     pub wasi: wasmtime_wasi::WasiCtx,
     pub memory: Option<wasmtime::Memory>,
+    pub guest_alloc: Option<crt_marshal_host::MarshaledTypedFunc<(u32, u32), WasmPtr<()>>>,
 }
 
-impl CtxHasMainMemory for RuntimeContext {
-    fn extract_main_memory<'a>(
-        caller: &'a mut wasmtime::Caller<'_, Self>,
-    ) -> (&'a mut [u8], &'a mut Self) {
-        let memory = caller.data().memory.unwrap();
-        memory.data_and_store_mut(&mut *caller)
+impl crt_marshal_host::StoreHasMemory for RuntimeContext {
+    fn main_memory(&self) -> wasmtime::Memory {
+        self.memory.unwrap()
+    }
+
+    fn alloc_func(&self) -> crt_marshal_host::MarshaledTypedFunc<(u32, u32), WasmPtr<()>> {
+        self.guest_alloc.unwrap()
     }
 }

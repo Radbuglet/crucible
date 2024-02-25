@@ -39,6 +39,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
+
+[[package]]
 name = "ambient-authority"
 version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -125,10 +131,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "aunty"
+version = "0.1.0"
+source = "git+https://github.com/Radbuglet/aunty.git?rev=b473aadd44bdd64d94b1378e7da7f2c959f7ef25#b473aadd44bdd64d94b1378e7da7f2c959f7ef25"
+dependencies = [
+ "autoken",
+ "derive-where",
+ "hashbrown 0.14.3",
+ "rustc-hash",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
+
+[[package]]
+name = "autoken"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96aa6849429e318e327803767379c98e405fc0b952789d72340fcc054bd462d7"
+dependencies = [
+ "semver",
+]
 
 [[package]]
 name = "backtrace"
@@ -528,6 +554,7 @@ checksum = "248e3bacc7dc6baa3b21e405ee045c3047101a49145e7e9eca583ab4c2ca5345"
 [[package]]
 name = "crt-marshal"
 version = "0.1.0"
+source = "git+https://github.com/Radbuglet/crucible-rt.git?rev=88c6068c74d2e820037c253c8277c1233164b92b#88c6068c74d2e820037c253c8277c1233164b92b"
 dependencies = [
  "bytemuck",
  "wasmtime",
@@ -536,6 +563,7 @@ dependencies = [
 [[package]]
 name = "crt-marshal-host"
 version = "0.1.0"
+source = "git+https://github.com/Radbuglet/crucible-rt.git?rev=88c6068c74d2e820037c253c8277c1233164b92b#88c6068c74d2e820037c253c8277c1233164b92b"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -547,7 +575,9 @@ dependencies = [
 name = "crucible"
 version = "0.1.0"
 dependencies = [
+ "aunty",
  "crt-marshal",
+ "semver",
 ]
 
 [[package]]
@@ -595,6 +625,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef552e6f588e446098f6ba40d89ac146c8c7b64aade83c051ee00bb5d2bc18d"
 dependencies = [
  "uuid",
+]
+
+[[package]]
+name = "derive-where"
+version = "1.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62d671cc41a825ebabc75757b62d3d168c577f9149b2d49ece1dad1f72119d25"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -870,6 +911,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290f1a1d9242c78d09ce40a5e87e7554ee637af1351968159f4952f028f75604"
 dependencies = [
  "ahash",
+ "allocator-api2",
 ]
 
 [[package]]
@@ -1392,9 +1434,9 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "semver"
-version = "1.0.21"
+version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b97ed7a9823b74f99c7742f5336af7be5ecd3eeafcb1507d1fa93347b1d589b0"
+checksum = "92d43fe69e652f3df9bdc2b85b2854a0825b86e4fb76bc44d945137d053639ca"
 
 [[package]]
 name = "serde"

@@ -1,6 +1,6 @@
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
-use crt_marshal_host::{bind_to_linker, MemoryRead, WasmSlice, WasmStr};
+use crt_marshal_host::{bind_to_linker, ContextMemoryExt, MarshaledTypedFunc, MemoryRead, WasmStr};
 use crucible_server::runtime::base::RuntimeContext;
 use crucible_util::lang::error::{scope_err, tokio_read_file_anyhow, MultiError};
 use serde::Deserialize;
@@ -111,18 +111,19 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
         &mut linker,
         "crucible0",
         "get_rt_mode",
-        move |_cx: &mut RuntimeContext, _mem: &mut [u8]| Ok((1,)),
+        move |_cx: wasmtime::Caller<'_, _>| Ok((1,)),
     )?;
 
     bind_to_linker(
         &mut linker,
         "crucible0",
-        "test_payload",
-        move |_cx: &mut RuntimeContext, mem: &mut [u8], arg: WasmSlice<WasmStr>| {
-            for &str in mem.load_slice(arg)? {
-                log::info!("{}", mem.load_str(str)?);
-            }
-            Ok(())
+        "get_api_version",
+        move |mut cx: wasmtime::Caller<'_, RuntimeContext>, api_name: WasmStr| {
+            let (mem, _) = cx.main_memory();
+            let api_name = mem.load_str(api_name)?;
+            log::info!("{api_name}");
+
+            cx.alloc_str("0.1.0")
         },
     )?;
 
@@ -135,7 +136,14 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
         .inherit_stdio()
         .build();
 
-    let mut store = wasmtime::Store::new(&engine, RuntimeContext { wasi, memory: None });
+    let mut store = wasmtime::Store::new(
+        &engine,
+        RuntimeContext {
+            wasi,
+            memory: None,
+            guest_alloc: None,
+        },
+    );
     let instance = linker
         .instantiate(&mut store, &server_mod)
         .context("failed to instantiate server WASM module")?;
@@ -147,6 +155,12 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
             .get_memory(&mut store, "memory")
             .context("failed to get main memory of server WASM module")?,
     );
+
+    store.data_mut().guest_alloc = Some(MarshaledTypedFunc(
+        instance
+            .get_typed_func(&mut store, "host_alloc")
+            .context("failed to get `host_alloc` export")?,
+    ));
 
     instance
         .get_typed_func::<(), ()>(&mut store, "_start")
