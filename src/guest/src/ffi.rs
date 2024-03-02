@@ -1,6 +1,6 @@
 use std::alloc::Layout;
 
-use crt_marshal::WasmStr;
+use crt_marshal::{WasmFuncOnGuest, WasmPtr, WasmStr, ZstFn};
 
 // === Allocator Entry === //
 
@@ -44,6 +44,31 @@ pub fn get_rt_mode() -> RtMode {
 }
 
 // === Reloads === //
+
+pub fn set_reload_handler<T, F>(args: T, handler: F)
+where
+    T: 'static + Send + Sync,
+    F: for<'a> ZstFn<(&'a T, String), Output = ()>,
+{
+    crt_marshal::generate_guest_ffi! {
+        pub fn "crucible0".set_reload_handler(
+            args: WasmPtr<()>,
+            handler: WasmFuncOnGuest<(WasmPtr<()>, WasmStr), ()>,
+        );
+    }
+
+    unsafe {
+        let _ = handler;
+        let value = Box::into_raw(Box::new(args));
+
+        set_reload_handler(
+            WasmPtr::new_guest(value.cast()),
+            WasmFuncOnGuest::new_guest(|(args, data): (WasmPtr<()>, WasmStr)| {
+                F::call_static((&*args.into_guest().cast::<T>(), data.into_guest_string()))
+            }),
+        )
+    }
+}
 
 pub fn write_reload_message(data: &[u8]) {
     todo!();

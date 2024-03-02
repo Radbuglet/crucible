@@ -1,6 +1,8 @@
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
-use crt_marshal_host::{bind_to_linker, ContextMemoryExt, MarshaledTypedFunc, MemoryRead, WasmStr};
+use crt_marshal_host::{
+    bind_to_linker, ContextMemoryExt, MemoryRead, WasmFuncOnHost, WasmPtr, WasmStr,
+};
 use crucible_server::runtime::base::RuntimeContext;
 use crucible_util::lang::error::{scope_err, tokio_read_file_anyhow, MultiError};
 use serde::Deserialize;
@@ -127,6 +129,19 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
         },
     )?;
 
+    bind_to_linker(
+        &mut linker,
+        "crucible0",
+        "set_reload_handler",
+        |mut cx: wasmtime::Caller<'_, RuntimeContext>,
+         data: WasmPtr<()>,
+         cb: WasmFuncOnHost<(WasmPtr<()>, WasmStr), ()>| {
+            let str = cx.alloc_str("hello world!")?;
+            cb.call(cx, (data, str))?;
+            Ok(())
+        },
+    )?;
+
     wasmtime_wasi::add_to_linker(&mut linker, |c| &mut c.wasi)?;
     // linker.define_unknown_imports_as_traps(&server_mod)?;
 
@@ -156,7 +171,7 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
             .context("failed to get main memory of server WASM module")?,
     );
 
-    store.data_mut().guest_alloc = Some(MarshaledTypedFunc(
+    store.data_mut().guest_alloc = Some(WasmFuncOnHost(
         instance
             .get_typed_func(&mut store, "host_alloc")
             .context("failed to get `host_alloc` export")?,
