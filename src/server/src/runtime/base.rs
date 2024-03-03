@@ -4,7 +4,7 @@ pub struct RuntimeContext {
     pub wasi: wasmtime_wasi::WasiCtx,
     pub memory: Option<wasmtime::Memory>,
     pub function_table: Option<wasmtime::Table>,
-    pub guest_alloc: Option<crt_marshal_host::WasmFuncOnHost<(u32, u32), (WasmPtr<()>,)>>,
+    pub guest_alloc: Option<crt_marshal_host::WasmFuncOnHost<(u32, u32), WasmPtr<()>>>,
 }
 
 impl crt_marshal_host::StoreHasMemory for RuntimeContext {
@@ -12,7 +12,7 @@ impl crt_marshal_host::StoreHasMemory for RuntimeContext {
         self.memory.unwrap()
     }
 
-    fn alloc_func(&self) -> crt_marshal_host::WasmFuncOnHost<(u32, u32), (WasmPtr<()>,)> {
+    fn alloc_func(&self) -> crt_marshal_host::WasmFuncOnHost<(u32, u32), WasmPtr<()>> {
         self.guest_alloc.unwrap()
     }
 }

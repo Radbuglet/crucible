@@ -53,7 +53,7 @@ where
     crt_marshal::generate_guest_ffi! {
         pub fn "crucible0".set_reload_handler(
             args: WasmPtr<()>,
-            handler: WasmFuncOnGuest<(WasmPtr<()>, WasmStr), ()>,
+            handler: WasmFuncOnGuest<(WasmPtr<()>, WasmStr)>,
         );
     }
 

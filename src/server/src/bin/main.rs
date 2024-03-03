@@ -135,7 +135,7 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
         "set_reload_handler",
         |mut cx: wasmtime::Caller<'_, RuntimeContext>,
          data: WasmPtr<()>,
-         cb: WasmFuncOnHost<(WasmPtr<()>, WasmStr), ()>| {
+         cb: WasmFuncOnHost<(WasmPtr<()>, WasmStr)>| {
             let str = cx.alloc_str("hello world!")?;
             cb.call(cx, (data, str))?;
             Ok(())
@@ -172,13 +172,11 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
             .context("failed to get main memory of server WASM module")?,
     );
 
-    store.data_mut().guest_alloc = Some(WasmFuncOnHost {
-        // FIXME: Don't require fake indices for exports we never serialize back.
-        index: 0,
-        func: instance
+    store.data_mut().guest_alloc = Some(WasmFuncOnHost::new_not_indexed(
+        instance
             .get_typed_func(&mut store, "host_alloc")
             .context("failed to get `host_alloc` export")?,
-    });
+    ));
 
     store.data_mut().function_table = Some(
         instance
