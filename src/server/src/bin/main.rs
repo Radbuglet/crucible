@@ -125,7 +125,7 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
             let api_name = mem.load_str(api_name)?;
             log::info!("{api_name}");
 
-            cx.alloc_str("0.1.0")
+            Ok((cx.alloc_str("0.1.0")?,))
         },
     )?;
 
@@ -143,7 +143,7 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
     )?;
 
     wasmtime_wasi::add_to_linker(&mut linker, |c| &mut c.wasi)?;
-    // linker.define_unknown_imports_as_traps(&server_mod)?;
+    linker.define_unknown_imports_as_traps(&server_mod)?;
 
     // Spin up runtime
     let wasi = wasmtime_wasi::WasiCtxBuilder::new()
@@ -156,6 +156,7 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
         RuntimeContext {
             wasi,
             memory: None,
+            function_table: None,
             guest_alloc: None,
         },
     );
@@ -171,11 +172,19 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
             .context("failed to get main memory of server WASM module")?,
     );
 
-    store.data_mut().guest_alloc = Some(WasmFuncOnHost(
-        instance
+    store.data_mut().guest_alloc = Some(WasmFuncOnHost {
+        // FIXME: Don't require fake indices for exports we never serialize back.
+        index: 0,
+        func: instance
             .get_typed_func(&mut store, "host_alloc")
             .context("failed to get `host_alloc` export")?,
-    ));
+    });
+
+    store.data_mut().function_table = Some(
+        instance
+            .get_table(&mut store, "__indirect_function_table")
+            .context("failed to get `__indirect_function_table` table")?,
+    );
 
     instance
         .get_typed_func::<(), ()>(&mut store, "_start")
