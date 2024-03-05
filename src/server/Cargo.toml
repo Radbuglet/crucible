@@ -13,5 +13,6 @@ log = "0.4.20"
 serde = { version = "1.0.196", features = ["derive"] }
 tokio = { version = "1.36.0", features = ["full"] }
 toml = "0.8.10"
-wasmtime = "17.0.1"
-wasmtime-wasi = "17.0.1"
+wasi-common = "18.0.2"
+wasmtime = "18.0.2"
+wiggle = "18.0.2"

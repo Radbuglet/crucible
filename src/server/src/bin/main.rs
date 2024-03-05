@@ -3,7 +3,7 @@ use clap::{Args, Parser, Subcommand};
 use crt_marshal_host::{
     bind_to_linker, ContextMemoryExt, MemoryRead, WasmFuncOnHost, WasmPtr, WasmStr,
 };
-use crucible_server::runtime::base::RuntimeContext;
+use crucible_server::runtime::{base::RuntimeContext, logger::create_std_log_stream};
 use crucible_util::lang::error::{scope_err, tokio_read_file_anyhow, MultiError};
 use serde::Deserialize;
 use tokio::fs;
@@ -111,14 +111,14 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
 
     bind_to_linker(
         &mut linker,
-        "crucible0",
+        "crucible0_version",
         "get_rt_mode",
-        move |_cx: wasmtime::Caller<'_, _>| Ok((1,)),
+        move |_cx: wasmtime::Caller<'_, _>| Ok(1u32),
     )?;
 
     bind_to_linker(
         &mut linker,
-        "crucible0",
+        "crucible0_version",
         "get_api_version",
         move |mut cx: wasmtime::Caller<'_, RuntimeContext>, api_name: WasmStr| {
             let (mem, _) = cx.main_memory();
@@ -131,8 +131,8 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
 
     bind_to_linker(
         &mut linker,
-        "crucible0",
-        "set_reload_handler",
+        "crucible0_lifecycle",
+        "set_shutdown_handler",
         |mut cx: wasmtime::Caller<'_, RuntimeContext>,
          data: WasmPtr<()>,
          cb: WasmFuncOnHost<(WasmPtr<()>, WasmStr)>| {
@@ -142,13 +142,13 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
         },
     )?;
 
-    wasmtime_wasi::add_to_linker(&mut linker, |c| &mut c.wasi)?;
+    wasi_common::sync::add_to_linker(&mut linker, |c: &mut RuntimeContext| &mut c.wasi)?;
     linker.define_unknown_imports_as_traps(&server_mod)?;
 
     // Spin up runtime
-    let wasi = wasmtime_wasi::WasiCtxBuilder::new()
-        .inherit_stderr()
-        .inherit_stdio()
+    let wasi = wasi_common::sync::WasiCtxBuilder::new()
+        .stdout(Box::new(create_std_log_stream("guest.stdout")))
+        .stderr(Box::new(create_std_log_stream("guest.stderr")))
         .build();
 
     let mut store = wasmtime::Store::new(
@@ -183,6 +183,10 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
             .get_table(&mut store, "__indirect_function_table")
             .context("failed to get `__indirect_function_table` table")?,
     );
+
+    instance
+        .get_typed_func(&mut store, "pre_init")?
+        .call(&mut store, ())?;
 
     instance
         .get_typed_func::<(), ()>(&mut store, "_start")

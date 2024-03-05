@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 aunty = { git = "https://github.com/Radbuglet/aunty.git", rev = "b473aadd44bdd64d94b1378e7da7f2c959f7ef25", version = "0.1.0" }
 crt-marshal = { workspace = true }
+log = "0.4.21"
 semver = "1.0.22"

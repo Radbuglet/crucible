@@ -1,7 +1,8 @@
 use crt_marshal_host::WasmPtr;
 
 pub struct RuntimeContext {
-    pub wasi: wasmtime_wasi::WasiCtx,
+    // Core services
+    pub wasi: wasi_common::WasiCtx,
     pub memory: Option<wasmtime::Memory>,
     pub function_table: Option<wasmtime::Table>,
     pub guest_alloc: Option<crt_marshal_host::WasmFuncOnHost<(u32, u32), WasmPtr<()>>>,
