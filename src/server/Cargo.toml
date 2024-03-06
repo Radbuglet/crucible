@@ -9,6 +9,7 @@ clap = { version = "4.5.1", features = ["derive"] }
 crt-marshal-host = { workspace = true }
 crucible-util = { version = "0.1.0", path = "../util" }
 env_logger = "0.11.2"
+generational-arena = "0.2.9"
 log = "0.4.20"
 serde = { version = "1.0.196", features = ["derive"] }
 tokio = { version = "1.36.0", features = ["full"] }

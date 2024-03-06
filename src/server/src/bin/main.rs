@@ -1,9 +1,6 @@
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
-use crt_marshal_host::{
-    bind_to_linker, ContextMemoryExt, MemoryRead, WasmFuncOnHost, WasmPtr, WasmStr,
-};
-use crucible_server::runtime::{base::RuntimeContext, logger::create_std_log_stream};
+use crucible_server::runtime::base::RuntimeManager;
 use crucible_util::lang::error::{scope_err, tokio_read_file_anyhow, MultiError};
 use serde::Deserialize;
 use tokio::fs;
@@ -81,11 +78,8 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
     let conf = String::from_utf8(conf).context("server config is invalid UTF-8")?;
     let conf = toml::from_str::<ConfRoot>(&conf)?;
 
-    // Create engine
-    let engine = wasmtime::Engine::new(wasmtime::Config::new().epoch_interruption(true))
-        .context("failed to create wasm engine")?;
-
     // Load binaries
+    let mut mgr = RuntimeManager::new()?;
     let mut errors = MultiError::new("binary loading");
 
     let (server_mod, client_mod) = tokio::join!(
@@ -95,7 +89,7 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
 
     let server_mod = errors.maybe_report(scope_err(|| {
         let server_mod = server_mod?;
-        let module = wasmtime::Module::new(&engine, server_mod)?;
+        let module = wasmtime::Module::new(mgr.engine(), server_mod)?;
         Ok(module)
     }));
 
@@ -106,93 +100,12 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
     let server_mod = server_mod.unwrap();
     let client_mod = client_mod.unwrap();
 
-    // Create linker for server module
-    let mut linker = wasmtime::Linker::<RuntimeContext>::new(&engine);
+    // Create runtime
+    let pid = mgr.spawn("guest", &server_mod).await?;
 
-    bind_to_linker(
-        &mut linker,
-        "crucible0_version",
-        "get_rt_mode",
-        move |_cx: wasmtime::Caller<'_, _>| Ok(1u32),
-    )?;
-
-    bind_to_linker(
-        &mut linker,
-        "crucible0_version",
-        "get_api_version",
-        move |mut cx: wasmtime::Caller<'_, RuntimeContext>, api_name: WasmStr| {
-            let (mem, _) = cx.main_memory();
-            let api_name = mem.load_str(api_name)?;
-            log::info!("{api_name}");
-
-            Ok((cx.alloc_str("0.1.0")?,))
-        },
-    )?;
-
-    bind_to_linker(
-        &mut linker,
-        "crucible0_lifecycle",
-        "set_shutdown_handler",
-        |mut cx: wasmtime::Caller<'_, RuntimeContext>,
-         data: WasmPtr<()>,
-         cb: WasmFuncOnHost<(WasmPtr<()>, WasmStr)>| {
-            let str = cx.alloc_str("hello world!")?;
-            cb.call(cx, (data, str))?;
-            Ok(())
-        },
-    )?;
-
-    wasi_common::sync::add_to_linker(&mut linker, |c: &mut RuntimeContext| &mut c.wasi)?;
-    linker.define_unknown_imports_as_traps(&server_mod)?;
-
-    // Spin up runtime
-    let wasi = wasi_common::sync::WasiCtxBuilder::new()
-        .stdout(Box::new(create_std_log_stream("guest.stdout")))
-        .stderr(Box::new(create_std_log_stream("guest.stderr")))
-        .build();
-
-    let mut store = wasmtime::Store::new(
-        &engine,
-        RuntimeContext {
-            wasi,
-            memory: None,
-            function_table: None,
-            guest_alloc: None,
-        },
-    );
-    let instance = linker
-        .instantiate(&mut store, &server_mod)
-        .context("failed to instantiate server WASM module")?;
-
-    store.set_epoch_deadline(1);
-
-    store.data_mut().memory = Some(
-        instance
-            .get_memory(&mut store, "memory")
-            .context("failed to get main memory of server WASM module")?,
-    );
-
-    store.data_mut().guest_alloc = Some(WasmFuncOnHost::new_not_indexed(
-        instance
-            .get_typed_func(&mut store, "host_alloc")
-            .context("failed to get `host_alloc` export")?,
-    ));
-
-    store.data_mut().function_table = Some(
-        instance
-            .get_table(&mut store, "__indirect_function_table")
-            .context("failed to get `__indirect_function_table` table")?,
-    );
-
-    instance
-        .get_typed_func(&mut store, "pre_init")?
-        .call(&mut store, ())?;
-
-    instance
-        .get_typed_func::<(), ()>(&mut store, "_start")
-        .context("failed to find server WASM main function")?
-        .call(store, ())
-        .context("failed to call server WASM main function")?;
+    let _ = tokio::signal::ctrl_c().await;
+    mgr.shutdown(pid).await;
+    mgr.wait_for_shutdown().await;
 
     Ok(())
 }
