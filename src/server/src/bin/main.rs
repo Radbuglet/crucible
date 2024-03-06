@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
 use crucible_server::runtime::base::RuntimeManager;
@@ -51,7 +53,9 @@ struct ConfRes {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Setup debug services
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("INFO"));
+    env_logger::init_from_env(
+        env_logger::Env::new().default_filter_or("info,crucible_server=trace,guest=trace"),
+    );
 
     // Parse arguments
     let cmd = CliArgs::parse();
@@ -104,8 +108,12 @@ async fn do_cli_start_command(sub: &CliStartCommand) -> anyhow::Result<()> {
     let pid = mgr.spawn("guest", &server_mod).await?;
 
     let _ = tokio::signal::ctrl_c().await;
-    mgr.shutdown(pid).await;
-    mgr.wait_for_shutdown().await;
+    log::info!("Keyboard interrupt received. Giving guest 1s to shut down gracefully.");
+    mgr.kill(pid).await;
+    std::thread::sleep(Duration::from_millis(1000));
+    mgr.force_kill_all_pending().await;
+
+    log::info!("Goodbye!");
 
     Ok(())
 }
