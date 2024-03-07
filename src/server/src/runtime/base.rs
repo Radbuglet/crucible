@@ -11,10 +11,11 @@ use std::{
 
 use anyhow::Context;
 use crt_marshal_host::{
-    bind_to_linker, ContextMemoryExt, MemoryRead, WasmFuncOnHost, WasmPtr, WasmStr,
+    bind_to_linker, ContextMemoryExt, MemoryRead, WasmFunc, WasmFuncRef, WasmPtr, WasmStr,
 };
 use generational_arena::{Arena, Index};
 use tokio::{sync::Mutex, task::JoinHandle};
+use wasmtime::AsContextMut;
 
 use super::logger::create_std_log_stream;
 
@@ -71,9 +72,11 @@ impl RuntimeManager {
             "set_shutdown_handler",
             |mut cx: wasmtime::Caller<'_, StoreRuntimeState>,
              data: WasmPtr<()>,
-             cb: WasmFuncOnHost<(WasmPtr<()>, WasmStr)>| {
+             cb: WasmFunc<(WasmPtr<()>, WasmStr)>| {
                 let str = cx.alloc_str("hello world!")?;
-                cb.call(cx, (data, str))?;
+
+                WasmFuncRef::decode(cx.as_context_mut(), cb)?
+                    .call(cx.as_context_mut(), (data, str))?;
                 Ok(())
             },
         )?;
@@ -146,7 +149,7 @@ impl RuntimeManager {
                 .context("failed to get main memory of server WASM module")?,
         );
 
-        store.data_mut().guest_alloc = Some(WasmFuncOnHost::new_not_indexed(
+        store.data_mut().guest_alloc = Some(WasmFuncRef(
             instance
                 .get_typed_func(&mut store, "host_alloc")
                 .context("failed to get `host_alloc` export")?,
@@ -307,7 +310,7 @@ struct StoreRuntimeState {
     wasi: wasi_common::WasiCtx,
     memory: Option<wasmtime::Memory>,
     function_table: Option<wasmtime::Table>,
-    guest_alloc: Option<crt_marshal_host::WasmFuncOnHost<(u32, u32), WasmPtr<()>>>,
+    guest_alloc: Option<crt_marshal_host::WasmFuncRef<(u32, u32), WasmPtr<()>>>,
 }
 
 impl crt_marshal_host::StoreHasMemory for StoreRuntimeState {
@@ -315,7 +318,7 @@ impl crt_marshal_host::StoreHasMemory for StoreRuntimeState {
         self.memory.unwrap()
     }
 
-    fn alloc_func(&self) -> crt_marshal_host::WasmFuncOnHost<(u32, u32), WasmPtr<()>> {
+    fn alloc_func(&self) -> crt_marshal_host::WasmFuncRef<(u32, u32), WasmPtr<()>> {
         self.guest_alloc.unwrap()
     }
 }

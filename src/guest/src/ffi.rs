@@ -1,7 +1,7 @@
 use std::alloc::Layout;
 
 use crt_marshal::{
-    generate_guest_export, guest_u32_to_usize, WasmFuncOnGuest, WasmPtr, WasmSlice, WasmStr, ZstFn,
+    generate_guest_export, guest_u32_to_usize, WasmFunc, WasmPtr, WasmSlice, WasmStr, ZstFn,
 };
 
 // === Allocator Entry === //
@@ -84,7 +84,7 @@ where
     crt_marshal::generate_guest_import! {
         fn "crucible0_lifecycle".set_shutdown_handler(
             args: WasmPtr<()>,
-            handler: WasmFuncOnGuest<(WasmPtr<()>, WasmStr)>,
+            handler: WasmFunc<(WasmPtr<()>, WasmStr)>,
         );
     }
 
@@ -94,7 +94,7 @@ where
 
         set_shutdown_handler(
             WasmPtr::new_guest(value.cast()),
-            WasmFuncOnGuest::new_guest(|(args, data): (WasmPtr<()>, WasmStr)| {
+            WasmFunc::new_guest(|(args, data): (WasmPtr<()>, WasmStr)| {
                 F::call_static((&*args.into_guest().cast::<T>(), data.into_guest_string()))
             }),
         )

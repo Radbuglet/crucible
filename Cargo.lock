@@ -542,7 +542,7 @@ checksum = "248e3bacc7dc6baa3b21e405ee045c3047101a49145e7e9eca583ab4c2ca5345"
 [[package]]
 name = "crt-marshal"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/crucible-rt.git?rev=7763cdc50dabcda477c641068e55d39aef19e3d4#7763cdc50dabcda477c641068e55d39aef19e3d4"
+source = "git+https://github.com/Radbuglet/crucible-rt.git?rev=f0157e1fdb6ab665101a49469ecb05e532dc47be#f0157e1fdb6ab665101a49469ecb05e532dc47be"
 dependencies = [
  "bytemuck",
  "wasmtime",
@@ -551,7 +551,7 @@ dependencies = [
 [[package]]
 name = "crt-marshal-host"
 version = "0.1.0"
-source = "git+https://github.com/Radbuglet/crucible-rt.git?rev=7763cdc50dabcda477c641068e55d39aef19e3d4#7763cdc50dabcda477c641068e55d39aef19e3d4"
+source = "git+https://github.com/Radbuglet/crucible-rt.git?rev=f0157e1fdb6ab665101a49469ecb05e532dc47be#f0157e1fdb6ab665101a49469ecb05e532dc47be"
 dependencies = [
  "anyhow",
  "bytemuck",
