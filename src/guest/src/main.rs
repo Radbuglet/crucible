@@ -6,9 +6,20 @@ fn main() {
     dbg!(ffi::get_api_version("foo.whee"));
     println!("Hello, world!");
 
-    std::thread::sleep(Duration::from_millis(10000));
+    std::thread::sleep(Duration::from_millis(100));
 
-    ffi::set_shutdown_handler(42, |(data, msg): (&i32, String)| {
-        dbg!(data, msg);
+    let droopy = Droopy;
+
+    ffi::set_shutdown_handler(move |data| {
+        let _ = &droopy;
+        println!("Shutdown handler called: {data:?}");
     });
+}
+
+struct Droopy;
+
+impl Drop for Droopy {
+    fn drop(&mut self) {
+        println!("Dropped");
+    }
 }

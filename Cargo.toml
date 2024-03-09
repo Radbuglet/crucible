@@ -3,7 +3,7 @@ resolver = "2"
 members = ["src/util", "src/server", "src/guest"]
 
 [workspace.dependencies]
-crt-marshal = { git = "https://github.com/Radbuglet/crucible-rt.git", rev = "f0157e1fdb6ab665101a49469ecb05e532dc47be" }
-crt-marshal-host = { git = "https://github.com/Radbuglet/crucible-rt.git", rev = "f0157e1fdb6ab665101a49469ecb05e532dc47be" }
+crt-marshal = { git = "https://github.com/Radbuglet/crucible-rt.git", rev = "985b441f787bd4803dc999fe7a983af3bc18d2ca" }
+crt-marshal-host = { git = "https://github.com/Radbuglet/crucible-rt.git", rev = "985b441f787bd4803dc999fe7a983af3bc18d2ca" }
 # crt-marshal = { path = "../crucible-rt/src/marshal" }
 # crt-marshal-host = { path = "../crucible-rt/src/marshal-host" }

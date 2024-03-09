@@ -1,16 +1,18 @@
 use std::alloc::Layout;
 
 use crt_marshal::{
-    generate_guest_export, guest_u32_to_usize, WasmFunc, WasmPtr, WasmSlice, WasmStr, ZstFn,
+    guest_export, guest_u32_to_usize, WasmDynamicFunc, WasmFunc, WasmPtr, WasmSlice, WasmStr,
 };
 
 // === Allocator Entry === //
 
-generate_guest_export! {
+guest_export! {
+    #[no_mangle]
     fn pre_init() {
         // TODO: Initialize logger
     }
 
+    #[no_mangle]
     fn host_alloc(size: u32, align: u32) -> WasmPtr<u8> {
         unsafe {
             let layout = Layout::from_size_align(guest_u32_to_usize(size), guest_u32_to_usize(align))
@@ -26,7 +28,7 @@ generate_guest_export! {
 // === Version === //
 
 pub fn get_api_version(namespace: &'static str) -> Option<semver::Version> {
-    crt_marshal::generate_guest_import! {
+    crt_marshal::guest_import! {
         fn "crucible0_version".get_api_version(namespace: WasmStr) -> WasmStr;
     }
 
@@ -57,7 +59,7 @@ pub enum RtMode {
 }
 
 pub fn get_rt_mode() -> RtMode {
-    crt_marshal::generate_guest_import! {
+    crt_marshal::guest_import! {
         fn "crucible0_version".get_rt_mode() -> u8;
     }
 
@@ -76,33 +78,22 @@ pub fn get_rt_mode() -> RtMode {
 
 // === Reloads === //
 
-pub fn set_shutdown_handler<T, F>(args: T, handler: F)
-where
-    T: 'static + Send + Sync,
-    F: for<'a> ZstFn<(&'a T, String), Output = ()>,
-{
-    crt_marshal::generate_guest_import! {
+pub fn set_shutdown_handler(handler: impl 'static + Send + Sync + Fn(&str)) {
+    crt_marshal::guest_import! {
         fn "crucible0_lifecycle".set_shutdown_handler(
-            args: WasmPtr<()>,
-            handler: WasmFunc<(WasmPtr<()>, WasmStr)>,
+            handler: WasmDynamicFunc<(WasmStr,)>,
         );
     }
 
     unsafe {
-        let _ = handler;
-        let value = Box::into_raw(Box::new(args));
-
-        set_shutdown_handler(
-            WasmPtr::new_guest(value.cast()),
-            WasmFunc::new_guest(|(args, data): (WasmPtr<()>, WasmStr)| {
-                F::call_static((&*args.into_guest().cast::<T>(), data.into_guest_string()))
-            }),
-        )
+        set_shutdown_handler(WasmDynamicFunc::new_guest(Box::new(
+            move |(str,): (WasmStr,)| handler(str.into_guest_string().as_str()),
+        )))
     }
 }
 
 pub fn write_reload_message(data: &[u8]) {
-    crt_marshal::generate_guest_import! {
+    crt_marshal::guest_import! {
         fn "crucible0_lifecycle".write_reload_message(slice: WasmSlice<u8>);
     }
 
@@ -110,7 +101,7 @@ pub fn write_reload_message(data: &[u8]) {
 }
 
 pub fn read_reload_message(buf: &mut [u8]) -> usize {
-    crt_marshal::generate_guest_import! {
+    crt_marshal::guest_import! {
         fn "crucible0_lifecycle".write_reload_message(buf: WasmSlice<u8>) -> u32;
     }
 
@@ -118,7 +109,7 @@ pub fn read_reload_message(buf: &mut [u8]) -> usize {
 }
 
 pub fn clear_reload_message() {
-    crt_marshal::generate_guest_import! {
+    crt_marshal::guest_import! {
         fn "crucible0_lifecycle".clear_reload_message();
     }
 

@@ -11,11 +11,11 @@ use std::{
 
 use anyhow::Context;
 use crt_marshal_host::{
-    bind_to_linker, ContextMemoryExt, MemoryRead, WasmFunc, WasmFuncRef, WasmPtr, WasmStr,
+    bind_to_linker, ContextMemoryExt, MemoryRead, WasmDynamicExt, WasmDynamicFunc,
+    WasmDynamicFuncExt, WasmFuncRef, WasmPtr, WasmStr,
 };
 use generational_arena::{Arena, Index};
 use tokio::{sync::Mutex, task::JoinHandle};
-use wasmtime::AsContextMut;
 
 use super::logger::create_std_log_stream;
 
@@ -58,7 +58,7 @@ impl RuntimeManager {
             "crucible0_version",
             "get_api_version",
             move |mut cx: wasmtime::Caller<'_, StoreRuntimeState>, api_name: WasmStr| {
-                let (mem, _) = cx.main_memory();
+                let mem = cx.main_memory();
                 let api_name = mem.load_str(api_name)?;
                 log::info!("{api_name}");
 
@@ -70,13 +70,11 @@ impl RuntimeManager {
             &mut linker,
             "crucible0_lifecycle",
             "set_shutdown_handler",
-            |mut cx: wasmtime::Caller<'_, StoreRuntimeState>,
-             data: WasmPtr<()>,
-             cb: WasmFunc<(WasmPtr<()>, WasmStr)>| {
+            |mut cx: wasmtime::Caller<'_, StoreRuntimeState>, cb: WasmDynamicFunc<(WasmStr,)>| {
                 let str = cx.alloc_str("hello world!")?;
 
-                WasmFuncRef::decode(cx.as_context_mut(), cb)?
-                    .call(cx.as_context_mut(), (data, str))?;
+                cb.call(&mut cx, (str,))?;
+                cb.run_dtor(&mut cx)?;
                 Ok(())
             },
         )?;
