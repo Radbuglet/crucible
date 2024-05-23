@@ -1,9 +1,0 @@
-[package]
-name = "typed-glam"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-crucible-util = { workspace = true }
-glam = "0.24.0"
-num-traits = { workspace = true }
