@@ -1,3 +1,9 @@
 [workspace]
 resolver = "2"
-members = []
+members = [
+    "src/util/bevy-autoken",
+    "src/util/newtypes",
+    "src/util/newtypes-proc",
+    "src/util/std-traits",
+    "src/util/typed-glam",
+]

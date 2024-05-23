@@ -1,0 +1,10 @@
+[package]
+name = "typed-glam"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+glam = "0.24.0"
+newtypes = { version = "0.1.0", path = "../newtypes" }
+num-traits = "0.2.19"
+std-traits = { version = "0.1.0", path = "../std-traits" }

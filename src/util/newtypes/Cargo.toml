@@ -1,0 +1,8 @@
+[package]
+name = "newtypes"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+newtypes-proc = { version = "0.1.0", path = "../newtypes-proc" }
+std-traits = { version = "0.1.0", path = "../std-traits" }

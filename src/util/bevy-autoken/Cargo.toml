@@ -1,0 +1,12 @@
+[package]
+name = "bevy-autoken"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+autoken = { git = "https://github.com/Radbuglet/autoken.git", rev = "c0941f1506fda81dc388f9a52e3770792ee0c822", version = "0.1.0" }
+bevy_app = "0.13.2"
+bevy_ecs = "0.13.2"
+generational-arena = "0.2.9"
+rustc-hash = "1.1.0"
+scopeguard = "1.2.0"
