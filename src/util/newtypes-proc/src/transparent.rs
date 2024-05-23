@@ -10,6 +10,7 @@ mod custom_syntax {
     syn::custom_keyword!(transparent);
     syn::custom_keyword!(repr);
 
+    #[derive(Clone)]
     pub struct ReprTransparentMeta {
         pub repr: repr,
         pub paren_token: syn::token::Paren,

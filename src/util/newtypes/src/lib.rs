@@ -1,4 +1,4 @@
-pub use newtypes_proc::transparent;
+pub use newtypes_proc::{iterator, transparent};
 
 mod num_enum;
 
