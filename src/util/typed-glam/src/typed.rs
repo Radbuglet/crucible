@@ -39,7 +39,7 @@ impl<F: ?Sized + VecFlavor> FlavorCastFrom<TypedVector<F>> for F {
 
 pub type TypedVector<F> = TypedVectorImpl<F, <<F as VecFlavor>::Backing as NumericVector>::Dim>;
 
-#[transparent(raw)]
+#[transparent(raw, wrap)]
 #[repr(transparent)]
 pub struct TypedVectorImpl<F, D>
 where
@@ -124,11 +124,11 @@ impl<F: ?Sized + VecFlavor> TypedVector<F> {
     }
 
     pub fn from_glam_ref(glam: &F::Backing) -> &Self {
-        Self::transparent_from_ref(glam)
+        Self::wrap_ref(glam)
     }
 
     pub fn from_glam_mut(glam: &mut F::Backing) -> &mut Self {
-        Self::transparent_from_mut(glam)
+        Self::wrap_mut(glam)
     }
 
     // Copied from `GlamConvert`

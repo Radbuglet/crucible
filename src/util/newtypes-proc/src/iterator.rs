@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::Emitter;
+use crate::util::Emitter;
 
 #[derive(Clone)]
 struct AttrArgs {

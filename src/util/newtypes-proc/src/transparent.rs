@@ -2,28 +2,28 @@ use proc_macro2::TokenStream;
 use quote::{quote_spanned, ToTokens};
 use syn::spanned::Spanned;
 
-use crate::Emitter;
-
-use self::custom_syntax::ReprTransparentMeta;
+use crate::util::Emitter;
 
 mod custom_syntax {
+    use syn::parse;
+
     syn::custom_keyword!(transparent);
-    syn::custom_keyword!(repr);
 
     #[derive(Clone)]
-    pub struct ReprTransparentMeta {
-        pub repr: repr,
-        pub paren_token: syn::token::Paren,
-        pub transparent: transparent,
+    pub struct MacroArg {
+        pub on_field: syn::Ident,
+        pub comma: syn::token::Comma,
+        pub prefix_vis: syn::Visibility,
+        pub prefix_ident: syn::Ident,
     }
 
-    impl syn::parse::Parse for ReprTransparentMeta {
-        fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-            let in_trans;
+    impl parse::Parse for MacroArg {
+        fn parse(input: parse::ParseStream) -> syn::Result<Self> {
             Ok(Self {
-                repr: input.parse()?,
-                paren_token: syn::parenthesized!(in_trans in input),
-                transparent: in_trans.parse()?,
+                on_field: input.parse()?,
+                comma: input.parse()?,
+                prefix_vis: input.parse()?,
+                prefix_ident: input.parse()?,
             })
         }
     }
@@ -37,7 +37,7 @@ pub fn transparent(attrs: TokenStream, input: TokenStream) -> TokenStream {
     emitter.push(&input);
 
     // Parse our inputs
-    let value_field = syn::parse2::<syn::Ident>(attrs)
+    let attrs = syn::parse2::<custom_syntax::MacroArg>(attrs)
         .map_err(|err| {
             emitter.err(err);
         })
@@ -49,16 +49,14 @@ pub fn transparent(attrs: TokenStream, input: TokenStream) -> TokenStream {
         })
         .ok();
 
-    let (Some(value_field), Some(input)) = (value_field, input) else {
+    let (Some(attrs), Some(input)) = (attrs, input) else {
         return emitter.finish();
     };
 
     // Scan our inputs for the necessary information
-    if !input
-        .attrs
-        .iter()
-        .any(|attr| syn::parse2::<ReprTransparentMeta>(attr.meta.to_token_stream()).is_ok())
-    {
+    if !input.attrs.iter().any(|attr| {
+        attr.path().is_ident(&"repr") && attr.parse_args::<custom_syntax::transparent>().is_ok()
+    }) {
         emitter.err(syn::Error::new_spanned(
             &input.ident,
             "`transparent` attribute is only applicable to structs with the `#[repr(transparent)]` attribute",
@@ -81,7 +79,7 @@ pub fn transparent(attrs: TokenStream, input: TokenStream) -> TokenStream {
     let mut other_fields = Vec::new();
 
     for field in &input_data.fields {
-        if main_field.is_none() && field.ident.as_ref() == Some(&value_field) {
+        if main_field.is_none() && field.ident.as_ref() == Some(&attrs.on_field) {
             main_field = Some(&field.ty);
         } else {
             other_fields.push(&field.ty);
@@ -90,7 +88,7 @@ pub fn transparent(attrs: TokenStream, input: TokenStream) -> TokenStream {
 
     let Some(main_field) = main_field else {
         emitter.err(syn::Error::new_spanned(
-            &value_field,
+            &attrs.on_field,
             "failed to find a field with this name in the struct",
         ));
         return emitter.finish();
@@ -119,16 +117,22 @@ pub fn transparent(attrs: TokenStream, input: TokenStream) -> TokenStream {
         let name = &input.ident;
         let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-        emitter.push(quote_spanned! { value_field.span() =>
+        let prefix = &attrs.prefix_ident;
+
+        let wrap_vis = &attrs.prefix_vis;
+        let wrap_ref = syn::Ident::new(&format!("{prefix}_ref"), attrs.prefix_ident.span());
+        let wrap_mut = syn::Ident::new(&format!("{prefix}_mut"), attrs.prefix_ident.span());
+
+        emitter.push(quote_spanned! { attrs.on_field.span() =>
             #[allow(dead_code, clippy::needless_lifetimes)]
             impl #impl_generics #name #ty_generics #where_clause {
-                fn transparent_from_ref<'__transparent_lt>(inner: &'__transparent_lt #main_field) -> &'__transparent_lt Self {
+                #wrap_vis const fn #wrap_ref<'__transparent_lt>(inner: &'__transparent_lt #main_field) -> &'__transparent_lt Self {
                     #trans_asserts
 
                     unsafe { &*(inner as *const #main_field as *const Self) }
                 }
 
-                fn transparent_from_mut<'__transparent_lt>(inner: &'__transparent_lt mut #main_field) -> &'__transparent_lt mut Self {
+                #wrap_vis fn #wrap_mut<'__transparent_lt>(inner: &'__transparent_lt mut #main_field) -> &'__transparent_lt mut Self {
                     unsafe { &mut *(inner as *mut #main_field as *mut Self) }
                 }
             }
