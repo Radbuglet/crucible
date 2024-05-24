@@ -1,0 +1,10 @@
+[package]
+name = "crucible-math"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+newtypes = { version = "0.1.0", path = "../../util/newtypes" }
+num-traits = "0.2.19"
+std-traits = { version = "0.1.0", path = "../../util/std-traits" }
+typed-glam = { version = "0.1.0", path = "../../util/typed-glam" }

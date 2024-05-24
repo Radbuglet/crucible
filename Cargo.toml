@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "src/shared/crucible-math",
     "src/util/bevy-autoken",
     "src/util/newtypes",
     "src/util/newtypes-proc",

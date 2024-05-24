@@ -120,15 +120,15 @@ pub fn transparent(attrs: TokenStream, input: TokenStream) -> TokenStream {
         let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
         emitter.push(quote_spanned! { value_field.span() =>
-            #[allow(dead_code)]
+            #[allow(dead_code, clippy::needless_lifetimes)]
             impl #impl_generics #name #ty_generics #where_clause {
-                fn transparent_from_ref(inner: &#main_field) -> &Self {
+                fn transparent_from_ref<'__transparent_lt>(inner: &'__transparent_lt #main_field) -> &'__transparent_lt Self {
                     #trans_asserts
 
                     unsafe { &*(inner as *const #main_field as *const Self) }
                 }
 
-                fn transparent_from_mut(inner: &mut #main_field) -> &mut Self {
+                fn transparent_from_mut<'__transparent_lt>(inner: &'__transparent_lt mut #main_field) -> &'__transparent_lt mut Self {
                     unsafe { &mut *(inner as *mut #main_field as *mut Self) }
                 }
             }
