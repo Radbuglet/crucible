@@ -4,5 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+derive-where = "1.2.7"
 newtypes-proc = { version = "0.1.0", path = "../newtypes-proc" }
+num-traits = "0.2.19"
 std-traits = { version = "0.1.0", path = "../std-traits" }

@@ -832,7 +832,9 @@ dependencies = [
 name = "newtypes"
 version = "0.1.0"
 dependencies = [
+ "derive-where",
  "newtypes-proc",
+ "num-traits",
  "std-traits",
 ]
 

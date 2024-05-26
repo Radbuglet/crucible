@@ -174,6 +174,12 @@ impl<'a, K: NumEnum, V> IntoIterator for &'a mut NumEnumMap<K, V> {
     }
 }
 
+impl<K: NumEnum, V> FromIterator<V> for NumEnumMap<K, V> {
+    fn from_iter<T: IntoIterator<Item = V>>(iter: T) -> Self {
+        Self::new(K::Array::<V>::from_iter(iter))
+    }
+}
+
 impl<K: NumEnum, V> ops::Index<K> for NumEnumMap<K, V> {
     type Output = V;
 
