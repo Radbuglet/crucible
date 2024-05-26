@@ -1,0 +1,9 @@
+[package]
+name = "typed-wgpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+derive-where = "1.2.7"
+newtypes = { version = "0.1.0", path = "../../util/newtypes" }
+wgpu = "0.20.0"

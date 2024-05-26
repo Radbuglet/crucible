@@ -7,4 +7,5 @@ members = [
     "src/util/newtypes-proc",
     "src/util/std-traits",
     "src/util/typed-glam",
+    "src/util-gfx/typed-wgpu",
 ]
