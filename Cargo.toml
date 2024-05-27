@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "src/shared/crucible-math",
+    "src/shared/crucible-world",
     "src/util/bevy-autoken",
     "src/util/newtypes",
     "src/util/newtypes-proc",

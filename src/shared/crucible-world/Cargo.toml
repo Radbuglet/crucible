@@ -1,0 +1,13 @@
+[package]
+name = "crucible-world"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy-autoken = { version = "0.1.0", path = "../../util/bevy-autoken" }
+bevy_ecs = "0.13.2"
+crucible-math = { version = "0.1.0", path = "../crucible-math" }
+derive-where = "1.2.7"
+newtypes = { version = "0.1.0", path = "../../util/newtypes" }
+rustc-hash = "1.1.0"
+tracing = "0.1.40"
