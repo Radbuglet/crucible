@@ -1,8 +1,11 @@
 use bevy_autoken::{random_component, Obj, RandomEntityExt};
 use bevy_ecs::entity::Entity;
-use crucible_math::{BlockFace, ChunkVec, CHUNK_VOLUME};
+use crucible_math::{
+    Axis3, BlockFace, ChunkVec, EntityVec, Sign, VecCompExt, WorldVec, WorldVecExt, CHUNK_VOLUME,
+};
 use newtypes::{NumEnum, NumEnumMap};
 use rustc_hash::FxHashMap;
+use typed_glam::traits::{CastVecFrom, NumericVector};
 
 // === Structures === //
 
@@ -98,5 +101,136 @@ impl ChunkVoxelData {
 
     pub fn data_mut(&mut self) -> Option<&mut [u16; CHUNK_VOLUME as usize]> {
         self.data.as_deref_mut()
+    }
+}
+
+// === Pointer === //
+
+pub type WorldPointer = VoxelPointer<WorldVec>;
+pub type EntityPointer = VoxelPointer<EntityVec>;
+
+#[derive(Debug, Copy, Clone)]
+pub struct VoxelPointer<V> {
+    pub chunk: Option<Obj<ChunkVoxelData>>,
+    pub pos: V,
+}
+
+impl<V> VoxelPointer<V>
+where
+    WorldVec: CastVecFrom<V>,
+    V: NumericVector,
+{
+    pub const fn new(vector: V) -> Self {
+        Self {
+            chunk: None,
+            pos: vector,
+        }
+    }
+
+    pub fn move_to(&mut self, pos: V) {
+        // Update vector
+        let old_chunk = self.block().chunk();
+        self.pos = pos;
+        let new_chunk = self.block().chunk();
+
+        // Update chunk
+        if old_chunk == new_chunk {
+            // (we're still in the same chunk)
+            return;
+        }
+
+        let Some(mut chunk) = self.chunk else {
+            // (the chunk cache is unset and we don't want to recompute it)
+            return;
+        };
+
+        self.chunk = None;
+
+        let delta = new_chunk - old_chunk;
+
+        for axis in Axis3::variants() {
+            let delta = delta.comp(axis);
+
+            // We can't move more than one chunk across
+            if !(-1..=1).contains(&delta) {
+                return;
+            }
+
+            // If the delta is zero, don't move anywhere.
+            let Some(sign) = Sign::of(delta) else {
+                continue;
+            };
+
+            // If the neighbor is none, our cache becomes none.
+            let Some(neighbor) = chunk.neighbor(BlockFace::compose(axis, sign)) else {
+                return;
+            };
+
+            chunk = neighbor;
+        }
+
+        self.chunk = Some(chunk);
+    }
+
+    pub fn move_by(&mut self, delta: V) {
+        self.move_to(self.pos + delta);
+    }
+
+    #[must_use]
+    pub fn moved_to(mut self, pos: V) -> Self {
+        self.move_to(pos);
+        self
+    }
+
+    #[must_use]
+    pub fn moved_by(mut self, delta: V) -> Self {
+        self.move_by(delta);
+        self
+    }
+
+    pub fn block(&self) -> WorldVec {
+        self.pos.cast::<WorldVec>()
+    }
+
+    pub fn block_pointer(self) -> WorldPointer {
+        WorldPointer {
+            chunk: self.chunk,
+            pos: self.block(),
+        }
+    }
+
+    pub fn chunk(&mut self, world: Obj<WorldVoxelData>) -> Option<Obj<ChunkVoxelData>> {
+        match self.chunk {
+            Some(chunk) => Some(chunk),
+            None => {
+                self.chunk = world.get(self.block().decompose().0);
+                self.chunk
+            }
+        }
+    }
+}
+
+impl WorldPointer {
+    pub fn move_to_neighbor(&mut self, face: BlockFace) {
+        // Update vector
+        let old_pos = self.pos;
+        self.pos += face.unit();
+        let new_pos = self.pos;
+
+        // Update chunk
+        if old_pos.chunk() == new_pos.chunk() {
+            // (we didn't move chunks)
+            return;
+        }
+
+        if let Some(chunk) = self.chunk {
+            self.chunk = chunk.neighbor(face);
+        }
+    }
+
+    #[must_use]
+    pub fn neighbor(mut self, face: BlockFace) -> Self {
+        self.move_to_neighbor(face);
+        self
     }
 }

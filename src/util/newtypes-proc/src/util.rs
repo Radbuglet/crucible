@@ -1,5 +1,3 @@
-use std::panic::Location;
-
 #[derive(Default)]
 pub struct Emitter {
     tokens: proc_macro2::TokenStream,

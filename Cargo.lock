@@ -407,6 +407,7 @@ dependencies = [
  "newtypes",
  "rustc-hash",
  "tracing",
+ "typed-glam",
 ]
 
 [[package]]
