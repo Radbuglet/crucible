@@ -58,7 +58,7 @@ macro_rules! define_index {
     )*) => {$(
         $(#[$attr])*
         #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-        $vis struct $name($ty);
+        $vis struct $name(pub $ty);
 
         impl $crate::define_index_internals::Index for $name {
             type Prim = $ty;

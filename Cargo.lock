@@ -400,6 +400,7 @@ dependencies = [
 name = "crucible-world"
 version = "0.1.0"
 dependencies = [
+ "autoken",
  "bevy-autoken",
  "bevy_ecs",
  "crucible-math",

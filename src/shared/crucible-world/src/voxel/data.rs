@@ -1,66 +1,104 @@
-use bevy_autoken::{random_component, Obj, RandomEntityExt};
-use bevy_ecs::entity::Entity;
-use crucible_math::{
-    Axis3, BlockFace, ChunkVec, EntityVec, Sign, VecCompExt, WorldVec, WorldVecExt, CHUNK_VOLUME,
+use std::{collections::hash_map, mem};
+
+use bevy_autoken::{
+    random_component, random_event, send_event, spawn_entity, Obj, ObjOwner, RandomAccess,
+    RandomEntityExt,
 };
-use newtypes::{NumEnum, NumEnumMap};
-use rustc_hash::FxHashMap;
+use bevy_ecs::{event::Event, removal_detection::RemovedComponents};
+use crucible_math::{
+    Axis3, BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, Sign, VecCompExt, WorldVec,
+    WorldVecExt, CHUNK_VOLUME,
+};
+use newtypes::{define_index, NumEnum, NumEnumMap};
+use rustc_hash::{FxHashMap, FxHashSet};
 use typed_glam::traits::{CastVecFrom, NumericVector};
 
-// === Structures === //
+// === Block Structures === //
+
+define_index! {
+    pub struct BlockMaterial: u16;
+}
+
+impl BlockMaterial {
+    pub const AIR: Self = Self(0);
+
+    pub fn is_air(self) -> bool {
+        self == Self::AIR
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct BlockData {
+    pub material: BlockMaterial,
+    pub variant: u32,
+}
+
+impl BlockData {
+    const AIR: Self = Self {
+        material: BlockMaterial::AIR,
+        variant: 0,
+    };
+}
+
+// === Events === //
+
+#[derive(Debug, Copy, Clone, Event)]
+pub struct WorldChunkCreated {
+    pub world: Obj<WorldVoxelData>,
+    pub chunk: Obj<ChunkVoxelData>,
+}
+
+random_event!(WorldChunkCreated);
+
+// === Components === //
 
 #[derive(Debug, Default)]
 pub struct WorldVoxelData {
     chunks: FxHashMap<ChunkVec, Obj<ChunkVoxelData>>,
+    dirty: FxHashSet<Obj<ChunkVoxelData>>,
 }
 
 impl WorldVoxelData {
-    pub fn insert(mut self: Obj<Self>, pos: ChunkVec, chunk: Entity) {
-        debug_assert!(!chunk.has::<ChunkVoxelData>());
-        debug_assert!(!self.chunks.contains_key(&pos));
+    pub fn get_or_insert(self: Obj<Self>, pos: ChunkVec) -> Obj<ChunkVoxelData> {
+        let world = self.deref_mut();
+        let entry = match world.chunks.entry(pos) {
+            hash_map::Entry::Occupied(entry) => return *entry.into_mut(),
+            hash_map::Entry::Vacant(entry) => entry,
+        };
 
-        let mut chunk = chunk.insert(ChunkVoxelData {
+        let mut chunk = spawn_entity(()).insert(ChunkVoxelData {
             world: self,
             pos,
             neighbors: NumEnumMap::default(),
             data: None,
+            non_air_count: 0,
+            is_dirty: false,
         });
 
-        self.chunks.insert(pos, chunk);
+        entry.insert(chunk);
 
         for face in BlockFace::variants() {
             let neighbor = pos + face.unit();
 
-            let Some(&(mut neighbor)) = self.chunks.get(&neighbor) else {
+            let Some(&(mut neighbor)) = world.chunks.get(&neighbor) else {
                 continue;
             };
 
             neighbor.neighbors[face.invert()] = Some(chunk);
             chunk.neighbors[face] = Some(neighbor);
         }
-    }
 
-    pub fn remove(mut self: Obj<Self>, chunk: Obj<ChunkVoxelData>) {
-        debug_assert_eq!(chunk.world, self);
+        send_event(WorldChunkCreated { world: self, chunk });
 
-        self.chunks.remove(&chunk.pos);
-
-        for face in BlockFace::variants() {
-            let neighbor = chunk.neighbors[face];
-
-            let Some(mut neighbor) = neighbor else {
-                continue;
-            };
-
-            neighbor.neighbors[face.invert()] = None;
-        }
-
-        // Queues the component for deletion
-        chunk.entity().remove::<ChunkVoxelData>();
+        chunk
     }
 
     pub fn get(&self, pos: ChunkVec) -> Option<Obj<ChunkVoxelData>> {
         self.chunks.get(&pos).copied()
+    }
+
+    pub fn drain_dirty(&mut self) -> impl Iterator<Item = Obj<ChunkVoxelData>> {
+        mem::take(&mut self.dirty).into_iter()
     }
 }
 
@@ -71,7 +109,15 @@ pub struct ChunkVoxelData {
     world: Obj<WorldVoxelData>,
     pos: ChunkVec,
     neighbors: NumEnumMap<BlockFace, Option<Obj<ChunkVoxelData>>>,
-    data: Option<Box<[u16; CHUNK_VOLUME as usize]>>,
+    data: Option<ChunkData>,
+    non_air_count: i32,
+    is_dirty: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum ChunkData {
+    AllAir,
+    Complex(Box<[BlockData; CHUNK_VOLUME as usize]>),
 }
 
 random_component!(ChunkVoxelData);
@@ -89,18 +135,88 @@ impl ChunkVoxelData {
         self.neighbors[face]
     }
 
-    pub fn initialize_data(&mut self, data: Box<[u16; CHUNK_VOLUME as usize]>) {
+    pub fn initialize_data(&mut self, data: ChunkData) {
         debug_assert!(self.data.is_none());
 
         self.data = Some(data);
     }
 
-    pub fn data(&self) -> Option<&[u16; CHUNK_VOLUME as usize]> {
-        self.data.as_deref()
+    pub fn block(&self, block: BlockVec) -> Option<BlockData> {
+        self.data.as_ref().map(|v| match v {
+            ChunkData::AllAir => BlockData::AIR,
+            ChunkData::Complex(v) => v[block.to_index()],
+        })
     }
 
-    pub fn data_mut(&mut self) -> Option<&mut [u16; CHUNK_VOLUME as usize]> {
-        self.data.as_deref_mut()
+    pub fn block_or_air(&self, block: BlockVec) -> BlockData {
+        self.block(block).unwrap_or(BlockData::AIR)
+    }
+
+    pub fn set_block(mut self: Obj<Self>, block: BlockVec, new_data: BlockData) {
+        self.set_block_no_dirty(block, new_data);
+        self.mark_dirty();
+    }
+
+    pub fn set_block_no_dirty(&mut self, block: BlockVec, new_data: BlockData) {
+        // Ensure that the chunk is loaded.
+        let Some(data) = &mut self.data else {
+            tracing::warn!("attempted to set block state in unloaded chunk");
+            return;
+        };
+
+        // Promote all-air chunks into complex chunks
+        let data = match data {
+            ChunkData::AllAir => {
+                *data = ChunkData::Complex(Box::new([BlockData::AIR; CHUNK_VOLUME as usize]));
+
+                match data {
+                    ChunkData::AllAir => unreachable!(),
+                    ChunkData::Complex(data) => data,
+                }
+            }
+            ChunkData::Complex(data) => data,
+        };
+
+        // Update the block state
+        let old_data = mem::replace(&mut data[block.to_index()], new_data);
+
+        let was_air = old_data.material.is_air() as i8;
+        let is_air = new_data.material.is_air() as i8;
+        self.non_air_count += (is_air - was_air) as i32;
+    }
+
+    pub fn mark_dirty(mut self: Obj<Self>) {
+        if self.is_dirty {
+            return;
+        }
+
+        self.deref_mut().world.dirty.insert(self);
+        self.is_dirty = true;
+    }
+
+    pub fn non_air_count(&self) -> i32 {
+        self.non_air_count
+    }
+
+    pub fn attempt_simplification(&mut self) {
+        if self.non_air_count == 0 && self.data.is_some() {
+            self.data = Some(ChunkData::AllAir);
+        }
+    }
+
+    pub fn unlink(self: Obj<Self>) {
+        let mut world = self.world;
+        world.chunks.remove(&self.pos);
+
+        for face in BlockFace::variants() {
+            let neighbor = self.neighbors[face];
+
+            let Some(mut neighbor) = neighbor else {
+                continue;
+            };
+
+            neighbor.neighbors[face.invert()] = None;
+        }
     }
 }
 
@@ -233,4 +349,17 @@ impl WorldPointer {
         self.move_to_neighbor(face);
         self
     }
+}
+
+// === Systems === //
+
+pub fn sys_unlink_dead_chunks(
+    mut rand: RandomAccess<(&mut WorldVoxelData, &mut ChunkVoxelData)>,
+    mut query: RemovedComponents<ObjOwner<ChunkVoxelData>>,
+) {
+    rand.provide(|| {
+        for entity in query.read() {
+            entity.get::<ChunkVoxelData>().unlink();
+        }
+    });
 }

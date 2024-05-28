@@ -3,7 +3,7 @@
 use std::{
     cell::Cell,
     collections::hash_map,
-    fmt,
+    fmt, hash,
     marker::PhantomData,
     ops::{Deref, DerefMut},
     thread::LocalKey,
@@ -144,9 +144,9 @@ impl<'w, 's, L: RandomResourceList> RandomAccess<'w, 's, L> {
 
 // === RandomComponentList === //
 
-pub type RandBorrowsRef<'a, T> = &'a mut Borrows<RandTokensOf<T>>;
+pub type RandBorrowsMut<'a, T> = &'a mut Borrows<RandTokensOf<T>>;
 
-pub type RandBorrowsMut<'a, T> = &'a Borrows<RandTokensOf<T>>;
+pub type RandBorrowsRef<'a, T> = &'a Borrows<RandTokensOf<T>>;
 
 pub type RandTokensOf<T> = <T as RandomResourceList>::Tokens;
 
@@ -598,6 +598,12 @@ impl<T> Eq for Obj<T> {}
 impl<T> PartialEq for Obj<T> {
     fn eq(&self, other: &Self) -> bool {
         self.index == other.index
+    }
+}
+
+impl<T> hash::Hash for Obj<T> {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.index.hash(state);
     }
 }
 
