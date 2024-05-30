@@ -1,5 +1,8 @@
-.PHONY: build
+.PHONY: build, run
 
 build:
 	cargo autoken check
 	cargo build
+
+run: build
+	RUST_LOG=info cargo run

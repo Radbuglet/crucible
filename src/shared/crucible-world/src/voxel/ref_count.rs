@@ -9,7 +9,7 @@ use bevy_ecs::{
     system::{Commands, Query},
 };
 
-use super::{WorldChunkCreated, WorldVoxelData};
+use super::{ChunkVoxelData, WorldChunkCreated, WorldVoxelData};
 
 // === Components === /
 
@@ -32,7 +32,7 @@ pub struct ChunkKeepAliveHandle(Arc<()>);
 // === Systems === //
 
 pub fn sys_add_rcs_to_new_chunks(
-    mut rand: RandomAccess<&WorldVoxelData>,
+    mut rand: RandomAccess<(&WorldVoxelData, &ChunkVoxelData)>,
     query: Query<(), With<WorldRc>>,
     mut cmd: Commands,
     mut events: EventReader<WorldChunkCreated>,
@@ -51,7 +51,7 @@ pub fn sys_add_rcs_to_new_chunks(
 
 pub fn sys_unload_dead_chunks(mut query: Query<(Entity, &ChunkLoadRc)>, mut cmd: Commands) {
     for (chunk, rc) in query.iter_mut() {
-        if Arc::strong_count(&rc.0) == 0 {
+        if Arc::strong_count(&rc.0) == 1 {
             cmd.entity(chunk).despawn();
         }
     }

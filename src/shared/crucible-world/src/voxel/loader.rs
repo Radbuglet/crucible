@@ -7,7 +7,7 @@ use std::{
 use bevy_autoken::{random_component, Obj, RandomAccess, RandomEntityExt};
 use bevy_ecs::event::EventReader;
 
-use super::{ChunkVoxelData, WorldChunkCreated};
+use super::{ChunkVoxelData, WorldChunkCreated, WorldVoxelData};
 
 // === ChunkQueue === //
 
@@ -61,7 +61,7 @@ impl ChunkQueue {
 
 // === Components === //
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ChunkLoadQueue(pub ChunkQueue);
 
 random_component!(ChunkLoadQueue);
@@ -69,7 +69,7 @@ random_component!(ChunkLoadQueue);
 // === Systems === //
 
 pub fn sys_add_new_chunks_to_load_queue(
-    mut rand: RandomAccess<&mut ChunkLoadQueue>,
+    mut rand: RandomAccess<(&mut ChunkLoadQueue, &WorldVoxelData)>,
     mut events: EventReader<WorldChunkCreated>,
 ) {
     rand.provide(|| {
