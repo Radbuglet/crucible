@@ -13,7 +13,16 @@ use newtypes::{define_index, NumEnum, NumEnumMap};
 use rustc_hash::{FxHashMap, FxHashSet};
 use typed_glam::traits::{CastVecFrom, NumericVector};
 
+use crate::material::{MaterialCache, MaterialRegistry};
+
 // === Block Structures === //
+
+// Materials
+pub type BlockMaterialRegistry = MaterialRegistry<BlockMaterial>;
+
+random_component!(BlockMaterialRegistry);
+
+pub type BlockMaterialCache<V> = MaterialCache<BlockMaterial, V>;
 
 define_index! {
     pub struct BlockMaterial: u16;
@@ -25,8 +34,13 @@ impl BlockMaterial {
     pub fn is_air(self) -> bool {
         self == Self::AIR
     }
+
+    pub fn is_not_air(self) -> bool {
+        self != Self::AIR
+    }
 }
 
+// Block Data
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct BlockData {
     pub material: BlockMaterial,
@@ -38,6 +52,14 @@ impl BlockData {
         material: BlockMaterial::AIR,
         variant: 0,
     };
+
+    pub fn is_air(&self) -> bool {
+        self.material.is_air()
+    }
+
+    pub fn is_not_air(&self) -> bool {
+        self.material.is_not_air()
+    }
 }
 
 // === Events === //
@@ -57,6 +79,8 @@ pub struct WorldVoxelData {
     chunks: FxHashMap<ChunkVec, Obj<ChunkVoxelData>>,
     dirty: FxHashSet<Obj<ChunkVoxelData>>,
 }
+
+random_component!(WorldVoxelData);
 
 impl WorldVoxelData {
     pub fn get_or_insert(self: Obj<Self>, pos: ChunkVec) -> Obj<ChunkVoxelData> {
@@ -101,8 +125,6 @@ impl WorldVoxelData {
         mem::take(&mut self.dirty).into_iter()
     }
 }
-
-random_component!(WorldVoxelData);
 
 #[derive(Debug)]
 pub struct ChunkVoxelData {
@@ -243,7 +265,7 @@ where
         }
     }
 
-    pub fn move_to(&mut self, pos: V) {
+    pub fn move_to(&mut self, pos: V) -> &mut Self {
         // Update vector
         let old_chunk = self.block().chunk();
         self.pos = pos;
@@ -252,12 +274,12 @@ where
         // Update chunk
         if old_chunk == new_chunk {
             // (we're still in the same chunk)
-            return;
+            return self;
         }
 
         let Some(mut chunk) = self.chunk else {
             // (the chunk cache is unset and we don't want to recompute it)
-            return;
+            return self;
         };
 
         self.chunk = None;
@@ -269,7 +291,7 @@ where
 
             // We can't move more than one chunk across
             if !(-1..=1).contains(&delta) {
-                return;
+                return self;
             }
 
             // If the delta is zero, don't move anywhere.
@@ -279,17 +301,18 @@ where
 
             // If the neighbor is none, our cache becomes none.
             let Some(neighbor) = chunk.neighbor(BlockFace::compose(axis, sign)) else {
-                return;
+                return self;
             };
 
             chunk = neighbor;
         }
 
         self.chunk = Some(chunk);
+        self
     }
 
-    pub fn move_by(&mut self, delta: V) {
-        self.move_to(self.pos + delta);
+    pub fn move_by(&mut self, delta: V) -> &mut Self {
+        self.move_to(self.pos + delta)
     }
 
     #[must_use]
@@ -348,6 +371,10 @@ impl WorldPointer {
     pub fn neighbor(mut self, face: BlockFace) -> Self {
         self.move_to_neighbor(face);
         self
+    }
+
+    pub fn block_data(&mut self, world: Obj<WorldVoxelData>) -> Option<BlockData> {
+        self.chunk(world).and_then(|v| v.block(self.pos.block()))
     }
 }
 

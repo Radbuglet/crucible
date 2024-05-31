@@ -7,9 +7,12 @@ edition = "2021"
 autoken = { git = "https://github.com/Radbuglet/autoken.git", rev = "c0941f1506fda81dc388f9a52e3770792ee0c822", version = "0.1.0" }
 bevy-autoken = { version = "0.1.0", path = "../../util/bevy-autoken" }
 bevy_ecs = "0.13.2"
+cbit = "0.1.0"
 crucible-math = { version = "0.1.0", path = "../crucible-math" }
 derive-where = "1.2.7"
 newtypes = { version = "0.1.0", path = "../../util/newtypes" }
 rustc-hash = "1.1.0"
+smallvec = "1.13.2"
+std-traits = { version = "0.1.0", path = "../../util/std-traits" }
 tracing = "0.1.40"
 typed-glam = { version = "0.1.0", path = "../../util/typed-glam" }

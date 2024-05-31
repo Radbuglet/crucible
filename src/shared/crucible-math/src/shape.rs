@@ -221,6 +221,16 @@ pub struct Aabb3<V> {
 }
 
 impl<V: SignedNumericVector3> Aabb3<V> {
+    pub const ZERO: Self = Self {
+        origin: V::ZERO,
+        size: V::ZERO,
+    };
+
+    pub const ONE: Self = Self {
+        origin: V::ZERO,
+        size: V::ONE,
+    };
+
     #[must_use]
     pub fn from_corners_max_excl(a: V, b: V) -> Self {
         let min = a.min(b);

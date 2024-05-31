@@ -248,4 +248,19 @@ impl<K: Index, V> IndexVec<K, V> {
     pub fn pop_entry(&mut self) -> Option<(K, V)> {
         self.raw.pop().map(|v| (self.len(), v))
     }
+
+    pub fn entry_with(&mut self, key: K, f: impl FnMut() -> V) -> &mut V {
+        if self.raw.len() < key.as_usize() + 1 {
+            self.raw.resize_with(key.as_usize() + 1, f);
+        }
+
+        &mut self[key]
+    }
+
+    pub fn entry(&mut self, key: K) -> &mut V
+    where
+        V: Default,
+    {
+        self.entry_with(key, V::default)
+    }
 }
