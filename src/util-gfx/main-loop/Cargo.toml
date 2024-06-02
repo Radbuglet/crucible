@@ -1,0 +1,12 @@
+[package]
+name = "winit-ext"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+typed-glam = { version = "0.1.0", path = "../../util/typed-glam" }
+wgpu = "0.20.0"
+winit = "0.30.0"
+
+[dev-dependencies]
+fastrand = "2.1.0"
