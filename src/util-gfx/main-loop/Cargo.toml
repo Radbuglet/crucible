@@ -1,9 +1,11 @@
 [package]
-name = "winit-ext"
+name = "main-loop"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+newtypes = { version = "0.1.0", path = "../../util/newtypes" }
+rustc-hash = "1.1.0"
 typed-glam = { version = "0.1.0", path = "../../util/typed-glam" }
 wgpu = "0.20.0"
 winit = "0.30.0"

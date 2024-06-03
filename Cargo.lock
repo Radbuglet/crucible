@@ -1113,6 +1113,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 
 [[package]]
+name = "main-loop"
+version = "0.1.0"
+dependencies = [
+ "fastrand",
+ "newtypes",
+ "rustc-hash",
+ "typed-glam",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2665,16 +2677,6 @@ dependencies = [
  "x11-dl",
  "x11rb",
  "xkbcommon-dl",
-]
-
-[[package]]
-name = "winit-ext"
-version = "0.1.0"
-dependencies = [
- "fastrand",
- "typed-glam",
- "wgpu",
- "winit",
 ]
 
 [[package]]

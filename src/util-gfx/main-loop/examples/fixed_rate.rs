@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use winit_ext::{FixedRate, TickResult};
+use main_loop::{FixedRate, TickResult};
 
 fn main() {
     let mut fr = FixedRate::new(10.);
