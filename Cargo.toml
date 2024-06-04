@@ -10,5 +10,5 @@ members = [
     "src/util/newtypes-proc",
     "src/util/newtypes",
     "src/util/std-traits",
-    "src/util/typed-glam",
+    "src/util/typed-glam", "src/util/fmt-util",
 ]

@@ -114,11 +114,11 @@ impl KeyboardDeviceState {
     }
 
     fn logical_key(&self, key: Key) -> BoolAction {
-        self.logical_keys.get(&key).cloned().unwrap_or_default()
+        self.logical_keys.get(&key).copied().unwrap_or_default()
     }
 
     fn physical_key(&self, key: PhysicalKey) -> BoolAction {
-        self.physical_keys.get(&key).cloned().unwrap_or_default()
+        self.physical_keys.get(&key).copied().unwrap_or_default()
     }
 }
 
@@ -150,7 +150,7 @@ impl MouseDeviceState {
     }
 
     fn button(&self, button: MouseButton) -> BoolAction {
-        self.buttons[MouseButtonIndex::from(button)].clone()
+        self.buttons[MouseButtonIndex::from(button)]
     }
 }
 
@@ -243,7 +243,7 @@ impl InputManagerMouse<'_> {
 
 // === BoolAction === //
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct BoolAction {
     changes: u8,
     state: bool,
