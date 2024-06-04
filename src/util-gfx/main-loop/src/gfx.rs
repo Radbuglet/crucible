@@ -21,7 +21,7 @@ pub struct GfxContext {
 impl GfxContext {
     pub async fn new<T>(
         main_window: Arc<Window>,
-        mut compat_detector: impl FnMut(&mut CompatQueryInfo) -> (Judgement, T),
+        mut compat_detector: impl Judge<Table = T>,
     ) -> anyhow::Result<(Self, wgpu::Surface<'static>, T)> {
         let backends = wgpu::Backends::PRIMARY;
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -55,7 +55,7 @@ impl GfxContext {
 
                 // Query support and config
                 let mut descriptor = wgpu::DeviceDescriptor::default();
-                let (judgement, compat_table) = (compat_detector)(&mut CompatQueryInfo {
+                let (judgement, compat_table) = compat_detector.judge(&mut CompatQueryInfo {
                     descriptor: &mut descriptor,
                     instance: &instance,
                     main_surface: &main_surface,
@@ -255,6 +255,85 @@ impl Judgement {
     }
 }
 
+// === Judge === //
+
+pub trait Judge: Sized {
+    type Table;
+
+    fn judge(&mut self, info: &mut CompatQueryInfo) -> (Judgement, Self::Table);
+
+    fn map_judgement(
+        mut self,
+        mut map: impl FnMut(Judgement) -> Judgement,
+    ) -> impl Judge<Table = Self::Table> {
+        move |info: &mut CompatQueryInfo| {
+            let (judgement, table) = self.judge(info);
+            let judgement = map(judgement);
+
+            (judgement, table)
+        }
+    }
+
+    fn map_optional(self, penalty: f64) -> impl Judge<Table = Self::Table> {
+        self.map_judgement(move |judgement| judgement.make_soft_error(penalty))
+    }
+}
+
+impl<F, T> Judge for F
+where
+    F: FnMut(&mut CompatQueryInfo) -> (Judgement, T),
+{
+    type Table = T;
+
+    fn judge(&mut self, info: &mut CompatQueryInfo) -> (Judgement, Self::Table) {
+        self(info)
+    }
+}
+
+#[doc(hidden)]
+pub mod define_judge_internals {
+    pub use {
+        super::{CompatQueryInfo, Judge, Judgement},
+        std::stringify,
+    };
+}
+
+#[macro_export]
+macro_rules! define_judge {
+    ($(
+        $(#[$attr:meta])*
+        $vis:vis struct $name:ident {
+            $($f_vis:vis $f_name:ident: $f_ty:ty => $init:expr),*
+            $(,)?
+        }
+    )*) => {$(
+        $(#[$attr])*
+        $vis struct $name {
+            $($f_vis $f_name: $f_ty),*
+        }
+
+        impl $name {
+            $vis fn judge() -> impl $crate::define_judge_internals::Judge<Table = Self> {
+                move |info: &mut $crate::define_judge_internals::CompatQueryInfo| {
+                    let judgement = $crate::define_judge_internals::Judgement::new_ok(
+                        $crate::define_judge_internals::stringify!($name),
+                    );
+
+                    $(
+                        let (sub_judgement, $f_name) = $crate::define_judge_internals::Judge::judge(
+                            &mut $init,
+                            info,
+                        );
+                        let judgement = judgement.with_sub(sub_judgement);
+                    )*
+
+                    (judgement, Self { $($f_name,)* })
+                }
+            }
+        }
+    )*};
+}
+
 // === Foundational Feature Judgements === //
 
 pub fn feat_requires_screen(info: &mut CompatQueryInfo) -> (Judgement, ()) {
@@ -271,9 +350,7 @@ pub fn feat_requires_screen(info: &mut CompatQueryInfo) -> (Judgement, ()) {
     .with_table(())
 }
 
-pub fn feat_requires_power_pref(
-    pref: wgpu::PowerPreference,
-) -> impl FnMut(&mut CompatQueryInfo) -> (Judgement, ()) {
+pub fn feat_requires_power_pref(pref: wgpu::PowerPreference) -> impl Judge<Table = ()> {
     move |info: &mut CompatQueryInfo| {
         let mode = info.adapter_info.device_type();
         let matches = match mode {

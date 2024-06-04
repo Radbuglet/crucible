@@ -1,11 +1,12 @@
-use std::time::Instant;
+use std::sync::Arc;
 
-use main_loop::{InputManager, LimitedRate, TickResult};
+use main_loop::{
+    define_judge, feat_requires_power_pref, feat_requires_screen, InputManager, Judge,
+};
 use winit::{
     application::ApplicationHandler,
-    event::{DeviceEvent, DeviceId, StartCause, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{Key, NamedKey},
+    event::{DeviceEvent, DeviceId, WindowEvent},
+    event_loop::{ActiveEventLoop, EventLoop},
     window::{Window, WindowId},
 };
 
@@ -14,56 +15,36 @@ fn main() {
     event_loop.run_app(&mut MyApp::default()).unwrap();
 }
 
+#[derive(Default)]
 struct MyApp {
     manager: InputManager,
-    rate_limiter: LimitedRate,
-    main_window: Option<Window>,
+    app: Option<MyAppInit>,
 }
 
-impl Default for MyApp {
-    fn default() -> Self {
-        Self {
-            manager: InputManager::default(),
-            rate_limiter: LimitedRate::new(10.),
-            main_window: None,
-        }
+struct MyAppInit {
+    main_window: Arc<Window>,
+}
+
+define_judge! {
+    pub struct MyAppFeatures {
+        _requires_screen: () => feat_requires_screen,
+        _power_pref: () => {
+            feat_requires_power_pref(wgpu::PowerPreference::HighPerformance)
+                .map_optional(10.)
+        },
     }
 }
 
 impl ApplicationHandler<()> for MyApp {
-    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
-        let tick = self.rate_limiter.tick(Instant::now());
-
-        match tick {
-            TickResult::Tick(()) => {
-                let Some(main_window) = self.main_window.as_ref() else {
-                    return;
-                };
-
-                if self
-                    .manager
-                    .window(main_window.id())
-                    .logical_key(Key::Named(NamedKey::Escape))
-                    .recently_pressed()
-                {
-                    event_loop.exit();
-                }
-
-                self.manager.end_tick();
-            }
-            TickResult::Sleep(until) => {
-                event_loop.set_control_flow(ControlFlow::WaitUntil(until));
-            }
-        }
-    }
-
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.main_window.is_none() {
-            let window = event_loop
-                .create_window(Window::default_attributes().with_title("Hello"))
-                .unwrap();
+        if self.app.is_none() {
+            let main_window = Arc::new(
+                event_loop
+                    .create_window(Window::default_attributes().with_title("Hello"))
+                    .unwrap(),
+            );
 
-            self.main_window = Some(window);
+            self.app = Some(MyAppInit { main_window });
         }
     }
 

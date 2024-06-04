@@ -5,9 +5,10 @@ use std::{
 
 // === Common === //
 
-pub enum TickResult<T> {
-    Tick(T),
-    Sleep(Instant),
+#[derive(Debug, Copy, Clone)]
+pub struct TickResult<T> {
+    pub output: Option<T>,
+    pub next_tick: Instant,
 }
 
 // === LimitedRate === //
@@ -57,7 +58,10 @@ impl LimitedRate {
         // If this is our first tick, run it immediately.
         let Some(last_tick) = self.last_tick.as_mut() else {
             self.last_tick = Some(now);
-            return TickResult::Tick(());
+            return TickResult {
+                output: Some(()),
+                next_tick: now + self.min_delta,
+            };
         };
 
         // See if we can run yet.
@@ -67,9 +71,15 @@ impl LimitedRate {
             *last_tick = now;
             self.last_delta_as_duration = delta;
             self.last_delta_mirror = delta.as_secs_f64();
-            LimitedRateTickResult::Tick(())
+            LimitedRateTickResult {
+                output: Some(()),
+                next_tick: now + (delta - self.min_delta),
+            }
         } else {
-            LimitedRateTickResult::Sleep(now + (self.min_delta - delta))
+            LimitedRateTickResult {
+                output: None,
+                next_tick: now + (self.min_delta - delta),
+            }
         }
     }
 }
@@ -134,7 +144,10 @@ impl FixedRate {
         // If this is our first tick, run it immediately.
         let Some(last_tick) = self.world_time.as_mut() else {
             self.world_time = Some(now);
-            return TickResult::Tick(NonZeroU32::new(1).unwrap());
+            return TickResult {
+                output: Some(NonZeroU32::new(1).unwrap()),
+                next_tick: now + self.fixed_delta_as_duration,
+            };
         };
 
         // The `last_tick` will always be in the past compared to us since a) instants are monotonic
@@ -149,9 +162,15 @@ impl FixedRate {
         if let Some(ticks_to_run) = NonZeroU32::new(ticks_to_run) {
             *last_tick += self.fixed_delta_as_duration * ticks_to_run.get();
 
-            TickResult::Tick(ticks_to_run)
+            TickResult {
+                output: Some(ticks_to_run),
+                next_tick: *last_tick + self.fixed_delta_as_duration,
+            }
         } else {
-            TickResult::Sleep(self.next_tick(now))
+            TickResult {
+                output: None,
+                next_tick: self.next_tick(now),
+            }
         }
     }
 }
