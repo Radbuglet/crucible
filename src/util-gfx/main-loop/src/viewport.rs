@@ -17,8 +17,6 @@ pub struct ViewportManager {
     window_map: FxHashMap<WindowId, Obj<Viewport>>,
 }
 
-random_component!(ViewportManager);
-
 impl ViewportManager {
     pub fn register(&mut self, viewport: Obj<Viewport>) {
         self.window_map.insert(viewport.window.id(), viewport);
@@ -129,7 +127,7 @@ impl Viewport {
         &self.window
     }
 
-    pub fn present(
+    pub fn get_current_texture(
         &mut self,
         gfx: &GfxContext,
     ) -> Result<Option<wgpu::SurfaceTexture>, OutOfDeviceMemoryError> {

@@ -7,8 +7,9 @@ members = [
     "src/util-gfx/main-loop",
     "src/util-gfx/typed-wgpu",
     "src/util/bevy-autoken",
+    "src/util/fmt-util",
     "src/util/newtypes-proc",
     "src/util/newtypes",
     "src/util/std-traits",
-    "src/util/typed-glam", "src/util/fmt-util",
+    "src/util/typed-glam",
 ]

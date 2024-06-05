@@ -1,12 +1,12 @@
-use bevy_app::{App, Update};
-use bevy_autoken::RandomAppExt;
-use bevy_ecs::schedule::IntoSystemConfigs;
-use crucible_world::{
-    collider::{sys_unregister_dead_aabbs, AabbHolder, AabbStore},
-    voxel::{
-        sys_add_new_chunks_to_load_queue, sys_add_rcs_to_new_chunks, sys_unlink_dead_chunks,
-        sys_unload_dead_chunks, ChunkLoadQueue, ChunkVoxelData, WorldChunkCreated, WorldVoxelData,
-    },
+use std::process;
+
+use anyhow::Context;
+use main_loop::run_app_with_init;
+use winit::{
+    application::ApplicationHandler,
+    event::{DeviceEvent, DeviceId, StartCause, WindowEvent},
+    event_loop::{ActiveEventLoop, EventLoop},
+    window::{Window, WindowId},
 };
 
 fn main() {
@@ -15,24 +15,50 @@ fn main() {
 
     tracing::info!("Hello!");
 
-    let mut app = App::new();
+    if let Err(err) = main_inner() {
+        tracing::error!("Fatal error ocurred during engine startup:\n{err:?}");
+        process::exit(1);
+    }
 
-    app.add_random_component::<AabbHolder>();
-    app.add_random_component::<AabbStore>();
-    app.add_random_component::<ChunkLoadQueue>();
-    app.add_random_component::<ChunkVoxelData>();
-    app.add_random_component::<WorldVoxelData>();
+    tracing::info!("Goodbye!");
+}
 
-    app.add_event::<WorldChunkCreated>();
+fn main_inner() -> anyhow::Result<()> {
+    let event_loop = EventLoop::new().context("failed to create event loop")?;
 
-    #[rustfmt::skip]
-    app.add_systems(Update, (
-        sys_add_rcs_to_new_chunks,
-        sys_add_new_chunks_to_load_queue,
-        sys_unload_dead_chunks,
-        sys_unlink_dead_chunks,
-        sys_unregister_dead_aabbs,
-    ).chain());
+    run_app_with_init(event_loop, |event_loop| {
+        let main_window = event_loop.create_window(
+            Window::default_attributes()
+                .with_title("Crucible")
+                .with_blur(true),
+        )?;
 
-    app.run();
+        Ok(WinitApp { main_window })
+    })
+}
+
+struct WinitApp {
+    main_window: Window,
+}
+
+impl ApplicationHandler for WinitApp {
+    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {}
+
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {}
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
+    }
+
+    fn device_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+    }
 }
