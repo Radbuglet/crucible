@@ -1,3 +1,4 @@
+use bevy_ecs::system::Resource;
 use newtypes::{define_index, IndexVec};
 use rustc_hash::FxHashMap;
 use typed_glam::glam::DVec2;
@@ -11,7 +12,7 @@ use winit::{
 
 // === InputManager === //
 
-#[derive(Debug, Default)]
+#[derive(Debug, Resource, Default)]
 pub struct InputManager {
     windows: FxHashMap<WindowId, WindowDeviceState>,
     mouse_delta: DVec2,
@@ -33,6 +34,8 @@ impl InputManager {
     }
 
     pub fn end_tick(&mut self) {
+        self.mouse_delta = DVec2::ZERO;
+
         for win in self.windows.values_mut() {
             win.end_tick();
         }
@@ -40,6 +43,10 @@ impl InputManager {
 
     pub fn window(&self, window: WindowId) -> InputManagerWindow<'_> {
         InputManagerWindow(self.windows.get(&window))
+    }
+
+    pub fn mouse_delta(&self) -> DVec2 {
+        self.mouse_delta
     }
 }
 

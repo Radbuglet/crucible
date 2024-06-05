@@ -6,6 +6,7 @@ use std::{
     fmt, hash,
     marker::PhantomData,
     ops::{Deref, DerefMut},
+    ptr::NonNull,
     thread::LocalKey,
 };
 
@@ -17,7 +18,7 @@ use bevy_ecs::{
     entity::Entity,
     event::{Event, Events},
     removal_detection::RemovedComponents,
-    system::{Commands, Res, ResMut, Resource, SystemMeta, SystemParam},
+    system::{Commands, In, Res, ResMut, Resource, RunSystemOnce, SystemMeta, SystemParam},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 use generational_arena::{Arena, Index};
@@ -100,7 +101,7 @@ unsafe impl<'w2, 's2, L: RandomResourceList> SystemParam for RandomAccessInner<'
         // with another parameter's borrow access.
         let state = L::get_param_state(world, system_meta);
 
-        // Adjust the borrow set of this system.
+        // Adjust the borrow set of this system so that future parameters don't conflict with us.
         L::update_access_sets(&state, world, system_meta);
 
         state
@@ -163,7 +164,7 @@ pub unsafe trait RandomResourceList {
     type TlsSnapshot: 'static + Copy;
 
     /// Fetches the set of [`ComponentId`]s that this component list, ensuring that the existing
-    /// system meta doesn't have any conflicting borrows.
+    /// system meta doesn't have any conflicting borrows with other systems.
     fn get_param_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::ParamState;
 
     /// Appends this set's resource set to the system metadata.
@@ -740,6 +741,54 @@ impl RandomAppExt for App {
     fn add_random_component<T: RandomComponent>(&mut self) {
         self.init_resource::<RandomArena<T>>();
         self.add_systems(Last, make_unlinker_system::<T>());
+    }
+}
+
+pub trait RandomWorldExt {
+    fn use_random<L, R>(&mut self, f: impl FnOnce() -> R) -> R
+    where
+        L: 'static + RandomResourceList;
+}
+
+impl RandomWorldExt for World {
+    fn use_random<L: 'static + RandomResourceList, R>(&mut self, f: impl FnOnce() -> R) -> R {
+        #[allow(clippy::type_complexity)]
+        struct Smuggle<L: RandomResourceList>(NonNull<dyn FnMut(RandomAccess<L>)>);
+
+        unsafe impl<L: RandomResourceList> Send for Smuggle<L> {}
+
+        unsafe impl<L: RandomResourceList> Sync for Smuggle<L> {}
+
+        fn sys_use_random<L: RandomResourceList>(
+            In(Smuggle(mut f)): In<Smuggle<L>>,
+            rand: RandomAccess<L>,
+        ) {
+            unsafe {
+                f.as_mut()(rand);
+            }
+        }
+
+        let mut f = Some(f);
+        let mut result = None;
+
+        let mut f = |mut rand: RandomAccess<L>| {
+            rand.provide(|| {
+                result = Some(f.take().unwrap()());
+            });
+        };
+
+        #[allow(clippy::unnecessary_cast)]
+        self.run_system_once_with(
+            Smuggle(unsafe {
+                NonNull::new_unchecked(
+                    &mut f as *mut (dyn FnMut(RandomAccess<L>) + '_)
+                        as *mut dyn FnMut(RandomAccess<L>),
+                )
+            }),
+            sys_use_random::<L>,
+        );
+
+        result.unwrap()
     }
 }
 

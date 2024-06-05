@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use anyhow::Context;
+use bevy_ecs::system::Resource;
 use fmt_util::DisplayFromFn;
 use winit::window::Window;
 
-#[derive(Debug)]
+#[derive(Debug, Resource)]
 pub struct GfxContext {
     pub instance: wgpu::Instance,
     pub device: wgpu::Device,

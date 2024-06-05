@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bevy_autoken::{random_component, Obj};
+use bevy_ecs::system::Resource;
 use rustc_hash::FxHashMap;
 use thiserror::Error;
 use typed_glam::glam::UVec2;
@@ -12,7 +13,7 @@ pub const FALLBACK_SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bg
 
 // === ViewportManager === //
 
-#[derive(Debug, Default)]
+#[derive(Debug, Resource, Default)]
 pub struct ViewportManager {
     window_map: FxHashMap<WindowId, Obj<Viewport>>,
 }
