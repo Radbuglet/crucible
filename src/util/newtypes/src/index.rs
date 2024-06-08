@@ -234,6 +234,12 @@ impl<K, V> IndexVec<K, V> {
     }
 }
 
+impl<K, V> FromIterator<V> for IndexVec<K, V> {
+    fn from_iter<T: IntoIterator<Item = V>>(iter: T) -> Self {
+        Self::from_raw(Vec::from_iter(iter))
+    }
+}
+
 impl<K: Index, V> IndexVec<K, V> {
     pub fn push(&mut self, value: V) -> K {
         let new_index = K::from_usize(self.raw.len());
