@@ -1,4 +1,4 @@
-use bevy_ecs::system::Resource;
+use bevy_autoken::random_component;
 use newtypes::{define_index, IndexVec};
 use rustc_hash::FxHashMap;
 use typed_glam::glam::DVec2;
@@ -12,11 +12,13 @@ use winit::{
 
 // === InputManager === //
 
-#[derive(Debug, Resource, Default)]
+#[derive(Debug, Default)]
 pub struct InputManager {
     windows: FxHashMap<WindowId, WindowDeviceState>,
     mouse_delta: DVec2,
 }
+
+random_component!(InputManager);
 
 impl InputManager {
     pub fn process_window_event(&mut self, window: WindowId, event: &WindowEvent) {

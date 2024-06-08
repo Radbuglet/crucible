@@ -10,7 +10,7 @@ use std::{
     thread::LocalKey,
 };
 
-use autoken::{cap, Borrows, CapTarget, TokenSet};
+use autoken::{cap, Borrows, CapTarget, Ref, TokenSet};
 use bevy_app::{App, Last};
 use bevy_ecs::{
     bundle::Bundle,
@@ -43,9 +43,16 @@ impl<T> Default for RandomArena<T> {
 
 // === RandomAccess === //
 
-cap! {
-    CommandsCap<'w, 's> = Commands<'w, 's>;
+mod sealed {
+    use super::*;
+
+    cap! {
+        pub CommandsCap<'w, 's> = Commands<'w, 's>;
+        pub WorldCap<'w> = UnsafeWorldCell<'w>;
+    }
 }
+
+use sealed::*;
 
 pub struct RandomAccess<'w, 's, L: RandomResourceList> {
     inner: RandomAccessInner<'w, 's, L>,
@@ -137,7 +144,11 @@ impl<'w, 's, L: RandomResourceList> RandomAccess<'w, 's, L> {
                 }
 
                 let _all = dummy::<L::TokensMut>();
-                autoken::absorb::<L::Tokens, R>(|| CommandsCap::provide(&mut self.commands, f))
+                autoken::absorb::<L::Tokens, R>(|| {
+                    CommandsCap::provide(&mut self.commands, || {
+                        WorldCap::provide(&self.inner.world, f)
+                    })
+                })
             })
         }
     }
@@ -149,7 +160,7 @@ pub type RandBorrowsMut<'a, T> = &'a mut Borrows<RandTokensOf<T>>;
 
 pub type RandBorrowsRef<'a, T> = &'a Borrows<RandTokensOf<T>>;
 
-pub type RandTokensOf<T> = <T as RandomResourceList>::Tokens;
+pub type RandTokensOf<T> = (<T as RandomResourceList>::Tokens, Ref<WorldCap>);
 
 pub unsafe trait RandomResourceList {
     /// The set of tokens absorbed by the list.
@@ -473,11 +484,15 @@ pub unsafe trait RandomComponent: 'static + Sized + Send + Sync {
 
     fn arena<'a>() -> &'a RandomArena<Self> {
         autoken::tie!('a => ref RandomComponentToken<Self>);
+        autoken::tie!('a => ref WorldCap);
+
         unsafe { &*Self::tls().get() }
     }
 
     fn arena_mut<'a>() -> &'a mut RandomArena<Self> {
         autoken::tie!('a => mut RandomComponentToken<Self>);
+        autoken::tie!('a => ref WorldCap);
+
         unsafe { &mut *Self::tls().get() }
     }
 }
@@ -639,12 +654,16 @@ impl<T: RandomComponent> Obj<T> {
     #[allow(clippy::should_implement_trait)]
     pub fn deref<'a>(self) -> &'a T {
         autoken::tie!('a => ref RandomComponentToken<T>);
+        autoken::tie!('a => ref WorldCap);
+
         &T::arena().arena[self.index].1
     }
 
     #[allow(clippy::should_implement_trait)]
     pub fn deref_mut<'a>(self) -> &'a mut T {
         autoken::tie!('a => mut RandomComponentToken<T>);
+        autoken::tie!('a => ref WorldCap);
+
         &mut T::arena_mut().arena[self.index].1
     }
 }
@@ -667,6 +686,8 @@ impl<T: RandomComponent> Deref for Obj<T> {
 
     fn deref<'a>(&'a self) -> &'a Self::Target {
         autoken::tie!(unsafe 'a => ref RandomComponentToken<T>);
+        autoken::tie!(unsafe 'a => ref WorldCap);
+
         (*self).deref()
     }
 }
@@ -674,6 +695,8 @@ impl<T: RandomComponent> Deref for Obj<T> {
 impl<T: RandomComponent> DerefMut for Obj<T> {
     fn deref_mut<'a>(&'a mut self) -> &'a mut Self::Target {
         autoken::tie!(unsafe 'a => mut RandomComponentToken<T>);
+        autoken::tie!(unsafe 'a => ref WorldCap);
+
         (*self).deref_mut()
     }
 }
@@ -773,7 +796,11 @@ impl RandomWorldExt for World {
 
         let mut f = |mut rand: RandomAccess<L>| {
             rand.provide(|| {
-                result = Some(f.take().unwrap()());
+                result = Some(cap!(ref WorldCap => world in {
+                    let mut world = *world;
+
+                    WorldCap::provide(&mut world, f.take().unwrap())
+                }));
             });
         };
 
@@ -821,4 +848,10 @@ pub fn despawn_entity(entity: Entity) {
 
 pub fn send_event<E: RandomEvent>(event: E) {
     E::events_mut().send(event);
+}
+
+pub fn world_mut<'a>() -> &'a mut World {
+    autoken::tie!('a => mut WorldCap);
+
+    cap!(mut WorldCap => world in unsafe { world.world_mut() })
 }

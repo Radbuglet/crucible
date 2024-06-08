@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
+use bevy_autoken::random_component;
 use bevy_ecs::system::Resource;
 use fmt_util::DisplayFromFn;
 use winit::window::Window;
@@ -18,6 +19,8 @@ pub struct GfxContext {
     pub requested_features: wgpu::Features,
     pub requested_limits: wgpu::Limits,
 }
+
+random_component!(GfxContext);
 
 impl GfxContext {
     pub async fn new<T>(

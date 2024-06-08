@@ -2,8 +2,8 @@ use std::{process, sync::Arc};
 
 use anyhow::Context;
 use bevy_app::App;
-use bevy_autoken::{spawn_entity, RandomAccess, RandomAppExt, RandomEntityExt, RandomWorldExt};
-use bevy_ecs::system::{In, Res, RunSystemOnce};
+use bevy_autoken::{spawn_entity, world_mut, RandomAppExt, RandomEntityExt, RandomWorldExt};
+use bevy_ecs::{entity::Entity, world::World};
 use main_loop::{
     feat_requires_screen, run_app_with_init, GfxContext, InputManager, Viewport, ViewportManager,
 };
@@ -38,7 +38,10 @@ fn main_inner() -> anyhow::Result<()> {
         // Create app
         let mut app = App::new();
 
+        app.add_random_component::<GfxContext>();
+        app.add_random_component::<InputManager>();
         app.add_random_component::<Viewport>();
+        app.add_random_component::<ViewportManager>();
 
         // Create main window
         let main_window = Arc::new(
@@ -73,27 +76,42 @@ fn main_inner() -> anyhow::Result<()> {
         // Create input manager
         let input_mgr = InputManager::default();
 
-        // Register resources
-        app.insert_resource(viewports);
-        app.insert_resource(input_mgr);
-        app.insert_resource(gfx);
+        // Create singleton
+        let engine_root = app
+            .world
+            .use_random::<(&mut InputManager, &mut ViewportManager, &mut GfxContext), _>(|| {
+                let engine_root = world_mut().spawn(()).id();
+                engine_root.insert(viewports);
+                engine_root.insert(input_mgr);
+                engine_root.insert(gfx);
+                engine_root
+            });
 
         // Make main viewport visible
         app.world.use_random::<&mut Viewport, _>(|| {
             main_viewport.window().set_visible(true);
         });
 
-        Ok(WinitApp { app })
+        Ok(WinitApp { app, engine_root })
     })
 }
 
 struct WinitApp {
     app: App,
+    engine_root: Entity,
 }
 
 impl ApplicationHandler for WinitApp {
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: StartCause) {
-        self.app.world.run_system_once(sys_request_redraws);
+        self.app
+            .world
+            .use_random::<(&ViewportManager, &Viewport), _>(|| {
+                let vmgr = self.engine_root.get::<ViewportManager>();
+
+                for viewport in vmgr.window_map().values() {
+                    viewport.window().request_redraw();
+                }
+            });
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -107,16 +125,15 @@ impl ApplicationHandler for WinitApp {
         event: WindowEvent,
     ) {
         // Tick input manager
-        self.app
-            .world
-            .resource_mut::<InputManager>()
-            .process_window_event(window_id, &event);
+        self.app.world.use_random::<&mut InputManager, _>(|| {
+            self.engine_root
+                .get::<InputManager>()
+                .process_window_event(window_id, &event);
+        });
 
         // Handle redraw requests
         if let WindowEvent::RedrawRequested = &event {
-            self.app
-                .world
-                .run_system_once_with(window_id, sys_render_all);
+            render_app(&mut self.app.world, self.engine_root, window_id);
         }
     }
 
@@ -126,28 +143,19 @@ impl ApplicationHandler for WinitApp {
         device_id: DeviceId,
         event: DeviceEvent,
     ) {
-        self.app
-            .world
-            .resource_mut::<InputManager>()
-            .process_device_event(device_id, &event);
+        self.app.world.use_random::<&mut InputManager, _>(|| {
+            self.engine_root
+                .get::<InputManager>()
+                .process_device_event(device_id, &event);
+        });
     }
 }
 
-fn sys_request_redraws(mut rand: RandomAccess<&Viewport>, vmgr: Res<ViewportManager>) {
-    rand.provide(|| {
-        for viewport in vmgr.window_map().values() {
-            viewport.window().request_redraw();
-        }
-    })
-}
+fn render_app(world: &mut World, engine_root: Entity, window_id: WindowId) {
+    world.use_random::<(&mut ViewportManager, &mut Viewport, &GfxContext), _>(|| {
+        let vmgr = engine_root.get::<ViewportManager>();
+        let gfx = engine_root.get::<GfxContext>();
 
-fn sys_render_all(
-    In(window_id): In<WindowId>,
-    mut rand: RandomAccess<&mut Viewport>,
-    vmgr: Res<ViewportManager>,
-    gfx: Res<GfxContext>,
-) {
-    rand.provide(|| {
         let Some(mut viewport) = vmgr.get_viewport(window_id) else {
             return;
         };
