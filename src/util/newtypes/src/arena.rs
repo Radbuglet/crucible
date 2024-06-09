@@ -1,18 +1,23 @@
 use derive_where::derive_where;
 use std::{
-    fmt, iter,
+    fmt,
     marker::PhantomData,
     mem::MaybeUninit,
     num::NonZeroU32,
     ops::{Index, IndexMut},
-    slice,
 };
+
+use crate::{Index as _, IndexSliceIterEnumerate, IndexSliceIterEnumerateMut, IndexVec};
+
+crate::define_index! {
+    pub struct ArenaSlotIndex: u32;
+}
 
 #[derive_where(Default)]
 pub struct Arena<T> {
     // Invariant: this vector can never be u32::MAX elements in length.
-    slots: Vec<ArenaSlot<T>>,
-    free_slots: Vec<u32>,
+    slots: IndexVec<ArenaSlotIndex, ArenaSlot<T>>,
+    free_slots: Vec<ArenaSlotIndex>,
 }
 
 struct ArenaSlot<T> {
@@ -36,7 +41,7 @@ impl<T> Arena<T> {
 
     pub fn get(&self, index: Handle<T>) -> Option<&T> {
         self.slots
-            .get(index.index as usize)
+            .get(index.index)
             .filter(|v| v.gen == index.gen.get())
             .map(|v| unsafe {
                 // Safety: `v.gen` must be odd by invariant and odd values denote occupied cells.
@@ -46,7 +51,7 @@ impl<T> Arena<T> {
 
     pub fn get_mut(&mut self, index: Handle<T>) -> Option<&mut T> {
         self.slots
-            .get_mut(index.index as usize)
+            .get_mut(index.index)
             .filter(|slot| slot.gen == index.gen.get())
             .map(|slot| unsafe {
                 // Safety: `index.gen` must be odd by invariant and odd values denote occupied cells.
@@ -71,12 +76,12 @@ impl<T> Arena<T> {
         }
 
         // Fetch the entire set.
-        let slots = self.slots.as_mut_ptr().cast::<ArenaSlot<T>>();
+        let slots = self.slots.raw.as_mut_ptr().cast::<ArenaSlot<T>>();
 
         indices.map(|index| {
             let slot = unsafe {
                 // Safety: we already ensured that indices are distinct.
-                &mut *slots.add(index.index as usize)
+                &mut *slots.add(index.index.as_usize())
             };
 
             if slot.gen != index.gen.get() {
@@ -92,7 +97,7 @@ impl<T> Arena<T> {
 
     pub fn insert(&mut self, value: T) -> Handle<T> {
         if let Some(index) = self.free_slots.pop() {
-            let slot = &mut self.slots[index as usize];
+            let slot = &mut self.slots[index];
 
             // This cannot overflow because the value is even and `u32::MAX` is odd.
             slot.gen += 1;
@@ -108,9 +113,7 @@ impl<T> Arena<T> {
                 },
             }
         } else {
-            let index = u32::try_from(self.slots.len()).expect("too many slots");
-
-            self.slots.push(ArenaSlot {
+            let index = self.slots.push(ArenaSlot {
                 gen: 1,
                 value: MaybeUninit::new(value),
             });
@@ -124,7 +127,7 @@ impl<T> Arena<T> {
     }
 
     pub fn remove(&mut self, index: Handle<T>) -> Option<T> {
-        let slot = self.slots.get_mut(index.index as usize)?;
+        let slot = self.slots.get_mut(index.index)?;
 
         if slot.gen != index.gen.get() {
             return None;
@@ -145,7 +148,7 @@ impl<T> Arena<T> {
     }
 
     pub fn len(&self) -> usize {
-        self.slots.len() - self.free_slots.len()
+        self.slots.raw.len() - self.free_slots.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -153,19 +156,19 @@ impl<T> Arena<T> {
     }
 
     pub fn clear(&mut self) {
-        self.slots.clear();
+        self.slots.raw.clear();
         self.free_slots.clear();
     }
 
     pub fn iter(&self) -> ArenaIter<'_, T> {
         ArenaIter {
-            slots: self.slots.iter().enumerate(),
+            slots: self.slots.enumerate(),
         }
     }
 
     pub fn iter_mut(&mut self) -> ArenaIterMut<'_, T> {
         ArenaIterMut {
-            slots: self.slots.iter_mut().enumerate(),
+            slots: self.slots.enumerate_mut(),
         }
     }
 }
@@ -222,7 +225,7 @@ pub struct Handle<T> {
     _ty: PhantomData<fn() -> T>,
 
     // The index of this object's slot.
-    index: u32,
+    index: ArenaSlotIndex,
 
     // Invariant: this value must be odd!
     gen: NonZeroU32,
@@ -230,7 +233,7 @@ pub struct Handle<T> {
 
 impl<T> fmt::Debug for Handle<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} @ {}", self.index, self.gen)
+        write!(f, "{} @ {}", self.index.0, self.gen)
     }
 }
 
@@ -242,11 +245,19 @@ impl<T> Handle<T> {
             gen: self.gen,
         }
     }
+
+    pub fn index(self) -> ArenaSlotIndex {
+        self.index
+    }
+
+    pub fn gen(self) -> NonZeroU32 {
+        self.gen
+    }
 }
 
 #[derive_where(Clone)]
 pub struct ArenaIter<'a, T> {
-    slots: iter::Enumerate<slice::Iter<'a, ArenaSlot<T>>>,
+    slots: IndexSliceIterEnumerate<'a, ArenaSlotIndex, ArenaSlot<T>>,
 }
 
 impl<'a, T> Iterator for ArenaIter<'a, T> {
@@ -255,7 +266,6 @@ impl<'a, T> Iterator for ArenaIter<'a, T> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let (index, slot) = self.slots.next()?;
-            let index = index as u32;
 
             if slot.gen % 2 == 0 {
                 continue;
@@ -281,7 +291,7 @@ impl<'a, T> Iterator for ArenaIter<'a, T> {
 }
 
 pub struct ArenaIterMut<'a, T> {
-    slots: iter::Enumerate<slice::IterMut<'a, ArenaSlot<T>>>,
+    slots: IndexSliceIterEnumerateMut<'a, ArenaSlotIndex, ArenaSlot<T>>,
 }
 
 impl<'a, T> Iterator for ArenaIterMut<'a, T> {
@@ -290,7 +300,6 @@ impl<'a, T> Iterator for ArenaIterMut<'a, T> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let (index, slot) = self.slots.next()?;
-            let index = index as u32;
 
             if slot.gen % 2 == 0 {
                 continue;
