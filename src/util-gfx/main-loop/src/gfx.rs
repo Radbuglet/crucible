@@ -1,13 +1,25 @@
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 use anyhow::Context;
 use bevy_autoken::random_component;
-use bevy_ecs::system::Resource;
 use fmt_util::DisplayFromFn;
 use winit::window::Window;
 
-#[derive(Debug, Resource)]
-pub struct GfxContext {
+#[derive(Debug, Clone)]
+pub struct GfxContext(Arc<GfxContextInner>);
+
+random_component!(GfxContext);
+
+impl Deref for GfxContext {
+    type Target = GfxContextInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Debug)]
+pub struct GfxContextInner {
     pub instance: wgpu::Instance,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -19,8 +31,6 @@ pub struct GfxContext {
     pub requested_features: wgpu::Features,
     pub requested_limits: wgpu::Limits,
 }
-
-random_component!(GfxContext);
 
 impl GfxContext {
     pub async fn new<T>(
@@ -102,7 +112,7 @@ impl GfxContext {
             .context("failed to acquire wgpu device")?;
 
         Ok((
-            Self {
+            Self(Arc::new(GfxContextInner {
                 instance,
                 device,
                 queue,
@@ -110,7 +120,7 @@ impl GfxContext {
                 adapter_info: req.adapter_info,
                 requested_features: req.descriptor.required_features,
                 requested_limits: req.descriptor.required_limits,
-            },
+            })),
             main_surface,
             req.compat_table,
         ))

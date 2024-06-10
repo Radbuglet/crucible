@@ -505,6 +505,7 @@ dependencies = [
  "futures",
  "main-loop",
  "native-dialog",
+ "newtypes",
  "tracing",
  "tracing-subscriber",
  "wgpu",
@@ -700,6 +701,19 @@ dependencies = [
  "bitflags 2.5.0",
  "libloading 0.8.3",
  "winapi",
+]
+
+[[package]]
+name = "dashmap"
+version = "5.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
+dependencies = [
+ "cfg-if",
+ "hashbrown",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -1088,6 +1102,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hash-utils"
+version = "0.1.0"
+dependencies = [
+ "dashmap",
+ "derive-where",
+ "hashbrown",
+ "newtypes",
+ "rustc-hash",
+ "std-traits",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1300,8 +1326,9 @@ dependencies = [
  "bevy_ecs",
  "fastrand",
  "fmt-util",
+ "hash-utils",
  "newtypes",
- "rustc-hash",
+ "smallbox",
  "thiserror",
  "tracing",
  "typed-glam",
@@ -2005,6 +2032,12 @@ checksum = "dbff4acf519f630b3a3ddcfaea6c06b42174d9a44bc70c620e9ed1649d58b82a"
 dependencies = [
  "version_check",
 ]
+
+[[package]]
+name = "smallbox"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d92359f97e6b417da4328a970cf04a044db104fbd57f7d72cb7ff665bb8806af"
 
 [[package]]
 name = "smallvec"

@@ -1,5 +1,8 @@
 #![feature(arbitrary_self_types)]
 
+mod asset;
+pub use asset::*;
+
 mod gfx;
 pub use gfx::*;
 

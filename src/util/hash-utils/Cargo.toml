@@ -1,0 +1,12 @@
+[package]
+name = "hash-utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dashmap = "5.5.3"
+derive-where = "1.2.7"
+hashbrown = "0.14.5"
+newtypes = { version = "0.1.0", path = "../newtypes" }
+rustc-hash = "1.1.0"
+std-traits = { version = "0.1.0", path = "../std-traits" }

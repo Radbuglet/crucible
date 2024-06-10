@@ -8,8 +8,9 @@ anyhow = "1.0.86"
 bevy-autoken = { version = "0.1.0", path = "../../util/bevy-autoken" }
 bevy_ecs = "0.13.2"
 fmt-util = { version = "0.1.0", path = "../../util/fmt-util" }
+hash-utils = { version = "0.1.0", path = "../../util/hash-utils" }
 newtypes = { version = "0.1.0", path = "../../util/newtypes" }
-rustc-hash = "1.1.0"
+smallbox = "0.8.2"
 thiserror = "1.0.61"
 tracing = "0.1.40"
 typed-glam = { version = "0.1.0", path = "../../util/typed-glam" }

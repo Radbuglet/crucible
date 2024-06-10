@@ -8,6 +8,7 @@ members = [
     "src/util-gfx/typed-wgpu",
     "src/util/bevy-autoken",
     "src/util/fmt-util",
+    "src/util/hash-utils",
     "src/util/newtypes-proc",
     "src/util/newtypes",
     "src/util/std-traits",
