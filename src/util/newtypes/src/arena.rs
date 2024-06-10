@@ -39,6 +39,10 @@ impl<T> Arena<T> {
         Self::default()
     }
 
+    pub fn contains(&self, index: Handle<T>) -> bool {
+        self.get(index).is_some()
+    }
+
     pub fn get(&self, index: Handle<T>) -> Option<&T> {
         self.slots
             .get(index.index)

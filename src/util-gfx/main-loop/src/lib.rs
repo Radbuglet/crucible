@@ -1,3 +1,5 @@
+#![feature(arbitrary_self_types)]
+
 mod gfx;
 pub use gfx::*;
 

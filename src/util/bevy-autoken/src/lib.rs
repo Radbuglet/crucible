@@ -3,7 +3,7 @@
 use std::{
     cell::Cell,
     collections::hash_map,
-    fmt, hash,
+    fmt,
     marker::PhantomData,
     ops::{Deref, DerefMut},
     ptr::NonNull,
@@ -21,7 +21,8 @@ use bevy_ecs::{
     system::{Commands, In, Res, ResMut, Resource, RunSystemOnce, SystemMeta, SystemParam},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
-use generational_arena::{Arena, Index};
+use derive_where::derive_where;
+use newtypes::{Arena, Handle};
 use rustc_hash::FxHashMap;
 
 // === RandomArena === //
@@ -586,42 +587,9 @@ macro_rules! random_event {
 
 // === Obj === //
 
+#[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(transparent)]
-pub struct Obj<T> {
-    _ty: PhantomData<fn() -> T>,
-    index: Index,
-}
-
-impl<T> fmt::Debug for Obj<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Obj")
-            .field(&self.index.into_raw_parts().0)
-            .field(&self.index.into_raw_parts().1)
-            .finish()
-    }
-}
-
-impl<T> Copy for Obj<T> {}
-
-impl<T> Clone for Obj<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Eq for Obj<T> {}
-
-impl<T> PartialEq for Obj<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.index == other.index
-    }
-}
-
-impl<T> hash::Hash for Obj<T> {
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        self.index.hash(state);
-    }
-}
+pub struct Obj<T>(Handle<(Entity, T)>);
 
 impl<T: RandomComponent> Obj<T> {
     fn new(owner: Entity, value: T) -> Self {
@@ -629,11 +597,11 @@ impl<T: RandomComponent> Obj<T> {
         match arena.map.entry(owner) {
             hash_map::Entry::Occupied(entry) => {
                 let obj = *entry.into_mut();
-                arena.arena[obj.index] = (owner, value);
+                arena.arena[obj.0] = (owner, value);
                 obj
             }
             hash_map::Entry::Vacant(entry) => {
-                let obj = Self::from_index(arena.arena.insert((owner, value)));
+                let obj = Obj(arena.arena.insert((owner, value)));
                 cap!(mut CommandsCap => v in {
                     v.entity(owner).insert(ObjOwner(obj));
                 });
@@ -644,11 +612,11 @@ impl<T: RandomComponent> Obj<T> {
     }
 
     pub fn entity(self) -> Entity {
-        T::arena().arena[self.index].0
+        T::arena().arena[self.0].0
     }
 
     pub fn is_alive(self) -> bool {
-        T::arena().arena.contains(self.index)
+        T::arena().arena.contains(self.0)
     }
 
     #[allow(clippy::should_implement_trait)]
@@ -656,7 +624,7 @@ impl<T: RandomComponent> Obj<T> {
         autoken::tie!('a => ref RandomComponentToken<T>);
         autoken::tie!('a => ref WorldCap);
 
-        &T::arena().arena[self.index].1
+        &T::arena().arena[self.0].1
     }
 
     #[allow(clippy::should_implement_trait)]
@@ -664,20 +632,13 @@ impl<T: RandomComponent> Obj<T> {
         autoken::tie!('a => mut RandomComponentToken<T>);
         autoken::tie!('a => ref WorldCap);
 
-        &mut T::arena_mut().arena[self.index].1
+        &mut T::arena_mut().arena[self.0].1
     }
 }
 
 impl<T> Obj<T> {
-    pub fn from_index(index: Index) -> Self {
-        Self {
-            _ty: PhantomData,
-            index,
-        }
-    }
-
-    pub fn index(me: Self) -> Index {
-        me.index
+    pub fn cast<V>(self) -> Obj<V> {
+        Obj(self.0.cast())
     }
 }
 
@@ -768,13 +729,25 @@ impl RandomAppExt for App {
 }
 
 pub trait RandomWorldExt {
-    fn use_random<L, R>(&mut self, f: impl FnOnce() -> R) -> R
+    fn use_random<L, R>(&mut self, f: impl FnOnce(PhantomData<L>) -> R) -> R
     where
         L: 'static + RandomResourceList;
 }
 
+impl RandomWorldExt for App {
+    fn use_random<L, R>(&mut self, f: impl FnOnce(PhantomData<L>) -> R) -> R
+    where
+        L: 'static + RandomResourceList,
+    {
+        self.world.use_random::<L, R>(f)
+    }
+}
+
 impl RandomWorldExt for World {
-    fn use_random<L: 'static + RandomResourceList, R>(&mut self, f: impl FnOnce() -> R) -> R {
+    fn use_random<L: 'static + RandomResourceList, R>(
+        &mut self,
+        f: impl FnOnce(PhantomData<L>) -> R,
+    ) -> R {
         #[allow(clippy::type_complexity)]
         struct Smuggle<L: RandomResourceList>(NonNull<dyn FnMut(RandomAccess<L>)>);
 
@@ -799,7 +772,9 @@ impl RandomWorldExt for World {
                 result = Some(cap!(ref WorldCap => world in {
                     let mut world = *world;
 
-                    WorldCap::provide(&mut world, f.take().unwrap())
+                    WorldCap::provide(&mut world, || {
+                        f.take().unwrap()(PhantomData)
+                    })
                 }));
             });
         };
@@ -827,7 +802,7 @@ pub fn make_unlinker_system<T: RandomComponent>(
 
             for removed in removed.read() {
                 if let Some(obj) = arena.map.remove(&removed) {
-                    arena.arena.remove(obj.index);
+                    arena.arena.remove(obj.0);
                 }
             }
         });

@@ -122,8 +122,11 @@ impl KeyboardDeviceState {
         !self.logical_keys.is_empty() || !self.physical_keys.is_empty()
     }
 
-    fn logical_key(&self, key: Key) -> BoolAction {
-        self.logical_keys.get(&key).copied().unwrap_or_default()
+    fn logical_key(&self, key: impl Into<Key>) -> BoolAction {
+        self.logical_keys
+            .get(&key.into())
+            .copied()
+            .unwrap_or_default()
     }
 
     fn physical_key(&self, key: PhysicalKey) -> BoolAction {
@@ -204,7 +207,7 @@ impl<'a> InputManagerWindow<'a> {
             .map_or(BoolAction::default(), |v| v.agg_keyboard.physical_key(key))
     }
 
-    pub fn logical_key(self, key: Key) -> BoolAction {
+    pub fn logical_key(self, key: impl Into<Key>) -> BoolAction {
         self.0
             .map_or(BoolAction::default(), |v| v.agg_keyboard.logical_key(key))
     }

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use bevy_autoken::{random_component, Obj};
+use bevy_autoken::{random_component, Obj, ObjOwner, RandomAccess, RandomEntityExt};
+use bevy_ecs::removal_detection::RemovedComponents;
 use rustc_hash::FxHashMap;
 use thiserror::Error;
 use typed_glam::glam::UVec2;
@@ -20,7 +21,8 @@ pub struct ViewportManager {
 random_component!(ViewportManager);
 
 impl ViewportManager {
-    pub fn register(&mut self, viewport: Obj<Viewport>) {
+    pub fn register(mut self: Obj<Self>, mut viewport: Obj<Viewport>) {
+        viewport.manager = Some(self);
         self.window_map.insert(viewport.window.id(), viewport);
     }
 
@@ -54,6 +56,7 @@ fn surface_size_from_config(config: &wgpu::SurfaceConfiguration) -> Option<UVec2
 #[derive(Debug)]
 pub struct Viewport {
     window: Arc<Window>,
+    manager: Option<Obj<ViewportManager>>,
     surface: wgpu::Surface<'static>,
     curr_config: wgpu::SurfaceConfiguration,
     next_config: wgpu::SurfaceConfiguration,
@@ -74,6 +77,7 @@ impl Viewport {
 
         Self {
             window,
+            manager: None,
             surface,
             curr_config: config.clone(),
             next_config: config,
@@ -257,8 +261,30 @@ impl Viewport {
             }
         }
     }
+
+    pub fn manager(&self) -> Option<Obj<ViewportManager>> {
+        self.manager
+    }
 }
 
 #[derive(Debug, Copy, Clone, Error)]
 #[error("out of device memory")]
 pub struct OutOfDeviceMemoryError;
+
+// === Systems === //
+
+pub fn sys_unregister_dead_viewports(
+    mut rand: RandomAccess<(&mut ViewportManager, &Viewport)>,
+    mut query: RemovedComponents<ObjOwner<Viewport>>,
+) {
+    rand.provide(|| {
+        for viewport in query.read() {
+            let viewport = viewport.get::<Viewport>();
+            let Some(mut vmgr) = viewport.manager() else {
+                continue;
+            };
+
+            vmgr.unregister(viewport.window().id());
+        }
+    })
+}
