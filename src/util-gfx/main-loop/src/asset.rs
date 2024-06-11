@@ -3,9 +3,13 @@ use std::{
     fmt,
     ops::Deref,
     ptr::NonNull,
-    sync::{Arc, OnceLock, RwLock},
+    sync::{
+        atomic::{AtomicBool, Ordering::*},
+        Arc, OnceLock, RwLock,
+    },
 };
 
+use bevy_autoken::random_component;
 use derive_where::derive_where;
 use hash_util::{fx_hash_one, hashbrown::hash_map, FxHashMap, ManyToOwned};
 use smallbox::{smallbox, SmallBox};
@@ -14,13 +18,20 @@ use smallbox::{smallbox, SmallBox};
 
 #[derive(Default)]
 pub struct AssetManager {
-    assets: RwLock<FxHashMap<AssetKey, Arc<dyn Any + Send + Sync>>>,
+    assets: RwLock<FxHashMap<AssetKey, AssetValue>>,
 }
+
+random_component!(AssetManager);
 
 struct AssetKey {
     hash: u64,
     loader_ptr: usize,
     value: SmallBox<dyn Any + Send + Sync, [u64; 2]>,
+}
+
+struct AssetValue {
+    deletion_candidate: AtomicBool,
+    value: Arc<dyn Any + Send + Sync>,
 }
 
 impl AssetManager {
@@ -43,6 +54,21 @@ impl AssetManager {
         }
     }
 
+    pub fn try_reclaim(&mut self) {
+        self.assets.get_mut().unwrap().retain(|_, v| {
+            let deletion_candidate = v.deletion_candidate.get_mut();
+
+            if Arc::strong_count(&v.value) == 1 {
+                let should_delete = !*deletion_candidate;
+                *deletion_candidate = true;
+                should_delete
+            } else {
+                *deletion_candidate = false;
+                true
+            }
+        });
+    }
+
     fn load_inner<A, R>(&self, args: A, loader_ptr: usize) -> Arc<OnceLock<R>>
     where
         A: ManyToOwned,
@@ -63,7 +89,8 @@ impl AssetManager {
         let assets = self.assets.read().unwrap();
 
         if let Some((_, asset)) = assets.raw_entry().from_hash(hash, check_candidate) {
-            let asset = asset.clone();
+            asset.deletion_candidate.store(false, Relaxed);
+            let asset = asset.value.clone();
             drop(assets);
             return asset.downcast::<OnceLock<R>>().unwrap();
         }
@@ -76,8 +103,11 @@ impl AssetManager {
 
         match assets.raw_entry_mut().from_hash(hash, check_candidate) {
             hash_map::RawEntryMut::Occupied(entry) => {
-                let entry = entry.into_mut().clone();
+                let entry = entry.into_mut();
+                *entry.deletion_candidate.get_mut() = false;
+                let entry = entry.value.clone();
                 drop(assets);
+
                 entry.downcast::<OnceLock<R>>().unwrap()
             }
             hash_map::RawEntryMut::Vacant(entry) => {
@@ -90,7 +120,10 @@ impl AssetManager {
                         // FIXME: Poisoning
                         value: smallbox!(args.to_owned()),
                     },
-                    value.clone(),
+                    AssetValue {
+                        deletion_candidate: AtomicBool::new(false),
+                        value: value.clone(),
+                    },
                     |entry| entry.hash,
                 );
                 value
