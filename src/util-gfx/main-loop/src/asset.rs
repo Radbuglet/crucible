@@ -1,64 +1,134 @@
-use std::{any::Any, borrow::Borrow, hash, sync::Arc};
+use std::{
+    any::Any,
+    fmt,
+    ops::Deref,
+    ptr::NonNull,
+    sync::{Arc, OnceLock, RwLock},
+};
 
-use hash_utils::FxDashMap;
-use newtypes::impl_tuples;
+use derive_where::derive_where;
+use hash_util::{fx_hash_one, hashbrown::hash_map, FxHashMap, ManyToOwned};
+use smallbox::{smallbox, SmallBox};
 
 // === AssetManager === //
 
 #[derive(Default)]
-pub struct AssetManager {}
+pub struct AssetManager {
+    assets: RwLock<FxHashMap<AssetKey, Arc<dyn Any + Send + Sync>>>,
+}
+
+struct AssetKey {
+    hash: u64,
+    loader_ptr: usize,
+    value: SmallBox<dyn Any + Send + Sync, [u64; 2]>,
+}
 
 impl AssetManager {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn load<C, A, R>(&self, cx: C, args: A, loader: fn(C, A) -> R) -> Asset<R>
+    pub fn load<C, A, R>(&self, cx: C, args: A, loader: fn(&Self, C, A) -> R) -> Asset<R>
     where
-        A: for<'a> LoaderArgs<'a>,
-        R: Any + Send + Sync,
+        A: ManyToOwned,
+        A::Owned: 'static + Send + Sync,
+        R: 'static + Send + Sync,
     {
-        todo!();
+        let asset = self.load_inner::<A, R>(args, loader as usize);
+        let inner = NonNull::from(asset.get_or_init(|| loader(self, cx, args)));
+
+        Asset {
+            _asset: asset,
+            inner,
+        }
+    }
+
+    fn load_inner<A, R>(&self, args: A, loader_ptr: usize) -> Arc<OnceLock<R>>
+    where
+        A: ManyToOwned,
+        A::Owned: 'static + Send + Sync,
+        R: 'static + Send + Sync,
+    {
+        let hash = fx_hash_one(args);
+        let check_candidate = |candidate: &AssetKey| -> bool {
+            candidate.hash == hash
+                && candidate.loader_ptr == loader_ptr
+                && candidate
+                    .value
+                    .downcast_ref::<A::Owned>()
+                    .is_some_and(|owned| args.cmp_owned(owned))
+        };
+
+        // Attempt to fetch an existing asset handle while holding a reader to the shared map.
+        let assets = self.assets.read().unwrap();
+
+        if let Some((_, asset)) = assets.raw_entry().from_hash(hash, check_candidate) {
+            let asset = asset.clone();
+            drop(assets);
+            return asset.downcast::<OnceLock<R>>().unwrap();
+        }
+
+        drop(assets);
+
+        // Attempt to insert the asset into the map. Since we have to upgrade the lock in between
+        // the check and the insertion, someone may have raced us to creating the entry.
+        let mut assets = self.assets.write().unwrap();
+
+        match assets.raw_entry_mut().from_hash(hash, check_candidate) {
+            hash_map::RawEntryMut::Occupied(entry) => {
+                let entry = entry.into_mut().clone();
+                drop(assets);
+                entry.downcast::<OnceLock<R>>().unwrap()
+            }
+            hash_map::RawEntryMut::Vacant(entry) => {
+                let value = Arc::new(OnceLock::<R>::new());
+                entry.insert_with_hasher(
+                    hash,
+                    AssetKey {
+                        hash,
+                        loader_ptr,
+                        // FIXME: Poisoning
+                        value: smallbox!(args.to_owned()),
+                    },
+                    value.clone(),
+                    |entry| entry.hash,
+                );
+                value
+            }
+        }
     }
 }
 
 // === Asset === //
 
+#[derive_where(Clone)]
 pub struct Asset<T> {
-    asset: Arc<T>,
+    _asset: Arc<OnceLock<T>>,
+    inner: NonNull<T>,
 }
 
-// === LoaderArgs === //
+unsafe impl<T: Sync> Send for Asset<T> {}
 
-pub trait LoaderArgs<'a>: Copy + hash::Hash + Eq {
-    type Owned: Send + Sync;
+unsafe impl<T: Sync> Sync for Asset<T> {}
 
-    fn to_owned(self) -> Self::Owned;
-
-    fn borrow_owned(owned: &'a Self::Owned) -> Self;
+impl<T: fmt::Debug> fmt::Debug for Asset<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        (**self).fmt(f)
+    }
 }
 
-macro_rules! impl_loader_args {
-    ($($name:ident:$field:tt),*) => {
-        impl<'a, $($name: ToOwned + Eq + hash::Hash),*> LoaderArgs<'a> for ($(&'a $name,)*)
-        where
-            $($name::Owned: Send + Sync,)*
-        {
-            type Owned = ($($name::Owned,)*);
+impl<T> Eq for Asset<T> {}
 
-            #[allow(clippy::unused_unit)]
-            fn to_owned(self) -> Self::Owned {
-                ($(self.$field.to_owned(),)*)
-            }
-
-            #[allow(clippy::unused_unit)]
-            #[allow(unused_variables)]
-            fn borrow_owned(owned: &'a Self::Owned) -> Self {
-                ($(owned.$field.borrow(),)*)
-            }
-        }
-
-    };
+impl<T> PartialEq for Asset<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
 }
 
-impl_tuples!(impl_loader_args);
+impl<T> Deref for Asset<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.inner.as_ref() }
+    }
+}

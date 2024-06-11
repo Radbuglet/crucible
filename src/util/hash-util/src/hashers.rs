@@ -1,4 +1,7 @@
-use std::{hash, marker::PhantomData};
+use std::{
+    hash::{self, BuildHasher},
+    marker::PhantomData,
+};
 
 use derive_where::derive_where;
 use rustc_hash::FxHasher;
@@ -42,9 +45,11 @@ impl hash::Hasher for NopHasher {
 pub type FxBuildHasher = ConstBuildHasherDefault<FxHasher>;
 pub type FxHashMap<K, V> = hashbrown::HashMap<K, V, FxBuildHasher>;
 pub type FxHashSet<T> = hashbrown::HashSet<T, FxBuildHasher>;
-pub type FxDashMap<K, V> = dashmap::DashMap<K, V, FxBuildHasher>;
 
 pub type NopBuildHasher = ConstBuildHasherDefault<NopHasher>;
 pub type NopHashMap<K, V> = hashbrown::HashMap<K, V, NopBuildHasher>;
 pub type NopHashSet<T> = hashbrown::HashSet<T, NopBuildHasher>;
-pub type NopDashMap<K, V> = dashmap::DashMap<K, V, NopBuildHasher>;
+
+pub fn fx_hash_one(value: impl hash::Hash) -> u64 {
+    FxBuildHasher::new().hash_one(value)
+}

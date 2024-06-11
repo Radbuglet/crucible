@@ -1,6 +1,6 @@
 use bevy_autoken::random_component;
+use hash_util::FxHashMap;
 use newtypes::{define_index, IndexVec};
-use hash_utils::FxHashMap;
 use typed_glam::glam::DVec2;
 use winit::{
     dpi::PhysicalPosition,
