@@ -1,7 +1,8 @@
 use std::{fmt, hash, iter, ops, slice};
 
-use newtypes_proc::iterator;
-use std_traits::ArrayLike;
+use crate::traits::ArrayLike;
+
+use super::iterator;
 
 // === NumEnum === //
 
@@ -52,19 +53,21 @@ macro_rules! num_enum {
 			),*
 		}
 
-		impl $crate::num_enum_internals::NumEnum for $name {
+		impl $crate::newtypes::num_enum_internals::NumEnum for $name {
 			const VARIANTS: &'static [Self] = &[
 				$(Self::$field),*
 			];
 
 			type Array<T> = [T; Self::COUNT];
 
-			fn index(self) -> $crate::num_enum_internals::usize {
-				self as $crate::num_enum_internals::usize
+			fn index(self) -> $crate::newtypes::num_enum_internals::usize {
+				self as $crate::newtypes::num_enum_internals::usize
 			}
 		}
 	)*};
 }
+
+pub use num_enum;
 
 // === NumEnumMap === //
 

@@ -1,4 +1,4 @@
-use std::fmt;
+use core::fmt;
 
 #[derive(Copy, Clone)]
 pub struct DisplayFromFn<F>(pub F)

@@ -6,7 +6,8 @@ use std::{
 };
 
 use derive_where::derive_where;
-use newtypes_proc::{iterator, transparent};
+
+use super::{iterator, transparent};
 
 // === Index === //
 
@@ -60,19 +61,19 @@ macro_rules! define_index {
         #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
         $vis struct $name(pub $ty);
 
-        impl $crate::define_index_internals::Index for $name {
+        impl $crate::newtypes::define_index_internals::Index for $name {
             type Prim = $ty;
 
-            fn try_from_usize(idx: $crate::define_index_internals::usize) -> $crate::define_index_internals::Option<Self> {
-                <$ty as $crate::define_index_internals::TryFrom<_>>::try_from(idx).ok().map(Self)
+            fn try_from_usize(idx: $crate::newtypes::define_index_internals::usize) -> $crate::newtypes::define_index_internals::Option<Self> {
+                <$ty as $crate::newtypes::define_index_internals::TryFrom<_>>::try_from(idx).ok().map(Self)
             }
 
             fn from_raw(raw: $ty) -> Self {
                 Self(raw)
             }
 
-            fn as_usize(self) -> $crate::define_index_internals::usize {
-                self.0 as $crate::define_index_internals::usize
+            fn as_usize(self) -> $crate::newtypes::define_index_internals::usize {
+                self.0 as $crate::newtypes::define_index_internals::usize
             }
 
             fn as_raw(self) -> $ty {
@@ -81,6 +82,8 @@ macro_rules! define_index {
         }
     )*};
 }
+
+pub use define_index;
 
 // === IndexSlice === //
 

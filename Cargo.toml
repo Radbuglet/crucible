@@ -7,10 +7,7 @@ members = [
     "src/util-gfx/main-loop",
     "src/util-gfx/typed-wgpu",
     "src/util/bevy-autoken",
-    "src/util/fmt-util",
-    "src/util/hash-util",
-    "src/util/newtypes-proc",
-    "src/util/newtypes",
-    "src/util/std-traits",
+    "src/util/crucible-utils-proc",
+    "src/util/crucible-utils",
     "src/util/typed-glam",
 ]

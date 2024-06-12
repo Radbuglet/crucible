@@ -71,3 +71,5 @@ macro_rules! impl_tuples {
 		$crate::impl_tuples!($target; no_unit);
 	};
 }
+
+pub use impl_tuples;

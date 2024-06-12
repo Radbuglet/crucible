@@ -11,7 +11,7 @@ use std::{
 };
 
 use num_traits::Num;
-use std_traits::ArrayLike;
+use crucible_utils::traits::ArrayLike;
 
 // === Dim class === //
 

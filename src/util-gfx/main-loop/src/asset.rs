@@ -10,8 +10,8 @@ use std::{
 };
 
 use bevy_autoken::random_component;
+use crucible_utils::hash::{fx_hash_one, hashbrown::hash_map, FxHashMap, ManyToOwned};
 use derive_where::derive_where;
-use hash_util::{fx_hash_one, hashbrown::hash_map, FxHashMap, ManyToOwned};
 use smallbox::{smallbox, SmallBox};
 
 // === AssetManager === //

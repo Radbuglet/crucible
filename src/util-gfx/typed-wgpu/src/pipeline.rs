@@ -1,7 +1,7 @@
 use std::{any::TypeId, borrow::Cow, marker::PhantomData, num::NonZeroU32};
 
+use crucible_utils::newtypes::{impl_tuples, transparent};
 use derive_where::derive_where;
-use newtypes::{impl_tuples, transparent};
 
 use crate::{
     buffer::BufferSlice,

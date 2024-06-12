@@ -2,7 +2,7 @@ use std::{ops::Deref, sync::Arc};
 
 use anyhow::Context;
 use bevy_autoken::random_component;
-use fmt_util::DisplayFromFn;
+use crucible_utils::fmt::DisplayFromFn;
 use winit::window::Window;
 
 #[derive(Debug, Clone)]

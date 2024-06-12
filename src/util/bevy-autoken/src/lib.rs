@@ -21,8 +21,8 @@ use bevy_ecs::{
     system::{Commands, In, Res, ResMut, Resource, RunSystemOnce, SystemMeta, SystemParam},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
+use crucible_utils::newtypes::{Arena, Handle};
 use derive_where::derive_where;
-use newtypes::{Arena, Handle};
 use rustc_hash::FxHashMap;
 
 // === RandomArena === //

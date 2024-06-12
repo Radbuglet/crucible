@@ -1,6 +1,6 @@
 use crucible_math::{AaQuad, Aabb3, BlockFace};
+use crucible_utils::newtypes::NumEnum;
 use derive_where::derive_where;
-use newtypes::NumEnum;
 use typed_glam::glam::Vec3;
 
 // === Volumetric === //

@@ -7,10 +7,8 @@ edition = "2021"
 anyhow = "1.0.86"
 bevy-autoken = { version = "0.1.0", path = "../../util/bevy-autoken" }
 bevy_ecs = "0.13.2"
+crucible-utils = { version = "0.1.0", path = "../../util/crucible-utils" }
 derive-where = "1.2.7"
-fmt-util = { version = "0.1.0", path = "../../util/fmt-util" }
-hash-util = { version = "0.1.0", path = "../../util/hash-util" }
-newtypes = { version = "0.1.0", path = "../../util/newtypes" }
 smallbox = "0.8.2"
 thiserror = "1.0.61"
 tracing = "0.1.40"

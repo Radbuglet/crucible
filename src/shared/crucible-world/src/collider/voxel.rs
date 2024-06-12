@@ -6,9 +6,8 @@ use crucible_math::{
     WorldVecExt,
 };
 
-use newtypes::NumEnum;
+use crucible_utils::{newtypes::NumEnum, traits::VecLike};
 use smallvec::SmallVec;
-use std_traits::VecLike;
 use typed_glam::{glam::DVec2, traits::NumericVector};
 
 use crate::voxel::{BlockData, BlockMaterialCache, EntityPointer, WorldPointer, WorldVoxelData};

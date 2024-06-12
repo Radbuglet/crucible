@@ -1,5 +1,5 @@
+use crucible_utils::newtypes::transparent;
 use derive_where::derive_where;
-use newtypes::transparent;
 use std::{any::type_name, borrow::Cow, fmt, hash::Hash, marker::PhantomData, num::NonZeroU32};
 
 use crate::{pipeline::PipelineSet, util::SlotAssigner};

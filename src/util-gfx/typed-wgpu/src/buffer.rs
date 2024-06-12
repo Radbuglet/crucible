@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
+use crucible_utils::newtypes::transparent;
 use derive_where::derive_where;
-use newtypes::transparent;
 
 #[derive_where(Debug)]
 #[transparent(raw, pub wrap)]

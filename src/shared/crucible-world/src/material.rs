@@ -2,8 +2,8 @@ use std::collections::hash_map;
 
 use bevy_autoken::{Obj, RandomComponent, RandomEntityExt};
 use bevy_ecs::entity::Entity;
+use crucible_utils::newtypes::{Index, IndexVec};
 use derive_where::derive_where;
-use newtypes::{Index, IndexVec};
 use rustc_hash::FxHashMap;
 
 // === MaterialRegistry === //

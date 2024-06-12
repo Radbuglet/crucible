@@ -5,8 +5,7 @@ use std::{
     ops::{self, Index, IndexMut},
 };
 
-use newtypes::transparent;
-use std_traits::ArrayLike;
+use crucible_utils::{newtypes::transparent, traits::ArrayLike};
 
 use crate::traits::{
     floating_vector_forwards, numeric_vector_forwards, signed_vector_forwards, CastVecFrom, Dim2,

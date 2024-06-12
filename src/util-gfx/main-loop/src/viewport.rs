@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bevy_autoken::{random_component, Obj, ObjOwner, RandomAccess, RandomEntityExt};
 use bevy_ecs::removal_detection::RemovedComponents;
-use hash_util::FxHashMap;
+use crucible_utils::hash::FxHashMap;
 use thiserror::Error;
 use typed_glam::glam::UVec2;
 use winit::window::{Window, WindowId};

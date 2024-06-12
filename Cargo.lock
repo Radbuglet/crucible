@@ -203,8 +203,8 @@ dependencies = [
  "autoken",
  "bevy_app",
  "bevy_ecs",
+ "crucible-utils",
  "derive-where",
- "newtypes",
  "rustc-hash",
  "scopeguard",
 ]
@@ -505,7 +505,6 @@ dependencies = [
  "futures",
  "main-loop",
  "native-dialog",
- "newtypes",
  "tracing",
  "tracing-subscriber",
  "wgpu",
@@ -662,10 +661,30 @@ checksum = "22ec99545bb0ed0ea7bb9b8e1e9122ea386ff8a48c0922e43f36d45ab09e0e80"
 name = "crucible-math"
 version = "0.1.0"
 dependencies = [
- "newtypes",
+ "crucible-utils",
  "num-traits",
- "std-traits",
  "typed-glam",
+]
+
+[[package]]
+name = "crucible-utils"
+version = "0.1.0"
+dependencies = [
+ "crucible-utils-proc",
+ "derive-where",
+ "hashbrown",
+ "num-traits",
+ "rustc-hash",
+ "smallvec",
+]
+
+[[package]]
+name = "crucible-utils-proc"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.65",
 ]
 
 [[package]]
@@ -677,11 +696,10 @@ dependencies = [
  "bevy_ecs",
  "cbit",
  "crucible-math",
+ "crucible-utils",
  "derive-where",
- "newtypes",
  "rustc-hash",
  "smallvec",
- "std-traits",
  "tracing",
  "typed-glam",
 ]
@@ -835,10 +853,6 @@ name = "fixedbitset"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
-
-[[package]]
-name = "fmt-util"
-version = "0.1.0"
 
 [[package]]
 name = "foreign-types"
@@ -1089,16 +1103,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hash-util"
-version = "0.1.0"
-dependencies = [
- "derive-where",
- "hashbrown",
- "newtypes",
- "rustc-hash",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1309,11 +1313,9 @@ dependencies = [
  "anyhow",
  "bevy-autoken",
  "bevy_ecs",
+ "crucible-utils",
  "derive-where",
  "fastrand",
- "fmt-util",
- "hash-util",
- "newtypes",
  "smallbox",
  "thiserror",
  "tracing",
@@ -1457,25 +1459,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
 dependencies = [
  "jni-sys",
-]
-
-[[package]]
-name = "newtypes"
-version = "0.1.0"
-dependencies = [
- "derive-where",
- "newtypes-proc",
- "num-traits",
- "std-traits",
-]
-
-[[package]]
-name = "newtypes-proc"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.65",
 ]
 
 [[package]]
@@ -2084,13 +2067,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
-name = "std-traits"
-version = "0.1.0"
-dependencies = [
- "smallvec",
-]
-
-[[package]]
 name = "strict-num"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2266,18 +2242,17 @@ checksum = "2c591d83f69777866b9126b24c6dd9a18351f177e49d625920d19f989fd31cf8"
 name = "typed-glam"
 version = "0.1.0"
 dependencies = [
+ "crucible-utils",
  "glam",
- "newtypes",
  "num-traits",
- "std-traits",
 ]
 
 [[package]]
 name = "typed-wgpu"
 version = "0.1.0"
 dependencies = [
+ "crucible-utils",
  "derive-where",
- "newtypes",
  "wgpu",
 ]
 

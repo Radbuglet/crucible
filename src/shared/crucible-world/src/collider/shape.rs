@@ -1,4 +1,4 @@
-use newtypes::define_index;
+use crucible_utils::newtypes::define_index;
 
 use crate::mesh::{QuadMeshLayer, VolumetricMeshLayer};
 

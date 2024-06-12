@@ -9,7 +9,7 @@ use crucible_math::{
     Axis3, BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, Sign, VecCompExt, WorldVec,
     WorldVecExt, CHUNK_VOLUME,
 };
-use newtypes::{define_index, NumEnum, NumEnumMap};
+use crucible_utils::newtypes::{define_index, NumEnum, NumEnumMap};
 use rustc_hash::{FxHashMap, FxHashSet};
 use typed_glam::traits::{CastVecFrom, NumericVector};
 

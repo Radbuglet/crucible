@@ -1,6 +1,6 @@
 use std::f32::consts::{PI, TAU};
 
-use newtypes::{num_enum, NumEnum};
+use crucible_utils::newtypes::{num_enum, NumEnum};
 use num_traits::Signed;
 use typed_glam::{
     glam::{DVec2, DVec3, IVec2, IVec3, Mat4, Vec2, Vec3},

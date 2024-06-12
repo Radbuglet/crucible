@@ -1,0 +1,12 @@
+[package]
+name = "crucible-utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crucible-utils-proc = { version = "0.1.0", path = "../crucible-utils-proc" }
+derive-where = "1.2.7"
+hashbrown = "0.14.5"
+num-traits = "0.2.19"
+rustc-hash = "1.1.0"
+smallvec = "1.13.2"

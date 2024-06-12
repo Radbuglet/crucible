@@ -1,4 +1,4 @@
-use std_traits::ArrayLike;
+use crucible_utils::traits::ArrayLike;
 use typed_glam::{
     glam::{self, Vec2},
     traits::SignedNumericVector3,
