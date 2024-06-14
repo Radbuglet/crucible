@@ -41,16 +41,15 @@ impl AssetManager {
 
     pub fn load<C, A, R>(&self, cx: C, args: A, loader: fn(&Self, C, A) -> R) -> Asset<R>
     where
-        A: ManyToOwned,
-        A::Owned: 'static + Send + Sync,
+        A: AssetArgs,
         R: 'static + Send + Sync,
     {
         let asset = self.load_inner::<A, R>(args, loader as usize);
         let inner = NonNull::from(asset.get_or_init(|| loader(self, cx, args)));
 
         Asset {
-            _asset: asset,
-            inner,
+            arc_owner: asset,
+            pointee: inner,
         }
     }
 
@@ -71,8 +70,7 @@ impl AssetManager {
 
     fn load_inner<A, R>(&self, args: A, loader_ptr: usize) -> Arc<OnceLock<R>>
     where
-        A: ManyToOwned,
-        A::Owned: 'static + Send + Sync,
+        A: AssetArgs,
         R: 'static + Send + Sync,
     {
         let hash = fx_hash_one(args);
@@ -132,12 +130,23 @@ impl AssetManager {
     }
 }
 
+pub trait AssetArgs: ManyToOwned<Owned = Self::Owned2> {
+    type Owned2: 'static + Send + Sync;
+}
+
+impl<T: ManyToOwned> AssetArgs for T
+where
+    T::Owned: 'static + Send + Sync,
+{
+    type Owned2 = T::Owned;
+}
+
 // === Asset === //
 
 #[derive_where(Clone)]
 pub struct Asset<T> {
-    _asset: Arc<OnceLock<T>>,
-    inner: NonNull<T>,
+    arc_owner: Arc<dyn Any + Send + Sync>,
+    pointee: NonNull<T>,
 }
 
 unsafe impl<T: Sync> Send for Asset<T> {}
@@ -154,7 +163,7 @@ impl<T> Eq for Asset<T> {}
 
 impl<T> PartialEq for Asset<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.inner == other.inner
+        self.pointee == other.pointee
     }
 }
 
@@ -162,6 +171,17 @@ impl<T> Deref for Asset<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { self.inner.as_ref() }
+        unsafe { self.pointee.as_ref() }
+    }
+}
+
+impl<T> Asset<T> {
+    pub fn map<V>(me: Self, f: impl FnOnce(&T) -> &V) -> Asset<V> {
+        let pointee = NonNull::from(f(&*me));
+
+        Asset {
+            arc_owner: me.arc_owner,
+            pointee,
+        }
     }
 }

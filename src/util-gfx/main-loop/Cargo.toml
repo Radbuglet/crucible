@@ -13,6 +13,7 @@ smallbox = "0.8.2"
 thiserror = "1.0.61"
 tracing = "0.1.40"
 typed-glam = { version = "0.1.0", path = "../../util/typed-glam" }
+typed-wgpu = { version = "0.1.0", path = "../typed-wgpu" }
 wgpu = "0.20.0"
 winit = "0.30.0"
 
