@@ -11,8 +11,8 @@ use bevy_ecs::{
     system::{Res, Resource},
 };
 use main_loop::{
-    feat_requires_screen, run_app_with_init, sys_unregister_dead_viewports, GfxContext,
-    InputManager, Viewport, ViewportManager,
+    feat_requires_screen, run_app_with_init, sys_unregister_dead_viewports, AssetManager,
+    GfxContext, InputManager, Viewport, ViewportManager,
 };
 use winit::{
     application::ApplicationHandler,
@@ -32,6 +32,7 @@ pub fn main_inner() -> anyhow::Result<()> {
         // Create app
         let mut app = App::new();
 
+        app.add_random_component::<AssetManager>();
         app.add_random_component::<GfxContext>();
         app.add_random_component::<InputManager>();
         app.add_random_component::<Viewport>();
@@ -46,6 +47,7 @@ pub fn main_inner() -> anyhow::Result<()> {
         // Initialize engine root
         let engine_root = app.use_random(
             |_: PhantomData<(
+                &mut AssetManager,
                 &mut GfxContext,
                 &mut InputManager,
                 &mut Viewport,
@@ -62,6 +64,9 @@ pub fn main_inner() -> anyhow::Result<()> {
                             .with_visible(false),
                     )?,
                 );
+
+                // Create asset manager
+                engine_root.insert(AssetManager::default());
 
                 // Create graphics singleton
                 let (gfx, gfx_surface, _feat_table) = futures::executor::block_on(
@@ -82,7 +87,7 @@ pub fn main_inner() -> anyhow::Result<()> {
                     Some(gfx_surface),
                     gfx_surface_config,
                 ));
-                main_viewport.insert(ViewportRenderer::new((*gfx).clone()));
+                main_viewport.insert(ViewportRenderer::new(engine_root));
 
                 viewports.register(main_viewport_vp);
 

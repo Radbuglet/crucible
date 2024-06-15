@@ -1,18 +1,29 @@
-use bevy_autoken::random_component;
-use main_loop::GfxContext;
+use bevy_autoken::{random_component, Obj, RandomEntityExt};
+use bevy_ecs::entity::Entity;
+use main_loop::{AssetManager, GfxContext};
+use shaders::skybox::load_skybox_pipeline;
+
+pub mod shaders;
+
+// === ViewportRenderer === //
 
 pub type ViewportRendererCx = (&'static mut ViewportRenderer,);
 
 #[derive(Debug)]
 pub struct ViewportRenderer {
+    assets: Obj<AssetManager>,
     gfx: GfxContext,
 }
 
 random_component!(ViewportRenderer);
 
 impl ViewportRenderer {
-    pub fn new(gfx: GfxContext) -> Self {
-        Self { gfx }
+    pub fn new(world: Entity) -> Self {
+        let assets = world.get::<AssetManager>();
+        let gfx = (*world.get::<GfxContext>()).clone();
+        let skybox = load_skybox_pipeline(&assets, &gfx, wgpu::TextureFormat::Bgra8Unorm);
+
+        Self { assets, gfx }
     }
 
     pub fn render(&mut self, cmd: &mut wgpu::CommandEncoder, frame: &wgpu::TextureView) {

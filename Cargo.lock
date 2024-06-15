@@ -500,6 +500,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "color-backtrace",
+ "crevice",
  "crucible-math",
  "crucible-world",
  "futures",
@@ -507,6 +508,8 @@ dependencies = [
  "native-dialog",
  "tracing",
  "tracing-subscriber",
+ "typed-glam",
+ "typed-wgpu",
  "wgpu",
  "winit",
 ]
@@ -649,6 +652,27 @@ dependencies = [
  "bitflags 1.3.2",
  "core-foundation",
  "libc",
+]
+
+[[package]]
+name = "crevice"
+version = "0.13.0"
+source = "git+https://github.com/Radbuglet/crevice.git?rev=b57559deff995ec5657f7866717600a055f756d5#b57559deff995ec5657f7866717600a055f756d5"
+dependencies = [
+ "bytemuck",
+ "crevice-derive",
+ "glam",
+ "mint",
+]
+
+[[package]]
+name = "crevice-derive"
+version = "0.10.0"
+source = "git+https://github.com/Radbuglet/crevice.git?rev=b57559deff995ec5657f7866717600a055f756d5#b57559deff995ec5657f7866717600a055f756d5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -1028,6 +1052,9 @@ name = "glam"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5418c17512bdf42730f9032c74e1ae39afc408745ebb2acf72fbc4691c17945"
+dependencies = [
+ "mint",
+]
 
 [[package]]
 name = "glow"
@@ -1378,6 +1405,12 @@ checksum = "87dfd01fe195c66b572b37921ad8803d010623c0aca821bea2302239d155cdae"
 dependencies = [
  "adler",
 ]
+
+[[package]]
+name = "mint"
+version = "0.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e53debba6bda7a793e5f99b8dacf19e626084f525f7829104ba9898f367d85ff"
 
 [[package]]
 name = "naga"
