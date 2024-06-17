@@ -1,43 +1,42 @@
+use bevy_autoken::{random_component, Obj};
 use crucible_math::{Angle3D, Angle3DExt};
 use typed_glam::glam::{Mat4, Vec3};
 
+// === Components === //
+
 #[derive(Debug, Clone, Default)]
 pub struct CameraManager {
-    is_locked: bool,
-    view: Mat4,
+    view_xform: Mat4,
     settings: CameraSettings,
+    active_camera: Option<Obj<VirtualCamera>>,
 }
 
+random_component!(CameraManager);
+
 impl CameraManager {
-    pub fn unset(&mut self) {
-        self.is_locked = false;
+    pub fn set_active_camera(&mut self, camera: Obj<VirtualCamera>) {
+        self.active_camera = Some(camera);
     }
 
-    pub fn set(&mut self, view: Mat4, settings: CameraSettings) {
-        if self.is_locked {
-            tracing::warn!("Provided multiple view transforms in a single frame.");
+    pub fn recompute(&mut self) {
+        let Some(camera) = self.active_camera else {
+            return;
+        };
+
+        if !camera.is_alive() {
+            self.active_camera = None;
+            return;
         }
-        self.is_locked = true;
-        self.view = view;
-        self.settings = settings;
-    }
 
-    pub fn set_pos_rot(&mut self, pos: Vec3, angle: Angle3D, settings: CameraSettings) {
-        let view = angle.as_matrix().inverse() * Mat4::from_translation(-pos);
-        self.set(view, settings);
+        self.view_xform = camera.view_xform;
+        self.settings = camera.settings;
     }
 
     pub fn get_view_xform(&self) -> Mat4 {
-        if !self.is_locked {
-            tracing::warn!("Called `get_view_xform` on a `CameraManager` before a camera was set.");
-        }
-        self.view
+        self.view_xform
     }
 
     pub fn get_settings(&self) -> CameraSettings {
-        if !self.is_locked {
-            tracing::warn!("Called `get_settings` on a `CameraManager` before a camera was set.");
-        }
         self.settings
     }
 
@@ -94,3 +93,32 @@ impl CameraSettings {
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct VirtualCamera {
+    pub view_xform: Mat4,
+    pub settings: CameraSettings,
+}
+
+random_component!(VirtualCamera);
+
+impl VirtualCamera {
+    pub fn new(view_xform: Mat4, settings: CameraSettings) -> Self {
+        Self {
+            view_xform,
+            settings,
+        }
+    }
+
+    pub fn new_pos_rot(pos: Vec3, angle: Angle3D, settings: CameraSettings) -> Self {
+        let mut camera = Self::new(Mat4::IDENTITY, settings);
+        camera.set_pos_rot(pos, angle);
+        camera
+    }
+
+    pub fn set_pos_rot(&mut self, pos: Vec3, angle: Angle3D) {
+        self.view_xform = angle.as_matrix().inverse() * Mat4::from_translation(-pos);
+    }
+}
+
+// === Systems === //

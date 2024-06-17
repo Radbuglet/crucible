@@ -1,11 +1,9 @@
 use bevy_autoken::{random_component, Obj, RandomEntityExt};
 use bevy_ecs::entity::Entity;
 use crucible_assets::AssetManager;
-use crucible_math::{Angle3D, Angle3DExt};
-use helpers::{CameraManager, CameraSettings};
+use helpers::CameraManager;
 use main_loop::{GfxContext, Viewport};
 use shaders::skybox::{load_skybox_pipeline, SkyboxUniforms};
-use typed_glam::glam::Vec3;
 use wgpu::util::DeviceExt;
 
 pub mod helpers;
@@ -19,9 +17,8 @@ pub type ViewportRendererCx = (&'static mut ViewportRenderer,);
 pub struct ViewportRenderer {
     assets: Obj<AssetManager>,
     gfx: GfxContext,
-    camera: CameraManager,
+    camera: Obj<CameraManager>,
     skybox: SkyboxUniforms,
-    time: f32,
 }
 
 random_component!(ViewportRenderer);
@@ -30,7 +27,7 @@ impl ViewportRenderer {
     pub fn new(world: Entity) -> Self {
         let assets = world.get::<AssetManager>();
         let gfx = (*world.get::<GfxContext>()).clone();
-        let camera = CameraManager::default();
+        let camera = world.get::<CameraManager>();
 
         let skybox = image::load_from_memory(include_bytes!("embedded_res/default_skybox.png"))
             .unwrap()
@@ -63,7 +60,6 @@ impl ViewportRenderer {
             gfx,
             camera,
             skybox,
-            time: 0.,
         }
     }
 
@@ -73,17 +69,7 @@ impl ViewportRenderer {
         viewport: &Viewport,
         frame: &wgpu::TextureView,
     ) {
-        self.camera.unset();
-        self.camera.set_pos_rot(
-            Vec3::ZERO,
-            Angle3D::new_deg(self.time, 0.),
-            CameraSettings::Perspective {
-                fov: 90.,
-                near: 0.1,
-                far: 90.,
-            },
-        );
-        self.time += 1.;
+        self.camera.recompute();
 
         let skybox = load_skybox_pipeline(&self.assets, &self.gfx, viewport.curr_config().format);
 
@@ -93,12 +79,7 @@ impl ViewportRenderer {
                 view: frame,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.02,
-                        g: 0.01,
-                        b: 0.05,
-                        a: 1.0,
-                    }),
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],

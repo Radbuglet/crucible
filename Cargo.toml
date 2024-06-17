@@ -13,5 +13,8 @@ members = [
     "src/util/typed-glam",
 ]
 
+[profile.dev]
+opt-level = 1
+
 [profile.dev.package.image]
 opt-level = 3
