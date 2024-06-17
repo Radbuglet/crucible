@@ -349,7 +349,7 @@ impl<U: PipelineSet, V: PipelineSet> RenderPipeline<U, V> {
         f(&self.raw.get_bind_group_layout(U::index()))
     }
 
-    pub fn bind_group<'a, L, D>(
+    pub fn bind_group_static<'a, L, D>(
         pass: &mut wgpu::RenderPass<'a>,
         group: &'a BindGroupInstance<L>,
         offsets: &L::DynamicOffsets,
@@ -360,11 +360,36 @@ impl<U: PipelineSet, V: PipelineSet> RenderPipeline<U, V> {
         pass.set_bind_group(U::index(), &group.raw, &offsets.as_offset_set());
     }
 
-    pub fn bind_vertex_buffer<'a, T, D>(pass: &mut wgpu::RenderPass<'a>, buffer: BufferSlice<'a, T>)
-    where
+    pub fn bind_vertex_buffer_static<'a, T, D>(
+        pass: &mut wgpu::RenderPass<'a>,
+        buffer: BufferSlice<'a, T>,
+    ) where
         T: 'static,
         V: StaticPipelineSetHas<T, D>,
     {
         pass.set_vertex_buffer(V::index(), buffer.raw);
+    }
+
+    pub fn bind_group<'a, L, D>(
+        &self,
+        pass: &mut wgpu::RenderPass<'a>,
+        group: &'a BindGroupInstance<L>,
+        offsets: &L::DynamicOffsets,
+    ) where
+        L: 'static + BindGroup,
+        U: StaticPipelineSetHas<L, D>,
+    {
+        Self::bind_group_static(pass, group, offsets)
+    }
+
+    pub fn bind_vertex_buffer<'a, T, D>(
+        &self,
+        pass: &mut wgpu::RenderPass<'a>,
+        buffer: BufferSlice<'a, T>,
+    ) where
+        T: 'static,
+        V: StaticPipelineSetHas<T, D>,
+    {
+        Self::bind_vertex_buffer_static(pass, buffer);
     }
 }

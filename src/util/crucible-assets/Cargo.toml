@@ -1,0 +1,10 @@
+[package]
+name = "crucible-assets"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy-autoken = { version = "0.1.0", path = "../bevy-autoken" }
+crucible-utils = { version = "0.1.0", path = "../crucible-utils" }
+derive-where = "1.2.7"
+smallbox = "0.8.2"

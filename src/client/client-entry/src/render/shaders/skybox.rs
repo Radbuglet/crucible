@@ -1,13 +1,13 @@
 use crevice::std430::AsStd430;
-use main_loop::{
-    Asset, AssetManager, BindGroupExt as _, GfxContext, PipelineLayoutExt as _, SamplerDesc,
-};
+use crucible_assets::{Asset, AssetManager};
+use main_loop::GfxContext;
 use typed_glam::glam;
 use typed_wgpu::{
-    buffer::BufferBinding,
-    pipeline::RenderPipeline,
-    uniform::{BindGroup, BindGroupBuilder, BindGroupInstance, NoDynamicOffsets, PipelineLayout},
+    BindGroup, BindGroupBuilder, BindGroupInstance, BufferBinding, NoDynamicOffsets,
+    PipelineLayout, RenderPipeline,
 };
+
+use crate::render::helpers::{BindGroupExt as _, PipelineLayoutExt as _, SamplerDesc};
 
 pub fn load_skybox_shader_module(
     assets: &AssetManager,
@@ -102,7 +102,7 @@ impl SkyboxUniforms {
     }
 
     pub fn write_pass_state<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-        SkyboxPipeline::bind_group(pass, &self.bind_group, &[]);
+        SkyboxPipeline::bind_group_static(pass, &self.bind_group, &[]);
     }
 
     pub fn set_camera_matrix(&self, gfx: &GfxContext, inv_proj_and_view: glam::Mat4) {

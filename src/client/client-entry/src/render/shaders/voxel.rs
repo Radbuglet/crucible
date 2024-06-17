@@ -1,14 +1,13 @@
 use crevice::std430::AsStd430;
-use main_loop::{
-    Asset, AssetManager, BindGroupExt as _, GfxContext, PipelineLayoutExt as _, SamplerDesc,
-};
+use crucible_assets::{Asset, AssetManager};
+use main_loop::GfxContext;
 use typed_glam::glam;
 use typed_wgpu::{
-    buffer::BufferBinding,
-    pipeline::RenderPipeline,
-    uniform::{BindGroup, BindGroupBuilder, BindGroupInstance, NoDynamicOffsets, PipelineLayout},
-    vertex::{Std430VertexFormat, VertexBufferLayout},
+    BindGroup, BindGroupBuilder, BindGroupInstance, BufferBinding, NoDynamicOffsets,
+    PipelineLayout, RenderPipeline, Std430VertexFormat, VertexBufferLayout,
 };
+
+use crate::render::helpers::{BindGroupExt as _, PipelineLayoutExt, SamplerDesc};
 
 // === Uniforms === //
 
@@ -141,7 +140,7 @@ impl VoxelUniforms {
     }
 
     pub fn write_pass_state<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-        OpaqueBlockPipeline::bind_group(pass, &self.bind_group, &[]);
+        OpaqueBlockPipeline::bind_group_static(pass, &self.bind_group, &[]);
     }
 
     pub fn set_camera_matrix(&self, gfx: &GfxContext, proj: glam::Mat4) {

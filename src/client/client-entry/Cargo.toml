@@ -8,10 +8,14 @@ anyhow = { version = "1.0.86", features = ["backtrace"] }
 bevy-autoken = { version = "0.1.0", path = "../../util/bevy-autoken" }
 bevy_app = "0.13.2"
 bevy_ecs = "0.13.2"
+bytemuck = "1.16.0"
 color-backtrace = "0.6.1"
+crucible-assets = { version = "0.1.0", path = "../../util/crucible-assets" }
 crucible-math = { version = "0.1.0", path = "../../shared/crucible-math" }
+crucible-utils = { version = "0.1.0", path = "../../util/crucible-utils" }
 crucible-world = { version = "0.1.0", path = "../../shared/crucible-world" }
 futures = "0.3.30"
+image = "0.24.5"
 main-loop = { version = "0.1.0", path = "../../util-gfx/main-loop" }
 native-dialog = "0.7.0"
 tracing = "0.1.40"

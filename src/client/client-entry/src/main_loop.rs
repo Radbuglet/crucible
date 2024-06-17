@@ -10,9 +10,10 @@ use bevy_ecs::{
     schedule::IntoSystemConfigs,
     system::{Res, Resource},
 };
+use crucible_assets::AssetManager;
 use main_loop::{
-    feat_requires_screen, run_app_with_init, sys_unregister_dead_viewports, AssetManager,
-    GfxContext, InputManager, Viewport, ViewportManager,
+    feat_requires_screen, run_app_with_init, sys_unregister_dead_viewports, GfxContext,
+    InputManager, Viewport, ViewportManager,
 };
 use winit::{
     application::ApplicationHandler,
@@ -198,6 +199,7 @@ fn sys_handle_esc_to_exit(
 
 fn render_app(
     _ty: PhantomData<(
+        &AssetManager,
         &GfxContext,
         &mut Viewport,
         &mut ViewportManager,
@@ -228,7 +230,7 @@ fn render_app(
     viewport
         .entity()
         .get::<ViewportRenderer>()
-        .render(&mut cmd, &texture_view);
+        .render(&mut cmd, &viewport, &texture_view);
 
     gfx.queue.submit([cmd.finish()]);
 

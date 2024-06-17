@@ -7,7 +7,11 @@ members = [
     "src/util-gfx/main-loop",
     "src/util-gfx/typed-wgpu",
     "src/util/bevy-autoken",
+    "src/util/crucible-assets",
     "src/util/crucible-utils-proc",
     "src/util/crucible-utils",
     "src/util/typed-glam",
 ]
+
+[profile.dev.package.image]
+opt-level = 3
