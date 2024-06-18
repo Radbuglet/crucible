@@ -1,3 +1,4 @@
+mod dummy_game;
 mod main_loop;
 mod render;
 

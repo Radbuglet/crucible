@@ -243,6 +243,9 @@ pub trait Angle3DExt {
     fn new_deg(yaw: f32, pitch: f32) -> Self;
 
     #[must_use]
+    fn from_deg(vec: Vec2) -> Self;
+
+    #[must_use]
     fn as_matrix(&self) -> Mat4;
 
     #[must_use]
@@ -273,6 +276,10 @@ pub trait Angle3DExt {
 impl Angle3DExt for Angle3D {
     fn new_deg(yaw: f32, pitch: f32) -> Self {
         Self::new(yaw.to_radians(), pitch.to_radians())
+    }
+
+    fn from_deg(vec: Vec2) -> Self {
+        Self::new_deg(vec.x, vec.y)
     }
 
     fn as_matrix(&self) -> Mat4 {

@@ -3,7 +3,8 @@ use std::{marker::PhantomData, sync::Arc, time::Instant};
 use anyhow::Context;
 use bevy_app::{App, Update};
 use bevy_autoken::{
-    despawn_entity, spawn_entity, RandomAccess, RandomAppExt, RandomEntityExt, RandomWorldExt,
+    despawn_entity, spawn_entity, world_mut, RandomAccess, RandomAppExt, RandomEntityExt,
+    RandomWorldExt,
 };
 use bevy_ecs::{
     entity::Entity,
@@ -11,12 +12,10 @@ use bevy_ecs::{
     system::{Res, Resource},
 };
 use crucible_assets::AssetManager;
-use crucible_math::{Angle3D, Angle3DExt};
 use main_loop::{
     feat_requires_screen, run_app_with_init, sys_unregister_dead_viewports, GfxContext,
     InputManager, LimitedRate, Viewport, ViewportManager,
 };
-use typed_glam::glam::Vec3;
 use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, DeviceId, StartCause, WindowEvent},
@@ -25,9 +24,12 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use crate::render::{
-    helpers::{CameraManager, CameraSettings, VirtualCamera},
-    ViewportRenderer, ViewportRendererCx,
+use crate::{
+    dummy_game::{sys_process_camera_controller, PlayerCameraController},
+    render::{
+        helpers::{CameraManager, VirtualCamera},
+        ViewportRenderer, ViewportRendererCx,
+    },
 };
 
 pub fn main_inner() -> anyhow::Result<()> {
@@ -42,14 +44,22 @@ pub fn main_inner() -> anyhow::Result<()> {
         app.add_random_component::<CameraManager>();
         app.add_random_component::<GfxContext>();
         app.add_random_component::<InputManager>();
+        app.add_random_component::<PlayerCameraController>();
         app.add_random_component::<Viewport>();
         app.add_random_component::<ViewportManager>();
         app.add_random_component::<ViewportRenderer>();
         app.add_random_component::<VirtualCamera>();
 
+        #[rustfmt::skip]
         app.add_systems(
             Update,
-            (sys_handle_esc_to_exit, sys_unregister_dead_viewports).chain(),
+            (
+                sys_process_camera_controller,
+                sys_handle_esc_to_exit,
+                sys_unregister_dead_viewports,
+                sys_reset_input_tracker,
+            )
+            .chain(),
         );
 
         // Initialize engine root
@@ -157,6 +167,15 @@ fn sys_handle_esc_to_exit(
     });
 }
 
+fn sys_reset_input_tracker(
+    mut rand: RandomAccess<&mut InputManager>,
+    engine_root: Res<EngineRoot>,
+) {
+    rand.provide(|| {
+        engine_root.0.get::<InputManager>().end_tick();
+    });
+}
+
 #[allow(clippy::type_complexity)]
 fn init_engine_root(
     _cx: PhantomData<(
@@ -186,17 +205,7 @@ fn init_engine_root(
     engine_root.insert(AssetManager::default());
 
     // Create camera manager
-    let mut camera_mgr = engine_root.insert(CameraManager::default());
-    let camera = engine_root.insert(VirtualCamera::new_pos_rot(
-        Vec3::ZERO,
-        Angle3D::new_deg(0., 0.),
-        CameraSettings::Perspective {
-            fov: 90.,
-            near: 0.1,
-            far: 100.,
-        },
-    ));
-    camera_mgr.set_active_camera(camera);
+    engine_root.insert(CameraManager::default());
 
     // Create graphics singleton
     let (gfx, gfx_surface, _feat_table) =
@@ -221,6 +230,9 @@ fn init_engine_root(
 
     // Create input manager
     let _input_mgr = engine_root.insert(InputManager::default());
+
+    // Allow game to initialize itself
+    world_mut().use_random(|cx| crate::dummy_game::init_engine_root(cx, engine_root));
 
     // Make main viewport visible
     main_viewport_vp.window().set_visible(true);
