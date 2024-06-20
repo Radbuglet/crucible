@@ -9,7 +9,7 @@ use shaders::{
     skybox::{load_skybox_pipeline, SkyboxUniforms},
     voxel::{load_opaque_block_pipeline, VoxelUniforms},
 };
-use typed_glam::glam::UVec2;
+use typed_glam::glam::{UVec2, Vec4};
 use voxel::WorldVoxelMesh;
 use wgpu::util::DeviceExt;
 
@@ -121,9 +121,8 @@ impl ViewportRenderer {
         frame: &wgpu::TextureView,
     ) {
         self.camera.recompute();
-        let proj_xform = self
-            .camera
-            .get_camera_xform(viewport.curr_surface_aspect().unwrap_or(1.));
+        let aspect = viewport.curr_surface_aspect().unwrap_or(1.);
+        let proj_xform = self.camera.get_camera_xform(aspect);
 
         let skybox = load_skybox_pipeline(&self.assets, &self.gfx, viewport.curr_config().format);
         let voxels = load_opaque_block_pipeline(
@@ -152,7 +151,15 @@ impl ViewportRenderer {
 
         skybox.bind_pipeline(&mut pass);
 
-        self.skybox.set_camera_matrix(&self.gfx, proj_xform);
+        // Skybox view projection does not take translation or scale into account. We must compute
+        // the matrix manually.
+        {
+            let i_proj = self.camera.get_proj_xform(aspect).inverse();
+            let mut i_view = self.camera.get_view_xform().inverse();
+            i_view.w_axis = Vec4::new(0.0, 0.0, 0.0, i_view.w_axis.w);
+            self.skybox.set_camera_matrix(&self.gfx, i_view * i_proj);
+        }
+
         self.skybox.write_pass_state(&mut pass);
         pass.draw(0..6, 0..1);
 

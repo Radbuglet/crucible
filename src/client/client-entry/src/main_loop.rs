@@ -17,7 +17,7 @@ use crucible_world::voxel::{
     WorldVoxelData,
 };
 use main_loop::{
-    feat_requires_screen, run_app_with_init, sys_unregister_dead_viewports, GfxContext,
+    feat_requires_screen, run_app_with_init, sys_unregister_dead_viewports, FixedRate, GfxContext,
     InputManager, LimitedRate, Viewport, ViewportManager,
 };
 use winit::{
@@ -88,6 +88,7 @@ pub fn main_inner() -> anyhow::Result<()> {
         Ok(WinitApp {
             app,
             engine_root,
+            update_rate: FixedRate::new(60.),
             render_rate: LimitedRate::new(60.),
         })
     })
@@ -96,11 +97,19 @@ pub fn main_inner() -> anyhow::Result<()> {
 struct WinitApp {
     app: App,
     engine_root: Entity,
+    update_rate: FixedRate,
     render_rate: LimitedRate,
 }
 
 impl ApplicationHandler for WinitApp {
     fn new_events(&mut self, event_loop: &ActiveEventLoop, _cause: StartCause) {
+        // Update and queue render if applicable
+        if let Some(times) = self.update_rate.tick(Instant::now()).output {
+            for _ in 0..times.get().min(2) {
+                self.app.update();
+            }
+        }
+
         if self.render_rate.tick(Instant::now()).output.is_some() {
             self.app
                 .use_random(|_: PhantomData<(&ViewportManager, &Viewport)>| {
@@ -113,8 +122,7 @@ impl ApplicationHandler for WinitApp {
         }
         event_loop.set_control_flow(ControlFlow::Poll);
 
-        self.app.update();
-
+        // Quit if no windows remain
         self.app.use_random(|_: PhantomData<&ViewportManager>| {
             let vmgr = self.engine_root.get::<ViewportManager>();
 

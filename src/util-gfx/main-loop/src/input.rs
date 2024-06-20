@@ -131,8 +131,11 @@ impl KeyboardDeviceState {
             .unwrap_or_default()
     }
 
-    fn physical_key(&self, key: PhysicalKey) -> BoolAction {
-        self.physical_keys.get(&key).copied().unwrap_or_default()
+    fn physical_key(&self, key: impl Into<PhysicalKey>) -> BoolAction {
+        self.physical_keys
+            .get(&key.into())
+            .copied()
+            .unwrap_or_default()
     }
 }
 
@@ -204,7 +207,7 @@ impl From<MouseButtonIndex> for MouseButton {
 pub struct InputManagerWindow<'a>(Option<&'a WindowDeviceState>);
 
 impl<'a> InputManagerWindow<'a> {
-    pub fn physical_key(self, key: PhysicalKey) -> BoolAction {
+    pub fn physical_key(self, key: impl Into<PhysicalKey>) -> BoolAction {
         self.0
             .map_or(BoolAction::default(), |v| v.agg_keyboard.physical_key(key))
     }
