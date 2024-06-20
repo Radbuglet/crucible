@@ -1,18 +1,26 @@
 use std::marker::PhantomData;
 
-use bevy_autoken::{random_component, ObjOwner, RandomAccess, RandomEntityExt};
+use bevy_autoken::{
+    random_component, spawn_entity, ObjOwner, RandomAccess, RandomEntityExt, SendsEvent,
+};
 use bevy_ecs::{
     component::Component,
     entity::Entity,
     system::{Query, Res},
 };
-use crucible_math::{Angle3D, Angle3DExt};
+use crucible_math::{Angle3D, Angle3DExt, WorldVec, WorldVecExt};
+use crucible_world::voxel::{
+    BlockData, BlockMaterialRegistry, ChunkData, ChunkVoxelData, WorldChunkCreated, WorldVoxelData,
+};
 use main_loop::InputManager;
-use typed_glam::glam::Vec3;
+use typed_glam::glam::{UVec2, Vec3};
 
 use crate::{
     main_loop::EngineRoot,
-    render::helpers::{CameraManager, CameraSettings, VirtualCamera},
+    render::{
+        helpers::{CameraManager, CameraSettings, VirtualCamera},
+        voxel::MaterialVisualDescriptor,
+    },
 };
 
 // === Components === //
@@ -27,14 +35,21 @@ random_component!(PlayerCameraController);
 
 // === Systems === //
 
+#[allow(clippy::type_complexity)]
 pub fn init_engine_root(
     _cx: PhantomData<(
         &mut CameraManager,
         &mut PlayerCameraController,
         &mut VirtualCamera,
+        &mut WorldVoxelData,
+        &mut ChunkVoxelData,
+        &mut BlockMaterialRegistry,
+        &mut MaterialVisualDescriptor,
+        SendsEvent<WorldChunkCreated>,
     )>,
     engine_root: Entity,
 ) {
+    // Create the root camera
     let camera = engine_root.insert(VirtualCamera::new_pos_rot(
         Vec3::ZERO,
         Angle3D::new_deg(0., 0.),
@@ -50,6 +65,27 @@ pub fn init_engine_root(
     });
 
     engine_root.get::<CameraManager>().set_active_camera(camera);
+
+    // Create the basic material
+    let mut registry = engine_root.get::<BlockMaterialRegistry>();
+    let _air = registry.register("crucible:air", spawn_entity(()));
+    let stone = registry.register(
+        "crucible:stone",
+        spawn_entity(()).with(MaterialVisualDescriptor::cubic_simple(UVec2::ZERO)),
+    );
+
+    // Create the root chunk
+    let world = engine_root.get::<WorldVoxelData>();
+    let pos = WorldVec::new(0, -1, 0);
+    let mut chunk = world.get_or_insert(pos.chunk());
+    chunk.initialize_data(ChunkData::AllAir);
+    chunk.set_block(
+        pos.block(),
+        BlockData {
+            material: stone,
+            variant: 0,
+        },
+    );
 }
 
 pub fn sys_process_camera_controller(

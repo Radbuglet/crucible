@@ -6,32 +6,34 @@ use std::{
 
 use bevy_autoken::{random_component, Obj, RandomAccess, RandomEntityExt};
 use bevy_ecs::event::EventReader;
+use derive_where::derive_where;
 
 use super::{ChunkVoxelData, WorldChunkCreated, WorldVoxelData};
 
 // === ChunkQueue === //
 
-#[derive(Debug, Default)]
-pub struct ChunkQueue {
-    queue: VecDeque<(bool, Obj<ChunkVoxelData>)>,
+#[derive(Debug)]
+#[derive_where(Default)]
+pub struct ChunkQueue<T> {
+    queue: VecDeque<(bool, T)>,
 }
 
-impl ChunkQueue {
-    pub fn push_many(&mut self, iter: impl IntoIterator<Item = Obj<ChunkVoxelData>>) {
+impl<T> ChunkQueue<T> {
+    pub fn push_many(&mut self, iter: impl IntoIterator<Item = T>) {
         let my_color = self.queue.back().map_or(false, |last| !last.0);
 
         self.queue
             .extend(iter.into_iter().map(|chunk| (my_color, chunk)));
     }
 
-    pub fn push(&mut self, chunk: Obj<ChunkVoxelData>) {
+    pub fn push(&mut self, chunk: T) {
         self.push_many([chunk]);
     }
 
     pub fn process<B>(
         &mut self,
         limit: Option<Duration>,
-        mut f: impl FnMut(Obj<ChunkVoxelData>) -> ControlFlow<B>,
+        mut f: impl FnMut(T) -> ControlFlow<B>,
     ) -> ControlFlow<B> {
         let Some(&(mut color, _)) = self.queue.front() else {
             return ControlFlow::Continue(());
@@ -62,7 +64,7 @@ impl ChunkQueue {
 // === Components === //
 
 #[derive(Debug, Default)]
-pub struct ChunkLoadQueue(pub ChunkQueue);
+pub struct ChunkLoadQueue(pub ChunkQueue<Obj<ChunkVoxelData>>);
 
 random_component!(ChunkLoadQueue);
 

@@ -665,6 +665,8 @@ impl<T: RandomComponent> DerefMut for Obj<T> {
 pub trait RandomEntityExt {
     fn insert<T: RandomComponent>(self, value: T) -> Obj<T>;
 
+    fn with<T: RandomComponent>(self, value: T) -> Self;
+
     fn remove<T: RandomComponent>(self);
 
     fn has<T: RandomComponent>(self) -> bool;
@@ -677,6 +679,11 @@ pub trait RandomEntityExt {
 impl RandomEntityExt for Entity {
     fn insert<T: RandomComponent>(self, value: T) -> Obj<T> {
         Obj::new(self, value)
+    }
+
+    fn with<T: RandomComponent>(self, value: T) -> Self {
+        self.insert(value);
+        self
     }
 
     fn remove<T: RandomComponent>(self) {

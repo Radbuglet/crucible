@@ -98,7 +98,7 @@ pub fn load_opaque_block_pipeline(
                 .with_layout(&PipelineLayout::load_default(assets, gfx))
                 .with_vertex_shader(&shader, "vs_main", &(VoxelVertex::layout(),))
                 .with_fragment_shader(&shader, "fs_main", surface_format)
-                .with_cull_mode(wgpu::Face::Back)
+                // .with_cull_mode(wgpu::Face::Back)
                 .with_depth(depth_format, true, wgpu::CompareFunction::Less)
                 .finish(&gfx.device)
         },

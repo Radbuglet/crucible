@@ -12,6 +12,10 @@ use bevy_ecs::{
     system::{Res, Resource},
 };
 use crucible_assets::AssetManager;
+use crucible_world::voxel::{
+    sys_clear_dirty_chunk_lists, BlockMaterialRegistry, ChunkVoxelData, WorldChunkCreated,
+    WorldVoxelData,
+};
 use main_loop::{
     feat_requires_screen, run_app_with_init, sys_unregister_dead_viewports, GfxContext,
     InputManager, LimitedRate, Viewport, ViewportManager,
@@ -28,6 +32,10 @@ use crate::{
     dummy_game::{sys_process_camera_controller, PlayerCameraController},
     render::{
         helpers::{CameraManager, VirtualCamera},
+        voxel::{
+            sys_attach_mesh_to_visual_chunks, sys_queue_dirty_chunks_for_render, ChunkVoxelMesh,
+            MaterialVisualDescriptor, WorldVoxelMesh,
+        },
         ViewportRenderer, ViewportRendererCx,
     },
 };
@@ -41,20 +49,31 @@ pub fn main_inner() -> anyhow::Result<()> {
         let mut app = App::new();
 
         app.add_random_component::<AssetManager>();
+        app.add_random_component::<BlockMaterialRegistry>();
         app.add_random_component::<CameraManager>();
+        app.add_random_component::<ChunkVoxelData>();
+        app.add_random_component::<ChunkVoxelMesh>();
         app.add_random_component::<GfxContext>();
         app.add_random_component::<InputManager>();
+        app.add_random_component::<MaterialVisualDescriptor>();
         app.add_random_component::<PlayerCameraController>();
         app.add_random_component::<Viewport>();
         app.add_random_component::<ViewportManager>();
         app.add_random_component::<ViewportRenderer>();
         app.add_random_component::<VirtualCamera>();
+        app.add_random_component::<WorldVoxelData>();
+        app.add_random_component::<WorldVoxelMesh>();
+
+        app.add_event::<WorldChunkCreated>();
 
         #[rustfmt::skip]
         app.add_systems(
             Update,
             (
                 sys_process_camera_controller,
+                sys_attach_mesh_to_visual_chunks,
+                sys_queue_dirty_chunks_for_render,
+                sys_clear_dirty_chunk_lists,
                 sys_handle_esc_to_exit,
                 sys_unregister_dead_viewports,
                 sys_reset_input_tracker,
@@ -180,13 +199,17 @@ fn sys_reset_input_tracker(
 fn init_engine_root(
     _cx: PhantomData<(
         &mut AssetManager,
+        &mut BlockMaterialRegistry,
         &mut CameraManager,
         &mut GfxContext,
         &mut InputManager,
+        &mut MaterialVisualDescriptor,
         &mut Viewport,
         &mut ViewportManager,
         &mut ViewportRenderer,
         &mut VirtualCamera,
+        &mut WorldVoxelData,
+        &mut WorldVoxelMesh,
     )>,
     event_loop: &ActiveEventLoop,
 ) -> anyhow::Result<Entity> {
@@ -206,6 +229,11 @@ fn init_engine_root(
 
     // Create camera manager
     engine_root.insert(CameraManager::default());
+
+    // Create voxel stuff
+    let registry = engine_root.insert(BlockMaterialRegistry::default());
+    engine_root.insert(WorldVoxelData::default());
+    engine_root.insert(WorldVoxelMesh::new(registry));
 
     // Create graphics singleton
     let (gfx, gfx_surface, _feat_table) =
@@ -240,13 +268,19 @@ fn init_engine_root(
     Ok(engine_root)
 }
 
+#[allow(clippy::type_complexity)]
 fn render_app(
     _cx: PhantomData<(
         &AssetManager,
+        &BlockMaterialRegistry,
+        &ChunkVoxelData,
         &GfxContext,
+        &MaterialVisualDescriptor,
         &mut CameraManager,
+        &mut ChunkVoxelMesh,
         &mut Viewport,
         &mut ViewportManager,
+        &mut WorldVoxelMesh,
         &VirtualCamera,
         ViewportRendererCx,
     )>,

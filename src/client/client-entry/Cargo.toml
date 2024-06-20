@@ -9,6 +9,7 @@ bevy-autoken = { version = "0.1.0", path = "../../util/bevy-autoken" }
 bevy_app = "0.13.2"
 bevy_ecs = "0.13.2"
 bytemuck = "1.16.0"
+cbit = "0.1.0"
 color-backtrace = "0.6.1"
 crucible-assets = { version = "0.1.0", path = "../../util/crucible-assets" }
 crucible-math = { version = "0.1.0", path = "../../shared/crucible-math" }

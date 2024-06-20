@@ -4,7 +4,7 @@ use bevy_autoken::{
     random_component, random_event, send_event, spawn_entity, Obj, ObjOwner, RandomAccess,
     RandomEntityExt,
 };
-use bevy_ecs::{event::Event, removal_detection::RemovedComponents};
+use bevy_ecs::{event::Event, removal_detection::RemovedComponents, system::Query};
 use crucible_math::{
     Axis3, BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, Sign, VecCompExt, WorldVec,
     WorldVecExt, CHUNK_VOLUME,
@@ -121,8 +121,12 @@ impl WorldVoxelData {
         self.chunks.get(&pos).copied()
     }
 
-    pub fn drain_dirty(&mut self) -> impl Iterator<Item = Obj<ChunkVoxelData>> {
-        mem::take(&mut self.dirty).into_iter()
+    pub fn iter_dirty(&self) -> impl Iterator<Item = Obj<ChunkVoxelData>> + '_ {
+        self.dirty.iter().copied()
+    }
+
+    pub fn clear_dirty(&mut self) {
+        self.dirty.clear()
     }
 }
 
@@ -387,6 +391,17 @@ pub fn sys_unlink_dead_chunks(
     rand.provide(|| {
         for entity in query.read() {
             entity.get::<ChunkVoxelData>().unlink();
+        }
+    });
+}
+
+pub fn sys_clear_dirty_chunk_lists(
+    mut rand: RandomAccess<&mut WorldVoxelData>,
+    mut query: Query<&ObjOwner<WorldVoxelData>>,
+) {
+    rand.provide(|| {
+        for &ObjOwner(mut world) in query.iter_mut() {
+            world.clear_dirty();
         }
     });
 }

@@ -512,6 +512,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bytemuck",
+ "cbit",
  "color-backtrace",
  "crevice",
  "crucible-assets",
