@@ -519,6 +519,7 @@ dependencies = [
  "crucible-math",
  "crucible-utils",
  "crucible-world",
+ "fastrand",
  "futures",
  "image",
  "main-loop",

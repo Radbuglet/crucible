@@ -15,6 +15,7 @@ crucible-assets = { version = "0.1.0", path = "../../util/crucible-assets" }
 crucible-math = { version = "0.1.0", path = "../../shared/crucible-math" }
 crucible-utils = { version = "0.1.0", path = "../../util/crucible-utils" }
 crucible-world = { version = "0.1.0", path = "../../shared/crucible-world" }
+fastrand = "2.1.0"
 futures = "0.3.30"
 image = "0.24.5"
 main-loop = { version = "0.1.0", path = "../../util-gfx/main-loop" }

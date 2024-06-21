@@ -336,6 +336,14 @@ pub fn sys_queue_dirty_chunks_for_render(
     rand.provide(|| {
         for &ObjOwner(world) in query.iter_mut() {
             for dirty in world.iter_dirty() {
+                for face in BlockFace::variants() {
+                    let Some(neighbor) = dirty.neighbor(face) else {
+                        continue;
+                    };
+
+                    neighbor.entity().get::<ChunkVoxelMesh>().mark_dirty();
+                }
+
                 dirty.entity().get::<ChunkVoxelMesh>().mark_dirty();
             }
         }

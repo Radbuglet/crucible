@@ -167,6 +167,10 @@ impl ChunkVoxelData {
         self.data = Some(data);
     }
 
+    pub fn is_init(&self) -> bool {
+        self.data.is_some()
+    }
+
     pub fn block(&self, block: BlockVec) -> Option<BlockData> {
         self.data.as_ref().map(|v| match v {
             ChunkData::AllAir => BlockData::AIR,

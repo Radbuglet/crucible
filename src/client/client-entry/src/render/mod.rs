@@ -4,6 +4,7 @@ use bevy_autoken::{random_component, Obj, RandomEntityExt};
 use bevy_ecs::entity::Entity;
 use crucible_assets::AssetManager;
 use helpers::{AtlasTexture, AtlasTextureGfx, CameraManager, FullScreenTexture};
+use image::Rgba32FImage;
 use main_loop::{GfxContext, Viewport};
 use shaders::{
     skybox::{load_skybox_pipeline, SkyboxUniforms},
@@ -33,6 +34,7 @@ pub struct ViewportRenderer {
     // Atlas
     atlas: AtlasTexture,
     atlas_gfx: AtlasTextureGfx,
+    is_atlas_dirty: bool,
 
     // Depth
     depth: FullScreenTexture,
@@ -53,7 +55,7 @@ impl ViewportRenderer {
         let camera = engine_root.get::<CameraManager>();
 
         // Generate atlas textures
-        let atlas = AtlasTexture::new(UVec2::splat(100), UVec2::splat(32), 4);
+        let atlas = AtlasTexture::new(UVec2::splat(16), UVec2::splat(32), 4);
         let atlas_gfx = AtlasTextureGfx::new(&gfx, &atlas, Some("voxel texture atlas"));
 
         // Generate depth texture
@@ -103,6 +105,7 @@ impl ViewportRenderer {
             // Atlas
             atlas,
             atlas_gfx,
+            is_atlas_dirty: false,
 
             // Depth
             depth,
@@ -114,12 +117,22 @@ impl ViewportRenderer {
         }
     }
 
+    pub fn push_to_atlas(&mut self, image: &Rgba32FImage) -> UVec2 {
+        self.is_atlas_dirty = true;
+        self.atlas.add(image)
+    }
+
     pub fn render(
         &mut self,
         cmd: &mut wgpu::CommandEncoder,
         viewport: &Viewport,
         frame: &wgpu::TextureView,
     ) {
+        if self.is_atlas_dirty {
+            self.is_atlas_dirty = false;
+            self.atlas_gfx.update(&self.gfx, &self.atlas);
+        }
+
         self.camera.recompute();
         let aspect = viewport.curr_surface_aspect().unwrap_or(1.);
         let proj_xform = self.camera.get_camera_xform(aspect);
