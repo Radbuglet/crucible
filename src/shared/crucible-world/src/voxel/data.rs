@@ -1,8 +1,7 @@
 use std::{collections::hash_map, mem};
 
 use bevy_autoken::{
-    random_component, random_event, send_event, spawn_entity, Obj, ObjOwner, RandomAccess,
-    RandomEntityExt,
+    random_component, random_event, send_event, spawn_entity, Obj, RandomAccess, RandomEntityExt,
 };
 use bevy_ecs::{event::Event, removal_detection::RemovedComponents, system::Query};
 use crucible_math::{
@@ -390,7 +389,7 @@ impl WorldPointer {
 
 pub fn sys_unlink_dead_chunks(
     mut rand: RandomAccess<(&mut WorldVoxelData, &mut ChunkVoxelData)>,
-    mut query: RemovedComponents<ObjOwner<ChunkVoxelData>>,
+    mut query: RemovedComponents<Obj<ChunkVoxelData>>,
 ) {
     rand.provide(|| {
         for entity in query.read() {
@@ -401,10 +400,10 @@ pub fn sys_unlink_dead_chunks(
 
 pub fn sys_clear_dirty_chunk_lists(
     mut rand: RandomAccess<&mut WorldVoxelData>,
-    mut query: Query<&ObjOwner<WorldVoxelData>>,
+    mut query: Query<&Obj<WorldVoxelData>>,
 ) {
     rand.provide(|| {
-        for &ObjOwner(mut world) in query.iter_mut() {
+        for &(mut world) in query.iter_mut() {
             world.clear_dirty();
         }
     });

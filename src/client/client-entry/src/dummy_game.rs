@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use bevy_autoken::{
-    random_component, spawn_entity, ObjOwner, RandomAccess, RandomEntityExt, SendsEvent,
+    random_component, spawn_entity, Obj, RandomAccess, RandomEntityExt, SendsEvent,
 };
 use bevy_ecs::{
     component::Component,
@@ -143,13 +143,13 @@ pub fn sys_process_camera_controller(
         &mut PlayerCameraController,
         &mut VirtualCamera,
     )>,
-    mut query: Query<(&ObjOwner<PlayerCameraController>, &ObjOwner<VirtualCamera>)>,
+    mut query: Query<(&Obj<PlayerCameraController>, &Obj<VirtualCamera>)>,
     engine_root: Res<EngineRoot>,
 ) {
     rand.provide(|| {
         let inputs = &*engine_root.0.get::<InputManager>();
 
-        for (&ObjOwner(mut controller), &ObjOwner(mut camera)) in query.iter_mut() {
+        for (&(mut controller), &(mut camera)) in query.iter_mut() {
             // Update facing angle
             let sensitivity = controller.sensitivity;
             controller.angle += Angle3D::from_deg(inputs.mouse_delta().as_vec2() * sensitivity);

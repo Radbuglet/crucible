@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use bevy_autoken::{random_component, Obj, ObjOwner, RandomAccess, RandomEntityExt};
+use bevy_autoken::{random_component, Obj, RandomAccess, RandomEntityExt};
 use bevy_ecs::removal_detection::RemovedComponents;
 use crucible_utils::hash::FxHashMap;
 use thiserror::Error;
@@ -275,7 +275,7 @@ pub struct OutOfDeviceMemoryError;
 
 pub fn sys_unregister_dead_viewports(
     mut rand: RandomAccess<(&mut ViewportManager, &Viewport)>,
-    mut query: RemovedComponents<ObjOwner<Viewport>>,
+    mut query: RemovedComponents<Obj<Viewport>>,
 ) {
     rand.provide(|| {
         for viewport in query.read() {

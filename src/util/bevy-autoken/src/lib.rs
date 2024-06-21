@@ -3,7 +3,6 @@
 use std::{
     cell::Cell,
     collections::hash_map,
-    fmt,
     marker::PhantomData,
     ops::{Deref, DerefMut},
     ptr::NonNull,
@@ -588,6 +587,7 @@ macro_rules! random_event {
 // === Obj === //
 
 #[derive_where(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Component)]
 #[repr(transparent)]
 pub struct Obj<T>(Handle<(Entity, T)>);
 
@@ -603,7 +603,7 @@ impl<T: RandomComponent> Obj<T> {
             hash_map::Entry::Vacant(entry) => {
                 let obj = Obj(arena.arena.insert((owner, value)));
                 cap!(mut CommandsCap => v in {
-                    v.entity(owner).insert(ObjOwner(obj));
+                    v.entity(owner).insert(obj);
                 });
                 entry.insert(obj);
                 obj
@@ -688,7 +688,7 @@ impl RandomEntityExt for Entity {
 
     fn remove<T: RandomComponent>(self) {
         cap!(mut CommandsCap => v in {
-            v.entity(self).remove::<ObjOwner<T>>();
+            v.entity(self).remove::<Obj<T>>();
         });
     }
 
@@ -706,23 +706,6 @@ impl RandomEntityExt for Entity {
 }
 
 // === System Link === //
-
-#[derive(Component)]
-pub struct ObjOwner<T>(pub Obj<T>);
-
-impl<T> fmt::Debug for ObjOwner<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ObjOwner").field(&self.0).finish()
-    }
-}
-
-impl<T> Copy for ObjOwner<T> {}
-
-impl<T> Clone for ObjOwner<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
 
 pub trait RandomAppExt {
     fn add_random_component<T: RandomComponent>(&mut self);
@@ -802,7 +785,7 @@ impl RandomWorldExt for World {
 }
 
 pub fn make_unlinker_system<T: RandomComponent>(
-) -> impl 'static + Send + Sync + Fn(RandomAccess<&mut T>, RemovedComponents<ObjOwner<T>>) {
+) -> impl 'static + Send + Sync + Fn(RandomAccess<&mut T>, RemovedComponents<Obj<T>>) {
     |mut rand, mut removed| {
         rand.provide(|| {
             let arena = T::arena_mut();

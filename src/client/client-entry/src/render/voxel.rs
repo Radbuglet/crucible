@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use bevy_autoken::{random_component, Obj, ObjOwner, RandomAccess, RandomEntityExt};
+use bevy_autoken::{random_component, Obj, RandomAccess, RandomEntityExt};
 use bevy_ecs::{event::EventReader, query::With, system::Query};
 use crevice::std430::AsStd430 as _;
 use crucible_math::{
@@ -331,10 +331,10 @@ pub fn sys_queue_dirty_chunks_for_render(
         &mut WorldVoxelMesh,
         &WorldVoxelData,
     )>,
-    mut query: Query<&ObjOwner<WorldVoxelData>, With<ObjOwner<WorldVoxelMesh>>>,
+    mut query: Query<&Obj<WorldVoxelData>, With<Obj<WorldVoxelMesh>>>,
 ) {
     rand.provide(|| {
-        for &ObjOwner(world) in query.iter_mut() {
+        for &world in query.iter_mut() {
             for dirty in world.iter_dirty() {
                 for face in BlockFace::variants() {
                     let Some(neighbor) = dirty.neighbor(face) else {

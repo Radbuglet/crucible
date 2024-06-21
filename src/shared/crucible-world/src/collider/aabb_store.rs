@@ -1,6 +1,6 @@
 use std::ops::ControlFlow;
 
-use bevy_autoken::{random_component, Obj, ObjOwner, RandomAccess, RandomEntityExt};
+use bevy_autoken::{random_component, Obj, RandomAccess, RandomEntityExt};
 use bevy_ecs::removal_detection::RemovedComponents;
 use crucible_math::EntityAabb;
 use rustc_hash::FxHashSet;
@@ -64,7 +64,7 @@ impl AabbHolder {
 
 pub fn sys_unregister_dead_aabbs(
     mut rand: RandomAccess<(&mut AabbStore, &mut AabbHolder)>,
-    mut query: RemovedComponents<ObjOwner<AabbHolder>>,
+    mut query: RemovedComponents<Obj<AabbHolder>>,
 ) {
     rand.provide(|| {
         for entity in query.read() {
