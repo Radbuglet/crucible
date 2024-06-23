@@ -21,7 +21,7 @@ use crate::{
     render::{
         helpers::{CameraManager, CameraSettings, VirtualCamera},
         voxel::MaterialVisualDescriptor,
-        ViewportRenderer,
+        GlobalRenderer,
     },
 };
 
@@ -47,7 +47,7 @@ pub fn init_engine_root(
         &mut ChunkVoxelData,
         &mut MaterialVisualDescriptor,
         &mut PlayerCameraController,
-        &mut ViewportRenderer,
+        &mut GlobalRenderer,
         &mut VirtualCamera,
         &mut WorldVoxelData,
         &Viewport,
@@ -58,12 +58,7 @@ pub fn init_engine_root(
 ) {
     let viewport_mgr = engine_root.get::<ViewportManager>();
     let main_viewport = *viewport_mgr.window_map().keys().next().unwrap();
-    let mut main_viewport_renderer = engine_root
-        .get::<ViewportManager>()
-        .get_viewport(main_viewport)
-        .unwrap()
-        .entity()
-        .get::<ViewportRenderer>();
+    let mut renderer = engine_root.get::<GlobalRenderer>();
 
     // Create the root camera
     let camera = engine_root.insert(VirtualCamera::new_pos_rot(
@@ -85,13 +80,13 @@ pub fn init_engine_root(
     engine_root.get::<CameraManager>().set_active_camera(camera);
 
     // Create the basic material
-    let stone = main_viewport_renderer.push_to_atlas(
+    let stone = renderer.push_to_atlas(
         &image::load_from_memory(include_bytes!("render/embedded_res/stone.png"))
             .unwrap()
             .into_rgba32f(),
     );
 
-    let bricks = main_viewport_renderer.push_to_atlas(
+    let bricks = renderer.push_to_atlas(
         &image::load_from_memory(include_bytes!("render/embedded_res/bricks.png"))
             .unwrap()
             .into_rgba32f(),

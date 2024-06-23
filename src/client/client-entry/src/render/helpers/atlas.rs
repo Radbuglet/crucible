@@ -1,10 +1,18 @@
 use crucible_math::VolumetricIter;
 use crucible_utils::hash::FxHashSet;
-use image::{imageops, Rgba32FImage};
+use image::{imageops, GenericImageView, Pixel, Rgba, Rgba32FImage};
 use main_loop::GfxContext;
 use typed_glam::glam::{UVec2, Vec2};
 
 use crate::render::helpers::write_texture_data_raw;
+
+const MIP_DBG_SPLIT_COLORS: [[f32; 4]; 5] = [
+    [1., 1., 1., 0.0],
+    [1., 0., 0., 0.5],
+    [0., 1., 0., 0.5],
+    [0., 0., 1., 0.5],
+    [1., 0., 1., 0.5],
+];
 
 #[derive(Debug)]
 pub struct AtlasTexture {
@@ -92,21 +100,52 @@ impl AtlasTexture {
         let atlas_size = self.atlas_size().as_dvec2();
         let offset = free_tile * self.tile_size;
 
-        for layer in &mut self.atlas {
+        for (layer, &dbg_split) in self
+            .atlas
+            .iter_mut()
+            .zip(MIP_DBG_SPLIT_COLORS.iter().cycle())
+        {
             let factor_x = layer.width() as f64 / atlas_size.x;
             let factor_y = layer.height() as f64 / atlas_size.y;
 
             imageops::replace(
                 layer,
-                &imageops::resize(
-                    sub,
-                    (sub.width() as f64 * factor_x) as u32,
-                    (sub.height() as f64 * factor_y) as u32,
-                    imageops::FilterType::Gaussian,
-                ),
+                &Tint {
+                    base: &imageops::resize(
+                        sub,
+                        (sub.width() as f64 * factor_x) as u32,
+                        (sub.height() as f64 * factor_y) as u32,
+                        imageops::FilterType::Gaussian,
+                    ),
+                    pixel: Rgba(dbg_split),
+                },
                 (offset.x as f64 * factor_x) as i64,
                 (offset.y as f64 * factor_y) as i64,
             );
+
+            struct Tint<'a, B: GenericImageView> {
+                base: &'a B,
+                pixel: B::Pixel,
+            }
+
+            impl<'a, B: GenericImageView> GenericImageView for Tint<'a, B> {
+                type Pixel = B::Pixel;
+
+                fn dimensions(&self) -> (u32, u32) {
+                    self.base.dimensions()
+                }
+
+                #[allow(deprecated)]
+                fn bounds(&self) -> (u32, u32, u32, u32) {
+                    self.base.bounds()
+                }
+
+                fn get_pixel(&self, x: u32, y: u32) -> Self::Pixel {
+                    let mut pixel = self.base.get_pixel(x, y);
+                    pixel.blend(&self.pixel);
+                    pixel
+                }
+            }
         }
 
         free_tile

@@ -36,7 +36,7 @@ use crate::{
             sys_attach_mesh_to_visual_chunks, sys_queue_dirty_chunks_for_render, ChunkVoxelMesh,
             MaterialVisualDescriptor, WorldVoxelMesh,
         },
-        ViewportRenderer, ViewportRendererCx,
+        GlobalRenderer, RenderCx, ViewportRenderer,
     },
 };
 
@@ -54,6 +54,7 @@ pub fn main_inner() -> anyhow::Result<()> {
         app.add_random_component::<ChunkVoxelData>();
         app.add_random_component::<ChunkVoxelMesh>();
         app.add_random_component::<GfxContext>();
+        app.add_random_component::<GlobalRenderer>();
         app.add_random_component::<InputManager>();
         app.add_random_component::<MaterialVisualDescriptor>();
         app.add_random_component::<PlayerCameraController>();
@@ -214,10 +215,10 @@ fn init_engine_root(
         &mut MaterialVisualDescriptor,
         &mut Viewport,
         &mut ViewportManager,
-        &mut ViewportRenderer,
         &mut VirtualCamera,
         &mut WorldVoxelData,
         &mut WorldVoxelMesh,
+        RenderCx,
     )>,
     event_loop: &ActiveEventLoop,
 ) -> anyhow::Result<Entity> {
@@ -260,6 +261,7 @@ fn init_engine_root(
         Some(gfx_surface),
         gfx_surface_config,
     ));
+    engine_root.insert(GlobalRenderer::new(engine_root));
     main_viewport.insert(ViewportRenderer::new(engine_root));
 
     viewports.register(main_viewport_vp);
@@ -290,13 +292,14 @@ fn render_app(
         &mut ViewportManager,
         &mut WorldVoxelMesh,
         &VirtualCamera,
-        ViewportRendererCx,
+        RenderCx,
     )>,
     engine_root: Entity,
     window_id: WindowId,
 ) {
     let vmgr = engine_root.get::<ViewportManager>();
     let gfx = (*engine_root.get::<GfxContext>()).clone();
+    let mut global_renderer = engine_root.get::<GlobalRenderer>();
 
     let Some(mut viewport) = vmgr.get_viewport(window_id) else {
         return;
@@ -314,10 +317,12 @@ fn render_app(
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 
-    viewport
-        .entity()
-        .get::<ViewportRenderer>()
-        .render(&mut cmd, &viewport, &texture_view);
+    global_renderer.render(
+        &mut cmd,
+        &viewport,
+        &mut viewport.entity().get::<ViewportRenderer>(),
+        &texture_view,
+    );
 
     gfx.queue.submit([cmd.finish()]);
 

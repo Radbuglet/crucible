@@ -22,10 +22,10 @@ pub mod voxel;
 
 const MESH_TIME_LIMIT: Option<Duration> = Some(Duration::from_millis(10));
 
-pub type ViewportRendererCx = (&'static mut ViewportRenderer,);
+pub type RenderCx = (&'static mut GlobalRenderer, &'static mut ViewportRenderer);
 
 #[derive(Debug)]
-pub struct ViewportRenderer {
+pub struct GlobalRenderer {
     // Services
     assets: Obj<AssetManager>,
     gfx: GfxContext,
@@ -36,18 +36,15 @@ pub struct ViewportRenderer {
     atlas_gfx: AtlasTextureGfx,
     is_atlas_dirty: bool,
 
-    // Depth
-    depth: FullScreenTexture,
-
     // Rendering subsystems
     skybox: SkyboxUniforms,
     voxel: Obj<WorldVoxelMesh>,
     voxel_uniforms: VoxelUniforms,
 }
 
-random_component!(ViewportRenderer);
+random_component!(GlobalRenderer);
 
-impl ViewportRenderer {
+impl GlobalRenderer {
     pub fn new(engine_root: Entity) -> Self {
         // Fetch services
         let assets = engine_root.get::<AssetManager>();
@@ -57,13 +54,6 @@ impl ViewportRenderer {
         // Generate atlas textures
         let atlas = AtlasTexture::new(UVec2::splat(16), UVec2::splat(32), 4);
         let atlas_gfx = AtlasTextureGfx::new(&gfx, &atlas, Some("voxel texture atlas"));
-
-        // Generate depth texture
-        let depth = FullScreenTexture::new(
-            Some("depth texture"),
-            wgpu::TextureFormat::Depth32Float,
-            wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::RENDER_ATTACHMENT,
-        );
 
         // load skybox subsystem
         let skybox = image::load_from_memory(include_bytes!("embedded_res/default_skybox.png"))
@@ -107,9 +97,6 @@ impl ViewportRenderer {
             atlas_gfx,
             is_atlas_dirty: false,
 
-            // Depth
-            depth,
-
             // Rendering subsystems
             skybox,
             voxel,
@@ -126,6 +113,7 @@ impl ViewportRenderer {
         &mut self,
         cmd: &mut wgpu::CommandEncoder,
         viewport: &Viewport,
+        viewport_renderer: &mut ViewportRenderer,
         frame: &wgpu::TextureView,
     ) {
         if self.is_atlas_dirty {
@@ -142,7 +130,7 @@ impl ViewportRenderer {
             &self.assets,
             &self.gfx,
             viewport.curr_config().format,
-            self.depth.format(),
+            viewport_renderer.depth.format(),
         );
         let voxels_pass = self.voxel.prepare_pass();
 
@@ -190,7 +178,7 @@ impl ViewportRenderer {
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: self.depth.acquire_view(&self.gfx, viewport),
+                view: viewport_renderer.depth.acquire_view(&self.gfx, viewport),
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.),
                     store: wgpu::StoreOp::Store,
@@ -206,5 +194,27 @@ impl ViewportRenderer {
         voxels_pass.render(&voxels, &self.voxel_uniforms, &mut pass);
 
         drop(pass);
+    }
+}
+
+#[derive(Debug)]
+pub struct ViewportRenderer {
+    depth: FullScreenTexture,
+}
+
+random_component!(ViewportRenderer);
+
+impl ViewportRenderer {
+    pub fn new(engine_root: Entity) -> Self {
+        let _ = engine_root;
+
+        // Generate depth texture
+        let depth = FullScreenTexture::new(
+            Some("depth texture"),
+            wgpu::TextureFormat::Depth32Float,
+            wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::RENDER_ATTACHMENT,
+        );
+
+        Self { depth }
     }
 }
