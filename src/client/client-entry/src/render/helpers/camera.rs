@@ -1,6 +1,6 @@
 use bevy_autoken::{random_component, Obj};
 use crucible_math::{Angle3D, Angle3DExt};
-use typed_glam::glam::{Mat4, Vec3};
+use typed_glam::glam::{Mat4, Vec2, Vec3};
 
 // === Components === //
 
@@ -56,7 +56,7 @@ pub enum CameraSettings {
         near: f32,
         far: f32,
     },
-    Orthogonal {
+    Orthographic {
         left: f32,
         right: f32,
         bottom: f32,
@@ -77,19 +77,25 @@ impl Default for CameraSettings {
 }
 
 impl CameraSettings {
+    pub fn new_ortho(size: Vec2, near: f32, far: f32) -> Self {
+        Self::Orthographic {
+            left: -size.x,
+            right: size.x,
+            bottom: -size.y,
+            top: size.y,
+            near,
+            far,
+        }
+    }
+
+    #[rustfmt::skip]
     pub fn proj_matrix(self, aspect: f32) -> Mat4 {
         // FIXME: I have no clue why we have to use left-handed variants to achieve a true right-handed
         //  coordinate system...
         match self {
             Self::Perspective { fov, near, far } => Mat4::perspective_lh(fov, aspect, near, far),
-            Self::Orthogonal {
-                left,
-                right,
-                bottom,
-                top,
-                near,
-                far,
-            } => Mat4::orthographic_lh(left, right, bottom, top, near, far),
+            Self::Orthographic { left, right, bottom, top, near, far } =>
+                Mat4::orthographic_lh(left, right, bottom, top, near, far),
         }
     }
 }

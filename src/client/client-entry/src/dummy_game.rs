@@ -17,7 +17,10 @@ use crucible_world::{
     },
 };
 use main_loop::{InputManager, Viewport, ViewportManager};
-use typed_glam::{glam::Vec3, traits::GlamBacked};
+use typed_glam::{
+    glam::{Vec2, Vec3},
+    traits::GlamBacked,
+};
 use winit::{event::MouseButton, keyboard::KeyCode, window::WindowId};
 
 use crate::{
@@ -218,7 +221,16 @@ pub fn sys_process_camera_controller(
             }
 
             // Update camera
+            camera.settings = CameraSettings::Perspective {
+                fov: 90.,
+                near: 0.1,
+                far: 100.,
+            };
             camera.set_pos_rot(controller.pos.as_glam().as_vec3(), controller.angle);
+
+            if inputs.physical_key(KeyCode::Space).state() {
+                camera.settings = CameraSettings::new_ortho(Vec2::splat(10.), 1., 100.);
+            }
         }
     });
 }
