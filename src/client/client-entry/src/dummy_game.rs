@@ -208,7 +208,7 @@ pub fn sys_process_camera_controller(
                         continue;
                     }
 
-                    isect.block.move_to_neighbor(isect.face).set_state(
+                    isect.block.move_to_neighbor(isect.enter_face).set_state(
                         world,
                         BlockData::new(stone),
                         PopulateWorld,

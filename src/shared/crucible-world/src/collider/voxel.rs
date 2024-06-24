@@ -320,7 +320,7 @@ pub struct VoxelRayCast {
 #[non_exhaustive]
 pub struct VoxelRayCastIntersection {
     pub block: WorldPointer,
-    pub face: BlockFace,
+    pub enter_face: BlockFace,
     pub pos: EntityVec,
     pub distance: f64,
 }
@@ -411,7 +411,7 @@ impl VoxelRayCast {
 
                 intersections.push(VoxelRayCastIntersection {
                     block: block_loc, // This will be updated in a bit.
-                    face: exit_face.invert(),
+                    enter_face: exit_face.invert(),
                     // N.B. This lerp value is the actual length along the ray because the ray is a
                     // unit vector.
                     distance: self.dist + isect_lerp,
@@ -427,7 +427,7 @@ impl VoxelRayCast {
         // Update block positions by accumulating face traversals onto `block_loc`—which is currently
         // just the position of our ray before the step began.
         for isect in &mut intersections {
-            isect.block = block_loc.neighbor(isect.face.invert());
+            isect.block = block_loc.neighbor(isect.enter_face.invert());
             block_loc = isect.block;
         }
 
@@ -435,9 +435,6 @@ impl VoxelRayCast {
         // N.B. the direction is either normalized, in which case the step was of length 1, or we're
         // traveling with direction zero, in which case the distance traveled is already infinite.
         self.dist += 1.0;
-
-        // Don't forget to bump the position!
-        self.loc.move_by(self.dir);
 
         intersections
     }
@@ -474,7 +471,7 @@ impl VoxelRayCast {
                     isect_buffer.push((
                         VoxelRayCastIntersection {
                             block: block_isect.block,
-                            face: face_isect.face,
+                            enter_face: face_isect.face,
                             pos: face_isect.pos,
                             distance: start_dist + face_isect.dist_along_ray,
                         },
