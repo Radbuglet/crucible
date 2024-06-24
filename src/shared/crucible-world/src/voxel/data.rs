@@ -132,7 +132,9 @@ impl WorldVoxelData {
     }
 
     pub fn clear_dirty(&mut self) {
-        self.dirty.clear()
+        for mut chunk in self.dirty.drain() {
+            chunk.is_dirty = false;
+        }
     }
 }
 
@@ -261,7 +263,7 @@ impl ChunkVoxelData {
 pub type WorldPointer = VoxelPointer<WorldVec>;
 pub type EntityPointer = VoxelPointer<EntityVec>;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct VoxelPointer<V> {
     pub chunk: Option<Obj<ChunkVoxelData>>,
     pub pos: V,
@@ -375,7 +377,7 @@ where
 }
 
 impl WorldPointer {
-    pub fn move_to_neighbor(&mut self, face: BlockFace) {
+    pub fn move_to_neighbor(&mut self, face: BlockFace) -> &mut Self {
         // Update vector
         let old_pos = self.pos;
         self.pos += face.unit();
@@ -384,12 +386,14 @@ impl WorldPointer {
         // Update chunk
         if old_pos.chunk() == new_pos.chunk() {
             // (we didn't move chunks)
-            return;
+            return self;
         }
 
         if let Some(chunk) = self.chunk {
             self.chunk = chunk.neighbor(face);
         }
+
+        self
     }
 
     #[must_use]
@@ -398,8 +402,94 @@ impl WorldPointer {
         self
     }
 
-    pub fn block_data(&mut self, world: Obj<WorldVoxelData>) -> Option<BlockData> {
+    pub fn state(&mut self, world: Obj<WorldVoxelData>) -> Option<BlockData> {
         self.chunk(world).and_then(|v| v.block(self.pos.block()))
+    }
+
+    pub fn state_or_air(&mut self, world: Obj<WorldVoxelData>) -> BlockData {
+        self.chunk(world)
+            .map_or(BlockData::AIR, |v| v.block_or_air(self.pos.block()))
+    }
+
+    pub fn set_state(
+        &mut self,
+        world: Obj<WorldVoxelData>,
+        data: BlockData,
+        mut policy: impl SetStatePolicy,
+    ) {
+        let chunk = match self.chunk {
+            Some(chunk) => chunk,
+            None => {
+                let Some(chunk) = policy.fetch_chunk(world, self.pos.chunk()) else {
+                    return;
+                };
+                self.chunk = Some(chunk);
+                chunk
+            }
+        };
+
+        policy.set_block(chunk, self.pos.block(), data);
+    }
+}
+
+pub trait SetStatePolicy: Sized {
+    fn fetch_chunk(
+        &mut self,
+        world: Obj<WorldVoxelData>,
+        pos: ChunkVec,
+    ) -> Option<Obj<ChunkVoxelData>>;
+
+    fn set_block(&mut self, chunk: Obj<ChunkVoxelData>, pos: BlockVec, data: BlockData);
+}
+
+impl<T: SetStatePolicy> SetStatePolicy for &mut T {
+    fn fetch_chunk(
+        &mut self,
+        world: Obj<WorldVoxelData>,
+        pos: ChunkVec,
+    ) -> Option<Obj<ChunkVoxelData>> {
+        (*self).fetch_chunk(world, pos)
+    }
+
+    fn set_block(&mut self, chunk: Obj<ChunkVoxelData>, pos: BlockVec, data: BlockData) {
+        (*self).set_block(chunk, pos, data)
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct KeepInWorld;
+
+impl SetStatePolicy for KeepInWorld {
+    fn fetch_chunk(
+        &mut self,
+        world: Obj<WorldVoxelData>,
+        pos: ChunkVec,
+    ) -> Option<Obj<ChunkVoxelData>> {
+        world.get(pos)
+    }
+
+    fn set_block(&mut self, chunk: Obj<ChunkVoxelData>, pos: BlockVec, data: BlockData) {
+        chunk.set_block(pos, data);
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct PopulateWorld;
+
+impl SetStatePolicy for PopulateWorld {
+    fn fetch_chunk(
+        &mut self,
+        world: Obj<WorldVoxelData>,
+        pos: ChunkVec,
+    ) -> Option<Obj<ChunkVoxelData>> {
+        Some(world.get_or_insert(pos))
+    }
+
+    fn set_block(&mut self, mut chunk: Obj<ChunkVoxelData>, pos: BlockVec, data: BlockData) {
+        if !chunk.is_init() {
+            chunk.initialize_data(ChunkData::AllAir);
+        }
+        chunk.set_block(pos, data);
     }
 }
 
@@ -417,7 +507,7 @@ pub fn sys_unlink_dead_chunks(
 }
 
 pub fn sys_clear_dirty_chunk_lists(
-    mut rand: RandomAccess<&mut WorldVoxelData>,
+    mut rand: RandomAccess<(&mut WorldVoxelData, &mut ChunkVoxelData)>,
     mut query: Query<&Obj<WorldVoxelData>>,
 ) {
     rand.provide(|| {

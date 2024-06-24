@@ -8,17 +8,17 @@ use bevy_ecs::{
     entity::Entity,
     system::{Query, Res},
 };
-use crucible_math::{Angle3D, Angle3DExt, WorldVec};
+use crucible_math::{Angle3D, Angle3DExt, EntityVec, WorldVec};
 use crucible_world::{
+    collider::{AabbHolder, AabbStore, BlockColliderDescriptor, VoxelRayCast},
     voxel::{
-        BlockData, BlockMaterialRegistry, ChunkData, ChunkVoxelData, WorldChunkCreated,
-        WorldVoxelData,
+        BlockData, BlockMaterialRegistry, ChunkVoxelData, EntityPointer, PopulateWorld,
+        WorldChunkCreated, WorldPointer, WorldVoxelData,
     },
-    WorldFacade,
 };
 use main_loop::{InputManager, Viewport, ViewportManager};
-use typed_glam::glam::Vec3;
-use winit::{keyboard::KeyCode, window::WindowId};
+use typed_glam::{glam::Vec3, traits::GlamBacked};
+use winit::{event::MouseButton, keyboard::KeyCode, window::WindowId};
 
 use crate::{
     main_loop::EngineRoot,
@@ -33,7 +33,7 @@ use crate::{
 
 #[derive(Debug, Component)]
 pub struct PlayerCameraController {
-    pub pos: Vec3,
+    pub pos: EntityVec,
     pub angle: Angle3D,
     pub sensitivity: f32,
     pub ctrl_window: WindowId,
@@ -53,7 +53,6 @@ pub fn init_engine_root(
         &mut MaterialVisualDescriptor,
         &mut PlayerCameraController,
         &mut VirtualCamera,
-        &mut WorldFacade,
         &mut WorldVoxelData,
         &Viewport,
         &ViewportManager,
@@ -76,7 +75,7 @@ pub fn init_engine_root(
         },
     ));
     engine_root.insert(PlayerCameraController {
-        pos: Vec3::ZERO,
+        pos: EntityVec::ZERO,
         angle: Angle3D::ZERO,
         sensitivity: 0.1,
         ctrl_window: main_viewport,
@@ -109,7 +108,8 @@ pub fn init_engine_root(
     );
 
     // Create the root chunk
-    let mut world = engine_root.get::<WorldFacade>();
+    let mut pointer = WorldPointer::default();
+    let world = engine_root.get::<WorldVoxelData>();
 
     for x in -10..=10 {
         for y in -10..=10 {
@@ -118,34 +118,45 @@ pub fn init_engine_root(
                     continue;
                 }
 
-                world.set_block(
-                    WorldVec::new(x, y, z),
+                pointer.move_to(WorldVec::new(x, y, z)).set_state(
+                    world,
                     if fastrand::bool() {
                         BlockData::new(bricks)
                     } else {
                         BlockData::new(stone)
                     },
-                    |mut cd, _| {
-                        cd.initialize_data(ChunkData::AllAir);
-                        true
-                    },
+                    PopulateWorld,
                 );
             }
         }
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub fn sys_process_camera_controller(
     mut rand: RandomAccess<(
         &InputManager,
+        &mut AabbHolder,
+        &mut AabbStore,
+        &mut BlockColliderDescriptor,
+        &mut BlockMaterialRegistry,
+        &mut ChunkVoxelData,
         &mut PlayerCameraController,
         &mut VirtualCamera,
+        &mut WorldVoxelData,
+        SendsEvent<WorldChunkCreated>,
     )>,
     mut query: Query<(&Obj<PlayerCameraController>, &Obj<VirtualCamera>)>,
     engine_root: Res<EngineRoot>,
 ) {
     rand.provide(|| {
         let inputs = &*engine_root.0.get::<InputManager>();
+        let world = engine_root.0.get::<WorldVoxelData>();
+        let stone = engine_root
+            .0
+            .get::<BlockMaterialRegistry>()
+            .lookup_by_name("crucible:stone")
+            .unwrap();
 
         for (&(mut controller), &(mut camera)) in query.iter_mut() {
             // Update facing angle
@@ -185,8 +196,29 @@ pub fn sys_process_camera_controller(
             heading = controller.angle.as_matrix().transform_vector3(heading);
             controller.pos += heading * 0.1;
 
+            // Handle interaction
+            if inputs.button(MouseButton::Right).recently_pressed() {
+                let mut ray = VoxelRayCast::new_at(
+                    EntityPointer::new(controller.pos),
+                    controller.angle.forward().as_dvec3().cast_glam(),
+                );
+
+                for mut isect in ray.step_for(7.) {
+                    if isect.block.state_or_air(world).is_air() {
+                        continue;
+                    }
+
+                    isect.block.move_to_neighbor(isect.face).set_state(
+                        world,
+                        BlockData::new(stone),
+                        PopulateWorld,
+                    );
+                    break;
+                }
+            }
+
             // Update camera
-            camera.set_pos_rot(controller.pos, controller.angle);
+            camera.set_pos_rot(controller.pos.as_glam().as_vec3(), controller.angle);
         }
     });
 }

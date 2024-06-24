@@ -28,7 +28,7 @@ pub fn occluding_volumes_in_block<B>(
     mut f: impl FnMut((&mut WorldPointer, EntityAabb, ColliderMaterial)) -> ControlFlow<B>,
 ) -> ControlFlow<B> {
     // Decode descriptor
-    let Some(state) = block.block_data(world).filter(BlockData::is_not_air) else {
+    let Some(state) = block.state(world).filter(BlockData::is_not_air) else {
         return ControlFlow::Continue(());
     };
 
@@ -76,7 +76,7 @@ pub fn occluding_faces_in_block<B>(
     mut f: impl FnMut((AaQuad<EntityVec>, ColliderMaterial)) -> ControlFlow<B>,
 ) -> ControlFlow<B> {
     // Decode descriptor
-    let Some(state) = block.block_data(world).filter(BlockData::is_not_air) else {
+    let Some(state) = block.state(world).filter(BlockData::is_not_air) else {
         return ControlFlow::Continue(());
     };
 

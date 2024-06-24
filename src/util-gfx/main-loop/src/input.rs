@@ -93,6 +93,8 @@ impl WindowDeviceState {
     fn end_tick(&mut self) {
         self.keyboards.retain(|_, v| v.end_tick());
         self.mice.retain(|_, v| v.end_tick());
+        self.agg_keyboard.end_tick();
+        self.agg_mouse.end_tick();
     }
 }
 
@@ -167,7 +169,10 @@ impl MouseDeviceState {
     }
 
     fn button(&self, button: MouseButton) -> BoolAction {
-        self.buttons[MouseButtonIndex::from(button)]
+        self.buttons
+            .get(MouseButtonIndex::from(button))
+            .copied()
+            .unwrap_or_default()
     }
 }
 
