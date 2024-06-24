@@ -7,7 +7,7 @@ use rustc_hash::FxHashSet;
 
 // === Components === //
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AabbStore {
     // TODO: Use an actual implementation
     colliders: FxHashSet<Obj<AabbHolder>>,

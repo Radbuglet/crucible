@@ -3,7 +3,7 @@ use std::{iter, ops::ControlFlow};
 use bevy_autoken::{random_component, Obj};
 use crucible_math::{
     AaQuad, Aabb3, Axis3, BlockFace, EntityAabb, EntityVec, EntityVecExt, Line3, Sign, VecCompExt,
-    WorldVecExt,
+    WorldAabb, WorldVecExt,
 };
 
 use crucible_utils::{newtypes::NumEnum, traits::VecLike};
@@ -25,7 +25,7 @@ pub fn occluding_volumes_in_block<B>(
     world: Obj<WorldVoxelData>,
     collider_mats: &mut BlockMaterialCache<BlockColliderDescriptor>,
     block: &mut WorldPointer,
-    mut f: impl FnMut((EntityAabb, ColliderMaterial)) -> ControlFlow<B>,
+    mut f: impl FnMut((&mut WorldPointer, EntityAabb, ColliderMaterial)) -> ControlFlow<B>,
 ) -> ControlFlow<B> {
     // Decode descriptor
     let Some(state) = block.block_data(world).filter(BlockData::is_not_air) else {
@@ -40,9 +40,11 @@ pub fn occluding_volumes_in_block<B>(
     match &descriptor.0 {
         Collider::Transparent => {}
         Collider::Opaque(meta) => {
+            let origin = block.pos.negative_most_corner();
             f((
+                block,
                 Aabb3 {
-                    origin: block.pos.negative_most_corner(),
+                    origin,
                     size: EntityVec::ONE,
                 },
                 *meta,
@@ -50,9 +52,11 @@ pub fn occluding_volumes_in_block<B>(
         }
         Collider::Mesh { volumes, .. } => {
             for (aabb, meta) in volumes.iter_cloned() {
+                let origin = aabb.origin.cast::<EntityVec>() + block.pos.negative_most_corner();
                 f((
+                    block,
                     Aabb3 {
-                        origin: aabb.origin.cast::<EntityVec>() + block.pos.negative_most_corner(),
+                        origin,
                         size: aabb.size.cast(),
                     },
                     meta,
@@ -197,6 +201,20 @@ pub fn intersecting_faces_in_block<B>(
 // === Volumetric Collisions === //
 
 pub const COLLISION_TOLERANCE: f64 = 0.0005;
+
+pub fn occluding_volumes_in_block_volume<B>(
+    world: Obj<WorldVoxelData>,
+    collider_mats: &mut BlockMaterialCache<BlockColliderDescriptor>,
+    volume: WorldAabb,
+    cache: &mut WorldPointer,
+    mut f: impl FnMut((&mut WorldPointer, EntityAabb, ColliderMaterial)) -> ControlFlow<B>,
+) -> ControlFlow<B> {
+    for pos in volume.iter_blocks() {
+        cache.move_to(pos);
+        occluding_volumes_in_block(world, collider_mats, cache, &mut f)?;
+    }
+    ControlFlow::Continue(())
+}
 
 pub fn cast_voxel_volume(
     world: Obj<WorldVoxelData>,

@@ -12,9 +12,13 @@ use bevy_ecs::{
     system::{Res, Resource},
 };
 use crucible_assets::AssetManager;
-use crucible_world::voxel::{
-    sys_clear_dirty_chunk_lists, BlockMaterialRegistry, ChunkVoxelData, WorldChunkCreated,
-    WorldVoxelData,
+use crucible_world::{
+    collider::{AabbHolder, AabbStore},
+    voxel::{
+        sys_clear_dirty_chunk_lists, BlockMaterialRegistry, ChunkVoxelData, WorldChunkCreated,
+        WorldVoxelData,
+    },
+    WorldFacade,
 };
 use main_loop::{
     feat_requires_screen, run_app_with_init, sys_unregister_dead_viewports, FixedRate, GfxContext,
@@ -48,6 +52,8 @@ pub fn main_inner() -> anyhow::Result<()> {
         // Create app
         let mut app = App::new();
 
+        app.add_random_component::<AabbHolder>();
+        app.add_random_component::<AabbStore>();
         app.add_random_component::<AssetManager>();
         app.add_random_component::<BlockMaterialRegistry>();
         app.add_random_component::<CameraManager>();
@@ -62,6 +68,7 @@ pub fn main_inner() -> anyhow::Result<()> {
         app.add_random_component::<ViewportManager>();
         app.add_random_component::<ViewportRenderer>();
         app.add_random_component::<VirtualCamera>();
+        app.add_random_component::<WorldFacade>();
         app.add_random_component::<WorldVoxelData>();
         app.add_random_component::<WorldVoxelMesh>();
 
@@ -208,16 +215,20 @@ fn sys_reset_input_tracker(
 fn init_engine_root(
     _cx: PhantomData<(
         &mut AssetManager,
-        &mut BlockMaterialRegistry,
         &mut CameraManager,
         &mut GfxContext,
         &mut InputManager,
-        &mut MaterialVisualDescriptor,
         &mut Viewport,
         &mut ViewportManager,
         &mut VirtualCamera,
-        &mut WorldVoxelData,
-        &mut WorldVoxelMesh,
+        (
+            &mut AabbStore,
+            &mut MaterialVisualDescriptor,
+            &mut WorldVoxelMesh,
+            &mut WorldFacade,
+            &mut WorldVoxelData,
+            &mut BlockMaterialRegistry,
+        ),
         RenderCx,
     )>,
     event_loop: &ActiveEventLoop,
@@ -241,8 +252,10 @@ fn init_engine_root(
 
     // Create voxel stuff
     let registry = engine_root.insert(BlockMaterialRegistry::default());
+    engine_root.insert(AabbStore::default());
     engine_root.insert(WorldVoxelData::default());
     engine_root.insert(WorldVoxelMesh::new(registry));
+    engine_root.insert(WorldFacade::new(registry, engine_root));
 
     // Create graphics singleton
     let (gfx, gfx_surface, _feat_table) =

@@ -47,10 +47,17 @@ pub struct BlockData {
 }
 
 impl BlockData {
-    const AIR: Self = Self {
+    pub const AIR: Self = Self {
         material: BlockMaterial::AIR,
         variant: 0,
     };
+
+    pub fn new(material: BlockMaterial) -> Self {
+        Self {
+            material,
+            variant: 0,
+        }
+    }
 
     pub fn is_air(&self) -> bool {
         self.material.is_air()
@@ -351,6 +358,17 @@ where
             None => {
                 self.chunk = world.get(self.block().decompose().0);
                 self.chunk
+            }
+        }
+    }
+
+    pub fn chunk_or_insert(&mut self, world: Obj<WorldVoxelData>) -> Obj<ChunkVoxelData> {
+        match self.chunk {
+            Some(chunk) => chunk,
+            None => {
+                let chunk = world.get_or_insert(self.block().decompose().0);
+                self.chunk = Some(chunk);
+                chunk
             }
         }
     }

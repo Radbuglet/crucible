@@ -8,9 +8,13 @@ use bevy_ecs::{
     entity::Entity,
     system::{Query, Res},
 };
-use crucible_math::{Angle3D, Angle3DExt, WorldVec, WorldVecExt};
-use crucible_world::voxel::{
-    BlockData, BlockMaterialRegistry, ChunkData, ChunkVoxelData, WorldChunkCreated, WorldVoxelData,
+use crucible_math::{Angle3D, Angle3DExt, WorldVec};
+use crucible_world::{
+    voxel::{
+        BlockData, BlockMaterialRegistry, ChunkData, ChunkVoxelData, WorldChunkCreated,
+        WorldVoxelData,
+    },
+    WorldFacade,
 };
 use main_loop::{InputManager, Viewport, ViewportManager};
 use typed_glam::glam::Vec3;
@@ -45,10 +49,11 @@ pub fn init_engine_root(
         &mut BlockMaterialRegistry,
         &mut CameraManager,
         &mut ChunkVoxelData,
+        &mut GlobalRenderer,
         &mut MaterialVisualDescriptor,
         &mut PlayerCameraController,
-        &mut GlobalRenderer,
         &mut VirtualCamera,
+        &mut WorldFacade,
         &mut WorldVoxelData,
         &Viewport,
         &ViewportManager,
@@ -104,7 +109,7 @@ pub fn init_engine_root(
     );
 
     // Create the root chunk
-    let world = engine_root.get::<WorldVoxelData>();
+    let mut world = engine_root.get::<WorldFacade>();
 
     for x in -10..=10 {
         for y in -10..=10 {
@@ -113,18 +118,16 @@ pub fn init_engine_root(
                     continue;
                 }
 
-                let pos = WorldVec::new(x, y, z);
-                let mut chunk = world.get_or_insert(pos.chunk());
-
-                if !chunk.is_init() {
-                    chunk.initialize_data(ChunkData::AllAir);
-                }
-
-                chunk.set_block(
-                    pos.block(),
-                    BlockData {
-                        material: if fastrand::bool() { stone } else { bricks },
-                        variant: 0,
+                world.set_block(
+                    WorldVec::new(x, y, z),
+                    if fastrand::bool() {
+                        BlockData::new(bricks)
+                    } else {
+                        BlockData::new(stone)
+                    },
+                    |mut cd, _| {
+                        cd.initialize_data(ChunkData::AllAir);
+                        true
                     },
                 );
             }
