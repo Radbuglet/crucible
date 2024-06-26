@@ -10,23 +10,27 @@ use bevy_ecs::{
 };
 use crucible_math::{Angle3D, Angle3DExt, EntityVec, WorldVec};
 use crucible_world::{
-    collider::{AabbHolder, AabbStore, BlockColliderDescriptor, VoxelRayCast},
+    collider::{BlockColliderDescriptor, VoxelRayCast},
     voxel::{
-        BlockData, BlockMaterialRegistry, ChunkVoxelData, EntityPointer, PopulateWorld,
-        WorldChunkCreated, WorldPointer, WorldVoxelData,
+        BlockData, BlockMaterialRegistry, ChunkVoxelData, EntityPointer, KeepInWorld,
+        PopulateWorld, WorldChunkCreated, WorldPointer, WorldVoxelData,
     },
 };
 use main_loop::{InputManager, Viewport, ViewportManager};
 use typed_glam::{
     glam::{Vec2, Vec3},
-    traits::GlamBacked,
+    traits::GlamBacked as _,
 };
-use winit::{event::MouseButton, keyboard::KeyCode, window::WindowId};
+use winit::{
+    event::MouseButton,
+    keyboard::KeyCode,
+    window::{CursorGrabMode, WindowId},
+};
 
 use crate::{
     main_loop::EngineRoot,
     render::{
-        helpers::{CameraManager, CameraSettings, VirtualCamera},
+        helpers::{CameraManager, CameraSettings, CameraViewState, VirtualCamera},
         voxel::MaterialVisualDescriptor,
         GlobalRenderer,
     },
@@ -37,9 +41,10 @@ use crate::{
 #[derive(Debug, Component)]
 pub struct PlayerCameraController {
     pub pos: EntityVec,
-    pub angle: Angle3D,
+    pub facing: Angle3D,
     pub sensitivity: f32,
     pub ctrl_window: WindowId,
+    pub has_focus: bool,
 }
 
 random_component!(PlayerCameraController);
@@ -68,20 +73,16 @@ pub fn init_engine_root(
     let mut renderer = engine_root.get::<GlobalRenderer>();
 
     // Create the root camera
-    let camera = engine_root.insert(VirtualCamera::new_pos_rot(
-        Vec3::ZERO,
-        Angle3D::new_deg(0., 0.),
-        CameraSettings::Perspective {
-            fov: (90f32).to_radians(),
-            near: 0.1,
-            far: 100.,
-        },
+    let camera = engine_root.insert(VirtualCamera::new(
+        CameraViewState::default(),
+        CameraSettings::new_persp_deg(90f32, 0.1, 100.),
     ));
     engine_root.insert(PlayerCameraController {
         pos: EntityVec::ZERO,
-        angle: Angle3D::ZERO,
+        facing: Angle3D::ZERO,
         sensitivity: 0.1,
         ctrl_window: main_viewport,
+        has_focus: false,
     });
 
     engine_root.get::<CameraManager>().set_active_camera(camera);
@@ -105,7 +106,7 @@ pub fn init_engine_root(
         "crucible:stone",
         spawn_entity(()).with(MaterialVisualDescriptor::cubic_simple(stone)),
     );
-    let bricks = registry.register(
+    let _bricks = registry.register(
         "crucible:bricks",
         spawn_entity(()).with(MaterialVisualDescriptor::cubic_simple(bricks)),
     );
@@ -114,23 +115,13 @@ pub fn init_engine_root(
     let mut pointer = WorldPointer::default();
     let world = engine_root.get::<WorldVoxelData>();
 
-    for x in -10..=10 {
-        for y in -10..=10 {
-            for z in -10..=10 {
-                if fastrand::bool() {
-                    continue;
-                }
-
-                pointer.move_to(WorldVec::new(x, y, z)).set_state(
-                    world,
-                    if fastrand::bool() {
-                        BlockData::new(bricks)
-                    } else {
-                        BlockData::new(stone)
-                    },
-                    PopulateWorld,
-                );
-            }
+    for x in -16..=16 {
+        for z in -16..=16 {
+            pointer.move_to(WorldVec::new(x, -5, z)).set_state(
+                world,
+                BlockData::new(stone),
+                PopulateWorld,
+            );
         }
     }
 }
@@ -139,14 +130,14 @@ pub fn init_engine_root(
 pub fn sys_process_camera_controller(
     mut rand: RandomAccess<(
         &InputManager,
-        &mut AabbHolder,
-        &mut AabbStore,
         &mut BlockColliderDescriptor,
         &mut BlockMaterialRegistry,
         &mut ChunkVoxelData,
         &mut PlayerCameraController,
         &mut VirtualCamera,
         &mut WorldVoxelData,
+        &Viewport,
+        &ViewportManager,
         SendsEvent<WorldChunkCreated>,
     )>,
     mut query: Query<(&Obj<PlayerCameraController>, &Obj<VirtualCamera>)>,
@@ -154,6 +145,7 @@ pub fn sys_process_camera_controller(
 ) {
     rand.provide(|| {
         let inputs = &*engine_root.0.get::<InputManager>();
+        let viewports = &*engine_root.0.get::<ViewportManager>();
         let world = engine_root.0.get::<WorldVoxelData>();
         let stone = engine_root
             .0
@@ -162,51 +154,78 @@ pub fn sys_process_camera_controller(
             .unwrap();
 
         for (&(mut controller), &(mut camera)) in query.iter_mut() {
+            let win_inputs = inputs.window(controller.ctrl_window);
+            let viewport = viewports.get_viewport(controller.ctrl_window).unwrap();
+            let window = viewport.window();
+
+            // Handle controller focus
+            if !controller.has_focus {
+                if win_inputs.button(MouseButton::Left).state() {
+                    for mode in [CursorGrabMode::Locked, CursorGrabMode::Confined] {
+                        if window.set_cursor_grab(mode).is_ok() {
+                            break;
+                        }
+                    }
+
+                    window.set_cursor_visible(false);
+
+                    controller.has_focus = true;
+                }
+                continue;
+            }
+
+            // Handle controller un-focus
+            if win_inputs.physical_key(KeyCode::Escape).recently_pressed() {
+                let _ = window.set_cursor_grab(CursorGrabMode::None);
+                window.set_cursor_visible(true);
+                controller.has_focus = false;
+                continue;
+            }
+
             // Update facing angle
             let sensitivity = controller.sensitivity;
-            controller.angle += Angle3D::from_deg(inputs.mouse_delta().as_vec2() * sensitivity);
-            controller.angle = controller.angle.wrap_x().clamp_y_90();
+            controller.facing += Angle3D::from_deg(inputs.mouse_delta().as_vec2() * sensitivity);
+            controller.facing = controller.facing.wrap_x().clamp_y_90();
 
             // Process heading
             let mut heading = Vec3::ZERO;
-            let inputs = inputs.window(controller.ctrl_window);
 
-            if inputs.physical_key(KeyCode::KeyW).state() {
+            if win_inputs.physical_key(KeyCode::KeyW).state() {
                 heading += Vec3::Z;
             }
 
-            if inputs.physical_key(KeyCode::KeyS).state() {
+            if win_inputs.physical_key(KeyCode::KeyS).state() {
                 heading += Vec3::NEG_Z;
             }
 
-            if inputs.physical_key(KeyCode::KeyA).state() {
+            if win_inputs.physical_key(KeyCode::KeyA).state() {
                 heading += Vec3::NEG_X;
             }
 
-            if inputs.physical_key(KeyCode::KeyD).state() {
+            if win_inputs.physical_key(KeyCode::KeyD).state() {
                 heading += Vec3::X;
             }
 
-            if inputs.physical_key(KeyCode::KeyQ).state() {
+            if win_inputs.physical_key(KeyCode::KeyQ).state() {
                 heading += Vec3::NEG_Y;
             }
 
-            if inputs.physical_key(KeyCode::KeyE).state() {
+            if win_inputs.physical_key(KeyCode::KeyE).state() {
                 heading += Vec3::Y;
             }
 
             heading = heading.normalize_or_zero();
-            heading = controller.angle.as_matrix().transform_vector3(heading);
+            heading = controller.facing.as_matrix().transform_vector3(heading);
             controller.pos += heading * 0.1;
 
             // Handle interaction
-            if inputs.button(MouseButton::Right).recently_pressed() {
-                let mut ray = VoxelRayCast::new_at(
+            if win_inputs.button(MouseButton::Right).recently_pressed() {
+                for mut isect in VoxelRayCast::new_at(
                     EntityPointer::new(controller.pos),
-                    controller.angle.forward().as_dvec3().cast_glam(),
-                );
-
-                for mut isect in ray.step_for(7.) {
+                    controller.facing.forward().as_dvec3().cast_glam(),
+                )
+                .step_for(7.)
+                {
                     if isect.block.state_or_air(world).is_air() {
                         continue;
                     }
@@ -220,17 +239,30 @@ pub fn sys_process_camera_controller(
                 }
             }
 
-            // Update camera
-            camera.settings = CameraSettings::Perspective {
-                fov: 90.,
-                near: 0.1,
-                far: 100.,
-            };
-            camera.set_pos_rot(controller.pos.as_glam().as_vec3(), controller.angle);
+            if win_inputs.button(MouseButton::Left).recently_pressed() {
+                for mut isect in VoxelRayCast::new_at(
+                    EntityPointer::new(controller.pos),
+                    controller.facing.forward().as_dvec3().cast_glam(),
+                )
+                .step_for(7.)
+                {
+                    if isect.block.state_or_air(world).is_air() {
+                        continue;
+                    }
 
-            if inputs.physical_key(KeyCode::Space).state() {
-                camera.settings = CameraSettings::new_ortho(Vec2::splat(10.), 1., 100.);
+                    isect.block.set_state(world, BlockData::AIR, KeepInWorld);
+                    break;
+                }
             }
+
+            // Update camera
+            camera.state.pos = controller.pos.as_glam().as_vec3();
+            camera.state.facing = controller.facing;
+            camera.settings = if win_inputs.physical_key(KeyCode::Space).state() {
+                CameraSettings::new_ortho(Vec2::splat(10.), 1., 100.)
+            } else {
+                CameraSettings::new_persp_deg(90., 0.1, 100.)
+            };
         }
     });
 }

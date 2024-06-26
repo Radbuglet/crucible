@@ -6,6 +6,8 @@ use typed_glam::glam::{UVec2, Vec2};
 
 use crate::render::helpers::write_texture_data_raw;
 
+const SHOW_MIP_DBG_SPLIT_COLORS: bool = false;
+
 const MIP_DBG_SPLIT_COLORS: [[f32; 4]; 5] = [
     [1., 1., 1., 0.0],
     [1., 0., 0., 0.5],
@@ -108,20 +110,31 @@ impl AtlasTexture {
             let factor_x = layer.width() as f64 / atlas_size.x;
             let factor_y = layer.height() as f64 / atlas_size.y;
 
-            imageops::replace(
-                layer,
-                &Tint {
-                    base: &imageops::resize(
-                        sub,
-                        (sub.width() as f64 * factor_x) as u32,
-                        (sub.height() as f64 * factor_y) as u32,
-                        imageops::FilterType::Gaussian,
-                    ),
-                    pixel: Rgba(dbg_split),
-                },
-                (offset.x as f64 * factor_x) as i64,
-                (offset.y as f64 * factor_y) as i64,
+            let base = imageops::resize(
+                sub,
+                (sub.width() as f64 * factor_x) as u32,
+                (sub.height() as f64 * factor_y) as u32,
+                imageops::FilterType::Gaussian,
             );
+
+            if SHOW_MIP_DBG_SPLIT_COLORS {
+                imageops::replace(
+                    layer,
+                    &Tint {
+                        base: &base,
+                        pixel: Rgba(dbg_split),
+                    },
+                    (offset.x as f64 * factor_x) as i64,
+                    (offset.y as f64 * factor_y) as i64,
+                );
+            } else {
+                imageops::replace(
+                    layer,
+                    &base,
+                    (offset.x as f64 * factor_x) as i64,
+                    (offset.y as f64 * factor_y) as i64,
+                );
+            }
 
             struct Tint<'a, B: GenericImageView> {
                 base: &'a B,

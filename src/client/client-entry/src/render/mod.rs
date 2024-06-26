@@ -121,9 +121,8 @@ impl GlobalRenderer {
             self.atlas_gfx.update(&self.gfx, &self.atlas);
         }
 
-        self.camera.recompute();
         let aspect = viewport.curr_surface_aspect().unwrap_or(1.);
-        let proj_xform = self.camera.get_camera_xform(aspect);
+        let camera = self.camera.snapshot(aspect);
 
         let skybox = load_skybox_pipeline(&self.assets, &self.gfx, viewport.curr_config().format);
         let voxels = load_opaque_block_pipeline(
@@ -155,8 +154,8 @@ impl GlobalRenderer {
         // Skybox view projection does not take translation or scale into account. We must compute
         // the matrix manually.
         {
-            let i_proj = self.camera.get_proj_xform(aspect).inverse();
-            let mut i_view = self.camera.get_view_xform().inverse();
+            let i_proj = camera.i_proj_xform();
+            let mut i_view = camera.i_view_xform();
             i_view.w_axis = Vec4::new(0.0, 0.0, 0.0, i_view.w_axis.w);
             self.skybox.set_camera_matrix(&self.gfx, i_view * i_proj);
         }
@@ -189,7 +188,8 @@ impl GlobalRenderer {
             occlusion_query_set: None,
         });
 
-        self.voxel_uniforms.set_camera_matrix(&self.gfx, proj_xform);
+        #[rustfmt::skip]
+        self.voxel_uniforms.set_camera_matrix(&self.gfx, camera.camera_xform());
         self.voxel.update(&self.gfx, &self.atlas, MESH_TIME_LIMIT);
         voxels_pass.render(&voxels, &self.voxel_uniforms, &mut pass);
 

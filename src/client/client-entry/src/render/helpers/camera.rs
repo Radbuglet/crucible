@@ -2,50 +2,21 @@ use bevy_autoken::{random_component, Obj};
 use crucible_math::{Angle3D, Angle3DExt};
 use typed_glam::glam::{Mat4, Vec2, Vec3};
 
-// === Components === //
+// === Math === //
 
-#[derive(Debug, Clone, Default)]
-pub struct CameraManager {
-    view_xform: Mat4,
-    settings: CameraSettings,
-    active_camera: Option<Obj<VirtualCamera>>,
+#[derive(Debug, Copy, Clone, Default)]
+pub struct CameraViewState {
+    pub pos: Vec3,
+    pub facing: Angle3D,
 }
 
-random_component!(CameraManager);
-
-impl CameraManager {
-    pub fn set_active_camera(&mut self, camera: Obj<VirtualCamera>) {
-        self.active_camera = Some(camera);
+impl CameraViewState {
+    pub fn new(pos: Vec3, facing: Angle3D) -> Self {
+        Self { pos, facing }
     }
 
-    pub fn recompute(&mut self) {
-        let Some(camera) = self.active_camera else {
-            return;
-        };
-
-        if !camera.is_alive() {
-            self.active_camera = None;
-            return;
-        }
-
-        self.view_xform = camera.view_xform;
-        self.settings = camera.settings;
-    }
-
-    pub fn get_view_xform(&self) -> Mat4 {
-        self.view_xform
-    }
-
-    pub fn get_settings(&self) -> CameraSettings {
-        self.settings
-    }
-
-    pub fn get_proj_xform(&self, aspect: f32) -> Mat4 {
-        self.get_settings().proj_matrix(aspect)
-    }
-
-    pub fn get_camera_xform(&self, aspect: f32) -> Mat4 {
-        self.get_proj_xform(aspect) * self.get_view_xform()
+    pub fn view_xform(self) -> Mat4 {
+        self.facing.as_matrix().inverse() * Mat4::from_translation(-self.pos)
     }
 }
 
@@ -77,6 +48,14 @@ impl Default for CameraSettings {
 }
 
 impl CameraSettings {
+    pub fn new_persp_rad(fov: f32, near: f32, far: f32) -> Self {
+        Self::Perspective { fov, near, far }
+    }
+
+    pub fn new_persp_deg(fov: f32, near: f32, far: f32) -> Self {
+        Self::new_persp_rad(fov.to_radians(), near, far)
+    }
+
     pub fn new_ortho(size: Vec2, near: f32, far: f32) -> Self {
         Self::Orthographic {
             left: -size.x,
@@ -89,7 +68,7 @@ impl CameraSettings {
     }
 
     #[rustfmt::skip]
-    pub fn proj_matrix(self, aspect: f32) -> Mat4 {
+    pub fn proj_xform(self, aspect: f32) -> Mat4 {
         // FIXME: I have no clue why we have to use left-handed variants to achieve a true right-handed
         //  coordinate system...
         match self {
@@ -101,30 +80,119 @@ impl CameraSettings {
 }
 
 #[derive(Debug, Clone)]
+pub struct CameraTransforms {
+    pub view: Mat4,
+    pub proj: Mat4,
+    pub i_view: Mat4,
+    pub i_proj: Mat4,
+    pub camera: Mat4,
+}
+
+impl CameraTransforms {
+    pub fn new(state: CameraViewState, settings: CameraSettings, aspect: f32) -> Self {
+        Self::new_raw(state.view_xform(), settings.proj_xform(aspect))
+    }
+
+    pub fn new_raw(view: Mat4, proj: Mat4) -> Self {
+        Self {
+            view,
+            proj,
+            i_view: view.inverse(),
+            i_proj: proj.inverse(),
+            camera: proj * view,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CameraSnapshot {
+    pub aspect: f32,
+    pub state: CameraViewState,
+    pub settings: CameraSettings,
+    pub xforms: CameraTransforms,
+}
+
+impl Default for CameraSnapshot {
+    fn default() -> Self {
+        Self::new(CameraViewState::default(), CameraSettings::default(), 1.)
+    }
+}
+
+impl CameraSnapshot {
+    pub fn new(state: CameraViewState, settings: CameraSettings, aspect: f32) -> Self {
+        Self {
+            aspect,
+            state,
+            settings,
+            xforms: CameraTransforms::new(state, settings, aspect),
+        }
+    }
+
+    pub fn pos(&self) -> Vec3 {
+        self.state.pos
+    }
+
+    pub fn facing(&self) -> Angle3D {
+        self.state.facing
+    }
+
+    pub fn view_xform(&self) -> Mat4 {
+        self.xforms.view
+    }
+
+    pub fn proj_xform(&self) -> Mat4 {
+        self.xforms.proj
+    }
+
+    pub fn i_view_xform(&self) -> Mat4 {
+        self.xforms.i_view
+    }
+
+    pub fn i_proj_xform(&self) -> Mat4 {
+        self.xforms.i_proj
+    }
+
+    pub fn camera_xform(&self) -> Mat4 {
+        self.xforms.camera
+    }
+}
+
+// === Manager === //
+
+#[derive(Debug, Clone, Default)]
+pub struct CameraManager {
+    pub active_camera: Option<Obj<VirtualCamera>>,
+}
+
+random_component!(CameraManager);
+
+impl CameraManager {
+    pub fn set_active_camera(&mut self, camera: Obj<VirtualCamera>) {
+        self.active_camera = Some(camera);
+    }
+
+    pub fn snapshot(&self, aspect: f32) -> CameraSnapshot {
+        self.active_camera
+            .filter(|camera| camera.is_alive())
+            .map(|v| v.snapshot(aspect))
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct VirtualCamera {
-    pub view_xform: Mat4,
+    pub state: CameraViewState,
     pub settings: CameraSettings,
 }
 
 random_component!(VirtualCamera);
 
 impl VirtualCamera {
-    pub fn new(view_xform: Mat4, settings: CameraSettings) -> Self {
-        Self {
-            view_xform,
-            settings,
-        }
+    pub fn new(state: CameraViewState, settings: CameraSettings) -> Self {
+        Self { state, settings }
     }
 
-    pub fn new_pos_rot(pos: Vec3, angle: Angle3D, settings: CameraSettings) -> Self {
-        let mut camera = Self::new(Mat4::IDENTITY, settings);
-        camera.set_pos_rot(pos, angle);
-        camera
-    }
-
-    pub fn set_pos_rot(&mut self, pos: Vec3, angle: Angle3D) {
-        self.view_xform = angle.as_matrix().inverse() * Mat4::from_translation(-pos);
+    pub fn snapshot(&self, aspect: f32) -> CameraSnapshot {
+        CameraSnapshot::new(self.state, self.settings, aspect)
     }
 }
-
-// === Systems === //

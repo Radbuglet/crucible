@@ -27,7 +27,6 @@ use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, DeviceId, StartCause, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::NamedKey,
     window::{Window, WindowId},
 };
 
@@ -81,7 +80,6 @@ pub fn main_inner() -> anyhow::Result<()> {
                 sys_attach_mesh_to_visual_chunks,
                 sys_queue_dirty_chunks_for_render,
                 sys_clear_dirty_chunk_lists,
-                sys_handle_esc_to_exit,
                 sys_unregister_dead_viewports,
                 sys_reset_input_tracker,
             )
@@ -128,7 +126,9 @@ impl ApplicationHandler for WinitApp {
                 });
         }
         event_loop.set_control_flow(ControlFlow::Poll);
+    }
 
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         // Quit if no windows remain
         self.app.use_random(|_: PhantomData<&ViewportManager>| {
             let vmgr = self.engine_root.get::<ViewportManager>();
@@ -162,6 +162,21 @@ impl ApplicationHandler for WinitApp {
                 .world
                 .use_random(|cx| render_app(cx, self.engine_root, window_id));
         }
+
+        // Handle quit requests
+        if let WindowEvent::CloseRequested = &event {
+            self.app
+                .world
+                .use_random(|_: PhantomData<(&ViewportManager, &Viewport)>| {
+                    despawn_entity(
+                        self.engine_root
+                            .get::<ViewportManager>()
+                            .get_viewport(window_id)
+                            .unwrap()
+                            .entity(),
+                    );
+                });
+        }
     }
 
     fn device_event(
@@ -180,26 +195,6 @@ impl ApplicationHandler for WinitApp {
 
 #[derive(Debug, Resource)]
 pub struct EngineRoot(pub Entity);
-
-fn sys_handle_esc_to_exit(
-    mut rand: RandomAccess<(&InputManager, &ViewportManager, &mut Viewport)>,
-    engine_root: Res<EngineRoot>,
-) {
-    rand.provide(|| {
-        let inputs = engine_root.0.get::<InputManager>();
-        let vmgr = engine_root.0.get::<ViewportManager>();
-
-        for (&window_id, &viewport) in vmgr.window_map() {
-            if inputs
-                .window(window_id)
-                .logical_key(NamedKey::Escape)
-                .recently_pressed()
-            {
-                despawn_entity(viewport.entity());
-            }
-        }
-    });
-}
 
 fn sys_reset_input_tracker(
     mut rand: RandomAccess<&mut InputManager>,
@@ -262,7 +257,8 @@ fn init_engine_root(
     // Register main window viewport
     let viewports = engine_root.insert(ViewportManager::default());
 
-    let gfx_surface_config = gfx_surface.get_default_config(&gfx.adapter, 0, 0).unwrap();
+    let mut gfx_surface_config = gfx_surface.get_default_config(&gfx.adapter, 0, 0).unwrap();
+    gfx_surface_config.format = wgpu::TextureFormat::Bgra8Unorm;
 
     let main_viewport = spawn_entity(());
     let main_viewport_vp = main_viewport.insert(Viewport::new(
