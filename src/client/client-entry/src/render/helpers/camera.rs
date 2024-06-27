@@ -86,6 +86,7 @@ pub struct CameraTransforms {
     pub i_view: Mat4,
     pub i_proj: Mat4,
     pub camera: Mat4,
+    pub i_camera: Mat4,
 }
 
 impl CameraTransforms {
@@ -94,12 +95,18 @@ impl CameraTransforms {
     }
 
     pub fn new_raw(view: Mat4, proj: Mat4) -> Self {
+        let i_view = view.inverse();
+        let i_proj = proj.inverse();
+        let camera = proj * view;
+        let i_camera = camera.inverse();
+
         Self {
             view,
             proj,
-            i_view: view.inverse(),
-            i_proj: proj.inverse(),
-            camera: proj * view,
+            i_view,
+            i_proj,
+            camera,
+            i_camera,
         }
     }
 }
@@ -154,6 +161,10 @@ impl CameraSnapshot {
 
     pub fn camera_xform(&self) -> Mat4 {
         self.xforms.camera
+    }
+
+    pub fn i_camera_xform(&self) -> Mat4 {
+        self.xforms.i_camera
     }
 }
 

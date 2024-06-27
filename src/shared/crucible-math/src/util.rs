@@ -3,7 +3,7 @@ use std::f32::consts::{PI, TAU};
 use crucible_utils::newtypes::{num_enum, NumEnum};
 use num_traits::Signed;
 use typed_glam::{
-    glam::{DVec2, DVec3, IVec2, IVec3, Mat4, Vec2, Vec3, Vec3Swizzles},
+    glam::{DVec2, DVec3, IVec2, IVec3, Mat4, Vec2, Vec3},
     traits::{NumericVector, NumericVector2, NumericVector3, SignedNumericVector3},
     typed::{FlavorCastFrom, TypedVector, VecFlavor},
 };
@@ -286,9 +286,8 @@ impl Angle3DExt for Angle3D {
     }
 
     fn from_facing(vec: Vec3) -> Self {
-        let yaw = vec.z.atan2(vec.x);
-        let pitch = vec.y.atan2(vec.xz().length());
-        Self::new(yaw, pitch)
+        let vec = vec.normalize_or_zero();
+        Self::new(vec.x.atan2(vec.z), (-vec.y).asin())
     }
 
     fn as_matrix(&self) -> Mat4 {

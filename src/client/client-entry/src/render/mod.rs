@@ -177,13 +177,13 @@ impl GlobalRenderer {
             camera.camera_xform(),
             // light_proj
             {
-                let offset = Vec3::new(10., 50., 10.);
+                let offset = Vec3::new(3., 10., 5.);
                 let pos = camera.state.pos + offset;
                 let facing = Angle3D::from_facing(-offset);
 
                 CameraSnapshot::new(
                     CameraViewState { pos, facing },
-                    CameraSettings::new_ortho(Vec2::splat(100.), 0.1, 100.),
+                    CameraSettings::new_ortho(Vec2::splat(10.), 0.1, 100.),
                     1.,
                 )
                 .camera_xform()
