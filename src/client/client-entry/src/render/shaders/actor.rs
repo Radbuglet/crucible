@@ -10,11 +10,11 @@ use typed_wgpu::{
 use crate::render::helpers::{BindGroupExt as _, PipelineLayoutExt as _};
 
 #[derive(Debug)]
-pub struct ActorRenderingBindUniform<'a> {
+pub struct ActorRenderingBindGroup<'a> {
     pub camera: wgpu::BufferBinding<'a>,
 }
 
-impl BindGroup for ActorRenderingBindUniform<'_> {
+impl BindGroup for ActorRenderingBindGroup<'_> {
     type Config = ();
     type DynamicOffsets = NoDynamicOffsets;
 
@@ -25,7 +25,8 @@ impl BindGroup for ActorRenderingBindUniform<'_> {
 
 #[derive(Debug, Copy, Clone, AsStd430)]
 pub struct ActorRenderingUniformData {
-    pub camera: Mat4,
+    pub camera_proj: Mat4,
+    pub light_proj: Mat4,
 }
 
 // === Vertices === //
@@ -81,7 +82,7 @@ pub fn load_opaque_actor_shader(
 }
 
 pub type OpaqueActorPipeline =
-    RenderPipeline<(ActorRenderingBindUniform<'static>,), (ActorVertex, ActorInstance)>;
+    RenderPipeline<(ActorRenderingBindGroup<'static>,), (ActorVertex, ActorInstance)>;
 
 pub fn load_opaque_actor_pipeline(
     assets: &AssetManager,
@@ -114,7 +115,7 @@ pub fn load_opaque_actor_pipeline(
 
 #[derive(Debug)]
 pub struct ActorRenderingUniforms {
-    bind_group: BindGroupInstance<ActorRenderingBindUniform<'static>>,
+    bind_group: BindGroupInstance<ActorRenderingBindGroup<'static>>,
     uniform_buffer: wgpu::Buffer,
 }
 
@@ -127,7 +128,7 @@ impl ActorRenderingUniforms {
             mapped_at_creation: false,
         });
 
-        let bind_group = ActorRenderingBindUniform {
+        let bind_group = ActorRenderingBindGroup {
             camera: uniform_buffer.as_entire_buffer_binding(),
         }
         .load_instance(assets, gfx, ());
@@ -142,13 +143,16 @@ impl ActorRenderingUniforms {
         OpaqueActorPipeline::bind_group_static(pass, &self.bind_group, &[]);
     }
 
-    pub fn set_camera_matrix(&self, gfx: &GfxContext, proj: Mat4) {
+    pub fn set_camera_matrix(&self, gfx: &GfxContext, camera_proj: Mat4, light_proj: Mat4) {
         gfx.queue.write_buffer(
             &self.uniform_buffer,
             0,
-            ActorRenderingUniformData { camera: proj }
-                .as_std430()
-                .as_bytes(),
+            ActorRenderingUniformData {
+                camera_proj,
+                light_proj,
+            }
+            .as_std430()
+            .as_bytes(),
         );
     }
 }

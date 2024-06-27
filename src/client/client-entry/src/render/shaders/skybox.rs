@@ -23,7 +23,7 @@ pub fn load_skybox_shader_module(
 }
 
 #[derive(Debug)]
-pub struct SkyboxRenderingBindUniform<'a> {
+pub struct SkyboxRenderingBindGroup<'a> {
     pub uniforms: BufferBinding<'a, SkyboxRenderingUniformBuffer>,
     pub panorama: &'a wgpu::TextureView,
     pub panorama_sampler: &'a wgpu::Sampler,
@@ -34,7 +34,7 @@ pub struct SkyboxRenderingUniformBuffer {
     pub inv_proj_and_view: glam::Mat4,
 }
 
-impl BindGroup for SkyboxRenderingBindUniform<'_> {
+impl BindGroup for SkyboxRenderingBindGroup<'_> {
     type Config = ();
     type DynamicOffsets = NoDynamicOffsets;
 
@@ -58,7 +58,7 @@ impl BindGroup for SkyboxRenderingBindUniform<'_> {
     }
 }
 
-pub type SkyboxPipeline = RenderPipeline<(SkyboxRenderingBindUniform<'static>,), ()>;
+pub type SkyboxPipeline = RenderPipeline<(SkyboxRenderingBindGroup<'static>,), ()>;
 
 pub fn load_skybox_pipeline(
     assets: &AssetManager,
@@ -78,7 +78,7 @@ pub fn load_skybox_pipeline(
 
 #[derive(Debug)]
 pub struct SkyboxUniforms {
-    bind_group: BindGroupInstance<SkyboxRenderingBindUniform<'static>>,
+    bind_group: BindGroupInstance<SkyboxRenderingBindGroup<'static>>,
     buffer: wgpu::Buffer,
 }
 
@@ -91,7 +91,7 @@ impl SkyboxUniforms {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let bind_group = SkyboxRenderingBindUniform {
+        let bind_group = SkyboxRenderingBindGroup {
             uniforms: BufferBinding::wrap(buffer.as_entire_buffer_binding()),
             panorama,
             panorama_sampler: &SamplerDesc::FILTER_CLAMP_EDGES.load(assets, gfx),

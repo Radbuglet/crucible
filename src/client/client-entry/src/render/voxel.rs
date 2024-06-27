@@ -27,7 +27,7 @@ use crate::render::shaders::voxel::VoxelVertex;
 
 use super::{
     helpers::AtlasTexture,
-    shaders::voxel::{OpaqueBlockPipeline, VoxelUniforms},
+    shaders::voxel::{VoxelCsmPipeline, VoxelOpaquePipeline, VoxelUniforms},
 };
 
 // === WorldVoxelMesh === //
@@ -234,14 +234,30 @@ pub struct ChunkRenderPass {
 }
 
 impl ChunkRenderPass {
-    pub fn render<'a>(
+    pub fn render_csm<'a>(
         &'a self,
-        pipeline: &'a OpaqueBlockPipeline,
+        pipeline: &'a VoxelCsmPipeline,
         uniforms: &'a VoxelUniforms,
         pass: &mut wgpu::RenderPass<'a>,
     ) {
         pipeline.bind_pipeline(pass);
-        uniforms.write_pass_state(pass);
+        pipeline.bind_group(pass, uniforms.common_bind_group(), &[]);
+
+        for (mesh, vertex_count) in &self.meshes {
+            pipeline.bind_vertex_buffer(pass, BufferSlice::wrap(mesh.slice(..)));
+            pass.draw(0..*vertex_count, 0..1);
+        }
+    }
+
+    pub fn render_opaque<'a>(
+        &'a self,
+        pipeline: &'a VoxelOpaquePipeline,
+        uniforms: &'a VoxelUniforms,
+        pass: &mut wgpu::RenderPass<'a>,
+    ) {
+        pipeline.bind_pipeline(pass);
+        pipeline.bind_group(pass, uniforms.common_bind_group(), &[]);
+        pipeline.bind_group(pass, uniforms.opaque_bind_group(), &[]);
 
         for (mesh, vertex_count) in &self.meshes {
             pipeline.bind_vertex_buffer(pass, BufferSlice::wrap(mesh.slice(..)));

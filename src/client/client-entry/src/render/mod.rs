@@ -3,14 +3,18 @@ use std::time::Duration;
 use bevy_autoken::{random_component, Obj, RandomEntityExt};
 use bevy_ecs::entity::Entity;
 use crucible_assets::AssetManager;
-use helpers::{AtlasTexture, AtlasTextureGfx, CameraManager, FullScreenTexture};
+use crucible_math::{Angle3D, Angle3DExt};
+use helpers::{
+    AtlasTexture, AtlasTextureGfx, CameraManager, CameraSettings, CameraSnapshot, CameraViewState,
+    FullScreenTexture,
+};
 use image::Rgba32FImage;
 use main_loop::{GfxContext, Viewport};
 use shaders::{
     skybox::{load_skybox_pipeline, SkyboxUniforms},
-    voxel::{load_opaque_block_pipeline, VoxelUniforms},
+    voxel::{load_voxel_csm_pipeline, load_voxel_opaque_pipeline, VoxelUniforms},
 };
-use typed_glam::glam::{UVec2, Vec4};
+use typed_glam::glam::{UVec2, Vec2, Vec3, Vec4};
 use voxel::WorldVoxelMesh;
 use wgpu::util::DeviceExt;
 
@@ -36,6 +40,10 @@ pub struct GlobalRenderer {
     atlas_gfx: AtlasTextureGfx,
     is_atlas_dirty: bool,
 
+    // CSM textures
+    csm: wgpu::Texture,
+    csm_view: wgpu::TextureView,
+
     // Rendering subsystems
     skybox: SkyboxUniforms,
     voxel: Obj<WorldVoxelMesh>,
@@ -54,6 +62,23 @@ impl GlobalRenderer {
         // Generate atlas textures
         let atlas = AtlasTexture::new(UVec2::splat(16), UVec2::splat(32), 4);
         let atlas_gfx = AtlasTextureGfx::new(&gfx, &atlas, Some("voxel texture atlas"));
+
+        // Create CSM textures
+        let csm = gfx.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("CSM texture"),
+            size: wgpu::Extent3d {
+                width: 2048,
+                height: 2048,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let csm_view = csm.create_view(&wgpu::TextureViewDescriptor::default());
 
         // load skybox subsystem
         let skybox = image::load_from_memory(include_bytes!("embedded_res/default_skybox.png"))
@@ -84,13 +109,17 @@ impl GlobalRenderer {
 
         // Load voxel subsystem
         let voxel = engine_root.get::<WorldVoxelMesh>();
-        let voxel_uniforms = VoxelUniforms::new(&assets, &gfx, &atlas_gfx.view);
+        let voxel_uniforms = VoxelUniforms::new(&assets, &gfx, &atlas_gfx.view, &csm_view);
 
         Self {
             // Services
             assets,
             gfx,
             camera,
+
+            // CSM textures
+            csm,
+            csm_view,
 
             // Atlas
             atlas,
@@ -116,22 +145,59 @@ impl GlobalRenderer {
         viewport_renderer: &mut ViewportRenderer,
         frame: &wgpu::TextureView,
     ) {
+        // Process dirty buffers
         if self.is_atlas_dirty {
             self.is_atlas_dirty = false;
             self.atlas_gfx.update(&self.gfx, &self.atlas);
         }
 
+        self.voxel.update(&self.gfx, &self.atlas, MESH_TIME_LIMIT);
+
+        // Determine camera settings
         let aspect = viewport.curr_surface_aspect().unwrap_or(1.);
         let camera = self.camera.snapshot(aspect);
 
+        // Load pipelines
         let skybox = load_skybox_pipeline(&self.assets, &self.gfx, viewport.curr_config().format);
-        let voxels = load_opaque_block_pipeline(
+        let voxel_opaque = load_voxel_opaque_pipeline(
             &self.assets,
             &self.gfx,
             viewport.curr_config().format,
             viewport_renderer.depth.format(),
         );
+        let voxel_csm = load_voxel_csm_pipeline(&self.assets, &self.gfx, self.csm.format());
+
+        // Prepare passes
         let voxels_pass = self.voxel.prepare_pass();
+
+        // Write uniforms
+        self.voxel_uniforms.set_camera_matrix(
+            &self.gfx,
+            // camera_proj
+            camera.camera_xform(),
+            // light_proj
+            {
+                let offset = Vec3::new(10., 50., 10.);
+                let pos = camera.state.pos + offset;
+                let facing = Angle3D::from_facing(-offset);
+
+                CameraSnapshot::new(
+                    CameraViewState { pos, facing },
+                    CameraSettings::new_ortho(Vec2::splat(100.), 0.1, 100.),
+                    1.,
+                )
+                .camera_xform()
+            },
+        );
+
+        self.skybox.set_camera_matrix(&self.gfx, {
+            // Skybox view projection does not take translation or scale into account. We must compute
+            // the matrix manually.
+            let i_proj = camera.i_proj_xform();
+            let mut i_view = camera.i_view_xform();
+            i_view.w_axis = Vec4::new(0.0, 0.0, 0.0, i_view.w_axis.w);
+            i_view * i_proj
+        });
 
         // Draw skybox
         let mut pass = cmd.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -148,21 +214,27 @@ impl GlobalRenderer {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-
         skybox.bind_pipeline(&mut pass);
-
-        // Skybox view projection does not take translation or scale into account. We must compute
-        // the matrix manually.
-        {
-            let i_proj = camera.i_proj_xform();
-            let mut i_view = camera.i_view_xform();
-            i_view.w_axis = Vec4::new(0.0, 0.0, 0.0, i_view.w_axis.w);
-            self.skybox.set_camera_matrix(&self.gfx, i_view * i_proj);
-        }
-
         self.skybox.write_pass_state(&mut pass);
         pass.draw(0..6, 0..1);
+        drop(pass);
 
+        // Update CSM
+        let mut pass = cmd.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("CSM pass"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.csm_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        voxels_pass.render_csm(&voxel_csm, &self.voxel_uniforms, &mut pass);
         drop(pass);
 
         // Draw voxels
@@ -187,12 +259,7 @@ impl GlobalRenderer {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-
-        #[rustfmt::skip]
-        self.voxel_uniforms.set_camera_matrix(&self.gfx, camera.camera_xform());
-        self.voxel.update(&self.gfx, &self.atlas, MESH_TIME_LIMIT);
-        voxels_pass.render(&voxels, &self.voxel_uniforms, &mut pass);
-
+        voxels_pass.render_opaque(&voxel_opaque, &self.voxel_uniforms, &mut pass);
         drop(pass);
     }
 }

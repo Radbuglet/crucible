@@ -12,18 +12,19 @@ use crate::render::helpers::{BindGroupExt as _, PipelineLayoutExt, SamplerDesc};
 // === Uniforms === //
 
 #[derive(Debug)]
-pub struct VoxelRenderingBindUniform<'a> {
-    pub uniforms: BufferBinding<'a, VoxelRenderingUniformBuffer>,
+pub struct VoxelCommonBindGroup<'a> {
+    pub uniforms: BufferBinding<'a, VoxelCommonUniformBuffer>,
     pub texture: &'a wgpu::TextureView,
-    pub sampler: &'a wgpu::Sampler,
+    pub nearest_sampler: &'a wgpu::Sampler,
 }
 
 #[derive(Debug, AsStd430)]
-pub struct VoxelRenderingUniformBuffer {
+pub struct VoxelCommonUniformBuffer {
     pub camera: glam::Mat4,
+    pub light: glam::Mat4,
 }
 
-impl BindGroup for VoxelRenderingBindUniform<'_> {
+impl BindGroup for VoxelCommonBindGroup<'_> {
     type Config = ();
     type DynamicOffsets = NoDynamicOffsets;
 
@@ -42,8 +43,28 @@ impl BindGroup for VoxelRenderingBindUniform<'_> {
             .with_sampler(
                 wgpu::ShaderStages::FRAGMENT,
                 wgpu::SamplerBindingType::NonFiltering,
-                |c| c.sampler,
+                |c| c.nearest_sampler,
             );
+    }
+}
+
+#[derive(Debug)]
+pub struct VoxelOpaqueBindGroup<'a> {
+    pub depth_texture: &'a wgpu::TextureView,
+}
+
+impl BindGroup for VoxelOpaqueBindGroup<'_> {
+    type Config = ();
+    type DynamicOffsets = NoDynamicOffsets;
+
+    fn layout(builder: &mut impl BindGroupBuilder<Self>, (): &Self::Config) {
+        builder.with_texture(
+            wgpu::ShaderStages::FRAGMENT,
+            wgpu::TextureSampleType::Float { filterable: false },
+            wgpu::TextureViewDimension::D2,
+            false,
+            |c| c.depth_texture,
+        );
     }
 }
 
@@ -66,7 +87,33 @@ impl VoxelVertex {
 
 // === Pipeline === //
 
-pub fn load_opaque_block_shader(
+pub type VoxelOpaquePipeline =
+    RenderPipeline<(VoxelCommonBindGroup<'static>, VoxelOpaqueBindGroup<'static>), (VoxelVertex,)>;
+
+pub fn load_voxel_opaque_pipeline(
+    assets: &AssetManager,
+    gfx: &GfxContext,
+    surface_format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
+) -> Asset<VoxelOpaquePipeline> {
+    assets.load(
+        gfx,
+        (&surface_format, &depth_format),
+        |assets, gfx, (&surface_format, &depth_format)| {
+            let shader = load_voxel_opaque_shader(assets, gfx);
+
+            VoxelOpaquePipeline::builder()
+                .with_layout(&PipelineLayout::load_default(assets, gfx))
+                .with_vertex_shader(&shader, "vs_main", &(VoxelVertex::layout(),))
+                .with_fragment_shader(&shader, "fs_main", surface_format)
+                .with_cull_mode(wgpu::Face::Back)
+                .with_depth(depth_format, true, wgpu::CompareFunction::Less)
+                .finish(&gfx.device)
+        },
+    )
+}
+
+pub fn load_voxel_opaque_shader(
     assets: &AssetManager,
     gfx: &GfxContext,
 ) -> Asset<wgpu::ShaderModule> {
@@ -79,49 +126,60 @@ pub fn load_opaque_block_shader(
     })
 }
 
-pub type OpaqueBlockPipeline =
-    RenderPipeline<(VoxelRenderingBindUniform<'static>,), (VoxelVertex,)>;
+pub type VoxelCsmPipeline = RenderPipeline<(VoxelCommonBindGroup<'static>,), (VoxelVertex,)>;
 
-pub fn load_opaque_block_pipeline(
+pub fn load_voxel_csm_pipeline(
     assets: &AssetManager,
     gfx: &GfxContext,
-    surface_format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
-) -> Asset<OpaqueBlockPipeline> {
-    assets.load(
-        gfx,
-        (&surface_format, &depth_format),
-        |assets, gfx, (&surface_format, &depth_format)| {
-            let shader = load_opaque_block_shader(assets, gfx);
+) -> Asset<VoxelCsmPipeline> {
+    assets.load(gfx, (&depth_format,), |assets, gfx, (&depth_format,)| {
+        let shader = load_voxel_csm_shader(assets, gfx);
 
-            OpaqueBlockPipeline::builder()
-                .with_layout(&PipelineLayout::load_default(assets, gfx))
-                .with_vertex_shader(&shader, "vs_main", &(VoxelVertex::layout(),))
-                .with_fragment_shader(&shader, "fs_main", surface_format)
-                .with_cull_mode(wgpu::Face::Back)
-                .with_depth(depth_format, true, wgpu::CompareFunction::Less)
-                .finish(&gfx.device)
-        },
-    )
+        VoxelCsmPipeline::builder()
+            .with_layout(&PipelineLayout::load_default(assets, gfx))
+            .with_vertex_shader(&shader, "vs_main", &(VoxelVertex::layout(),))
+            .with_cull_mode(wgpu::Face::Back)
+            .with_depth(depth_format, true, wgpu::CompareFunction::Less)
+            .finish(&gfx.device)
+    })
+}
+
+pub fn load_voxel_csm_shader(assets: &AssetManager, gfx: &GfxContext) -> Asset<wgpu::ShaderModule> {
+    assets.load(gfx, (), |_, gfx, ()| {
+        gfx.device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("voxel_csm.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("voxel_csm.wgsl").into()),
+            })
+    })
 }
 
 // === Uniform Management === //
 
 #[derive(Debug)]
 pub struct VoxelUniforms {
-    bind_group: BindGroupInstance<VoxelRenderingBindUniform<'static>>,
     buffer: wgpu::Buffer,
+    common_bind_group: BindGroupInstance<VoxelCommonBindGroup<'static>>,
+    opaque_bind_group: BindGroupInstance<VoxelOpaqueBindGroup<'static>>,
 }
 
 impl VoxelUniforms {
-    pub fn new(assets: &AssetManager, gfx: &GfxContext, texture: &wgpu::TextureView) -> Self {
+    pub fn new(
+        assets: &AssetManager,
+        gfx: &GfxContext,
+        texture: &wgpu::TextureView,
+        depth_texture: &wgpu::TextureView,
+    ) -> Self {
         let buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("uniform buffer"),
             mapped_at_creation: false,
-            size: VoxelRenderingUniformBuffer::std430_size_static() as u64,
+            size: VoxelCommonUniformBuffer::std430_size_static() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let sampler = SamplerDesc {
+
+        // Create `common_bind_group`
+        let nearest_sampler = SamplerDesc {
             mipmap_filter: wgpu::FilterMode::Linear,
             lod_min_clamp: 0.0,
             lod_max_clamp: 4.0,
@@ -129,27 +187,39 @@ impl VoxelUniforms {
         }
         .load(assets, gfx);
 
-        let bind_group = VoxelRenderingBindUniform {
+        let common_bind_group = VoxelCommonBindGroup {
             uniforms: BufferBinding::wrap(buffer.as_entire_buffer_binding()),
             texture,
-            sampler: &sampler,
+            nearest_sampler: &nearest_sampler,
         }
         .load_instance(assets, gfx, ());
 
-        Self { bind_group, buffer }
+        // Create `opaque_bind_group`
+        let opaque_bind_group =
+            VoxelOpaqueBindGroup { depth_texture }.load_instance(assets, gfx, ());
+
+        Self {
+            buffer,
+            common_bind_group,
+            opaque_bind_group,
+        }
     }
 
-    pub fn write_pass_state<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-        OpaqueBlockPipeline::bind_group_static(pass, &self.bind_group, &[]);
-    }
-
-    pub fn set_camera_matrix(&self, gfx: &GfxContext, proj: glam::Mat4) {
+    pub fn set_camera_matrix(&self, gfx: &GfxContext, camera: glam::Mat4, light: glam::Mat4) {
         gfx.queue.write_buffer(
             &self.buffer,
             0,
-            VoxelRenderingUniformBuffer { camera: proj }
+            VoxelCommonUniformBuffer { camera, light }
                 .as_std430()
                 .as_bytes(),
         )
+    }
+
+    pub fn common_bind_group(&self) -> &BindGroupInstance<VoxelCommonBindGroup<'static>> {
+        &self.common_bind_group
+    }
+
+    pub fn opaque_bind_group(&self) -> &BindGroupInstance<VoxelOpaqueBindGroup<'static>> {
+        &self.opaque_bind_group
     }
 }
