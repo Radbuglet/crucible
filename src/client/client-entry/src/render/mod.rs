@@ -67,8 +67,8 @@ impl GlobalRenderer {
         let csm = gfx.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("CSM texture"),
             size: wgpu::Extent3d {
-                width: 2048,
-                height: 2048,
+                width: 4096,
+                height: 4096,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,

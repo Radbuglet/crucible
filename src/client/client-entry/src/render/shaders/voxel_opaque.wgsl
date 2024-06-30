@@ -1,3 +1,9 @@
+// Settings
+const DBM_NONE: i32 = 1;
+const DBM_SHOW_LUXEL_GRID: i32 = 2;
+
+const DEBUG_MODE: i32 = DBM_SHOW_LUXEL_GRID;
+
 // Uniforms
 struct Uniforms {
     camera: mat4x4f,
@@ -52,15 +58,27 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         nearest_sampler,
         light_space.xy * vec2f(0.5, -0.5) + 0.5,
     ).r;
-    var my_lit_depth: f32 = light_space.z - 0.005;
+    var my_lit_depth: f32 = light_space.z - 0.0001;
 
-    if my_lit_depth > 1. {
-        return vec4f(0., 1., 0., 1.);
-    } else if my_lit_depth < 0. {
-        return vec4f(1., 0., 0., 1.);
-    } else if my_lit_depth < max_lit_depth {
-        return albedo;
+    // Determine whether this pixel is lit
+    var is_lit = my_lit_depth < max_lit_depth;
+
+    // Process shading mode
+    if (DEBUG_MODE == DBM_SHOW_LUXEL_GRID) {
+        // Determine pixel position in light-space
+        var luxel = light_space.xy * vec2f(0.5, -0.5) + 0.5;
+        var luxel_discrete = floor(luxel * vec2f(textureDimensions(light_map)));
+
+        if ((luxel_discrete.x + luxel_discrete.y) % 2. == 0. || !is_lit) {
+            return albedo / 2.;
+        } else {
+            return albedo;
+        }
     } else {
-        return albedo / 2.;
+        if is_lit {
+            return albedo;
+        } else {
+            return albedo / 2.;
+        }
     }
 }
