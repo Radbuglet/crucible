@@ -3,38 +3,31 @@ use crucible_assets::{Asset, AssetManager};
 use main_loop::GfxContext;
 use typed_glam::glam;
 use typed_wgpu::{
-    BindGroup, BindGroupBuilder, BindGroupInstance, BufferBinding, NoDynamicOffsets,
+    BindGroup, BindGroupBuilder, BindGroupInstance, BufferBinding, GpuStruct, NoDynamicOffsets,
     PipelineLayout, RenderPipeline,
 };
 
 use crate::render::helpers::{BindGroupExt as _, PipelineLayoutExt as _, SamplerDesc};
 
-pub fn load_skybox_shader_module(
-    assets: &AssetManager,
-    gfx: &GfxContext,
-) -> Asset<wgpu::ShaderModule> {
-    assets.load(gfx, (), |_assets, gfx, ()| {
-        gfx.device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Skybox shader module"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("skybox.wgsl").into()),
-            })
-    })
-}
+// === Uniforms === //
 
 #[derive(Debug)]
-pub struct SkyboxRenderingBindGroup<'a> {
-    pub uniforms: BufferBinding<'a, SkyboxRenderingUniformBuffer>,
+pub struct SkyboxBindGroup<'a> {
+    pub uniforms: BufferBinding<'a, SkyboxUniformData>,
     pub panorama: &'a wgpu::TextureView,
     pub panorama_sampler: &'a wgpu::Sampler,
 }
 
 #[derive(Debug, AsStd430)]
-pub struct SkyboxRenderingUniformBuffer {
+pub struct SkyboxUniformData {
     pub inv_proj_and_view: glam::Mat4,
 }
 
-impl BindGroup for SkyboxRenderingBindGroup<'_> {
+impl GpuStruct for SkyboxUniformData {
+    type Pod = <Self as AsStd430>::Output;
+}
+
+impl BindGroup for SkyboxBindGroup<'_> {
     type Config = ();
     type DynamicOffsets = NoDynamicOffsets;
 
@@ -58,7 +51,22 @@ impl BindGroup for SkyboxRenderingBindGroup<'_> {
     }
 }
 
-pub type SkyboxPipeline = RenderPipeline<(SkyboxRenderingBindGroup<'static>,), ()>;
+pub type SkyboxPipeline = RenderPipeline<(SkyboxBindGroup<'static>,), ()>;
+
+// === Pipeline === //
+
+pub fn load_skybox_shader_module(
+    assets: &AssetManager,
+    gfx: &GfxContext,
+) -> Asset<wgpu::ShaderModule> {
+    assets.load(gfx, (), |_assets, gfx, ()| {
+        gfx.device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Skybox shader module"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("skybox.wgsl").into()),
+            })
+    })
+}
 
 pub fn load_skybox_pipeline(
     assets: &AssetManager,
@@ -76,23 +84,28 @@ pub fn load_skybox_pipeline(
     })
 }
 
+// === Uniform Management === //
+
 #[derive(Debug)]
 pub struct SkyboxUniforms {
-    bind_group: BindGroupInstance<SkyboxRenderingBindGroup<'static>>,
-    buffer: wgpu::Buffer,
+    bind_group: BindGroupInstance<SkyboxBindGroup<'static>>,
+    buffer: typed_wgpu::Buffer<SkyboxUniformData>,
 }
 
 impl SkyboxUniforms {
     pub fn new(assets: &AssetManager, gfx: &GfxContext, panorama: &wgpu::TextureView) -> Self {
-        let buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("skybox uniform buffer"),
-            mapped_at_creation: false,
-            size: SkyboxRenderingUniformBuffer::std430_size_static() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let buffer = typed_wgpu::Buffer::create(
+            &gfx.device,
+            &wgpu::BufferDescriptor {
+                label: Some("skybox uniform buffer"),
+                mapped_at_creation: false,
+                size: 1,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
 
-        let bind_group = SkyboxRenderingBindGroup {
-            uniforms: BufferBinding::wrap(buffer.as_entire_buffer_binding()),
+        let bind_group = SkyboxBindGroup {
+            uniforms: buffer.as_entire_buffer_binding(),
             panorama,
             panorama_sampler: &SamplerDesc::FILTER_CLAMP_EDGES.load(assets, gfx),
         }
@@ -106,12 +119,10 @@ impl SkyboxUniforms {
     }
 
     pub fn set_camera_matrix(&self, gfx: &GfxContext, inv_proj_and_view: glam::Mat4) {
-        gfx.queue.write_buffer(
-            &self.buffer,
+        self.buffer.write(
+            &gfx.queue,
             0,
-            SkyboxRenderingUniformBuffer { inv_proj_and_view }
-                .as_std430()
-                .as_bytes(),
-        )
+            &[SkyboxUniformData { inv_proj_and_view }.as_std430()],
+        );
     }
 }

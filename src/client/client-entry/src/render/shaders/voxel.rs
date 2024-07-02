@@ -3,7 +3,7 @@ use crucible_assets::{Asset, AssetManager};
 use main_loop::GfxContext;
 use typed_glam::glam;
 use typed_wgpu::{
-    BindGroup, BindGroupBuilder, BindGroupInstance, BufferBinding, NoDynamicOffsets,
+    BindGroup, BindGroupBuilder, BindGroupInstance, BufferBinding, GpuStruct, NoDynamicOffsets,
     PipelineLayout, RenderPipeline, Std430VertexFormat, VertexBufferLayout,
 };
 
@@ -13,15 +13,19 @@ use crate::render::helpers::{BindGroupExt as _, PipelineLayoutExt, SamplerDesc};
 
 #[derive(Debug)]
 pub struct VoxelCommonBindGroup<'a> {
-    pub uniforms: BufferBinding<'a, VoxelCommonUniformBuffer>,
+    pub uniforms: BufferBinding<'a, VoxelCommonUniformData>,
     pub texture: &'a wgpu::TextureView,
     pub nearest_sampler: &'a wgpu::Sampler,
 }
 
 #[derive(Debug, AsStd430)]
-pub struct VoxelCommonUniformBuffer {
+pub struct VoxelCommonUniformData {
     pub camera: glam::Mat4,
     pub light: glam::Mat4,
+}
+
+impl GpuStruct for VoxelCommonUniformData {
+    type Pod = <Self as AsStd430>::Output;
 }
 
 impl BindGroup for VoxelCommonBindGroup<'_> {
@@ -74,6 +78,10 @@ impl BindGroup for VoxelOpaqueBindGroup<'_> {
 pub struct VoxelVertex {
     pub position: glam::Vec3,
     pub uv: glam::Vec2,
+}
+
+impl GpuStruct for VoxelVertex {
+    type Pod = <Self as AsStd430>::Output;
 }
 
 impl VoxelVertex {
@@ -159,7 +167,7 @@ pub fn load_voxel_csm_shader(assets: &AssetManager, gfx: &GfxContext) -> Asset<w
 
 #[derive(Debug)]
 pub struct VoxelUniforms {
-    buffer: wgpu::Buffer,
+    buffer: typed_wgpu::Buffer<VoxelCommonUniformData>,
     common_bind_group: BindGroupInstance<VoxelCommonBindGroup<'static>>,
     opaque_bind_group: BindGroupInstance<VoxelOpaqueBindGroup<'static>>,
 }
@@ -171,12 +179,15 @@ impl VoxelUniforms {
         texture: &wgpu::TextureView,
         depth_texture: &wgpu::TextureView,
     ) -> Self {
-        let buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("uniform buffer"),
-            mapped_at_creation: false,
-            size: VoxelCommonUniformBuffer::std430_size_static() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let buffer = typed_wgpu::Buffer::create(
+            &gfx.device,
+            &wgpu::BufferDescriptor {
+                label: Some("uniform buffer"),
+                mapped_at_creation: false,
+                size: 1,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
 
         // Create `common_bind_group`
         let nearest_sampler = SamplerDesc {
@@ -188,7 +199,7 @@ impl VoxelUniforms {
         .load(assets, gfx);
 
         let common_bind_group = VoxelCommonBindGroup {
-            uniforms: BufferBinding::wrap(buffer.as_entire_buffer_binding()),
+            uniforms: buffer.as_entire_buffer_binding(),
             texture,
             nearest_sampler: &nearest_sampler,
         }
@@ -206,13 +217,11 @@ impl VoxelUniforms {
     }
 
     pub fn set_camera_matrix(&self, gfx: &GfxContext, camera: glam::Mat4, light: glam::Mat4) {
-        gfx.queue.write_buffer(
-            &self.buffer,
+        self.buffer.write(
+            &gfx.queue,
             0,
-            VoxelCommonUniformBuffer { camera, light }
-                .as_std430()
-                .as_bytes(),
-        )
+            &[VoxelCommonUniformData { camera, light }.as_std430()],
+        );
     }
 
     pub fn common_bind_group(&self) -> &BindGroupInstance<VoxelCommonBindGroup<'static>> {

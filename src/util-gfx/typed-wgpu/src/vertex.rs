@@ -4,7 +4,7 @@ use crucible_utils::newtypes::{impl_tuples, num_enum, transparent};
 use derive_where::derive_where;
 
 use crate::{
-    buffer::BufferSlice,
+    buffer::{BufferSlice, GpuStruct},
     pipeline::{PipelineSet, UntypedPipelineSet},
     util::SlotAssigner,
 };
@@ -45,7 +45,7 @@ macro_rules! impl_vertex_buffer_set {
 			}
 		}
 
-		impl<$($para: 'static),*> VertexBufferSetInstanceGenerator<($($para,)*)> for ($(BufferSlice<'_, $para>,)*) {
+		impl<$($para: 'static + GpuStruct),*> VertexBufferSetInstanceGenerator<($($para,)*)> for ($(BufferSlice<'_, $para>,)*) {
 			#[allow(unused)]
 			fn apply<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
 				let mut index = 0;

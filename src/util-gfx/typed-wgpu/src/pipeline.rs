@@ -7,6 +7,7 @@ use crate::{
     buffer::BufferSlice,
     uniform::{BindGroup, BindGroupInstance, DynamicOffsetSet, PipelineLayout},
     vertex::VertexBufferSetLayoutGenerator,
+    GpuStruct,
 };
 
 // === PipelineSet === //
@@ -364,7 +365,7 @@ impl<U: PipelineSet, V: PipelineSet> RenderPipeline<U, V> {
         pass: &mut wgpu::RenderPass<'a>,
         buffer: BufferSlice<'a, T>,
     ) where
-        T: 'static,
+        T: 'static + GpuStruct,
         V: StaticPipelineSetHas<T, D>,
     {
         pass.set_vertex_buffer(V::index(), buffer.raw);
@@ -387,7 +388,7 @@ impl<U: PipelineSet, V: PipelineSet> RenderPipeline<U, V> {
         pass: &mut wgpu::RenderPass<'a>,
         buffer: BufferSlice<'a, T>,
     ) where
-        T: 'static,
+        T: 'static + GpuStruct,
         V: StaticPipelineSetHas<T, D>,
     {
         Self::bind_vertex_buffer_static(pass, buffer);

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bytemuck = "1.16.1"
 crucible-utils = { version = "0.1.0", path = "../../util/crucible-utils" }
 derive-where = "1.2.7"
 wgpu = "0.20.0"

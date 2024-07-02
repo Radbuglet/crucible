@@ -20,8 +20,6 @@ use crucible_world::{
 };
 use main_loop::GfxContext;
 use typed_glam::glam::{UVec2, Vec3};
-use typed_wgpu::BufferSlice;
-use wgpu::util::DeviceExt as _;
 
 use crate::render::shaders::voxel::VoxelVertex;
 
@@ -178,14 +176,13 @@ impl WorldVoxelMesh {
 
                 // Replace the chunk mesh
                 let buffer = if !vertices.is_empty() {
-                    Some(Arc::new(
-                        gfx.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some(format!("chunk mesh {:?}", data.pos()).as_str()),
-                                usage: wgpu::BufferUsages::VERTEX,
-                                contents: bytemuck::cast_slice(&vertices),
-                            }),
-                    ))
+                    Some(Arc::new(typed_wgpu::Buffer::create_init(
+                        &gfx.device,
+                        &typed_wgpu::BufferInitDescriptor {
+                            label: Some(format!("chunk mesh {:?}", data.pos()).as_str()),
+                            usage: wgpu::BufferUsages::VERTEX,
+                            contents: &vertices,
+                    })))
                 } else {
                     None
                 };
@@ -230,7 +227,7 @@ impl WorldVoxelMesh {
 
 #[derive(Debug)]
 pub struct ChunkRenderPass {
-    meshes: Vec<(Arc<wgpu::Buffer>, u32)>,
+    meshes: Vec<(Arc<typed_wgpu::Buffer<VoxelVertex>>, u32)>,
 }
 
 impl ChunkRenderPass {
@@ -244,7 +241,7 @@ impl ChunkRenderPass {
         pipeline.bind_group(pass, uniforms.common_bind_group(), &[]);
 
         for (mesh, vertex_count) in &self.meshes {
-            pipeline.bind_vertex_buffer(pass, BufferSlice::wrap(mesh.slice(..)));
+            pipeline.bind_vertex_buffer(pass, mesh.slice(..));
             pass.draw(0..*vertex_count, 0..1);
         }
     }
@@ -260,7 +257,7 @@ impl ChunkRenderPass {
         pipeline.bind_group(pass, uniforms.opaque_bind_group(), &[]);
 
         for (mesh, vertex_count) in &self.meshes {
-            pipeline.bind_vertex_buffer(pass, BufferSlice::wrap(mesh.slice(..)));
+            pipeline.bind_vertex_buffer(pass, mesh.slice(..));
             pass.draw(0..*vertex_count, 0..1);
         }
     }
@@ -272,7 +269,7 @@ impl ChunkRenderPass {
 pub struct ChunkVoxelMesh {
     dirty: bool,
     vertex_count: u32,
-    buffer: Option<Arc<wgpu::Buffer>>,
+    buffer: Option<Arc<typed_wgpu::Buffer<VoxelVertex>>>,
 }
 
 random_component!(ChunkVoxelMesh);

@@ -3,30 +3,36 @@ use crucible_assets::{Asset, AssetManager};
 use main_loop::GfxContext;
 use typed_glam::glam::{Mat4, Vec3};
 use typed_wgpu::{
-    BindGroup, BindGroupBuilder, BindGroupInstance, NoDynamicOffsets, PipelineLayout,
+    BindGroup, BindGroupBuilder, BindGroupInstance, GpuStruct, NoDynamicOffsets, PipelineLayout,
     RenderPipeline, Std430VertexFormat, VertexBufferLayout,
 };
 
 use crate::render::helpers::{BindGroupExt as _, PipelineLayoutExt as _};
 
+// === Uniforms === //
+
 #[derive(Debug)]
-pub struct ActorRenderingBindGroup<'a> {
-    pub camera: wgpu::BufferBinding<'a>,
+pub struct ActorBindGroup<'a> {
+    pub camera: typed_wgpu::BufferBinding<'a, ActorUniformData>,
 }
 
-impl BindGroup for ActorRenderingBindGroup<'_> {
+impl BindGroup for ActorBindGroup<'_> {
     type Config = ();
     type DynamicOffsets = NoDynamicOffsets;
 
     fn layout(builder: &mut impl BindGroupBuilder<Self>, _config: &Self::Config) {
-        builder.with_uniform_buffer(wgpu::ShaderStages::VERTEX, false, |c| c.camera.clone());
+        builder.with_uniform_buffer(wgpu::ShaderStages::VERTEX, false, |c| c.camera.raw.clone());
     }
 }
 
 #[derive(Debug, Copy, Clone, AsStd430)]
-pub struct ActorRenderingUniformData {
+pub struct ActorUniformData {
     pub camera_proj: Mat4,
     pub light_proj: Mat4,
+}
+
+impl GpuStruct for ActorUniformData {
+    type Pod = <Self as AsStd430>::Output;
 }
 
 // === Vertices === //
@@ -35,6 +41,10 @@ pub struct ActorRenderingUniformData {
 pub struct ActorVertex {
     pub pos: Vec3,
     pub color: Vec3,
+}
+
+impl GpuStruct for ActorVertex {
+    type Pod = <Self as AsStd430>::Output;
 }
 
 impl ActorVertex {
@@ -54,6 +64,10 @@ pub struct ActorInstance {
     pub translation: Vec3,
 }
 
+impl GpuStruct for ActorInstance {
+    type Pod = <Self as AsStd430>::Output;
+}
+
 impl ActorInstance {
     pub fn layout() -> VertexBufferLayout<Self> {
         VertexBufferLayout::builder()
@@ -68,21 +82,8 @@ impl ActorInstance {
 
 // === Pipeline === //
 
-pub fn load_opaque_actor_shader(
-    assets: &AssetManager,
-    gfx: &GfxContext,
-) -> Asset<wgpu::ShaderModule> {
-    assets.load(gfx, (), |_assets, gfx, ()| {
-        gfx.device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("actor/opaque.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("actor_opaque.wgsl").into()),
-            })
-    })
-}
-
 pub type OpaqueActorPipeline =
-    RenderPipeline<(ActorRenderingBindGroup<'static>,), (ActorVertex, ActorInstance)>;
+    RenderPipeline<(ActorBindGroup<'static>,), (ActorVertex, ActorInstance)>;
 
 pub fn load_opaque_actor_pipeline(
     assets: &AssetManager,
@@ -111,24 +112,40 @@ pub fn load_opaque_actor_pipeline(
     )
 }
 
+pub fn load_opaque_actor_shader(
+    assets: &AssetManager,
+    gfx: &GfxContext,
+) -> Asset<wgpu::ShaderModule> {
+    assets.load(gfx, (), |_assets, gfx, ()| {
+        gfx.device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("actor/opaque.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("actor_opaque.wgsl").into()),
+            })
+    })
+}
+
 // === Uniform Management === //
 
 #[derive(Debug)]
 pub struct ActorRenderingUniforms {
-    bind_group: BindGroupInstance<ActorRenderingBindGroup<'static>>,
-    uniform_buffer: wgpu::Buffer,
+    bind_group: BindGroupInstance<ActorBindGroup<'static>>,
+    uniform_buffer: typed_wgpu::Buffer<ActorUniformData>,
 }
 
 impl ActorRenderingUniforms {
     pub fn new(assets: &AssetManager, gfx: &GfxContext) -> Self {
-        let uniform_buffer = gfx.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("actor rendering uniforms buffer"),
-            size: ActorRenderingUniformData::std430_size_static() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = typed_wgpu::Buffer::create(
+            &gfx.device,
+            &wgpu::BufferDescriptor {
+                label: Some("actor rendering uniforms buffer"),
+                size: 1,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        );
 
-        let bind_group = ActorRenderingBindGroup {
+        let bind_group = ActorBindGroup {
             camera: uniform_buffer.as_entire_buffer_binding(),
         }
         .load_instance(assets, gfx, ());
@@ -144,15 +161,14 @@ impl ActorRenderingUniforms {
     }
 
     pub fn set_camera_matrix(&self, gfx: &GfxContext, camera_proj: Mat4, light_proj: Mat4) {
-        gfx.queue.write_buffer(
-            &self.uniform_buffer,
+        self.uniform_buffer.write(
+            &gfx.queue,
             0,
-            ActorRenderingUniformData {
+            &[ActorUniformData {
                 camera_proj,
                 light_proj,
             }
-            .as_std430()
-            .as_bytes(),
+            .as_std430()],
         );
     }
 }
