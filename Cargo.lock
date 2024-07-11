@@ -748,6 +748,7 @@ dependencies = [
 name = "crucible-utils"
 version = "0.1.0"
 dependencies = [
+ "bumpalo",
  "crucible-utils-proc",
  "derive-where",
  "hashbrown",

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bumpalo = "3.16.0"
 crucible-utils-proc = { version = "0.1.0", path = "../crucible-utils-proc" }
 derive-where = "1.2.7"
 hashbrown = "0.14.5"

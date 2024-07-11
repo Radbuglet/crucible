@@ -12,3 +12,6 @@ pub use camera::*;
 
 mod texture;
 pub use texture::*;
+
+mod multipass;
+pub use multipass::*;
