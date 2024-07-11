@@ -159,14 +159,14 @@ impl ApplicationHandler for WinitApp {
         // Handle redraw requests
         if let WindowEvent::RedrawRequested = &event {
             self.app
-                .world
+                .world_mut()
                 .use_random(|cx| render_app(cx, self.engine_root, window_id));
         }
 
         // Handle quit requests
         if let WindowEvent::CloseRequested = &event {
             self.app
-                .world
+                .world_mut()
                 .use_random(|_: PhantomData<(&ViewportManager, &Viewport)>| {
                     despawn_entity(
                         self.engine_root

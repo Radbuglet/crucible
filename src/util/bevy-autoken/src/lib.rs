@@ -729,7 +729,7 @@ impl RandomWorldExt for App {
     where
         L: 'static + RandomResourceList,
     {
-        self.world.use_random::<L, R>(f)
+        self.world_mut().use_random::<L, R>(f)
     }
 }
 

@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.86"
 bevy-autoken = { version = "0.1.0", path = "../../util/bevy-autoken" }
-bevy_ecs = "0.13.2"
+bevy_ecs = "0.14.0"
 crucible-utils = { version = "0.1.0", path = "../../util/crucible-utils" }
 derive-where = "1.2.7"
 smallbox = "0.8.2"
