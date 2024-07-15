@@ -6,7 +6,7 @@ use derive_where::derive_where;
 use crate::{
     buffer::BufferSlice,
     uniform::{BindGroup, BindGroupInstance, DynamicOffsetSet, PipelineLayout},
-    vertex::VertexBufferSetLayoutGenerator,
+    vertex::VertexBufferLayoutSet,
     GpuStruct,
 };
 
@@ -24,19 +24,19 @@ impl<T: StaticPipelineSet> PipelineSet for T {}
 // === StaticPipelineSet === //
 
 pub trait StaticPipelineSet: 'static {
-    fn index_of_dyn<T: 'static>() -> Option<u32>;
+    fn index_of<T: 'static>() -> Option<u32>;
 }
 
 pub trait StaticPipelineSetHas<T: 'static, D>: StaticPipelineSet {
     fn index() -> u32 {
-        Self::index_of_dyn::<T>().unwrap()
+        Self::index_of::<T>().unwrap()
     }
 }
 
 macro_rules! impl_pipeline_set {
 	($($para:ident:$field:tt),*) => {
 		impl<$($para: 'static),*> StaticPipelineSet for ($($para,)*) {
-			fn index_of_dyn<T: 'static>() -> Option<u32> {
+			fn index_of<T: 'static>() -> Option<u32> {
 				let index = 0;
 
 				$(
@@ -130,7 +130,7 @@ impl<'a, U: PipelineSet, V: PipelineSet> RenderPipelineBuilder<'a, U, V> {
         mut self,
         module: &'a wgpu::ShaderModule,
         entry: &'a str,
-        buffers: &'a impl VertexBufferSetLayoutGenerator<V>,
+        buffers: &'a impl VertexBufferLayoutSet<V>,
     ) -> Self
     where
         V: StaticPipelineSet,
@@ -358,7 +358,7 @@ impl<U: PipelineSet, V: PipelineSet> RenderPipeline<U, V> {
         L: 'static + BindGroup,
         U: StaticPipelineSetHas<L, D>,
     {
-        pass.set_bind_group(U::index(), &group.raw, &offsets.as_offset_set());
+        pass.set_bind_group(U::index(), &group.raw, offsets.as_offset_set().as_ref());
     }
 
     pub fn bind_vertex_buffer_static<'a, T, D>(

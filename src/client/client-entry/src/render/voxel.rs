@@ -1,8 +1,9 @@
-use std::{sync::Arc, time::Duration};
+use std::{num::NonZeroU64, sync::Arc, time::Duration};
 
 use bevy_autoken::{random_component, Obj, RandomAccess, RandomEntityExt};
 use bevy_ecs::{event::EventReader, query::With, system::Query};
 use crevice::std430::AsStd430 as _;
+use crucible_assets::AssetManager;
 use crucible_math::{
     AaQuad, BlockFace, BlockVec, BlockVecExt as _, Sign, Tri, WorldVec, WorldVecExt as _, QUAD_UVS,
 };
@@ -20,12 +21,16 @@ use crucible_world::{
 };
 use main_loop::GfxContext;
 use typed_glam::glam::{UVec2, Vec3};
+use typed_wgpu::BufferBinding;
 
 use crate::render::shaders::voxel::VoxelVertex;
 
 use super::{
-    helpers::AtlasTexture,
-    shaders::voxel::{VoxelCsmPipeline, VoxelOpaquePipeline, VoxelUniforms},
+    helpers::{AtlasTexture, BindGroupExt, MultiPass},
+    shaders::voxel::{
+        VoxelChunkInstanceBindGroup, VoxelChunkUniformData, VoxelCsmPipeline, VoxelOpaquePipeline,
+        VoxelUniforms,
+    },
 };
 
 // === WorldVoxelMesh === //
@@ -246,19 +251,43 @@ impl ChunkRenderPass {
         }
     }
 
-    pub fn render_opaque<'a>(
-        &'a self,
-        pipeline: &'a VoxelOpaquePipeline,
-        uniforms: &'a VoxelUniforms,
-        pass: &mut wgpu::RenderPass<'a>,
+    pub fn render_opaque<'p>(
+        &'p self,
+        assets: &AssetManager,
+        gfx: &GfxContext,
+        pipeline: &'p VoxelOpaquePipeline,
+        uniforms: &'p VoxelUniforms,
+        pass: &mut MultiPass<'_, 'p>,
     ) {
-        pipeline.bind_pipeline(pass);
-        pipeline.bind_group(pass, uniforms.common_bind_group(), &[]);
-        pipeline.bind_group(pass, uniforms.opaque_bind_group(), &[]);
+        let dyn_bind_group = pass.alloc(|buffer| {
+            VoxelChunkInstanceBindGroup {
+                buffer: BufferBinding::wrap(wgpu::BufferBinding {
+                    buffer,
+                    offset: 0,
+                    size: Some(NonZeroU64::new(256).unwrap()),
+                }),
+            }
+            .load_instance(assets, gfx, ())
+        });
+
+        pass.draw(|pass| {
+            pipeline.bind_pipeline(pass);
+            pipeline.bind_group(pass, uniforms.common_bind_group(), &[]);
+            pipeline.bind_group(pass, uniforms.opaque_bind_group(), &[]);
+        });
 
         for (mesh, vertex_count) in &self.meshes {
-            pipeline.bind_vertex_buffer(pass, mesh.slice(..));
-            pass.draw(0..*vertex_count, 0..1);
+            let offset = pass
+                .write_typed(gfx, || {
+                    VoxelChunkUniformData { offset: Vec3::ZERO }.as_std430()
+                })
+                .as_offset();
+
+            pass.draw(|pass| {
+                pipeline.bind_group(pass, dyn_bind_group.unwrap(), &(offset,));
+                pipeline.bind_vertex_buffer(pass, mesh.slice(..));
+                pass.draw(0..*vertex_count, 0..1);
+            });
         }
     }
 }

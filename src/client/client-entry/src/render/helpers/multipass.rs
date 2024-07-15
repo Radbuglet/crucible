@@ -1,6 +1,8 @@
 use std::{cell::RefCell, fmt};
 
 use crucible_utils::lifetimes::DropBump;
+use main_loop::GfxContext;
+use typed_wgpu::{BufferAddress, GpuStruct};
 
 use super::DynamicBuffer;
 
@@ -23,6 +25,7 @@ impl MultiPassDriver {
 
     pub fn drive<'p>(
         &'p self,
+        gfx: &GfxContext,
         pass: &mut wgpu::RenderPass<'p>,
         buffer: &mut DynamicBuffer,
         mut f: impl FnMut(&mut MultiPass<'_, 'p>),
@@ -40,7 +43,7 @@ impl MultiPassDriver {
         }));
 
         f(&mut MultiPass(MultiPassInner::Pass {
-            buffer: buffer.buffer(),
+            buffer: buffer.finish(gfx),
             bump: &self.bump,
             pass,
             offsets: &offset_buff,
@@ -66,11 +69,13 @@ enum MultiPassInner<'a, 'p> {
 }
 
 impl<'a, 'p> MultiPass<'a, 'p> {
-    pub fn write(&mut self, f: impl FnOnce(&mut DynamicBuffer)) -> wgpu::BufferAddress {
+    pub fn write(
+        &mut self,
+        f: impl FnOnce(&mut DynamicBuffer) -> wgpu::BufferAddress,
+    ) -> wgpu::BufferAddress {
         match &mut self.0 {
             MultiPassInner::Buffer { buffer, offsets } => {
-                let offset = buffer.len();
-                f(buffer);
+                let offset = f(buffer);
                 offsets.push(offset);
                 offset
             }
@@ -80,6 +85,25 @@ impl<'a, 'p> MultiPass<'a, 'p> {
                 first
             }
         }
+    }
+
+    pub fn write_typed<T: GpuStruct>(
+        &mut self,
+        gfx: &GfxContext,
+        f: impl FnOnce() -> T::Pod,
+    ) -> BufferAddress<T> {
+        BufferAddress::wrap(self.write(|writer| {
+            let align = gfx
+                .requested_limits
+                .min_uniform_buffer_offset_alignment
+                .into();
+
+            writer.align(align);
+            let start = writer.len();
+            writer.extend(bytemuck::bytes_of(&f()));
+            writer.align(align);
+            start
+        }))
     }
 
     pub fn alloc<T: 'static>(&mut self, f: impl FnOnce(&wgpu::Buffer) -> T) -> Option<&'p T> {

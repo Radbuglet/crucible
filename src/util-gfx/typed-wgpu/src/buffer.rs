@@ -127,3 +127,45 @@ impl<'a, T: GpuStruct> BufferBinding<'a, T> {
         }
     }
 }
+
+// === BufferAddress === //
+
+#[derive_where(Debug, Clone)]
+#[transparent(raw, pub wrap)]
+#[repr(transparent)]
+pub struct BufferAddress<T: GpuStruct> {
+    pub _ty: PhantomData<fn(T)>,
+    pub raw: wgpu::BufferAddress,
+}
+
+impl<T: GpuStruct> BufferAddress<T> {
+    pub const fn wrap(raw: wgpu::BufferAddress) -> Self {
+        Self {
+            _ty: PhantomData,
+            raw,
+        }
+    }
+
+    pub fn as_offset(self) -> DynamicOffset<T> {
+        DynamicOffset::wrap(wgpu::DynamicOffset::try_from(self.raw).expect("offset too large"))
+    }
+}
+
+// === DynamicOffset === //
+
+#[derive_where(Debug, Clone)]
+#[transparent(raw, pub wrap)]
+#[repr(transparent)]
+pub struct DynamicOffset<T: GpuStruct> {
+    pub _ty: PhantomData<fn(T)>,
+    pub raw: wgpu::DynamicOffset,
+}
+
+impl<T: GpuStruct> DynamicOffset<T> {
+    pub const fn wrap(raw: wgpu::DynamicOffset) -> Self {
+        Self {
+            _ty: PhantomData,
+            raw,
+        }
+    }
+}

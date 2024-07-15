@@ -1,8 +1,12 @@
-use crucible_utils::newtypes::transparent;
+use crucible_utils::{impl_tuples, newtypes::transparent};
 use derive_where::derive_where;
-use std::{any::type_name, borrow::Cow, fmt, hash::Hash, marker::PhantomData, num::NonZeroU32};
+use std::{any::type_name, fmt, hash::Hash, marker::PhantomData, num::NonZeroU32};
 
-use crate::{pipeline::PipelineSet, util::SlotAssigner};
+use crate::{
+    buffer::{DynamicOffset, GpuStruct},
+    pipeline::PipelineSet,
+    util::SlotAssigner,
+};
 
 // === PipelineLayout === //
 
@@ -682,19 +686,47 @@ impl<'a, T: ?Sized> BindGroupInstanceBuilder<'a, T> {
 // === DynamicOffsetSet === //
 
 pub trait DynamicOffsetSet {
-    fn as_offset_set(&self) -> Cow<[wgpu::DynamicOffset]>;
+    type OffsetSet<'a>: AsRef<[wgpu::DynamicOffset]>
+    where
+        Self: 'a;
+
+    fn as_offset_set(&self) -> Self::OffsetSet<'_>;
 }
 
+pub type NoDynamicOffsets = [wgpu::DynamicOffset; 0];
+
 impl DynamicOffsetSet for [wgpu::DynamicOffset] {
-    fn as_offset_set(&self) -> Cow<[wgpu::DynamicOffset]> {
-        self.into()
+    type OffsetSet<'a> = &'a [wgpu::DynamicOffset]
+    where
+        Self: 'a;
+
+    fn as_offset_set(&self) -> Self::OffsetSet<'_> {
+        self
     }
 }
 
 impl<const N: usize> DynamicOffsetSet for [wgpu::DynamicOffset; N] {
-    fn as_offset_set(&self) -> Cow<[wgpu::DynamicOffset]> {
-        self.as_slice().into()
+    type OffsetSet<'a> = &'a [wgpu::DynamicOffset; N]
+    where
+        Self: 'a;
+
+    fn as_offset_set(&self) -> Self::OffsetSet<'_> {
+        self
     }
 }
 
-pub type NoDynamicOffsets = [wgpu::DynamicOffset; 0];
+macro_rules! impl_dynamic_offset_set {
+    ($($name:ident:$field:tt),*) => {
+        impl<$($name: GpuStruct),*> DynamicOffsetSet for ($(DynamicOffset<$name>,)*) {
+            type OffsetSet<'a> = [wgpu::DynamicOffset; { 0 $(+ { let $name = 1; $name })* }]
+            where
+                Self: 'a;
+
+            fn as_offset_set(&self) -> Self::OffsetSet<'_> {
+                [$(self.$field.raw),*]
+            }
+        }
+    };
+}
+
+impl_tuples!(impl_dynamic_offset_set);

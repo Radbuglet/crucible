@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Mutex, time::Duration};
 
 use bevy_autoken::{random_component, Obj, RandomEntityExt};
 use bevy_ecs::entity::Entity;
@@ -6,7 +6,7 @@ use crucible_assets::AssetManager;
 use crucible_math::{Angle3D, Angle3DExt};
 use helpers::{
     AtlasTexture, AtlasTextureGfx, CameraManager, CameraSettings, CameraSnapshot, CameraViewState,
-    FullScreenTexture,
+    DynamicBuffer, FullScreenTexture, MultiPassDriver,
 };
 use image::Rgba32FImage;
 use main_loop::{GfxContext, Viewport};
@@ -48,6 +48,7 @@ pub struct GlobalRenderer {
     skybox: SkyboxUniforms,
     voxel: Obj<WorldVoxelMesh>,
     voxel_uniforms: VoxelUniforms,
+    voxel_dynamics: Mutex<DynamicBuffer>,
 }
 
 random_component!(GlobalRenderer);
@@ -130,6 +131,10 @@ impl GlobalRenderer {
             skybox,
             voxel,
             voxel_uniforms,
+            voxel_dynamics: Mutex::new(DynamicBuffer::new(
+                Some("voxel dynamic data buffer"),
+                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            )),
         }
     }
 
@@ -169,6 +174,7 @@ impl GlobalRenderer {
 
         // Prepare passes
         let voxels_pass = self.voxel.prepare_pass();
+        let multipass = MultiPassDriver::new();
 
         // Write uniforms
         self.voxel_uniforms.set_camera_matrix(
@@ -259,7 +265,21 @@ impl GlobalRenderer {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-        voxels_pass.render_opaque(&voxel_opaque, &self.voxel_uniforms, &mut pass);
+
+        multipass.drive(
+            &self.gfx,
+            &mut pass,
+            &mut self.voxel_dynamics.lock().unwrap(),
+            |pass| {
+                voxels_pass.render_opaque(
+                    &self.assets,
+                    &self.gfx,
+                    &voxel_opaque,
+                    &self.voxel_uniforms,
+                    pass,
+                );
+            },
+        );
         drop(pass);
     }
 }

@@ -4,28 +4,23 @@ use crucible_utils::newtypes::{impl_tuples, num_enum, transparent};
 use derive_where::derive_where;
 
 use crate::{
-    buffer::{BufferSlice, GpuStruct},
     pipeline::{PipelineSet, UntypedPipelineSet},
     util::SlotAssigner,
 };
 
-// === VertexBufferSet generators === //
+// === VertexBufferSetLayout === //
 
-pub trait VertexBufferSetLayoutGenerator<K: PipelineSet> {
+pub trait VertexBufferLayoutSet<K: PipelineSet> {
     fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]>;
 }
 
-pub trait VertexBufferSetInstanceGenerator<K: PipelineSet> {
-    fn apply<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>);
-}
-
-impl VertexBufferSetLayoutGenerator<UntypedPipelineSet> for [wgpu::VertexBufferLayout<'_>] {
+impl VertexBufferLayoutSet<UntypedPipelineSet> for [wgpu::VertexBufferLayout<'_>] {
     fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
         self.into()
     }
 }
 
-impl VertexBufferSetLayoutGenerator<()> for () {
+impl VertexBufferLayoutSet<()> for () {
     fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
         vec![].into()
     }
@@ -33,26 +28,15 @@ impl VertexBufferSetLayoutGenerator<()> for () {
 
 macro_rules! impl_vertex_buffer_set {
 	($($para:ident:$field:tt),*) => {
-		impl<'a, $($para: 'static),*> VertexBufferSetLayoutGenerator<($($para,)*)> for ($(&'a VertexBufferLayout<$para>,)*) {
+		impl<'a, $($para: 'static),*> VertexBufferLayoutSet<($($para,)*)> for ($(&'a VertexBufferLayout<$para>,)*) {
 			fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
 				vec![$(self.$field.raw.as_wgpu()),*].into()
 			}
 		}
 
-		impl<'a, $($para: 'static),*> VertexBufferSetLayoutGenerator<($($para,)*)> for ($(VertexBufferLayout<$para>,)*) {
+        impl<'a, $($para: 'static),*> VertexBufferLayoutSet<($($para,)*)> for ($(VertexBufferLayout<$para>,)*) {
 			fn layouts(&self) -> Cow<[wgpu::VertexBufferLayout<'_>]> {
 				vec![$(self.$field.raw.as_wgpu()),*].into()
-			}
-		}
-
-		impl<$($para: 'static + GpuStruct),*> VertexBufferSetInstanceGenerator<($($para,)*)> for ($(BufferSlice<'_, $para>,)*) {
-			#[allow(unused)]
-			fn apply<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-				let mut index = 0;
-				$({
-					pass.set_vertex_buffer(index, self.$field.raw);
-					index += 1;
-				})*
 			}
 		}
 	};

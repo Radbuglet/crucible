@@ -2,12 +2,16 @@
 const DBM_NONE: i32 = 1;
 const DBM_SHOW_LUXEL_GRID: i32 = 2;
 
-const DEBUG_MODE: i32 = DBM_SHOW_LUXEL_GRID;
+const DEBUG_MODE: i32 = DBM_NONE;
 
 // Uniforms
 struct Uniforms {
     camera: mat4x4f,
     light: mat4x4f,
+}
+
+struct PerChunkUniforms {
+    offset: vec3f,
 }
 
 @group(0) @binding(0)
@@ -21,6 +25,9 @@ var nearest_sampler: sampler;
 
 @group(1) @binding(0)
 var light_map: texture_2d<f32>;
+
+@group(2) @binding(0)
+var<uniform> uniforms_pc: PerChunkUniforms;
 
 // Vertex definitions
 struct VertexInput {
@@ -38,8 +45,10 @@ struct VertexOutput {
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
 	var out: VertexOutput;
-	out.clip_position = uniforms.camera * vec4f(in.position, 1.0);
-    out.light_space = uniforms.light * vec4f(in.position, 1.0);
+    let position = in.position + uniforms_pc.offset;
+
+	out.clip_position = uniforms.camera * vec4f(position, 1.0);
+    out.light_space = uniforms.light * vec4f(position, 1.0);
 	out.uv = in.uv;
 	return out;
 }

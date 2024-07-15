@@ -3,8 +3,8 @@ use crucible_assets::{Asset, AssetManager};
 use main_loop::GfxContext;
 use typed_glam::glam;
 use typed_wgpu::{
-    BindGroup, BindGroupBuilder, BindGroupInstance, BufferBinding, GpuStruct, NoDynamicOffsets,
-    PipelineLayout, RenderPipeline, Std430VertexFormat, VertexBufferLayout,
+    BindGroup, BindGroupBuilder, BindGroupInstance, BufferBinding, DynamicOffset, GpuStruct,
+    NoDynamicOffsets, PipelineLayout, RenderPipeline, Std430VertexFormat, VertexBufferLayout,
 };
 
 use crate::render::helpers::{BindGroupExt as _, PipelineLayoutExt, SamplerDesc};
@@ -72,6 +72,29 @@ impl BindGroup for VoxelOpaqueBindGroup<'_> {
     }
 }
 
+#[derive(Debug)]
+pub struct VoxelChunkInstanceBindGroup<'a> {
+    pub buffer: BufferBinding<'a, VoxelChunkUniformData>,
+}
+
+impl BindGroup for VoxelChunkInstanceBindGroup<'_> {
+    type Config = ();
+    type DynamicOffsets = (DynamicOffset<VoxelChunkUniformData>,);
+
+    fn layout(builder: &mut impl BindGroupBuilder<Self>, (): &Self::Config) {
+        builder.with_uniform_buffer(wgpu::ShaderStages::VERTEX, true, |c| c.buffer.raw.clone());
+    }
+}
+
+#[derive(Debug, AsStd430)]
+pub struct VoxelChunkUniformData {
+    pub offset: glam::Vec3,
+}
+
+impl GpuStruct for VoxelChunkUniformData {
+    type Pod = <Self as AsStd430>::Output;
+}
+
 // === Vertices === //
 
 #[derive(AsStd430)]
@@ -95,8 +118,14 @@ impl VoxelVertex {
 
 // === Pipeline === //
 
-pub type VoxelOpaquePipeline =
-    RenderPipeline<(VoxelCommonBindGroup<'static>, VoxelOpaqueBindGroup<'static>), (VoxelVertex,)>;
+pub type VoxelOpaquePipeline = RenderPipeline<
+    (
+        VoxelCommonBindGroup<'static>,
+        VoxelOpaqueBindGroup<'static>,
+        VoxelChunkInstanceBindGroup<'static>,
+    ),
+    (VoxelVertex,),
+>;
 
 pub fn load_voxel_opaque_pipeline(
     assets: &AssetManager,
