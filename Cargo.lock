@@ -745,6 +745,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "crucible-syn"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "autoken",
+ "bumpalo",
+ "crucible-utils",
+ "derive-where",
+]
+
+[[package]]
 name = "crucible-utils"
 version = "0.1.0"
 dependencies = [

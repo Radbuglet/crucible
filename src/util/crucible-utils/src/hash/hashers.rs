@@ -4,7 +4,8 @@ use std::{
 };
 
 use derive_where::derive_where;
-use rustc_hash::FxHasher;
+
+pub use rustc_hash::FxHasher;
 
 #[derive_where(Debug, Copy, Clone, Default)]
 pub struct ConstBuildHasherDefault<T> {

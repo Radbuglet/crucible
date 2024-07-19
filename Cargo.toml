@@ -10,7 +10,7 @@ members = [
     "src/util/crucible-assets",
     "src/util/crucible-utils-proc",
     "src/util/crucible-utils",
-    "src/util/typed-glam",
+    "src/util/typed-glam", "src/util/crucible-syn",
 ]
 
 [profile.dev]
