@@ -1,5 +1,4 @@
-use core::fmt;
-use std::cell::UnsafeCell;
+use std::{cell::UnsafeCell, fmt};
 
 trait Anything {}
 

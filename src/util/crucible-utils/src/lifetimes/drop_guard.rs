@@ -1,3 +1,7 @@
+//! This module is a replacement for `drop_guard` which supports defusing, avoids boxing the handler,
+//! and allows users to define their own destructor handler structures by implementing the
+//! `DropGuardHandler` trait.
+
 use std::{
     mem::{self, ManuallyDrop},
     ops::{Deref, DerefMut},

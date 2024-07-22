@@ -1,0 +1,9 @@
+[package]
+name = "wgsl-link"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.86"
+crucible-utils = { version = "0.1.0", path = "../../util/crucible-utils" }
+naga = { version = "22.0.0", features = ["wgsl-in", "wgsl-out"] }

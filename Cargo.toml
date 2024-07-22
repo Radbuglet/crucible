@@ -6,11 +6,12 @@ members = [
     "src/shared/crucible-world",
     "src/util-gfx/main-loop",
     "src/util-gfx/typed-wgpu",
+    "src/util-gfx/wgsl-link",
     "src/util/bevy-autoken",
     "src/util/crucible-assets",
     "src/util/crucible-utils-proc",
     "src/util/crucible-utils",
-    "src/util/typed-glam", "src/util/crucible-syn",
+    "src/util/typed-glam",
 ]
 
 [profile.dev]
