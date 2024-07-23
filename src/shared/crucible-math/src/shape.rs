@@ -123,6 +123,14 @@ impl<V: NumericVector3> AaQuad<V> {
         }
     }
 
+    pub fn center(self) -> V {
+        let (ortho_h, ortho_v) = self.face.axis().ortho_hv();
+        let (size_h, size_v) = self.size;
+        self.origin
+            + ortho_h.unit_typed::<V>() * V::splat(size_h)
+            + ortho_v.unit_typed::<V>() * V::splat(size_v)
+    }
+
     pub fn extrude_hv(self, delta: V::Comp) -> Aabb3<V>
     where
         V: SignedNumericVector3,

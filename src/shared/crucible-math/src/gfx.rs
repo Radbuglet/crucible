@@ -1,6 +1,6 @@
 use crucible_utils::traits::ArrayLike;
 use typed_glam::{
-    glam::{self, Vec2},
+    glam::{self, BVec2, Vec2},
     traits::SignedNumericVector3,
     typed::{FlavorCastFrom, TypedVector, VecFlavor},
 };
@@ -105,7 +105,7 @@ pub struct Tri<V>(pub [V; 3]);
 // === AaQuad Extensions === //
 
 impl<V: SignedNumericVector3> AaQuad<V> {
-    pub fn as_quad_ccw(&self) -> Quad<V> {
+    pub fn as_quad_ccw_whmask(&self) -> Quad<(V, BVec2)> {
         let (axis, sign) = self.face.decompose();
         let (w, h) = self.size;
         let origin = self.origin;
@@ -135,7 +135,12 @@ impl<V: SignedNumericVector3> AaQuad<V> {
                 let z = V::Z * V::splat(w);
                 let y = V::Y * V::splat(h);
 
-                Quad([origin + z, origin, origin + y, origin + y + z])
+                Quad([
+                    (origin + z, BVec2::new(true, false)),
+                    (origin, BVec2::new(false, false)),
+                    (origin + y, BVec2::new(false, true)),
+                    (origin + y + z, BVec2::new(true, true)),
+                ])
             }
             Axis3::Y => {
                 // A quad facing the negative y direction looks like this:
@@ -152,7 +157,12 @@ impl<V: SignedNumericVector3> AaQuad<V> {
                 let x = V::X * V::splat(w);
                 let z = V::Z * V::splat(h);
 
-                Quad([origin, origin + z, origin + x + z, origin + x])
+                Quad([
+                    (origin, BVec2::new(false, false)),
+                    (origin + z, BVec2::new(false, true)),
+                    (origin + x + z, BVec2::new(true, true)),
+                    (origin + x, BVec2::new(true, false)),
+                ])
             }
             Axis3::Z => {
                 // A quad facing the negative z direction looks like this:
@@ -169,7 +179,12 @@ impl<V: SignedNumericVector3> AaQuad<V> {
                 let x = V::X * V::splat(w);
                 let y = V::Y * V::splat(h);
 
-                Quad([origin, origin + x, origin + x + y, origin + y])
+                Quad([
+                    (origin, BVec2::new(false, false)),
+                    (origin + x, BVec2::new(true, false)),
+                    (origin + x + y, BVec2::new(true, true)),
+                    (origin + y, BVec2::new(false, true)),
+                ])
             }
         };
 
@@ -179,6 +194,10 @@ impl<V: SignedNumericVector3> AaQuad<V> {
         } else {
             quad
         }
+    }
+
+    pub fn as_quad_ccw(&self) -> Quad<V> {
+        self.as_quad_ccw_whmask().map(|v| v.0)
     }
 }
 

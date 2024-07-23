@@ -101,6 +101,7 @@ impl GpuStruct for VoxelChunkUniformData {
 pub struct VoxelVertex {
     pub position: glam::Vec3,
     pub uv: glam::Vec2,
+    pub light: f32,
 }
 
 impl GpuStruct for VoxelVertex {
@@ -112,6 +113,7 @@ impl VoxelVertex {
         VertexBufferLayout::builder()
             .with_attribute(Std430VertexFormat::Float32x3) // position
             .with_attribute(Std430VertexFormat::Float32x2) // uv
+            .with_attribute(Std430VertexFormat::Float32) // light
             .finish(wgpu::VertexStepMode::Vertex)
     }
 }

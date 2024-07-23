@@ -4,6 +4,8 @@ const DBM_SHOW_LUXEL_GRID: i32 = 2;
 
 const DEBUG_MODE: i32 = DBM_NONE;
 
+const SHADOW_BIAS: f32 = 0.0003;
+
 // Uniforms
 struct Uniforms {
     camera: mat4x4f,
@@ -33,12 +35,14 @@ var<uniform> uniforms_pc: PerChunkUniforms;
 struct VertexInput {
 	@location(0) position: vec3f,
 	@location(1) uv: vec2f,
+    @location(2) light: f32,
 }
 
 struct VertexOutput {
 	@builtin(position) clip_position: vec4f,
     @location(0) light_space: vec4f,
 	@location(1) uv: vec2f,
+    @location(2) light: f32,
 }
 
 // Entry points
@@ -50,12 +54,13 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 	out.clip_position = uniforms.camera * vec4f(position, 1.0);
     out.light_space = uniforms.light * vec4f(position, 1.0);
 	out.uv = in.uv;
+    out.light = in.light;
 	return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-    var albedo = vec4f(textureSample(texture, nearest_sampler, in.uv));
+    var albedo = vec4f(textureSample(texture, nearest_sampler, in.uv)) * in.light;
 
     // Determine position in light-space
     var light_space: vec3f = in.light_space.xyz;
@@ -67,7 +72,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         nearest_sampler,
         light_space.xy * vec2f(0.5, -0.5) + 0.5,
     ).r;
-    var my_lit_depth: f32 = light_space.z - 0.0001;
+    var my_lit_depth: f32 = light_space.z - SHADOW_BIAS;
 
     // Determine whether this pixel is lit
     var is_lit = my_lit_depth < max_lit_depth;

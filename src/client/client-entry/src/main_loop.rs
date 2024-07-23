@@ -289,7 +289,7 @@ fn render_app(
     _cx: PhantomData<(
         &AssetManager,
         &BlockMaterialRegistry,
-        &ChunkVoxelData,
+        (&WorldVoxelData, &ChunkVoxelData),
         &GfxContext,
         &MaterialVisualDescriptor,
         &mut CameraManager,

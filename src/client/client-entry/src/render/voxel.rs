@@ -16,7 +16,7 @@ use crucible_world::{
     mesh::QuadMeshLayer,
     voxel::{
         BlockMaterial, BlockMaterialCache, BlockMaterialRegistry, ChunkQueue, ChunkVoxelData,
-        WorldChunkCreated, WorldVoxelData,
+        WorldChunkCreated, WorldPointer, WorldVoxelData,
     },
 };
 use main_loop::GfxContext;
@@ -134,15 +134,34 @@ impl WorldVoxelMesh {
                                     // Construct the quad
                                     let quad = AaQuad::new_unit(center_origin, face);
                                     let quad = quad
-                                        .as_quad_ccw()
-                                        .zip(QUAD_UVS.map(|v| uv_origin + v * uv_size));
+                                        .as_quad_ccw_whmask()
+                                        // Determine UV
+                                        .zip(QUAD_UVS.map(|v| uv_origin + v * uv_size))
+                                        // Determine occlusion
+                                        .map(|((pos, whmask), uv)| {
+                                            let mut is_occluded = false;
+                                            let (h_rel, v_rel) = face.axis().ortho_hv();
+                                            let h_rel = h_rel.unit_typed::<WorldVec>() * if whmask.x { 1 } else { -1 };
+                                            let v_rel = v_rel.unit_typed::<WorldVec>() * if whmask.y { 1 } else { -1 };
+
+                                            let occlude_origin =  WorldVec::compose(data.pos(), center_pos) + face.unit_typed::<WorldVec>();
+
+                                            for (h_mul, v_mul) in [(1, 0), (0, 1), (1, 1)] {
+                                                let rel = h_rel * h_mul + v_rel * v_mul;
+
+                                                is_occluded |= WorldPointer::new(occlude_origin + rel)
+                                                    .state_or_air(data.world()).is_not_air();
+                                            }
+
+                                            (pos, uv, if is_occluded { 0.8 } else { 1. })
+                                        });
 
                                     let [Tri([a, b, c]), Tri([d, e, f])] = quad.to_tris();
                                     let quad_vertices = [a, b, c, d, e, f];
 
                                     // Write the quad
-                                    let quad_vertices = quad_vertices.map(|(position, uv)| {
-                                        VoxelVertex { position, uv }.as_std430()
+                                    let quad_vertices = quad_vertices.map(|(position, uv, light)| {
+                                        VoxelVertex { position, uv, light }.as_std430()
                                     });
 
                                     vertices.extend(quad_vertices);
@@ -169,7 +188,7 @@ impl WorldVoxelMesh {
 
                                 // Convert to std340
                                 let quad_vertices = quad_vertices.map(|(position, uv)| {
-                                    VoxelVertex { position, uv }.as_std430()
+                                    VoxelVertex { position, uv, light: 1. }.as_std430()
                                 });
 
                                 // Write to the vertex buffer
