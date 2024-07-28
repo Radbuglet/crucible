@@ -7,7 +7,9 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use super::{Index as _, IndexSliceIterEnumerate, IndexSliceIterEnumerateMut, IndexVec};
+use crate::newtypes::Index as _;
+
+use super::{IndexSliceIterEnumerate, IndexSliceIterEnumerateMut, IndexVec};
 
 crate::define_index! {
     pub struct ArenaSlotIndex: u32;

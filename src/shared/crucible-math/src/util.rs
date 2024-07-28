@@ -1,6 +1,6 @@
 use std::f32::consts::{PI, TAU};
 
-use crucible_utils::newtypes::{num_enum, NumEnum};
+use crucible_utils::newtypes::{enum_index, EnumIndex};
 use num_traits::Signed;
 use typed_glam::{
     glam::{DVec2, DVec3, IVec2, IVec3, Mat4, Vec2, Vec3},
@@ -10,7 +10,7 @@ use typed_glam::{
 
 // === Sign === //
 
-num_enum! {
+enum_index! {
     pub enum Sign {
         Positive,
         Negative,
@@ -69,7 +69,7 @@ impl Sign {
 
 // === Axis2 === //
 
-num_enum! {
+enum_index! {
     pub enum Axis2 {
         X,
         Y,
@@ -101,7 +101,7 @@ impl Axis2 {
 
 // === Axis3 === //
 
-num_enum! {
+enum_index! {
     pub enum Axis3 {
         X,
         Y,
@@ -201,13 +201,13 @@ impl Axis3 {
 
 // === Axis Extensions === //
 
-pub trait VecCompExt<A: NumEnum>: NumericVector {
+pub trait VecCompExt<A: EnumIndex>: NumericVector {
     fn comp(&self, axis: A) -> Self::Comp {
-        self[axis.index()]
+        self[axis.as_usize()]
     }
 
     fn comp_mut(&mut self, axis: A) -> &mut Self::Comp {
-        &mut self[axis.index()]
+        &mut self[axis.as_usize()]
     }
 }
 
@@ -337,7 +337,7 @@ pub fn lerp_percent_at(val: f64, start: f64, end: f64) -> f64 {
 
 // === BlockFace === //
 
-num_enum! {
+enum_index! {
     pub enum BlockFace {
         PositiveX,
         NegativeX,

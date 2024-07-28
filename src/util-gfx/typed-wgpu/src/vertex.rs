@@ -1,6 +1,6 @@
 use std::{borrow::Cow, marker::PhantomData};
 
-use crucible_utils::newtypes::{impl_tuples, num_enum, transparent};
+use crucible_utils::newtypes::{enum_index, impl_tuples, transparent};
 use derive_where::derive_where;
 
 use crate::{
@@ -253,7 +253,7 @@ impl AsVertexAttribute for wgpu::VertexFormat {
     }
 }
 
-num_enum! {
+enum_index! {
     pub enum Std430VertexFormat {
         Float32,
         Float32x2,

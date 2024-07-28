@@ -6,7 +6,7 @@ use crucible_math::{
     WorldAabb, WorldVecExt,
 };
 
-use crucible_utils::{newtypes::NumEnum, traits::VecLike};
+use crucible_utils::{newtypes::EnumIndex, traits::VecLike};
 use smallvec::SmallVec;
 use typed_glam::{glam::DVec2, traits::NumericVector};
 

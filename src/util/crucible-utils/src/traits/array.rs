@@ -50,7 +50,11 @@ impl<T, E> ResultLike for Result<T, E> {
 // === SliceLike === //
 
 pub trait SliceLike:
-    BorrowMut<[Self::Elem]> + AsMut<[Self::Elem]> + Index<usize, Output = Self::Elem> + IndexMut<usize>
+    BorrowMut<[Self::Elem]>
+    + AsRef<[Self::Elem]>
+    + AsMut<[Self::Elem]>
+    + Index<usize, Output = Self::Elem>
+    + IndexMut<usize>
 {
     type Elem;
 

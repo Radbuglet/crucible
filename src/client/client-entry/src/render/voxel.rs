@@ -9,7 +9,7 @@ use crucible_math::{
 };
 use crucible_utils::{
     hash::FxHashSet,
-    newtypes::{NumEnum, NumEnumMap},
+    newtypes::{EnumIndex as _, IndexArray},
 };
 use crucible_world::{
     material::MaterialCache,
@@ -346,7 +346,7 @@ impl ChunkVoxelMesh {
 #[derive(Debug)]
 pub enum MaterialVisualDescriptor {
     Cubic {
-        textures: NumEnumMap<BlockFace, UVec2>,
+        textures: IndexArray<BlockFace, UVec2>,
     },
     Mesh {
         mesh: QuadMeshLayer<UVec2>,
@@ -358,7 +358,7 @@ random_component!(MaterialVisualDescriptor);
 impl MaterialVisualDescriptor {
     pub fn cubic_simple(atlas: UVec2) -> Self {
         Self::Cubic {
-            textures: NumEnumMap::new([atlas; BlockFace::COUNT]),
+            textures: IndexArray::new([atlas; BlockFace::COUNT]),
         }
     }
 }

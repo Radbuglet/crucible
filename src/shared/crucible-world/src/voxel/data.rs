@@ -8,7 +8,7 @@ use crucible_math::{
     Axis3, BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, Sign, VecCompExt, WorldVec,
     WorldVecExt, CHUNK_VOLUME,
 };
-use crucible_utils::newtypes::{define_index, NumEnum, NumEnumMap};
+use crucible_utils::newtypes::{define_index, EnumIndex as _, IndexArray};
 use rustc_hash::{FxHashMap, FxHashSet};
 use typed_glam::traits::{CastVecFrom, NumericVector};
 
@@ -99,7 +99,7 @@ impl WorldVoxelData {
         let mut chunk = spawn_entity(()).insert(ChunkVoxelData {
             world: self,
             pos,
-            neighbors: NumEnumMap::default(),
+            neighbors: IndexArray::default(),
             data: None,
             non_air_count: 0,
             is_dirty: false,
@@ -142,7 +142,7 @@ impl WorldVoxelData {
 pub struct ChunkVoxelData {
     world: Obj<WorldVoxelData>,
     pos: ChunkVec,
-    neighbors: NumEnumMap<BlockFace, Option<Obj<ChunkVoxelData>>>,
+    neighbors: IndexArray<BlockFace, Option<Obj<ChunkVoxelData>>>,
     data: Option<ChunkData>,
     non_air_count: i32,
     is_dirty: bool,

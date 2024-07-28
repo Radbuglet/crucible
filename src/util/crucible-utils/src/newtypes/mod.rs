@@ -3,11 +3,14 @@ pub use crucible_utils_proc::{delegate, iterator, transparent};
 mod arena;
 pub use arena::*;
 
-mod num_enum;
-pub use num_enum::*;
-
 mod tuples;
 pub use tuples::*;
 
-mod index;
-pub use index::*;
+mod index_base;
+pub use index_base::*;
+
+mod index_enum;
+pub use index_enum::*;
+
+mod index_large;
+pub use index_large::*;

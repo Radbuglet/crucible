@@ -2,19 +2,19 @@ use std::collections::hash_map;
 
 use bevy_autoken::{Obj, RandomComponent, RandomEntityExt};
 use bevy_ecs::entity::Entity;
-use crucible_utils::newtypes::{Index, IndexVec};
+use crucible_utils::newtypes::{IndexVec, LargeIndex};
 use derive_where::derive_where;
 use rustc_hash::FxHashMap;
 
 // === MaterialRegistry === //
 
 #[derive_where(Debug, Default)]
-pub struct MaterialRegistry<K: Index> {
+pub struct MaterialRegistry<K: LargeIndex> {
     descriptors: IndexVec<K, Entity>,
     name_map: FxHashMap<String, K>,
 }
 
-impl<K: Index> MaterialRegistry<K> {
+impl<K: LargeIndex> MaterialRegistry<K> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -52,14 +52,14 @@ impl<K: Index> MaterialRegistry<K> {
 // === MaterialCache === //
 
 #[derive(Debug)]
-pub struct MaterialCache<K: Index, V> {
+pub struct MaterialCache<K: LargeIndex, V> {
     registry: Obj<MaterialRegistry<K>>,
     cache: IndexVec<K, Option<Obj<V>>>,
 }
 
 impl<K, V> MaterialCache<K, V>
 where
-    K: Index,
+    K: LargeIndex,
     MaterialRegistry<K>: RandomComponent,
     V: RandomComponent,
 {

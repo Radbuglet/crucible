@@ -1,5 +1,5 @@
 use crucible_math::{AaQuad, Aabb3, BlockFace};
-use crucible_utils::newtypes::NumEnum;
+use crucible_utils::newtypes::EnumIndex;
 use derive_where::derive_where;
 use typed_glam::glam::Vec3;
 
