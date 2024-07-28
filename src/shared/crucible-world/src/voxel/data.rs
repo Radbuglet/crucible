@@ -6,9 +6,9 @@ use bevy_autoken::{
 use bevy_ecs::{event::Event, removal_detection::RemovedComponents, system::Query};
 use crucible_math::{
     Axis3, BlockFace, BlockVec, BlockVecExt, ChunkVec, EntityVec, Sign, VecCompExt, WorldVec,
-    WorldVecExt, CHUNK_VOLUME,
+    WorldVecExt, CHUNK_EDGE, CHUNK_VOLUME,
 };
-use crucible_utils::newtypes::{define_index, EnumIndex as _, IndexArray};
+use crucible_utils::newtypes::{define_index, EnumIndex as _, IndexArray, IndexBitArray};
 use rustc_hash::{FxHashMap, FxHashSet};
 use typed_glam::traits::{CastVecFrom, NumericVector};
 
@@ -103,6 +103,7 @@ impl WorldVoxelData {
             data: None,
             non_air_count: 0,
             is_dirty: false,
+            dirty_faces: IndexBitArray::default(),
         });
 
         entry.insert(chunk);
@@ -134,6 +135,7 @@ impl WorldVoxelData {
     pub fn clear_dirty(&mut self) {
         for mut chunk in self.dirty.drain() {
             chunk.is_dirty = false;
+            chunk.dirty_faces.remove_all();
         }
     }
 }
@@ -146,6 +148,7 @@ pub struct ChunkVoxelData {
     data: Option<ChunkData>,
     non_air_count: i32,
     is_dirty: bool,
+    dirty_faces: IndexBitArray<BlockFace>,
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +170,10 @@ impl ChunkVoxelData {
 
     pub fn neighbor(&self, face: BlockFace) -> Option<Obj<ChunkVoxelData>> {
         self.neighbors[face]
+    }
+
+    pub fn dirty_neighbor_mask(&self) -> IndexBitArray<BlockFace> {
+        self.dirty_faces.clone()
     }
 
     pub fn initialize_data(&mut self, data: ChunkData) {
@@ -192,7 +199,23 @@ impl ChunkVoxelData {
 
     pub fn set_block(mut self: Obj<Self>, block: BlockVec, new_data: BlockData) {
         self.set_block_no_dirty(block, new_data);
-        self.mark_dirty();
+
+        for axis in Axis3::variants() {
+            if block.comp(axis) == 0 {
+                self.dirty_faces
+                    .add(BlockFace::compose(axis, Sign::Negative));
+            }
+
+            if block.comp(axis) == CHUNK_EDGE - 1 {
+                self.dirty_faces
+                    .add(BlockFace::compose(axis, Sign::Positive));
+            }
+        }
+
+        if !self.is_dirty {
+            self.is_dirty = true;
+            self.deref_mut().world.dirty.insert(self);
+        }
     }
 
     pub fn set_block_no_dirty(&mut self, block: BlockVec, new_data: BlockData) {
@@ -221,15 +244,6 @@ impl ChunkVoxelData {
         let was_air = old_data.material.is_air() as i8;
         let is_air = new_data.material.is_air() as i8;
         self.non_air_count += (is_air - was_air) as i32;
-    }
-
-    pub fn mark_dirty(mut self: Obj<Self>) {
-        if self.is_dirty {
-            return;
-        }
-
-        self.deref_mut().world.dirty.insert(self);
-        self.is_dirty = true;
     }
 
     pub fn non_air_count(&self) -> i32 {

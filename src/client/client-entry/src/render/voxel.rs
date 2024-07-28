@@ -54,6 +54,10 @@ impl WorldVoxelMesh {
     }
 
     pub fn update(&mut self, gfx: &GfxContext, atlas: &AtlasTexture, time_limit: Option<Duration>) {
+        if !self.dirty_queue.is_empty() {
+            tracing::info!("Dirty chunk count: {}", self.dirty_queue.len());
+        }
+
         cbit::cbit! {
             for mut chunk in self.dirty_queue.process(time_limit) {
                 // Ensure that the chunk is still alive
@@ -397,7 +401,7 @@ pub fn sys_queue_dirty_chunks_for_render(
     rand.provide(|| {
         for &world in query.iter_mut() {
             for dirty in world.iter_dirty() {
-                for face in BlockFace::variants() {
+                for face in dirty.dirty_neighbor_mask().iter_ones() {
                     let Some(neighbor) = dirty.neighbor(face) else {
                         continue;
                     };

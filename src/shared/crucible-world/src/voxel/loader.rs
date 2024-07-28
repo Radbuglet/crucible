@@ -59,6 +59,14 @@ impl<T> ChunkQueue<T> {
 
         ControlFlow::Continue(())
     }
+
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
 }
 
 // === Components === //

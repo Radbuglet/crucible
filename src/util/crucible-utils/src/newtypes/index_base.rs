@@ -1,6 +1,7 @@
-use std::{fmt, hash, iter, marker::PhantomData, ops, slice};
+use std::{fmt, hash, iter, marker::PhantomData, mem, ops, slice, usize};
 
 use derive_where::derive_where;
+use num_traits::PrimInt;
 
 use super::{iterator, transparent};
 
@@ -35,22 +36,22 @@ pub trait Index: 'static + Sized + fmt::Debug + Copy + hash::Hash + Eq + Ord {
 
 #[derive(Debug)]
 #[derive_where(Clone)]
-#[iterator(&'a V, &mut self.0)]
+#[iterator(&'a V, self.0.next())]
 pub struct IndexSliceIter<'a, V>(slice::Iter<'a, V>);
 
 #[derive(Debug)]
-#[iterator(&'a mut V, &mut self.0)]
+#[iterator(&'a mut V, self.0.next())]
 pub struct IndexSliceIterMut<'a, V>(slice::IterMut<'a, V>);
 
 #[derive(Debug)]
 #[derive_where(Clone)]
-#[iterator((K, &'a V), &mut self.0)]
+#[iterator((K, &'a V), self.0.next())]
 pub struct IndexSliceIterEnumerate<'a, K: Index, V>(
     iter::Zip<IndexSliceKeys<K>, IndexSliceIter<'a, V>>,
 );
 
 #[derive(Debug)]
-#[iterator((K, &'a mut V), &mut self.0)]
+#[iterator((K, &'a mut V), self.0.next())]
 pub struct IndexSliceIterEnumerateMut<'a, K: Index, V>(
     iter::Zip<IndexSliceKeys<K>, IndexSliceIterMut<'a, V>>,
 );
@@ -160,5 +161,146 @@ impl<'a, K: Index, V> IntoIterator for &'a mut IndexSlice<K, V> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
+    }
+}
+
+// === IndexBitSlice === //
+
+#[iterator(K, self.0.next())]
+pub struct IndexBitSliceIterOne<'a, K: Index, V: PrimInt>(
+    IndexBitSliceIter<K, iter::Copied<slice::Iter<'a, V>>>,
+);
+
+#[iterator(K, self.0.next())]
+pub struct IndexBitSliceIterZero<'a, K: Index, V: PrimInt>(
+    IndexBitSliceIter<K, InvertBits<iter::Copied<slice::Iter<'a, V>>>>,
+);
+
+#[iterator(I::Item, self.0.next().map(|v| !v))]
+struct InvertBits<I>(I)
+where
+    I: Iterator,
+    I::Item: PrimInt;
+
+pub struct IndexBitSliceIter<K, W>
+where
+    K: Index,
+    W: Iterator,
+    W::Item: PrimInt,
+{
+    _ty: PhantomData<fn(K) -> K>,
+    words: W,
+    word_idx_base: usize,
+    word: W::Item,
+}
+
+impl<K, V, W> IndexBitSliceIter<K, W>
+where
+    K: Index,
+    W: Iterator<Item = V>,
+    V: PrimInt,
+{
+    pub fn new(words: W) -> Self {
+        Self {
+            _ty: PhantomData,
+            words,
+            word_idx_base: usize::MAX - IndexBitSlice::<K, V>::BITS_PER_WORD + 1,
+            word: V::zero(),
+        }
+    }
+}
+
+impl<K, V, W> Iterator for IndexBitSliceIter<K, W>
+where
+    K: Index,
+    W: Iterator<Item = V>,
+    V: PrimInt,
+{
+    type Item = K;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.word.is_zero() {
+            self.word = self.words.next()?;
+            self.word_idx_base = self
+                .word_idx_base
+                .wrapping_add(IndexBitSlice::<K, V>::BITS_PER_WORD);
+        }
+
+        let idx = self.word.trailing_zeros() as usize;
+        self.word = self.word & !(V::one() << idx);
+
+        K::try_from_usize(self.word_idx_base + idx)
+    }
+}
+
+#[transparent(raw, pub from_raw)]
+#[repr(transparent)]
+pub struct IndexBitSlice<K, V> {
+    pub _ty: PhantomData<fn(K) -> K>,
+    pub raw: [V],
+}
+
+impl<K: Index, V: PrimInt> fmt::Debug for IndexBitSlice<K, V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_set().entries(self.iter_ones()).finish()
+    }
+}
+
+impl<K: Index, V: PrimInt> IndexBitSlice<K, V> {
+    pub const BITS_PER_WORD: usize = mem::size_of::<V>() * 8;
+
+    fn word_index(idx: usize) -> usize {
+        idx / Self::BITS_PER_WORD
+    }
+
+    fn bit_index(idx: usize) -> usize {
+        idx % Self::BITS_PER_WORD
+    }
+
+    fn bit_mask(idx: usize) -> V {
+        V::one() << Self::bit_index(idx)
+    }
+
+    pub fn get(&self, idx: K) -> bool {
+        let idx = idx.as_usize();
+        !(self.raw[Self::word_index(idx)] & Self::bit_mask(idx)).is_zero()
+    }
+
+    pub fn set(&mut self, idx: K, value: bool) {
+        let idx = idx.as_usize();
+        let word = &mut self.raw[Self::word_index(idx)];
+        if value {
+            *word = *word | Self::bit_mask(idx);
+        } else {
+            *word = *word & !Self::bit_mask(idx);
+        }
+    }
+
+    pub fn add(&mut self, idx: K) {
+        self.set(idx, true);
+    }
+
+    pub fn remove(&mut self, idx: K) {
+        self.set(idx, false);
+    }
+
+    pub fn add_all(&mut self) {
+        for v in &mut self.raw {
+            *v = V::max_value();
+        }
+    }
+
+    pub fn remove_all(&mut self) {
+        for v in &mut self.raw {
+            *v = V::zero();
+        }
+    }
+
+    pub fn iter_ones(&self) -> IndexBitSliceIterOne<'_, K, V> {
+        IndexBitSliceIterOne(IndexBitSliceIter::new(self.raw.iter().copied()))
+    }
+
+    pub fn iter_zeros(&self) -> IndexBitSliceIterZero<'_, K, V> {
+        IndexBitSliceIterZero(IndexBitSliceIter::new(InvertBits(self.raw.iter().copied())))
     }
 }

@@ -4,14 +4,16 @@ use std::{
     slice,
 };
 
+use num_traits::Zero;
+
 use crate::traits::ArrayLike;
 
-use super::{iterator, Index, IndexSlice, IndexSliceIter, IndexSliceIterMut};
+use super::{iterator, Index, IndexBitSlice, IndexSlice, IndexSliceIter, IndexSliceIterMut};
 
 // === Traits === //
 
 #[derive(Debug, Clone)]
-#[iterator(T, &mut self.0)]
+#[iterator(T, self.0.next())]
 pub struct EnumIndexVariants<T: EnumIndex>(iter::Copied<slice::Iter<'static, T>>);
 
 pub trait EnumIndex: Index {
@@ -134,10 +136,10 @@ pub use enum_index;
 
 // === IndexArray === //
 
-#[iterator(V, &mut self.0)]
+#[iterator(V, self.0.next())]
 pub struct IndexArrayIntoIter<K: EnumIndex, V>(<K::Array<V> as IntoIterator>::IntoIter);
 
-#[iterator((K, V), &mut self.0)]
+#[iterator((K, V), self.0.next())]
 pub struct IndexArrayIntoEnumerate<K: EnumIndex, V>(
     iter::Zip<EnumIndexVariants<K>, IndexArrayIntoIter<K, V>>,
 );
@@ -149,7 +151,7 @@ pub struct IndexArray<K: EnumIndex, V> {
 
 impl<K: EnumIndex, V: fmt::Debug> fmt::Debug for IndexArray<K, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_map().entries(self.enumerate()).finish()
+        (**self).fmt(f)
     }
 }
 
@@ -217,3 +219,40 @@ impl<K: EnumIndex, V> FromIterator<V> for IndexArray<K, V> {
         Self::new(K::Array::<V>::from_iter(iter))
     }
 }
+
+// === IndexBitArray === //
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct IndexBitArray<K: EnumIndex> {
+    pub raw: K::BitSet,
+}
+
+impl<K: EnumIndex> fmt::Debug for IndexBitArray<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        (**self).fmt(f)
+    }
+}
+
+impl<K: EnumIndex> Default for IndexBitArray<K> {
+    fn default() -> Self {
+        Self {
+            raw: <K::BitSet as ArrayLike>::from_fn(|_| <K::BitSetElem as Zero>::zero()),
+        }
+    }
+}
+
+impl<K: EnumIndex> Deref for IndexBitArray<K> {
+    type Target = IndexBitSlice<K, K::BitSetElem>;
+
+    fn deref(&self) -> &Self::Target {
+        IndexBitSlice::from_raw_ref(self.raw.as_ref())
+    }
+}
+
+impl<K: EnumIndex> DerefMut for IndexBitArray<K> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        IndexBitSlice::from_raw_mut(self.raw.as_mut())
+    }
+}
+
+// TODO: Additional trait forwards

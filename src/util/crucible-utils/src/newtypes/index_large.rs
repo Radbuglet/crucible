@@ -83,11 +83,11 @@ pub use define_index;
 // === IndexVec === //
 
 #[derive(Debug, Clone)]
-#[iterator(V, &mut self.0)]
+#[iterator(V, self.0.next())]
 pub struct IndexVecIntoIter<V>(vec::IntoIter<V>);
 
 #[derive(Debug, Clone)]
-#[iterator((K, V), &mut self.0)]
+#[iterator((K, V), self.0.next())]
 pub struct IndexVecIntoEnumerate<K: LargeIndex, V>(
     iter::Zip<IndexSliceKeys<K>, IndexVecIntoIter<V>>,
 );

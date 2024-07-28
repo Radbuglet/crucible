@@ -56,7 +56,7 @@ pub fn iterator(attrs: TokenStream, input: TokenStream) -> TokenStream {
                 type Item = #ty;
 
                 fn next(&mut self) -> ::core::option::Option<Self::Item> {
-                    ::core::iter::Iterator::next(#getter)
+                    #getter
                 }
             }
         });
