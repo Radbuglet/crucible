@@ -1,5 +1,5 @@
 build:
-    cargo autoken check
+    cargo autoken check --old-artifacts=delete
     cargo build
 
 run-unchecked:

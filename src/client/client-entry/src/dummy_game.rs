@@ -4,13 +4,16 @@ use bevy_autoken::{
     random_component, spawn_entity, Obj, RandomAccess, RandomEntityExt, SendsEvent,
 };
 use bevy_ecs::{
-    component::Component,
     entity::Entity,
     system::{Query, Res},
 };
-use crucible_math::{Angle3D, Angle3DExt, EntityVec, WorldVec};
+use crucible_math::{Aabb3, Angle3D, Angle3DExt, EntityAabb, EntityVec, WorldVec, WorldVecExt};
+use crucible_utils::newtypes::Index;
 use crucible_world::{
-    collider::{BlockColliderDescriptor, VoxelRayCast},
+    collider::{
+        AabbHolder, AabbStore, AnyCollision, BlockColliderDescriptor, Collider, ColliderMaterial,
+        ColliderMaterialId, VoxelRayCast, WorldCollisions,
+    },
     voxel::{
         BlockData, BlockMaterialRegistry, ChunkVoxelData, EntityPointer, KeepInWorld,
         PopulateWorld, WorldChunkCreated, WorldPointer, WorldVoxelData,
@@ -38,7 +41,7 @@ use crate::{
 
 // === Components === //
 
-#[derive(Debug, Component)]
+#[derive(Debug)]
 pub struct PlayerCameraController {
     pub pos: EntityVec,
     pub facing: Angle3D,
@@ -54,6 +57,8 @@ random_component!(PlayerCameraController);
 #[allow(clippy::type_complexity)]
 pub fn init_engine_root(
     _cx: PhantomData<(
+        (&mut AabbStore, &mut AabbHolder),
+        &mut BlockColliderDescriptor,
         &mut BlockMaterialRegistry,
         &mut CameraManager,
         &mut ChunkVoxelData,
@@ -62,8 +67,7 @@ pub fn init_engine_root(
         &mut PlayerCameraController,
         &mut VirtualCamera,
         &mut WorldVoxelData,
-        &Viewport,
-        &ViewportManager,
+        (&Viewport, &ViewportManager),
         SendsEvent<WorldChunkCreated>,
     )>,
     engine_root: Entity,
@@ -84,6 +88,14 @@ pub fn init_engine_root(
         ctrl_window: main_viewport,
         has_focus: false,
     });
+    engine_root.insert(AabbHolder::new(
+        EntityAabb::ZERO,
+        ColliderMaterial {
+            id: ColliderMaterialId::from_usize(0),
+            meta: 0,
+        },
+    ));
+    engine_root.get::<AabbStore>().register(engine_root.get());
 
     engine_root.get::<CameraManager>().set_active_camera(camera);
 
@@ -102,13 +114,22 @@ pub fn init_engine_root(
 
     let mut registry = engine_root.get::<BlockMaterialRegistry>();
     let _air = registry.register("crucible:air", spawn_entity(()));
+
+    let solid_mat = ColliderMaterial {
+        id: ColliderMaterialId::from_usize(0),
+        meta: 0,
+    };
     let stone = registry.register(
         "crucible:stone",
-        spawn_entity(()).with(MaterialVisualDescriptor::cubic_simple(stone)),
+        spawn_entity(())
+            .with(MaterialVisualDescriptor::cubic_simple(stone))
+            .with(BlockColliderDescriptor(Collider::Opaque(solid_mat))),
     );
     let _bricks = registry.register(
         "crucible:bricks",
-        spawn_entity(()).with(MaterialVisualDescriptor::cubic_simple(bricks)),
+        spawn_entity(())
+            .with(MaterialVisualDescriptor::cubic_simple(bricks))
+            .with(BlockColliderDescriptor(Collider::Opaque(solid_mat))),
     );
 
     // Create the root chunk
@@ -130,30 +151,39 @@ pub fn init_engine_root(
 pub fn sys_process_camera_controller(
     mut rand: RandomAccess<(
         &InputManager,
+        (&mut AabbStore, &mut AabbHolder),
         &mut BlockColliderDescriptor,
         &mut BlockMaterialRegistry,
         &mut ChunkVoxelData,
         &mut PlayerCameraController,
         &mut VirtualCamera,
         &mut WorldVoxelData,
+        &mut WorldCollisions,
         &Viewport,
         &ViewportManager,
         SendsEvent<WorldChunkCreated>,
     )>,
-    mut query: Query<(&Obj<PlayerCameraController>, &Obj<VirtualCamera>)>,
+    mut query: Query<(
+        Entity,
+        &Obj<PlayerCameraController>,
+        &Obj<VirtualCamera>,
+        &Obj<AabbHolder>,
+    )>,
     engine_root: Res<EngineRoot>,
 ) {
     rand.provide(|| {
         let inputs = &*engine_root.0.get::<InputManager>();
         let viewports = &*engine_root.0.get::<ViewportManager>();
         let world = engine_root.0.get::<WorldVoxelData>();
+        let mut collisions = engine_root.0.get::<WorldCollisions>();
+
         let stone = engine_root
             .0
             .get::<BlockMaterialRegistry>()
             .lookup_by_name("crucible:stone")
             .unwrap();
 
-        for (&(mut controller), &(mut camera)) in query.iter_mut() {
+        for (me, &(mut controller), &(mut camera), &aabb) in query.iter_mut() {
             let win_inputs = inputs.window(controller.ctrl_window);
             let viewport = viewports.get_viewport(controller.ctrl_window).unwrap();
             let window = viewport.window();
@@ -216,7 +246,23 @@ pub fn sys_process_camera_controller(
 
             heading = heading.normalize_or_zero();
             heading = controller.facing.as_matrix().transform_vector3(heading);
-            controller.pos += heading * 0.1;
+
+            let camera_aabb = Aabb3::from_origin_size(
+                camera.state.pos.as_dvec3().cast_glam(),
+                EntityVec::splat(0.9),
+                EntityVec::splat(0.5),
+            );
+
+            aabb.set_aabb(camera_aabb);
+
+            controller.pos += collisions.move_rigid_body(
+                camera_aabb,
+                (heading * 0.1).as_dvec3().cast_glam(),
+                |coll| match coll {
+                    AnyCollision::Block(..) => true,
+                    AnyCollision::Actor(actor) => actor.entity() != me,
+                },
+            );
 
             // Handle interaction
             if win_inputs.button(MouseButton::Right).recently_pressed() {
@@ -230,11 +276,18 @@ pub fn sys_process_camera_controller(
                         continue;
                     }
 
-                    isect.block.move_to_neighbor(isect.enter_face).set_state(
-                        world,
-                        BlockData::new(stone),
-                        PopulateWorld,
-                    );
+                    let place_at = isect.block.move_to_neighbor(isect.enter_face);
+
+                    if collisions
+                        .has_collisions(
+                            place_at.pos.full_aabb().grow(EntityVec::splat(-0.01)),
+                            |_| true,
+                        )
+                        .is_none()
+                    {
+                        place_at.set_state(world, BlockData::new(stone), PopulateWorld);
+                    }
+
                     break;
                 }
             }

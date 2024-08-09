@@ -13,7 +13,7 @@ use bevy_ecs::{
 };
 use crucible_assets::AssetManager;
 use crucible_world::{
-    collider::{AabbHolder, AabbStore, BlockColliderDescriptor},
+    collider::{AabbHolder, AabbStore, BlockColliderDescriptor, WorldCollisions},
     voxel::{
         sys_clear_dirty_chunk_lists, BlockMaterialRegistry, ChunkVoxelData, WorldChunkCreated,
         WorldVoxelData,
@@ -67,6 +67,7 @@ pub fn main_inner() -> anyhow::Result<()> {
         app.add_random_component::<ViewportManager>();
         app.add_random_component::<ViewportRenderer>();
         app.add_random_component::<VirtualCamera>();
+        app.add_random_component::<WorldCollisions>();
         app.add_random_component::<WorldVoxelData>();
         app.add_random_component::<WorldVoxelMesh>();
 
@@ -217,10 +218,11 @@ fn init_engine_root(
         &mut VirtualCamera,
         (
             &mut AabbStore,
-            &mut MaterialVisualDescriptor,
-            &mut WorldVoxelMesh,
-            &mut WorldVoxelData,
             &mut BlockMaterialRegistry,
+            &mut MaterialVisualDescriptor,
+            &mut WorldCollisions,
+            &mut WorldVoxelData,
+            &mut WorldVoxelMesh,
         ),
         RenderCx,
     )>,
@@ -248,6 +250,7 @@ fn init_engine_root(
     engine_root.insert(AabbStore::default());
     engine_root.insert(WorldVoxelData::default());
     engine_root.insert(WorldVoxelMesh::new(registry));
+    engine_root.insert(WorldCollisions::new(engine_root));
 
     // Create graphics singleton
     let (gfx, gfx_surface, _feat_table) =
@@ -326,7 +329,7 @@ fn render_app(
     global_renderer.render(
         &mut cmd,
         &viewport,
-        &mut viewport.entity().get::<ViewportRenderer>(),
+        &mut viewport.obj::<ViewportRenderer>(),
         &texture_view,
     );
 

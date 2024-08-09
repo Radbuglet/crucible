@@ -7,7 +7,7 @@ use crate::util::Emitter;
 struct AttrArgs {
     item_ty: syn::Type,
     _comma: syn::token::Comma,
-    getter: syn::Expr,
+    getter: TokenStream,
 }
 
 impl syn::parse::Parse for AttrArgs {

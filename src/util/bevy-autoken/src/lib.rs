@@ -615,6 +615,10 @@ impl<T: RandomComponent> Obj<T> {
         T::arena().arena[self.0].0
     }
 
+    pub fn obj<V: RandomComponent>(self) -> Obj<V> {
+        self.entity().get::<V>()
+    }
+
     pub fn is_alive(self) -> bool {
         T::arena().arena.contains(self.0)
     }

@@ -58,181 +58,195 @@ impl WorldVoxelMesh {
             tracing::info!("Dirty chunk count: {}", self.dirty_queue.len());
         }
 
-        cbit::cbit! {
-            for mut chunk in self.dirty_queue.process(time_limit) {
-                // Ensure that the chunk is still alive
-                if !chunk.is_alive() {
+        cbit::cbit!(for mut chunk in self.dirty_queue.process(time_limit) {
+            // Ensure that the chunk is still alive
+            if !chunk.is_alive() {
+                continue;
+            }
+
+            // Ensure that the chunk is only re-rendered once
+            if !chunk.dirty {
+                continue;
+            }
+
+            chunk.dirty = false;
+
+            let data = &*chunk.data();
+
+            let mut vertices = Vec::new();
+
+            for center_pos in BlockVec::iter() {
+                // Decode material
+                let material = data.block_or_air(center_pos).material;
+                if material == BlockMaterial::AIR {
                     continue;
                 }
+                let material = self.material_cache.get(material).unwrap();
 
-                // Ensure that the chunk is only re-rendered once
-                if !chunk.dirty {
-                    continue;
-                }
+                // Determine the center block mesh origin
+                // (this is used by all three branches)
+                let center_origin = WorldVec::compose(data.pos(), center_pos)
+                    .to_glam()
+                    .as_vec3();
 
-                chunk.dirty = false;
+                // Process material
+                match &*material {
+                    MaterialVisualDescriptor::Cubic { textures } => {
+                        // For every side of a solid block...
+                        for face in BlockFace::variants() {
+                            let neighbor_block = center_pos + face.unit();
 
-                let data = &*chunk.data();
-
-                let mut vertices = Vec::new();
-
-                for center_pos in BlockVec::iter() {
-                    // Decode material
-                    let material = data.block_or_air(center_pos).material;
-                    if material == BlockMaterial::AIR {
-                        continue;
-                    }
-                    let material = self.material_cache.get(material).unwrap();
-
-                    // Determine the center block mesh origin
-                    // (this is used by all three branches)
-                    let center_origin = WorldVec::compose(data.pos(), center_pos)
-                        .to_glam()
-                        .as_vec3();
-
-                    // Process material
-                    match &*material {
-                        MaterialVisualDescriptor::Cubic { textures } => {
-                            // For every side of a solid block...
-                            for face in BlockFace::variants() {
-                                let neighbor_block = center_pos + face.unit();
-
-                                // If the neighbor isn't solid...
-                                let is_solid = 'a: {
-                                    let state = if neighbor_block.is_valid() {
-                                        data.block_or_air(neighbor_block)
-                                    } else {
-                                        let Some(neighbor) = data.neighbor(face) else {
-                                            break 'a false;
-                                        };
-
-                                        neighbor.block_or_air(neighbor_block.wrap())
+                            // If the neighbor isn't solid...
+                            let is_solid = 'a: {
+                                let state = if neighbor_block.is_valid() {
+                                    data.block_or_air(neighbor_block)
+                                } else {
+                                    let Some(neighbor) = data.neighbor(face) else {
+                                        break 'a false;
                                     };
 
-                                    if state.is_air() {
-                                        break 'a false;
-                                    }
-
-                                    let material = self.material_cache.get(state.material).unwrap();
-
-                                    matches!(&*material, MaterialVisualDescriptor::Cubic { .. })
+                                    neighbor.block_or_air(neighbor_block.wrap())
                                 };
 
-                                if is_solid {
-                                    continue;
+                                if state.is_air() {
+                                    break 'a false;
                                 }
 
-                                // Mesh it!
-                                {
-                                    // Decode the texture bounds
-                                    let (uv_origin, uv_size) =
-                                        atlas.decode_uv_percent_bounds(textures[face]);
+                                let material = self.material_cache.get(state.material).unwrap();
 
-                                    // Determine the quad origin
-                                    let center_origin = if face.sign() == Sign::Positive {
-                                        center_origin + face.axis().unit_typed::<Vec3>()
-                                    } else {
-                                        center_origin
-                                    };
+                                matches!(&*material, MaterialVisualDescriptor::Cubic { .. })
+                            };
 
-                                    // Construct the quad
-                                    let quad = AaQuad::new_unit(center_origin, face);
-                                    let quad = quad
-                                        .as_quad_ccw_whmask()
-                                        // Determine UV
-                                        .zip(QUAD_UVS.map(|v| uv_origin + v * uv_size))
-                                        // Determine occlusion
-                                        .map(|((pos, whmask), uv)| {
-                                            let mut is_occluded = false;
-                                            let (h_rel, v_rel) = face.axis().ortho_hv();
-                                            let h_rel = h_rel.unit_typed::<WorldVec>() * if whmask.x { 1 } else { -1 };
-                                            let v_rel = v_rel.unit_typed::<WorldVec>() * if whmask.y { 1 } else { -1 };
+                            if is_solid {
+                                continue;
+                            }
 
-                                            let occlude_origin =  WorldVec::compose(data.pos(), center_pos) + face.unit_typed::<WorldVec>();
+                            // Mesh it!
+                            {
+                                // Decode the texture bounds
+                                let (uv_origin, uv_size) =
+                                    atlas.decode_uv_percent_bounds(textures[face]);
 
-                                            for (h_mul, v_mul) in [(1, 0), (0, 1), (1, 1)] {
-                                                let rel = h_rel * h_mul + v_rel * v_mul;
+                                // Determine the quad origin
+                                let center_origin = if face.sign() == Sign::Positive {
+                                    center_origin + face.axis().unit_typed::<Vec3>()
+                                } else {
+                                    center_origin
+                                };
 
-                                                is_occluded |= WorldPointer::new(occlude_origin + rel)
-                                                    .state_or_air(data.world()).is_not_air();
-                                            }
+                                // Construct the quad
+                                let quad = AaQuad::new_unit(center_origin, face);
+                                let quad = quad
+                                    .as_quad_ccw_whmask()
+                                    // Determine UV
+                                    .zip(QUAD_UVS.map(|v| uv_origin + v * uv_size))
+                                    // Determine occlusion
+                                    .map(|((pos, whmask), uv)| {
+                                        let mut is_occluded = false;
+                                        let (h_rel, v_rel) = face.axis().ortho_hv();
+                                        let h_rel = h_rel.unit_typed::<WorldVec>()
+                                            * if whmask.x { 1 } else { -1 };
+                                        let v_rel = v_rel.unit_typed::<WorldVec>()
+                                            * if whmask.y { 1 } else { -1 };
 
-                                            (pos, uv, if is_occluded { 0.8 } else { 1. })
-                                        });
+                                        let occlude_origin =
+                                            WorldVec::compose(data.pos(), center_pos)
+                                                + face.unit_typed::<WorldVec>();
 
-                                    let [Tri([a, b, c]), Tri([d, e, f])] = quad.to_tris();
-                                    let quad_vertices = [a, b, c, d, e, f];
+                                        for (h_mul, v_mul) in [(1, 0), (0, 1), (1, 1)] {
+                                            let rel = h_rel * h_mul + v_rel * v_mul;
 
-                                    // Write the quad
-                                    let quad_vertices = quad_vertices.map(|(position, uv, light)| {
-                                        VoxelVertex { position, uv, light }.as_std430()
+                                            is_occluded |= WorldPointer::new(occlude_origin + rel)
+                                                .state_or_air(data.world())
+                                                .is_not_air();
+                                        }
+
+                                        (pos, uv, if is_occluded { 0.8 } else { 1. })
                                     });
 
-                                    vertices.extend(quad_vertices);
-                                }
-                            }
-                        }
-                        MaterialVisualDescriptor::Mesh { mesh } => {
-                            // Push the mesh
-                            for (quad, material) in mesh.iter_cloned() {
-                                // Translate the quad relative to the block
-                                let quad = quad.translated(center_origin);
-
-                                // Decode the texture bounds
-                                let (uv_origin, uv_size) = atlas.decode_uv_percent_bounds(material);
-
-                                // Give it UVs
-                                let quad = quad
-                                    .as_quad_ccw()
-                                    .zip(QUAD_UVS.map(|v| uv_origin + v * uv_size));
-
-                                // Convert to triangles
                                 let [Tri([a, b, c]), Tri([d, e, f])] = quad.to_tris();
                                 let quad_vertices = [a, b, c, d, e, f];
 
-                                // Convert to std340
-                                let quad_vertices = quad_vertices.map(|(position, uv)| {
-                                    VoxelVertex { position, uv, light: 1. }.as_std430()
+                                // Write the quad
+                                let quad_vertices = quad_vertices.map(|(position, uv, light)| {
+                                    VoxelVertex {
+                                        position,
+                                        uv,
+                                        light,
+                                    }
+                                    .as_std430()
                                 });
 
-                                // Write to the vertex buffer
                                 vertices.extend(quad_vertices);
                             }
                         }
                     }
+                    MaterialVisualDescriptor::Mesh { mesh } => {
+                        // Push the mesh
+                        for (quad, material) in mesh.iter_cloned() {
+                            // Translate the quad relative to the block
+                            let quad = quad.translated(center_origin);
+
+                            // Decode the texture bounds
+                            let (uv_origin, uv_size) = atlas.decode_uv_percent_bounds(material);
+
+                            // Give it UVs
+                            let quad = quad
+                                .as_quad_ccw()
+                                .zip(QUAD_UVS.map(|v| uv_origin + v * uv_size));
+
+                            // Convert to triangles
+                            let [Tri([a, b, c]), Tri([d, e, f])] = quad.to_tris();
+                            let quad_vertices = [a, b, c, d, e, f];
+
+                            // Convert to std340
+                            let quad_vertices = quad_vertices.map(|(position, uv)| {
+                                VoxelVertex {
+                                    position,
+                                    uv,
+                                    light: 1.,
+                                }
+                                .as_std430()
+                            });
+
+                            // Write to the vertex buffer
+                            vertices.extend(quad_vertices);
+                        }
+                    }
                 }
-
-                // Replace the chunk mesh
-                let buffer = if !vertices.is_empty() {
-                    Some(Arc::new(typed_wgpu::Buffer::create_init(
-                        &gfx.device,
-                        &typed_wgpu::BufferInitDescriptor {
-                            label: Some(format!("chunk mesh {:?}", data.pos()).as_str()),
-                            usage: wgpu::BufferUsages::VERTEX,
-                            contents: &vertices,
-                    })))
-                } else {
-                    None
-                };
-
-                chunk.buffer = buffer;
-                chunk.vertex_count = vertices.len() as u32;
-
-                self.rendered_chunks.insert(chunk);
-
-                // Log some debug info
-                tracing::info!(
-                    "Meshed {} {} for chunk {:?}",
-                    vertices.len(),
-                    if vertices.len() == 1 {
-                        "vertex"
-                    } else {
-                        "vertices"
-                    },
-                    chunk,
-                );
             }
-        }
+
+            // Replace the chunk mesh
+            let buffer = if !vertices.is_empty() {
+                Some(Arc::new(typed_wgpu::Buffer::create_init(
+                    &gfx.device,
+                    &typed_wgpu::BufferInitDescriptor {
+                        label: Some(format!("chunk mesh {:?}", data.pos()).as_str()),
+                        usage: wgpu::BufferUsages::VERTEX,
+                        contents: &vertices,
+                    },
+                )))
+            } else {
+                None
+            };
+
+            chunk.buffer = buffer;
+            chunk.vertex_count = vertices.len() as u32;
+
+            self.rendered_chunks.insert(chunk);
+
+            // Log some debug info
+            tracing::info!(
+                "Meshed {} {} for chunk {:?}",
+                vertices.len(),
+                if vertices.len() == 1 {
+                    "vertex"
+                } else {
+                    "vertices"
+                },
+                chunk,
+            );
+        });
     }
 
     pub fn prepare_pass(&mut self) -> ChunkRenderPass {
@@ -328,11 +342,11 @@ random_component!(ChunkVoxelMesh);
 
 impl ChunkVoxelMesh {
     pub fn world(self: Obj<Self>) -> Obj<WorldVoxelMesh> {
-        self.data().world().entity().get::<WorldVoxelMesh>()
+        self.data().world().obj::<WorldVoxelMesh>()
     }
 
     pub fn data(self: Obj<Self>) -> Obj<ChunkVoxelData> {
-        self.entity().get::<ChunkVoxelData>()
+        self.obj::<ChunkVoxelData>()
     }
 
     pub fn mark_dirty(mut self: Obj<Self>) {
@@ -406,10 +420,10 @@ pub fn sys_queue_dirty_chunks_for_render(
                         continue;
                     };
 
-                    neighbor.entity().get::<ChunkVoxelMesh>().mark_dirty();
+                    neighbor.obj::<ChunkVoxelMesh>().mark_dirty();
                 }
 
-                dirty.entity().get::<ChunkVoxelMesh>().mark_dirty();
+                dirty.obj::<ChunkVoxelMesh>().mark_dirty();
             }
         }
     });

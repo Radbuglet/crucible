@@ -74,7 +74,7 @@ use typed_glam::{
     typed::{FlavorCastFrom, TypedVector, VecFlavor},
 };
 
-use crate::{AaPlane, BlockFace, Sign, VecCompExt};
+use crate::{AaPlane, BlockFace, EntityAabb, Sign, VecCompExt};
 
 // === Constants === //
 
@@ -124,6 +124,7 @@ pub trait WorldVecExt: Sized {
     fn chunk(self) -> ChunkVec;
     fn block(self) -> BlockVec;
     fn negative_most_corner(self) -> EntityVec;
+    fn full_aabb(self) -> EntityAabb;
 
     fn face_plane(self, face: BlockFace) -> AaPlane;
 }
@@ -157,6 +158,13 @@ impl WorldVecExt for WorldVec {
 
     fn negative_most_corner(self) -> EntityVec {
         self.map_glam(|raw| raw.as_dvec3())
+    }
+
+    fn full_aabb(self) -> EntityAabb {
+        EntityAabb {
+            origin: self.negative_most_corner(),
+            size: EntityVec::ONE,
+        }
     }
 
     fn face_plane(self, face: BlockFace) -> AaPlane {

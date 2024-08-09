@@ -5,6 +5,8 @@ use bevy_ecs::removal_detection::RemovedComponents;
 use crucible_math::EntityAabb;
 use rustc_hash::FxHashSet;
 
+use super::ColliderMaterial;
+
 // === Components === //
 
 #[derive(Debug, Default)]
@@ -38,11 +40,20 @@ impl AabbStore {
 pub struct AabbHolder {
     store: Option<Obj<AabbStore>>,
     aabb: EntityAabb,
+    material: ColliderMaterial,
 }
 
 random_component!(AabbHolder);
 
 impl AabbHolder {
+    pub fn new(aabb: EntityAabb, material: ColliderMaterial) -> Self {
+        Self {
+            store: None,
+            aabb,
+            material,
+        }
+    }
+
     pub fn aabb(&self) -> EntityAabb {
         self.aabb
     }
@@ -57,6 +68,14 @@ impl AabbHolder {
         };
 
         store.colliders.remove(&self);
+    }
+
+    pub fn material(&self) -> ColliderMaterial {
+        self.material
+    }
+
+    pub fn set_material(&mut self, material: ColliderMaterial) {
+        self.material = material;
     }
 }
 

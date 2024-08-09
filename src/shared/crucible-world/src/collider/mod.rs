@@ -6,3 +6,6 @@ pub use shape::*;
 
 mod voxel;
 pub use voxel::*;
+
+mod facade;
+pub use facade::*;

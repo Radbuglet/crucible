@@ -216,13 +216,31 @@ pub fn occluding_volumes_in_block_volume<B>(
     ControlFlow::Continue(())
 }
 
+pub fn occluding_volumes_in_entity_volume<B>(
+    world: Obj<WorldVoxelData>,
+    collider_mats: &mut BlockMaterialCache<BlockColliderDescriptor>,
+    volume: EntityAabb,
+    cache: &mut WorldPointer,
+    mut f: impl FnMut((&mut WorldPointer, EntityAabb, ColliderMaterial)) -> ControlFlow<B>,
+) -> ControlFlow<B> {
+    cbit::cbit!(for (ptr, aabb, mat) in
+        occluding_volumes_in_block_volume(world, collider_mats, volume.as_blocks(), cache)
+    {
+        if aabb.intersects(volume) {
+            f((ptr, aabb, mat))?;
+        }
+    });
+
+    ControlFlow::Continue(())
+}
+
 pub fn cast_voxel_volume(
     world: Obj<WorldVoxelData>,
     collider_mats: &mut BlockMaterialCache<BlockColliderDescriptor>,
     quad: AaQuad<EntityVec>,
     delta: f64,
     tolerance: f64,
-    mut filter: impl FnMut(ColliderMaterial) -> bool,
+    mut filter: impl FnMut(WorldPointer, ColliderMaterial) -> bool,
 ) -> f64 {
     // N.B. to ensure that `tolerance` is respected, we have to increase our check volume by
     // `tolerance` so that we catch blocks that are outside the check volume but may nonetheless
@@ -253,16 +271,19 @@ pub fn cast_voxel_volume(
 
     // For every block in the volume of potential occluders...
     for pos in check_aabb.iter_blocks() {
+        cached_loc.move_to(pos);
+        let pos_ptr = cached_loc;
+
         // For every occluder produced by that block...
         cbit::cbit! {
             for (occluder_quad, occluder_meta) in occluding_faces_in_block(
                 world,
                 collider_mats,
-                cached_loc.move_to(pos),
+                &mut cached_loc,
                 quad.face.invert(),
             ) {
                 // Filter occluders by whether we are affected by them.
-                if !filter(occluder_meta) {
+                if !filter(pos_ptr, occluder_meta) {
                     continue;
                 }
 
@@ -533,8 +554,10 @@ pub fn move_rigid_body_voxels(
     collider_mats: &mut BlockMaterialCache<BlockColliderDescriptor>,
     mut aabb: EntityAabb,
     delta: EntityVec,
-    mut filter: impl FnMut(ColliderMaterial) -> bool,
+    mut filter: impl FnMut(WorldPointer, ColliderMaterial) -> bool,
 ) -> EntityVec {
+    let start_origin = aabb.origin;
+
     for axis in Axis3::variants() {
         // Decompose the movement part
         let signed_delta = delta.comp(axis);
@@ -556,5 +579,5 @@ pub fn move_rigid_body_voxels(
         aabb.origin += face.unit_typed::<EntityVec>() * actual_delta;
     }
 
-    aabb.origin
+    aabb.origin - start_origin
 }
