@@ -339,7 +339,12 @@ impl<V: SignedNumericVector3> Aabb3<V> {
 
 impl EntityAabb {
     pub fn as_blocks(&self) -> WorldAabb {
-        Aabb3::from_blocks_corners(self.origin.block_pos(), self.max_corner().block_pos())
+        let max_corner = self.max_corner();
+        let nudge_mask = max_corner.fract().cmpeq(EntityVec::ZERO);
+        let max_corner =
+            max_corner.block_pos() - WorldVec::select(nudge_mask, WorldVec::ONE, WorldVec::ZERO);
+
+        Aabb3::from_blocks_corners(self.origin.block_pos(), max_corner)
     }
 }
 

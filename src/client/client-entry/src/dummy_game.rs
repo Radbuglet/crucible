@@ -279,10 +279,7 @@ pub fn sys_process_camera_controller(
                     let place_at = isect.block.move_to_neighbor(isect.enter_face);
 
                     if collisions
-                        .has_collisions(
-                            place_at.pos.full_aabb().grow(EntityVec::splat(-0.01)),
-                            |_| true,
-                        )
+                        .has_collisions(place_at.pos.full_aabb(), |_| true)
                         .is_none()
                     {
                         place_at.set_state(world, BlockData::new(stone), PopulateWorld);
