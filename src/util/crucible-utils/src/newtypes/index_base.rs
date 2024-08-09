@@ -303,4 +303,16 @@ impl<K: Index, V: PrimInt> IndexBitSlice<K, V> {
     pub fn iter_zeros(&self) -> IndexBitSliceIterZero<'_, K, V> {
         IndexBitSliceIterZero(IndexBitSliceIter::new(InvertBits(self.raw.iter().copied())))
     }
+
+    pub fn len(&self) -> usize {
+        self.raw
+            .iter()
+            .map(|v| v.count_ones() as usize)
+            .reduce(|a, b| a + b)
+            .unwrap_or(0)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.raw.iter().all(|&v| v.is_zero())
+    }
 }

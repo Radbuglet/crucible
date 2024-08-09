@@ -104,6 +104,7 @@ impl WorldVoxelData {
             non_air_count: 0,
             is_dirty: false,
             dirty_faces: IndexBitArray::default(),
+            dirty_corners: FxHashSet::default(),
         });
 
         entry.insert(chunk);
@@ -136,6 +137,7 @@ impl WorldVoxelData {
         for mut chunk in self.dirty.drain() {
             chunk.is_dirty = false;
             chunk.dirty_faces.remove_all();
+            chunk.dirty_corners.clear();
         }
     }
 }
@@ -145,10 +147,13 @@ pub struct ChunkVoxelData {
     world: Obj<WorldVoxelData>,
     pos: ChunkVec,
     neighbors: IndexArray<BlockFace, Option<Obj<ChunkVoxelData>>>,
+
     data: Option<ChunkData>,
     non_air_count: i32,
+
     is_dirty: bool,
     dirty_faces: IndexBitArray<BlockFace>,
+    dirty_corners: FxHashSet<ChunkVec>,
 }
 
 #[derive(Debug, Clone)]
@@ -173,7 +178,11 @@ impl ChunkVoxelData {
     }
 
     pub fn dirty_neighbor_mask(&self) -> IndexBitArray<BlockFace> {
-        self.dirty_faces.clone()
+        self.dirty_faces
+    }
+
+    pub fn dirty_corner_iter(&self) -> impl Iterator<Item = ChunkVec> + '_ {
+        self.dirty_corners.iter().copied()
     }
 
     pub fn initialize_data(&mut self, data: ChunkData) {
@@ -200,16 +209,25 @@ impl ChunkVoxelData {
     pub fn set_block(mut self: Obj<Self>, block: BlockVec, new_data: BlockData) {
         self.set_block_no_dirty(block, new_data);
 
-        for axis in Axis3::variants() {
-            if block.comp(axis) == 0 {
-                self.dirty_faces
-                    .add(BlockFace::compose(axis, Sign::Negative));
-            }
+        let mut dirty_faces = IndexBitArray::default();
+        let mut corner_delta = ChunkVec::default();
 
-            if block.comp(axis) == CHUNK_EDGE - 1 {
-                self.dirty_faces
-                    .add(BlockFace::compose(axis, Sign::Positive));
-            }
+        for axis in Axis3::variants() {
+            let sign = match block.comp(axis) {
+                0 => Sign::Negative,
+                v if v == CHUNK_EDGE - 1 => Sign::Positive,
+                _ => continue,
+            };
+
+            let face = BlockFace::compose(axis, sign);
+            dirty_faces.add(face);
+            corner_delta += face.unit();
+        }
+
+        self.dirty_faces |= dirty_faces;
+
+        if dirty_faces.len() > 1 {
+            self.dirty_corners.insert(corner_delta);
         }
 
         if !self.is_dirty {

@@ -1,9 +1,10 @@
 use std::{
-    fmt, iter,
-    ops::{Deref, DerefMut},
+    fmt, hash, iter,
+    ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Deref, DerefMut},
     slice,
 };
 
+use derive_where::derive_where;
 use num_traits::Zero;
 
 use crate::traits::ArrayLike;
@@ -21,8 +22,8 @@ pub trait EnumIndex: Index {
     const VARIANTS: &'static [Self];
 
     type Array<T>: ArrayLike<Elem = T>;
-    type BitSet: ArrayLike<Elem = Self::BitSetElem>;
-    type BitSetElem: num_traits::PrimInt;
+    type BitSet: Copy + ArrayLike<Elem = Self::BitSetElem>;
+    type BitSetElem: num_traits::PrimInt + hash::Hash + Eq;
 
     fn variants() -> EnumIndexVariants<Self> {
         EnumIndexVariants(Self::VARIANTS.iter().copied())
@@ -222,9 +223,23 @@ impl<K: EnumIndex, V> FromIterator<V> for IndexArray<K, V> {
 
 // === IndexBitArray === //
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive_where(Copy, Clone)]
 pub struct IndexBitArray<K: EnumIndex> {
     pub raw: K::BitSet,
+}
+
+impl<K: EnumIndex> hash::Hash for IndexBitArray<K> {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.raw.as_slice().hash(state);
+    }
+}
+
+impl<K: EnumIndex> Eq for IndexBitArray<K> {}
+
+impl<K: EnumIndex> PartialEq for IndexBitArray<K> {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw.as_slice() == other.raw.as_slice()
+    }
 }
 
 impl<K: EnumIndex> fmt::Debug for IndexBitArray<K> {
@@ -255,4 +270,60 @@ impl<K: EnumIndex> DerefMut for IndexBitArray<K> {
     }
 }
 
-// TODO: Additional trait forwards
+impl<K: EnumIndex> BitAnd for IndexBitArray<K> {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self {
+            raw: ArrayLike::from_iter(self.raw.into_iter().zip(rhs.raw).map(|(a, b)| a & b)),
+        }
+    }
+}
+
+impl<K: EnumIndex> BitAndAssign for IndexBitArray<K> {
+    fn bitand_assign(&mut self, rhs: Self) {
+        *self = *self & rhs;
+    }
+}
+
+impl<K: EnumIndex> BitOr for IndexBitArray<K> {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self {
+            raw: ArrayLike::from_iter(self.raw.into_iter().zip(rhs.raw).map(|(a, b)| a | b)),
+        }
+    }
+}
+
+impl<K: EnumIndex> BitOrAssign for IndexBitArray<K> {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = *self | rhs;
+    }
+}
+
+impl<K: EnumIndex> BitXor for IndexBitArray<K> {
+    type Output = Self;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        Self {
+            raw: ArrayLike::from_iter(self.raw.into_iter().zip(rhs.raw).map(|(a, b)| a ^ b)),
+        }
+    }
+}
+
+impl<K: EnumIndex> BitXorAssign for IndexBitArray<K> {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        *self = *self ^ rhs;
+    }
+}
+
+impl<K: EnumIndex> FromIterator<K> for IndexBitArray<K> {
+    fn from_iter<T: IntoIterator<Item = K>>(iter: T) -> Self {
+        let mut base = Self::default();
+        for bit in iter {
+            base.add(bit);
+        }
+        base
+    }
+}

@@ -129,7 +129,7 @@ impl WorldVoxelMesh {
 
                                 // Determine the quad origin
                                 let center_origin = if face.sign() == Sign::Positive {
-                                    center_origin + face.axis().unit_typed::<Vec3>()
+                                    center_origin + face.axis().unit_f()
                                 } else {
                                     center_origin
                                 };
@@ -150,8 +150,7 @@ impl WorldVoxelMesh {
                                             * if whmask.y { 1 } else { -1 };
 
                                         let occlude_origin =
-                                            WorldVec::compose(data.pos(), center_pos)
-                                                + face.unit_typed::<WorldVec>();
+                                            WorldVec::compose(data.pos(), center_pos) + face.unit();
 
                                         for (h_mul, v_mul) in [(1, 0), (0, 1), (1, 1)] {
                                             let rel = h_rel * h_mul + v_rel * v_mul;
@@ -417,6 +416,14 @@ pub fn sys_queue_dirty_chunks_for_render(
             for dirty in world.iter_dirty() {
                 for face in dirty.dirty_neighbor_mask().iter_ones() {
                     let Some(neighbor) = dirty.neighbor(face) else {
+                        continue;
+                    };
+
+                    neighbor.obj::<ChunkVoxelMesh>().mark_dirty();
+                }
+
+                for rel in dirty.dirty_corner_iter() {
+                    let Some(neighbor) = world.get(dirty.pos() + rel) else {
                         continue;
                     };
 
