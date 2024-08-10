@@ -172,6 +172,7 @@ impl WorldVoxelMesh {
                                         position,
                                         uv,
                                         light,
+                                        normal: face.unit_typed(),
                                     }
                                     .as_std430()
                                 });
@@ -183,6 +184,8 @@ impl WorldVoxelMesh {
                     MaterialVisualDescriptor::Mesh { mesh } => {
                         // Push the mesh
                         for (quad, material) in mesh.iter_cloned() {
+                            let normal = quad.face.unit_typed();
+
                             // Translate the quad relative to the block
                             let quad = quad.translated(center_origin);
 
@@ -204,6 +207,7 @@ impl WorldVoxelMesh {
                                     position,
                                     uv,
                                     light: 1.,
+                                    normal,
                                 }
                                 .as_std430()
                             });

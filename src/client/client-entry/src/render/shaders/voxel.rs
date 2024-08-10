@@ -22,6 +22,7 @@ pub struct VoxelCommonBindGroup<'a> {
 pub struct VoxelCommonUniformData {
     pub camera: glam::Mat4,
     pub light: glam::Mat4,
+    pub light_dir: glam::Vec3,
 }
 
 impl GpuStruct for VoxelCommonUniformData {
@@ -34,7 +35,7 @@ impl BindGroup for VoxelCommonBindGroup<'_> {
 
     fn layout(builder: &mut impl BindGroupBuilder<Self>, (): &Self::Config) {
         builder
-            .with_uniform_buffer(wgpu::ShaderStages::VERTEX, false, |c| {
+            .with_uniform_buffer(wgpu::ShaderStages::VERTEX_FRAGMENT, false, |c| {
                 c.uniforms.raw.clone()
             })
             .with_texture(
@@ -102,6 +103,7 @@ pub struct VoxelVertex {
     pub position: glam::Vec3,
     pub uv: glam::Vec2,
     pub light: f32,
+    pub normal: glam::Vec3,
 }
 
 impl GpuStruct for VoxelVertex {
@@ -114,6 +116,7 @@ impl VoxelVertex {
             .with_attribute(Std430VertexFormat::Float32x3) // position
             .with_attribute(Std430VertexFormat::Float32x2) // uv
             .with_attribute(Std430VertexFormat::Float32) // light
+            .with_attribute(Std430VertexFormat::Float32x3) // normal
             .finish(wgpu::VertexStepMode::Vertex)
     }
 }
@@ -247,11 +250,22 @@ impl VoxelUniforms {
         }
     }
 
-    pub fn set_camera_matrix(&self, gfx: &GfxContext, camera: glam::Mat4, light: glam::Mat4) {
+    pub fn set_camera_matrix(
+        &self,
+        gfx: &GfxContext,
+        camera: glam::Mat4,
+        light: glam::Mat4,
+        light_dir: glam::Vec3,
+    ) {
         self.buffer.write(
             &gfx.queue,
             0,
-            &[VoxelCommonUniformData { camera, light }.as_std430()],
+            &[VoxelCommonUniformData {
+                camera,
+                light,
+                light_dir,
+            }
+            .as_std430()],
         );
     }
 

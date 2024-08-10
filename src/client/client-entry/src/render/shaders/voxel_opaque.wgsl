@@ -10,6 +10,7 @@ const SHADOW_BIAS: f32 = 0.0003;
 struct Uniforms {
     camera: mat4x4f,
     light: mat4x4f,
+    light_dir: vec3f,
 }
 
 struct PerChunkUniforms {
@@ -36,6 +37,7 @@ struct VertexInput {
 	@location(0) position: vec3f,
 	@location(1) uv: vec2f,
     @location(2) light: f32,
+    @location(3) normal: vec3f,
 }
 
 struct VertexOutput {
@@ -43,6 +45,7 @@ struct VertexOutput {
     @location(0) light_space: vec4f,
 	@location(1) uv: vec2f,
     @location(2) light: f32,
+    @location(3) normal: vec3f,
 }
 
 // Entry points
@@ -55,6 +58,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.light_space = uniforms.light * vec4f(position, 1.0);
 	out.uv = in.uv;
     out.light = in.light;
+    out.normal = in.normal;
 	return out;
 }
 
@@ -75,7 +79,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     var my_lit_depth: f32 = light_space.z - SHADOW_BIAS;
 
     // Determine whether this pixel is lit
-    var is_lit = my_lit_depth < max_lit_depth;
+    var is_lit = my_lit_depth < max_lit_depth && dot(in.normal, uniforms.light_dir) < 0.;
 
     // Process shading mode
     if (DEBUG_MODE == DBM_SHOW_LUXEL_GRID) {

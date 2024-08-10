@@ -2,6 +2,7 @@
 struct Uniforms {
     camera: mat4x4f,
     light: mat4x4f,
+    light_dir: vec3f,
 }
 
 @group(0) @binding(0)

@@ -177,23 +177,26 @@ impl GlobalRenderer {
         let multipass = MultiPassDriver::new();
 
         // Write uniforms
+        let light_dir = Vec3::new(3., 10., 5.).normalize();
+
         self.voxel_uniforms.set_camera_matrix(
             &self.gfx,
             // camera_proj
             camera.camera_xform(),
             // light_proj
             {
-                let offset = Vec3::new(3., 10., 5.);
-                let pos = camera.state.pos + offset;
-                let facing = Angle3D::from_facing(-offset);
+                let pos = camera.state.pos + light_dir * 250.;
+                let facing = Angle3D::from_facing(-light_dir);
 
                 CameraSnapshot::new(
                     CameraViewState { pos, facing },
-                    CameraSettings::new_ortho(Vec2::splat(10.), 0.1, 100.),
+                    CameraSettings::new_ortho(Vec2::splat(50.), 0.1, 500.),
                     1.,
                 )
                 .camera_xform()
             },
+            // light_dir
+            -light_dir,
         );
 
         self.skybox.set_camera_matrix(&self.gfx, {
