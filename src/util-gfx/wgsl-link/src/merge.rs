@@ -134,7 +134,7 @@ impl<'a, T> ArenaMerger<'a, T> {
         }
     }
 
-    pub fn apply(&mut self, mut adjust: impl FnMut(&Self, Span, T) -> (Span, T)) {
+    pub fn apply(&mut self, mut adjust: impl FnMut(&Self, Handle<T>, Span, T) -> (Span, T)) {
         let mut inserted_arena = self
             .src_arena
             .take()
@@ -149,7 +149,7 @@ impl<'a, T> ArenaMerger<'a, T> {
                 continue;
             }
 
-            let (span, value) = adjust(self, span, value);
+            let (span, value) = adjust(self, handle, span, value);
             self.dest_arena.append(value, span);
         }
     }
@@ -168,10 +168,11 @@ pub struct UniqueArenaMerger<T> {
 }
 
 impl<T> UniqueArenaMerger<T> {
-    pub fn new(
+    pub fn new<M>(
         dest_arena: &mut UniqueArena<T>,
         src_arena: UniqueArena<T>,
-        mut map: impl FnMut(&UniqueArenaMerger<T>, Span, T) -> MapResult<T>,
+        mut map: impl FnMut(&UniqueArenaMerger<T>, Span, T) -> (MapResult<T>, M),
+        mut post_map: impl FnMut(&UniqueArenaMerger<T>, &UniqueArena<T>, M, Handle<T>, Handle<T>),
     ) -> Self
     where
         T: Eq + hash::Hash + Clone,
@@ -181,14 +182,19 @@ impl<T> UniqueArenaMerger<T> {
 
         let mut mapper = UniqueArenaMerger { map: Vec::new() };
 
-        for (handle, value) in src_arena.iter() {
-            let span = src_arena.get_span(handle);
+        for (src_handle, value) in src_arena.iter() {
+            let span = src_arena.get_span(src_handle);
             let value = value.clone();
 
-            mapper.map.push(match map(&mapper, span, value) {
+            let (map_res, map_meta) = map(&mapper, span, value);
+
+            let dest_handle = match map_res {
                 MapResult::Map(span, value) => dest_arena.insert(value, span),
                 MapResult::Dedup(handle) => handle,
-            });
+            };
+            mapper.map.push(dest_handle);
+
+            post_map(&mapper, dest_arena, map_meta, src_handle, dest_handle);
         }
 
         mapper
@@ -433,7 +439,7 @@ where
         let mut expressions =
             ArenaMerger::new(&mut expressions_arena, self.expressions, |_, _| None);
 
-        expressions.apply(|expressions, span, expr| {
+        expressions.apply(|expressions, _orig_handle, span, expr| {
             (
                 f.fold(span),
                 expr.fold(&folders!(
@@ -448,7 +454,7 @@ where
             )
         });
 
-        local_variables.apply(|_local_variables, span, var| {
+        local_variables.apply(|_local_variables, _orig_handle, span, var| {
             (
                 span,
                 naga::LocalVariable {

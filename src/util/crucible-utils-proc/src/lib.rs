@@ -1,5 +1,6 @@
 use proc_macro::TokenStream;
 
+mod copy_hygiene;
 mod delegate;
 mod iterator;
 mod transparent;
@@ -19,4 +20,9 @@ pub fn iterator(attrs: TokenStream, input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn transparent(attrs: TokenStream, input: TokenStream) -> TokenStream {
     transparent::transparent(attrs.into(), input.into()).into()
+}
+
+#[proc_macro]
+pub fn copy_hygiene(input: TokenStream) -> TokenStream {
+    copy_hygiene::copy_hygiene(input.into()).into()
 }

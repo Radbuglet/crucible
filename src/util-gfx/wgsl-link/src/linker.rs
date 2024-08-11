@@ -1,6 +1,11 @@
-use crucible_utils::{define_index, hash::FxHashMap, newtypes::IndexVec, polyfill::OptionExt};
+use crucible_utils::{
+    define_index,
+    hash::FxHashMap,
+    newtypes::IndexVec,
+    polyfill::{copy_hygiene, OptionExt},
+};
 
-use crate::merge::{folders, ArenaMerger, Foldable, MapResult, UniqueArenaMerger};
+use crate::merge::{folders, ArenaMerger, Foldable, FolderExt as _, MapResult, UniqueArenaMerger};
 
 define_index! {
     pub struct FileHandle: u32;
@@ -39,7 +44,7 @@ impl ModuleLinker {
         span_offset: u32,
         resolve_stub: impl FnMut(&str) -> Option<FileHandle>,
     ) -> FileHandle {
-        let file = File::default();
+        let mut file = File::default();
 
         let map_span = |span: naga::Span| -> naga::Span {
             span.to_range().map_or(naga::Span::UNDEFINED, |v| {
@@ -50,23 +55,35 @@ impl ModuleLinker {
         let mut stubs = StubResolver(resolve_stub);
 
         // Since everything depends on types, let's import those first.
-        let types =
-            UniqueArenaMerger::new(&mut self.module.types, module.types, |ty_map, span, ty| {
+        let types = UniqueArenaMerger::new(
+            &mut self.module.types,
+            module.types,
+            |types, span, ty| {
                 // Attempt to map the type to its non-stubbed version
                 if let Some((name, file)) = stubs.resolve_opt(ty.name.as_deref()) {
-                    return MapResult::Dedup(self.files[file].types[name]);
+                    return (MapResult::Dedup(self.files[file].types[name]), None);
                 }
 
                 // Otherwise, map it so that it can be integrated into the current arena.
-                let mut ty = ty.fold(&folders!(a: ty_map, b: &map_span));
+                let mut ty = ty.fold(&folders!(a: types, b: &map_span));
 
-                // If it has a name, mangle it and mark down the mangling from real name to handle.
+                // If it has a name, mangle it.
+                let demangle_to;
                 if let Some(name) = &mut ty.name {
-                    // TODO: Mangle name and update mangle map
+                    demangle_to = Some(name.clone());
+                    self.mangler.mangle_mut(name);
+                } else {
+                    demangle_to = None
                 }
 
-                MapResult::Map(map_span(span), ty)
-            });
+                (MapResult::Map(map_span(span), ty), demangle_to)
+            },
+            |_types, _dest_arena, demangle_to, _src_handle, dest_handle| {
+                if let Some(demangle_to) = demangle_to {
+                    file.types.insert(demangle_to, dest_handle);
+                }
+            },
+        );
 
         // If the imported module had special types, include them. If these types were already set,
         // the type insertion operation should deduplicated them and nothing should change.
@@ -129,43 +146,39 @@ impl ModuleLinker {
         );
 
         // Let's fold the new (un-stubbed) values to properly integrate them into the new arena.
-        // TODO: Mangle name and update mangle map
-        constants.apply(|_, span, val| {
-            (
-                map_span(span),
-                val.fold(&folders!(a: &global_expressions, b: &types)),
-            )
-        });
+        macro_rules! apply_stubs {
+            ($($name:ident),*$(,)?) => {$(
+                $name.apply(|$name, handle, span, mut val| {
+                    if let Some(name) = &mut val.name {
+                        file.$name
+                            .insert(name.clone(), $name.src_to_dest(handle));
 
-        overrides.apply(|_, span, val| {
-            (
-                map_span(span),
-                val.fold(&folders!(a: &global_expressions, b: &types)),
-            )
-        });
+                        self.mangler.mangle_mut(name);
+                    }
 
-        global_variables.apply(|_, span, val| {
-            (
-                map_span(span),
-                val.fold(&folders!(a: &global_expressions, b: &types)),
-            )
-        });
+                    (
+                        map_span(span),
+                        val.fold(&folders!(
+                            // `.upcast()` normalizes both plain `Folder` objects and references
+                            // thereto into proper references to `Folder`s.
+                            a: copy_hygiene!($name, constants.upcast()),
+                            b: copy_hygiene!($name, overrides.upcast()),
+                            c: copy_hygiene!($name, types.upcast()),
+                            e: copy_hygiene!($name, global_variables.upcast()),
+                            g: copy_hygiene!($name, functions.upcast()),
+                            h: copy_hygiene!($name, map_span.upcast()),
+                            i: copy_hygiene!($name, global_expressions.upcast()),
+                        )),
+                    )
+                });
+            )*};
+        }
 
-        functions.apply(|functions, span, val| {
-            (
-                map_span(span),
-                val.fold(&folders!(
-                    a: &constants,
-                    b: &overrides,
-                    c: &types,
-                    d: &global_variables,
-                    e: functions,
-                    f: &map_span,
-                )),
-            )
-        });
+        apply_stubs!(constants, overrides, global_variables, functions);
 
-        global_expressions.apply(|global_expressions, span, val| {
+        global_expressions.apply(|global_expressions, _handle, span, val| {
+            // (expressions do not have names to mangle)
+
             (
                 map_span(span),
                 val.fold(&folders!(
@@ -176,7 +189,7 @@ impl ModuleLinker {
                     e: &global_variables,
                     f: &|_lv| unreachable!("global expressions should not reference local variables"),
                     g: &functions,
-                ))
+                )),
             )
         });
 
@@ -189,6 +202,10 @@ impl ModuleLinker {
     pub fn gen_stubs(&mut self, file: FileHandle, names: &[&str], out: &mut String) {
         todo!()
     }
+
+    pub fn module(&self) -> &naga::Module {
+        &self.module
+    }
 }
 
 #[derive(Debug, Default)]
@@ -197,16 +214,11 @@ struct NameMangler(u64);
 impl NameMangler {
     pub fn mangle_mut(&mut self, name: &mut String) {
         use std::fmt::Write as _;
-        write!(name, "_MANGLE_{:x}", self.0).unwrap();
+        write!(name, "_MANGLE_{:x}_", self.0).unwrap();
         self.0 += 1;
     }
 
-    pub fn mangle_owned(&mut self, mut name: String) -> String {
-        self.mangle_mut(&mut name);
-        name
-    }
-
-    pub fn de_mangle<'a>(&mut self, name: &'a str) -> &'a str {
+    pub fn demangle<'a>(&mut self, name: &'a str) -> &'a str {
         &name[..name.rfind("_MANGLE").expect("name was never mangled")]
     }
 }
