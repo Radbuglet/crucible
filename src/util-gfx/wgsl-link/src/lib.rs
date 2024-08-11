@@ -12,5 +12,5 @@
 // - Emit a giant file for the entire linked module.
 //
 
-mod linker;
-mod merge;
+pub mod linker;
+pub mod merge;
