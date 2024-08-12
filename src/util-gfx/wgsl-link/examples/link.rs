@@ -1,4 +1,4 @@
-use wgsl_link::linker::{ImportMap, ModuleLinker};
+use wgsl_link::linker::{ImportStubs, ModuleLinker};
 
 fn main() {
     let mut linker = ModuleLinker::new();
@@ -9,26 +9,31 @@ fn main() {
 
     let file_a = linker.link(
         naga::front::wgsl::parse_str(include_str!("a.wgsl")).unwrap(),
+        &ImportStubs::empty(),
         0,
-        &ImportMap::new(),
     );
 
-    let b_imports = ImportMap::from_iter([(file_a, "Bar")]);
+    let b_stubs = linker.gen_stubs([
+        (file_a, "whee", Some("whee_new")),
+        (file_a, "Bar", None),
+        (file_a, "Foo", Some("FooNew")),
+    ]);
+
     let mut b_src = include_str!("b.wgsl").to_string();
-    let b_stubs = linker.gen_stubs(&b_imports);
+    b_src.push_str("\n// === Stubs === //\n\n");
     b_src.push_str(
         &naga::back::wgsl::write_string(
-            &b_stubs,
-            &validator.validate(&b_stubs).unwrap(),
+            b_stubs.module(),
+            &validator.validate(b_stubs.module()).unwrap(),
             naga::back::wgsl::WriterFlags::all(),
         )
         .unwrap(),
     );
-    linker.link(naga::front::wgsl::parse_str(&b_src).unwrap(), 0, &b_imports);
+    linker.link(naga::front::wgsl::parse_str(&b_src).unwrap(), &b_stubs, 0);
 
     let out = naga::back::wgsl::write_string(
-        linker.module(),
-        &validator.validate(linker.module()).unwrap(),
+        linker.full_module(),
+        &validator.validate(linker.full_module()).unwrap(),
         naga::back::wgsl::WriterFlags::all(),
     )
     .unwrap();

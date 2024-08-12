@@ -5,8 +5,10 @@ struct Baz {
 struct Foo {
     jg: Baz,
     far: Bar,
+    foo: FooNew,
 }
 
 fn quux(v: Foo) {
     let kaz = Baz(v.jg.faz);
+    whee_new(v.foo);
 }

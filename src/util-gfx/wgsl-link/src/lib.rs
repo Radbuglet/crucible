@@ -12,5 +12,6 @@
 // - Emit a giant file for the entire linked module.
 //
 
+pub mod fold;
 pub mod linker;
 pub mod merge;

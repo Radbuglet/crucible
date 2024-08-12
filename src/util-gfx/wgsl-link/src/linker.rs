@@ -1,15 +1,16 @@
-use std::ops::Range;
-
 use crucible_utils::{
     define_index,
-    hash::{fx_hash_one, hashbrown::hash_map::RawEntryMut, FxHashMap},
+    hash::{FxHashMap, FxStrMap},
     newtypes::{Index, IndexVec, LargeIndex},
     polyfill::{copy_hygiene, OptionExt},
 };
 
-use crate::merge::{
-    folders, handle_from_usize, ArenaMerger, Foldable, FolderExt as _, MapResult, UniqueArenaMerger,
+use crate::{
+    fold::{folders, Foldable as _, FolderExt as _},
+    merge::{ArenaMerger, MapResult, RawNagaHandle, UniqueArenaMerger},
 };
+
+// === ModuleLinker === //
 
 define_index! {
     pub struct FileHandle: u32;
@@ -29,16 +30,7 @@ pub struct ModuleLinker {
     mangler: NameMangler,
 
     // Map from mangle IDs to handles.
-    mangle_idx_to_handle: IndexVec<MangleIndex, usize>,
-}
-
-#[derive(Default)]
-struct File {
-    types: FxHashMap<String, naga::Handle<naga::Type>>,
-    constants: FxHashMap<String, naga::Handle<naga::Constant>>,
-    overrides: FxHashMap<String, naga::Handle<naga::Override>>,
-    global_variables: FxHashMap<String, naga::Handle<naga::GlobalVariable>>,
-    functions: FxHashMap<String, naga::Handle<naga::Function>>,
+    mangle_idx_to_handle: IndexVec<MangleIndex, RawNagaHandle>,
 }
 
 impl ModuleLinker {
@@ -49,8 +41,8 @@ impl ModuleLinker {
     pub fn link(
         &mut self,
         module: naga::Module,
+        stubs: &ImportStubs,
         span_offset: u32,
-        imports: &ImportMap,
     ) -> FileHandle {
         let mut file = File::default();
 
@@ -62,16 +54,17 @@ impl ModuleLinker {
 
         // Since everything depends on types, let's import those first.
         macro_rules! dedup_name {
-            ($name:expr, $dedup_from:ident) => {
+            ($name:expr, $expected_kind:expr) => {
                 'a: {
                     let name = $name;
 
                     if let Some((_, mangle_idx)) = NameMangler::try_demangle(name) {
-                        break 'a Some(handle_from_usize(self.mangle_idx_to_handle[mangle_idx]));
+                        break 'a Some(self.mangle_idx_to_handle[mangle_idx].as_typed());
                     }
 
-                    if let Some(file) = imports.name_to_file(name) {
-                        break 'a Some(self.files[file].$dedup_from[name]);
+                    if let Some(handle) = stubs.name_to_handle(name) {
+                        assert_eq!($expected_kind, handle.kind);
+                        break 'a Some(handle.raw.as_typed());
                     }
 
                     None
@@ -83,7 +76,7 @@ impl ModuleLinker {
             req.map(|types, span, ty| {
                 // Attempt to map the type to its non-stubbed version
                 if let Some(name) = &ty.name {
-                    if let Some(handle) = dedup_name!(name, types) {
+                    if let Some(handle) = dedup_name!(name, ExportKind::Types) {
                         return (MapResult::Dedup(handle), None);
                     }
                 }
@@ -106,8 +99,15 @@ impl ModuleLinker {
             .post_map(
                 |_types, _dest_arena, demangle_to, _src_handle, dest_handle| {
                     if let Some((demangled_name, mangle_id)) = demangle_to {
-                        file.types.insert(demangled_name, dest_handle);
-                        *self.mangle_idx_to_handle.entry(mangle_id) = dest_handle.index();
+                        file.exports.insert(
+                            demangled_name,
+                            AnyNagaHandle {
+                                kind: ExportKind::Types,
+                                raw: RawNagaHandle::from_typed(dest_handle),
+                            },
+                        );
+                        *self.mangle_idx_to_handle.entry(mangle_id) =
+                            RawNagaHandle::from_typed(dest_handle);
                     }
                 },
             );
@@ -151,16 +151,21 @@ impl ModuleLinker {
 
         // All these arenas can be mapped by deduplicating by stub.
         macro_rules! new_stubs {
-            ($($name:ident),*$(,)?) => {$(
+            ($($name:ident as $kind:expr),*$(,)?) => {$(
                 let mut $name = ArenaMerger::new(
                     &mut self.module.$name,
                     module.$name,
-                    |_span, val| val.name.as_deref().and_then(|name| dedup_name!(name, $name)),
+                    |_span, val| val.name.as_deref().and_then(|name| dedup_name!(name, $kind)),
                 );
             )*};
         }
 
-        new_stubs!(constants, overrides, global_variables, functions);
+        new_stubs!(
+            constants as ExportKind::Constants,
+            overrides as ExportKind::Overrides,
+            global_variables as ExportKind::GlobalVariables,
+            functions as ExportKind::Functions,
+        );
 
         // This arena doesn't need to be stubbed at all.
         let mut global_expressions = ArenaMerger::new(
@@ -171,14 +176,17 @@ impl ModuleLinker {
 
         // Let's fold the new (un-stubbed) values to properly integrate them into the new arena.
         macro_rules! apply_stubs {
-            ($($name:ident),*$(,)?) => {$(
+            ($($name:ident as $kind:expr),*$(,)?) => {$(
                 $name.apply(|$name, handle, span, mut val| {
                     if let Some(name) = &mut val.name {
-                        file.$name
-                            .insert(name.clone(), $name.src_to_dest(handle));
+                        file.exports.insert(name.clone(), AnyNagaHandle {
+                            kind: $kind,
+                            raw: $name.src_to_dest(handle).into(),
+                        });
 
                         let mangle_idx = self.mangler.mangle_mut(name);
-                        *self.mangle_idx_to_handle.entry(mangle_idx) = handle.index();
+                        *self.mangle_idx_to_handle.entry(mangle_idx) =
+                            RawNagaHandle::from_typed(handle);
                     }
 
                     (
@@ -199,7 +207,12 @@ impl ModuleLinker {
             )*};
         }
 
-        apply_stubs!(constants, overrides, global_variables, functions);
+        apply_stubs!(
+            constants as ExportKind::Constants,
+            overrides as ExportKind::Overrides,
+            global_variables as ExportKind::GlobalVariables,
+            functions as ExportKind::Functions,
+        );
 
         global_expressions.apply(|global_expressions, _handle, span, val| {
             // (expressions do not have names to mangle)
@@ -224,96 +237,110 @@ impl ModuleLinker {
         self.files.push(file)
     }
 
-    pub fn gen_stubs(&self, imports: &ImportMap) -> naga::Module {
-        let mut module = self.module.clone();
-
+    pub fn gen_stubs<'s>(
+        &self,
+        imports: impl IntoIterator<Item = (FileHandle, &'s str, Option<&'s str>)>,
+    ) -> ImportStubs {
         // TODO: Properly stub things instead of re-parsing the entire module
-        for (file, name) in imports.imports() {
+        let mut module = self.module.clone();
+        let mut names_to_handle = FxStrMap::new();
+
+        for (file, orig_name, rename_to) in imports {
+            let rename_to = rename_to.unwrap_or(orig_name);
             let file = &self.files[file];
+            let Some(&handle) = file.exports.get(orig_name) else {
+                panic!("failed to find import {orig_name:?}");
+            };
 
-            if let Some(&handle) = file.types.get(name) {
-                let mut ty = self.module.types[handle].clone();
-                NameMangler::demangle_mut(ty.name.as_mut().unwrap());
-                module.types.replace(handle, ty);
-                continue;
+            names_to_handle.insert(rename_to, handle);
+
+            fn rename(target: &mut Option<String>, value: &str) {
+                let target = target.as_mut().unwrap();
+                target.clear();
+                target.push_str(value);
             }
 
-            macro_rules! rename_arenas {
-                ($($name:ident),*$(,)?) => {$(
-                    if let Some(&handle) = file.$name.get(name) {
-                        NameMangler::demangle_mut(module.$name[handle].name.as_mut().unwrap());
-                        continue;
-                    }
-                )*};
+            match handle.kind {
+                ExportKind::Types => {
+                    let mut ty = self.module.types[handle.raw.as_typed()].clone();
+                    rename(&mut ty.name, rename_to);
+                    module.types.replace(handle.raw.as_typed(), ty);
+                }
+                ExportKind::Constants => {
+                    rename(&mut module.constants[handle.raw.as_typed()].name, rename_to);
+                }
+                ExportKind::Overrides => {
+                    rename(&mut module.overrides[handle.raw.as_typed()].name, rename_to);
+                }
+                ExportKind::GlobalVariables => {
+                    rename(
+                        &mut module.global_variables[handle.raw.as_typed()].name,
+                        rename_to,
+                    );
+                }
+                ExportKind::Functions => {
+                    rename(&mut module.functions[handle.raw.as_typed()].name, rename_to);
+                }
             }
-
-            rename_arenas!(constants, overrides, global_variables, functions);
         }
 
-        module
+        ImportStubs {
+            module,
+            names_to_handle,
+        }
+    }
+
+    pub fn full_module(&self) -> &naga::Module {
+        &self.module
+    }
+}
+
+#[derive(Debug)]
+pub struct ImportStubs {
+    module: naga::Module,
+    names_to_handle: FxStrMap<AnyNagaHandle>,
+}
+
+impl ImportStubs {
+    pub fn empty() -> Self {
+        ImportStubs {
+            module: naga::Module::default(),
+            names_to_handle: FxStrMap::new(),
+        }
     }
 
     pub fn module(&self) -> &naga::Module {
         &self.module
     }
-}
 
-#[derive(Debug, Default)]
-pub struct ImportMap {
-    names: String,
-    imports: Vec<(FileHandle, Range<usize>)>,
-    name_to_file: FxHashMap<Range<usize>, FileHandle>,
-}
-
-impl ImportMap {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn push(&mut self, file: FileHandle, name: &str) {
-        let start = self.names.len();
-        self.names.push_str(name);
-        let range = start..self.names.len();
-
-        self.imports.push((file, range.clone()));
-
-        let hash = fx_hash_one(name);
-
-        let RawEntryMut::Vacant(entry) = self
-            .name_to_file
-            .raw_entry_mut()
-            .from_hash(hash, |range| &self.names[range.clone()] == name)
-        else {
-            panic!("{name:?} added to import map more than once");
-        };
-
-        entry.insert_with_hasher(hash, range, file, |v| fx_hash_one(&self.names[v.clone()]));
-    }
-
-    pub fn imports(&self) -> impl Iterator<Item = (FileHandle, &str)> + '_ {
-        self.imports
-            .iter()
-            .map(|(file, range)| (*file, &self.names[range.clone()]))
-    }
-
-    pub fn name_to_file(&self, name: &str) -> Option<FileHandle> {
-        let hash = fx_hash_one(name);
-        self.name_to_file
-            .raw_entry()
-            .from_hash(hash, |range| &self.names[range.clone()] == name)
-            .map(|(_k, v)| *v)
+    fn name_to_handle(&self, name: &str) -> Option<AnyNagaHandle> {
+        self.names_to_handle.get(name).copied()
     }
 }
 
-impl<'a> FromIterator<(FileHandle, &'a str)> for ImportMap {
-    fn from_iter<T: IntoIterator<Item = (FileHandle, &'a str)>>(iter: T) -> Self {
-        let mut map = ImportMap::new();
-        for (file, name) in iter {
-            map.push(file, name);
-        }
-        map
-    }
+// === File === //
+
+#[derive(Default)]
+struct File {
+    exports: FxHashMap<String, AnyNagaHandle>,
 }
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+struct AnyNagaHandle {
+    kind: ExportKind,
+    raw: RawNagaHandle,
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+enum ExportKind {
+    Types,
+    Constants,
+    Overrides,
+    GlobalVariables,
+    Functions,
+}
+
+// === Helpers === //
 
 #[derive(Debug, Default)]
 struct NameMangler(u64);

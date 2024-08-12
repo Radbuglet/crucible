@@ -7,6 +7,8 @@ use derive_where::derive_where;
 
 pub use rustc_hash::FxHasher;
 
+use super::StrMap;
+
 #[derive_where(Debug, Copy, Clone, Default)]
 pub struct ConstBuildHasherDefault<T> {
     _ty: PhantomData<fn() -> T>,
@@ -50,6 +52,8 @@ pub type FxHashSet<T> = hashbrown::HashSet<T, FxBuildHasher>;
 pub type NopBuildHasher = ConstBuildHasherDefault<NopHasher>;
 pub type NopHashMap<K, V> = hashbrown::HashMap<K, V, NopBuildHasher>;
 pub type NopHashSet<T> = hashbrown::HashSet<T, NopBuildHasher>;
+
+pub type FxStrMap<V> = StrMap<V, FxBuildHasher>;
 
 pub fn fx_hash_one(value: impl hash::Hash) -> u64 {
     FxBuildHasher::new().hash_one(value)
