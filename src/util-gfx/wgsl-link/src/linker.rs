@@ -1,14 +1,19 @@
+use std::ops::Range;
+
 use crucible_utils::{
     define_index,
-    hash::FxHashMap,
-    newtypes::IndexVec,
+    hash::{fx_hash_one, hashbrown::hash_map::RawEntryMut, FxHashMap},
+    newtypes::{Index, IndexVec, LargeIndex},
     polyfill::{copy_hygiene, OptionExt},
 };
 
-use crate::merge::{folders, ArenaMerger, Foldable, FolderExt as _, MapResult, UniqueArenaMerger};
+use crate::merge::{
+    folders, handle_from_usize, ArenaMerger, Foldable, FolderExt as _, MapResult, UniqueArenaMerger,
+};
 
 define_index! {
     pub struct FileHandle: u32;
+    pub struct MangleIndex: u64;
 }
 
 #[derive(Default)]
@@ -22,6 +27,9 @@ pub struct ModuleLinker {
 
     // ID generator for de-mangling.
     mangler: NameMangler,
+
+    // Map from mangle IDs to handles.
+    mangle_idx_to_handle: IndexVec<MangleIndex, usize>,
 }
 
 #[derive(Default)]
@@ -42,7 +50,7 @@ impl ModuleLinker {
         &mut self,
         module: naga::Module,
         span_offset: u32,
-        resolve_stub: impl FnMut(&str) -> Option<FileHandle>,
+        imports: &ImportMap,
     ) -> FileHandle {
         let mut file = File::default();
 
@@ -52,16 +60,32 @@ impl ModuleLinker {
             })
         };
 
-        let mut stubs = StubResolver(resolve_stub);
-
         // Since everything depends on types, let's import those first.
-        let types = UniqueArenaMerger::new(
-            &mut self.module.types,
-            module.types,
-            |types, span, ty| {
+        macro_rules! dedup_name {
+            ($name:expr, $dedup_from:ident) => {
+                'a: {
+                    let name = $name;
+
+                    if let Some((_, mangle_idx)) = NameMangler::try_demangle(name) {
+                        break 'a Some(handle_from_usize(self.mangle_idx_to_handle[mangle_idx]));
+                    }
+
+                    if let Some(file) = imports.name_to_file(name) {
+                        break 'a Some(self.files[file].$dedup_from[name]);
+                    }
+
+                    None
+                }
+            };
+        }
+
+        let types = UniqueArenaMerger::new(&mut self.module.types, module.types, |req| {
+            req.map(|types, span, ty| {
                 // Attempt to map the type to its non-stubbed version
-                if let Some((name, file)) = stubs.resolve_opt(ty.name.as_deref()) {
-                    return (MapResult::Dedup(self.files[file].types[name]), None);
+                if let Some(name) = &ty.name {
+                    if let Some(handle) = dedup_name!(name, types) {
+                        return (MapResult::Dedup(handle), None);
+                    }
                 }
 
                 // Otherwise, map it so that it can be integrated into the current arena.
@@ -70,20 +94,24 @@ impl ModuleLinker {
                 // If it has a name, mangle it.
                 let demangle_to;
                 if let Some(name) = &mut ty.name {
-                    demangle_to = Some(name.clone());
-                    self.mangler.mangle_mut(name);
+                    let demangled_name = name.clone();
+                    let mangle_id = self.mangler.mangle_mut(name);
+                    demangle_to = Some((demangled_name, mangle_id));
                 } else {
                     demangle_to = None
                 }
 
                 (MapResult::Map(map_span(span), ty), demangle_to)
-            },
-            |_types, _dest_arena, demangle_to, _src_handle, dest_handle| {
-                if let Some(demangle_to) = demangle_to {
-                    file.types.insert(demangle_to, dest_handle);
-                }
-            },
-        );
+            })
+            .post_map(
+                |_types, _dest_arena, demangle_to, _src_handle, dest_handle| {
+                    if let Some((demangled_name, mangle_id)) = demangle_to {
+                        file.types.insert(demangled_name, dest_handle);
+                        *self.mangle_idx_to_handle.entry(mangle_id) = dest_handle.index();
+                    }
+                },
+            );
+        });
 
         // If the imported module had special types, include them. If these types were already set,
         // the type insertion operation should deduplicated them and nothing should change.
@@ -127,11 +155,7 @@ impl ModuleLinker {
                 let mut $name = ArenaMerger::new(
                     &mut self.module.$name,
                     module.$name,
-                    |_span, val| {
-                        stubs
-                            .resolve_opt(val.name.as_deref())
-                            .map(|(name, file)| self.files[file].$name[name])
-                    },
+                    |_span, val| val.name.as_deref().and_then(|name| dedup_name!(name, $name)),
                 );
             )*};
         }
@@ -153,7 +177,8 @@ impl ModuleLinker {
                         file.$name
                             .insert(name.clone(), $name.src_to_dest(handle));
 
-                        self.mangler.mangle_mut(name);
+                        let mangle_idx = self.mangler.mangle_mut(name);
+                        *self.mangle_idx_to_handle.entry(mangle_idx) = handle.index();
                     }
 
                     (
@@ -199,8 +224,33 @@ impl ModuleLinker {
         self.files.push(file)
     }
 
-    pub fn gen_stubs(&mut self, file: FileHandle, names: &[&str], out: &mut String) {
-        todo!()
+    pub fn gen_stubs(&self, imports: &ImportMap) -> naga::Module {
+        let mut module = self.module.clone();
+
+        // TODO: Properly stub things instead of re-parsing the entire module
+        for (file, name) in imports.imports() {
+            let file = &self.files[file];
+
+            if let Some(&handle) = file.types.get(name) {
+                let mut ty = self.module.types[handle].clone();
+                NameMangler::demangle_mut(ty.name.as_mut().unwrap());
+                module.types.replace(handle, ty);
+                continue;
+            }
+
+            macro_rules! rename_arenas {
+                ($($name:ident),*$(,)?) => {$(
+                    if let Some(&handle) = file.$name.get(name) {
+                        NameMangler::demangle_mut(module.$name[handle].name.as_mut().unwrap());
+                        continue;
+                    }
+                )*};
+            }
+
+            rename_arenas!(constants, overrides, global_variables, functions);
+        }
+
+        module
     }
 
     pub fn module(&self) -> &naga::Module {
@@ -209,31 +259,89 @@ impl ModuleLinker {
 }
 
 #[derive(Debug, Default)]
-struct NameMangler(u64);
+pub struct ImportMap {
+    names: String,
+    imports: Vec<(FileHandle, Range<usize>)>,
+    name_to_file: FxHashMap<Range<usize>, FileHandle>,
+}
 
-impl NameMangler {
-    pub fn mangle_mut(&mut self, name: &mut String) {
-        use std::fmt::Write as _;
-        write!(name, "_MANGLE_{:x}_", self.0).unwrap();
-        self.0 += 1;
+impl ImportMap {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn demangle<'a>(&mut self, name: &'a str) -> &'a str {
-        &name[..name.rfind("_MANGLE").expect("name was never mangled")]
+    pub fn push(&mut self, file: FileHandle, name: &str) {
+        let start = self.names.len();
+        self.names.push_str(name);
+        let range = start..self.names.len();
+
+        self.imports.push((file, range.clone()));
+
+        let hash = fx_hash_one(name);
+
+        let RawEntryMut::Vacant(entry) = self
+            .name_to_file
+            .raw_entry_mut()
+            .from_hash(hash, |range| &self.names[range.clone()] == name)
+        else {
+            panic!("{name:?} added to import map more than once");
+        };
+
+        entry.insert_with_hasher(hash, range, file, |v| fx_hash_one(&self.names[v.clone()]));
+    }
+
+    pub fn imports(&self) -> impl Iterator<Item = (FileHandle, &str)> + '_ {
+        self.imports
+            .iter()
+            .map(|(file, range)| (*file, &self.names[range.clone()]))
+    }
+
+    pub fn name_to_file(&self, name: &str) -> Option<FileHandle> {
+        let hash = fx_hash_one(name);
+        self.name_to_file
+            .raw_entry()
+            .from_hash(hash, |range| &self.names[range.clone()] == name)
+            .map(|(_k, v)| *v)
     }
 }
 
-struct StubResolver<F>(F);
+impl<'a> FromIterator<(FileHandle, &'a str)> for ImportMap {
+    fn from_iter<T: IntoIterator<Item = (FileHandle, &'a str)>>(iter: T) -> Self {
+        let mut map = ImportMap::new();
+        for (file, name) in iter {
+            map.push(file, name);
+        }
+        map
+    }
+}
 
-impl<F> StubResolver<F>
-where
-    F: FnMut(&str) -> Option<FileHandle>,
-{
-    pub fn resolve(&mut self, name: &str) -> Option<FileHandle> {
-        self.0(name)
+#[derive(Debug, Default)]
+struct NameMangler(u64);
+
+impl NameMangler {
+    const MANGLE_SEP: &'static str = "_MANGLE_";
+
+    pub fn mangle_mut(&mut self, name: &mut String) -> MangleIndex {
+        use std::fmt::Write as _;
+        let idx = MangleIndex::from_raw(self.0);
+        write!(name, "{}{:x}_", Self::MANGLE_SEP, self.0).unwrap();
+        self.0 += 1;
+        idx
     }
 
-    pub fn resolve_opt<'a>(&mut self, name: Option<&'a str>) -> Option<(&'a str, FileHandle)> {
-        name.and_then(|name| Some((name, self.resolve(name)?)))
+    pub fn try_demangle(name: &str) -> Option<(&str, MangleIndex)> {
+        let idx = name.rfind(Self::MANGLE_SEP)?;
+
+        let left = &name[..idx];
+
+        let right = &name[idx..][Self::MANGLE_SEP.len()..];
+        let right = &right[..(right.len() - 1)];
+        let right = MangleIndex::from_usize(usize::from_str_radix(right, 16).unwrap());
+
+        Some((left, right))
+    }
+
+    pub fn demangle_mut(name: &mut String) {
+        name.truncate(name.rfind(Self::MANGLE_SEP).expect("name was not mangled"))
     }
 }

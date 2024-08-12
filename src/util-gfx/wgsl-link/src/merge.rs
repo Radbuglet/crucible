@@ -6,11 +6,12 @@ use std::{
     num::NonZeroU32,
 };
 
+use crucible_utils::multi_closure::multi_closure;
 use naga::{Arena, Handle, Span, UniqueArena};
 
 // === Helpers === //
 
-fn handle_from_usize<T>(value: usize) -> Handle<T> {
+pub fn handle_from_usize<T>(value: usize) -> Handle<T> {
     let value = u32::try_from(value)
         .ok()
         .filter(|&v| v != u32::MAX)
@@ -171,8 +172,7 @@ impl<T> UniqueArenaMerger<T> {
     pub fn new<M>(
         dest_arena: &mut UniqueArena<T>,
         src_arena: UniqueArena<T>,
-        mut map: impl FnMut(&UniqueArenaMerger<T>, Span, T) -> (MapResult<T>, M),
-        mut post_map: impl FnMut(&UniqueArenaMerger<T>, &UniqueArena<T>, M, Handle<T>, Handle<T>),
+        mut map: impl FnMut(UniqueArenaMapRequest<T, M>),
     ) -> Self
     where
         T: Eq + hash::Hash + Clone,
@@ -186,7 +186,8 @@ impl<T> UniqueArenaMerger<T> {
             let span = src_arena.get_span(src_handle);
             let value = value.clone();
 
-            let (map_res, map_meta) = map(&mapper, span, value);
+            let (map_res, map_meta) =
+                UniqueArenaMapRequest::call_map((&mapper, span, value), &mut map);
 
             let dest_handle = match map_res {
                 MapResult::Map(span, value) => dest_arena.insert(value, span),
@@ -194,7 +195,10 @@ impl<T> UniqueArenaMerger<T> {
             };
             mapper.map.push(dest_handle);
 
-            post_map(&mapper, dest_arena, map_meta, src_handle, dest_handle);
+            UniqueArenaMapRequest::call_post_map(
+                (&mapper, dest_arena, map_meta, src_handle, dest_handle),
+                &mut map,
+            );
         }
 
         mapper
@@ -208,6 +212,13 @@ impl<T> UniqueArenaMerger<T> {
 impl<T> Folder<Handle<T>> for UniqueArenaMerger<T> {
     fn fold(&self, value: Handle<T>) -> Handle<T> {
         self.src_to_dest(value)
+    }
+}
+
+multi_closure! {
+    pub enum UniqueArenaMapRequest<'a, T, M> {
+        map(&'a UniqueArenaMerger<T>, Span, T) -> (MapResult<T>, M),
+        post_map(&'a UniqueArenaMerger<T>, &'a UniqueArena<T>, M, Handle<T>, Handle<T>),
     }
 }
 

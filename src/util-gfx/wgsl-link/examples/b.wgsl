@@ -4,6 +4,9 @@ struct Baz {
 
 struct Foo {
     jg: Baz,
+    far: Bar,
 }
 
-fn quux(v: Foo) {}
+fn quux(v: Foo) {
+    let kaz = Baz(v.jg.faz);
+}
