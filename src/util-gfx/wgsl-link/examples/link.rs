@@ -17,6 +17,7 @@ fn main() {
         (file_a, "whee", Some("whee_new")),
         (file_a, "Bar", None),
         (file_a, "Foo", Some("FooNew")),
+        (file_a, "FOO", None),
     ]);
 
     let mut b_src = include_str!("b.wgsl").to_string();
@@ -29,6 +30,7 @@ fn main() {
         )
         .unwrap(),
     );
+    eprintln!("{b_src}");
     linker.link(naga::front::wgsl::parse_str(&b_src).unwrap(), &b_stubs, 0);
 
     let out = naga::back::wgsl::write_string(
@@ -38,5 +40,5 @@ fn main() {
     )
     .unwrap();
 
-    eprintln!("{out}");
+    eprintln!("// === Linked Output === //\n\n{out}");
 }

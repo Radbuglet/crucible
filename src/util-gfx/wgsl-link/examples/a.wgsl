@@ -1,3 +1,5 @@
+const FOO: u32 = 4u;
+
 struct Foo {
     bar: Bar,
 }

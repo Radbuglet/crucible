@@ -1,3 +1,5 @@
+const BAR: u32 = FOO + 2u;
+
 struct Baz {
     faz: i32,
 }

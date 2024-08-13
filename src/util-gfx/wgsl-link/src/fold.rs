@@ -272,20 +272,8 @@ where
         });
 
         // Map other collections
-        let arguments = self
-            .arguments
-            .into_iter()
-            .map(|arg| naga::FunctionArgument {
-                name: arg.name,
-                ty: f.fold(arg.ty),
-                binding: arg.binding,
-            })
-            .collect();
-
-        let result = self.result.map(|res| naga::FunctionResult {
-            ty: f.fold(res.ty),
-            binding: res.binding,
-        });
+        let arguments = self.arguments.into_iter().map(|arg| arg.fold(f)).collect();
+        let result = self.result.map(|res| res.fold(f));
 
         let named_expressions = self
             .named_expressions
@@ -309,6 +297,31 @@ where
             expressions: expressions_arena,
             named_expressions,
             body,
+        }
+    }
+}
+
+impl<F> Foldable<F> for naga::FunctionArgument
+where
+    F: Folder<Handle<naga::Type>>,
+{
+    fn fold(self, f: &F) -> Self {
+        naga::FunctionArgument {
+            name: self.name,
+            ty: f.fold(self.ty),
+            binding: self.binding,
+        }
+    }
+}
+
+impl<F> Foldable<F> for naga::FunctionResult
+where
+    F: Folder<Handle<naga::Type>>,
+{
+    fn fold(self, f: &F) -> Self {
+        naga::FunctionResult {
+            ty: f.fold(self.ty),
+            binding: self.binding,
         }
     }
 }

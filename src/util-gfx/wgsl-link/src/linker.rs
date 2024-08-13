@@ -4,10 +4,12 @@ use crucible_utils::{
     newtypes::{Index, IndexVec, LargeIndex},
     polyfill::{copy_hygiene, OptionExt},
 };
+use naga::Span;
 
 use crate::{
     fold::{folders, Foldable as _, FolderExt as _},
     merge::{ArenaMerger, MapResult, RawNagaHandle, UniqueArenaMerger},
+    shake::{ArenaShakeSession, ArenaShaker, UniqueArenaShaker},
 };
 
 // === ModuleLinker === //
@@ -241,8 +243,29 @@ impl ModuleLinker {
         &self,
         imports: impl IntoIterator<Item = (FileHandle, &'s str, Option<&'s str>)>,
     ) -> ImportStubs {
-        // TODO: Properly stub things instead of re-parsing the entire module
-        let mut module = self.module.clone();
+        // Create a shaker for each arena.
+        let sess = ArenaShakeSession::new();
+        let mut constants = ArenaShaker::new(&sess, &self.module.constants);
+        let mut overrides = ArenaShaker::new(&sess, &self.module.overrides);
+        let mut global_variables = ArenaShaker::new(&sess, &self.module.global_variables);
+        let mut global_expressions = ArenaShaker::new(&sess, &self.module.global_expressions);
+        let mut functions = ArenaShaker::new(&sess, &self.module.functions);
+
+        let mut types =
+            UniqueArenaShaker::new(&self.module.types, (), &|types, span, val, rename_to| {
+                let mut val = val.clone().fold(&folders!(
+                    a: &|v: Span| v,
+                    b: &types.folder(&|| None),
+                ));
+                if let Some(rename_to) = rename_to {
+                    let name = val.name.as_mut().unwrap();
+                    name.clear();
+                    name.push_str(rename_to);
+                }
+                (span, val.clone())
+            });
+
+        // Seed each shaker with their base set of imports. Record where these new names map to.
         let mut names_to_handle = FxStrMap::new();
 
         for (file, orig_name, rename_to) in imports {
@@ -254,35 +277,116 @@ impl ModuleLinker {
 
             names_to_handle.insert(rename_to, handle);
 
-            fn rename(target: &mut Option<String>, value: &str) {
-                let target = target.as_mut().unwrap();
-                target.clear();
-                target.push_str(value);
-            }
-
             match handle.kind {
                 ExportKind::Types => {
-                    let mut ty = self.module.types[handle.raw.as_typed()].clone();
-                    rename(&mut ty.name, rename_to);
-                    module.types.replace(handle.raw.as_typed(), ty);
+                    types.include(handle.raw.as_typed(), || Some(rename_to));
                 }
                 ExportKind::Constants => {
-                    rename(&mut module.constants[handle.raw.as_typed()].name, rename_to);
+                    constants.include(handle.raw.as_typed(), || Some(rename_to));
                 }
                 ExportKind::Overrides => {
-                    rename(&mut module.overrides[handle.raw.as_typed()].name, rename_to);
+                    overrides.include(handle.raw.as_typed(), || Some(rename_to));
                 }
                 ExportKind::GlobalVariables => {
-                    rename(
-                        &mut module.global_variables[handle.raw.as_typed()].name,
-                        rename_to,
-                    );
+                    global_variables.include(handle.raw.as_typed(), || Some(rename_to));
                 }
                 ExportKind::Functions => {
-                    rename(&mut module.functions[handle.raw.as_typed()].name, rename_to);
+                    functions.include(handle.raw.as_typed(), || Some(rename_to));
                 }
             }
         }
+
+        // Construct tree-shaken stub arenas using the seeded names of the previous step.
+        sess.run(|| {
+            constants.run(|span, val, rename_to| {
+                (
+                    span,
+                    naga::Constant {
+                        name: rename_to
+                            .map_or_else(|| val.name.clone(), |name| Some(name.to_string())),
+                        ty: types.include(val.ty, || None),
+                        init: global_expressions.include(val.init, || ()),
+                    },
+                )
+            });
+
+            overrides.run(|span, val, rename_to| {
+                (
+                    span,
+                    naga::Override {
+                        name: rename_to
+                            .map_or_else(|| val.name.clone(), |name| Some(name.to_string())),
+                        id: val.id,
+                        ty: types.include(val.ty, || None),
+                        init: val.init.map(|expr| global_expressions.include(expr, || ())),
+                    },
+                )
+            });
+
+            global_variables.run(|span, val, rename_to| {
+                (
+                    span,
+                    naga::GlobalVariable {
+                        name: rename_to
+                            .map_or_else(|| val.name.clone(), |name| Some(name.to_string())),
+                        space: val.space,
+                        binding: val.binding.clone(),
+                        ty: types.include(val.ty, || None),
+                        init: val.init.map(|expr| global_expressions.include(expr, || ())),
+                    },
+                )
+            });
+
+            global_expressions.run(|span, val, ()| {
+                (
+                    span,
+                    val.clone().fold(&folders!(
+                        a: &constants.folder(&|| None),
+                        b: &overrides.folder(&|| None),
+                        c: &types.folder(&|| None),
+                        // TODO: Shakers need to be self-referential
+                        d: &|_exp: naga::Handle<naga::Expression>| todo!(),
+                        e: &global_variables.folder(&|| None),
+                        f: &|_var: naga::Handle<naga::LocalVariable>| unreachable!("global expressions should not reference local variables"),
+                        g: &functions.folder(&|| None),
+                    )),
+                )
+            });
+
+            functions.run(|span, val, rename_to| {
+                (
+                    span,
+                    naga::Function {
+                        name: rename_to
+                            .map_or_else(|| val.name.clone(), |name| Some(name.to_string())),
+                        arguments: val
+                            .arguments
+                            .iter()
+                            .map(|arg| arg.clone().fold(&types.folder(&|| None)))
+                            .collect(),
+                        result: val
+                            .result
+                            .clone()
+                            .map(|res| res.fold(&types.folder(&|| None))),
+                        local_variables: naga::Arena::new(),
+                        expressions: naga::Arena::new(),
+                        named_expressions: naga::FastIndexMap::default(),
+                        body: naga::Block::from_vec(vec![naga::Statement::Kill]),
+                    },
+                )
+            });
+        });
+
+        let module = naga::Module {
+            types: types.finish(),
+            special_types: naga::SpecialTypes::default(),
+            constants: constants.finish(),
+            overrides: overrides.finish(),
+            global_variables: global_variables.finish(),
+            global_expressions: global_expressions.finish(),
+            functions: functions.finish(),
+            entry_points: Vec::new(),
+        };
 
         ImportStubs {
             module,
@@ -366,9 +470,5 @@ impl NameMangler {
         let right = MangleIndex::from_usize(usize::from_str_radix(right, 16).unwrap());
 
         Some((left, right))
-    }
-
-    pub fn demangle_mut(name: &mut String) {
-        name.truncate(name.rfind(Self::MANGLE_SEP).expect("name was not mangled"))
     }
 }

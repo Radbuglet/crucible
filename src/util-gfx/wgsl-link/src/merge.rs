@@ -1,5 +1,7 @@
 //! Utilities for merging `naga` arenas.
 
+#![allow(unused)]
+
 use std::{hash, num::NonZeroU32};
 
 use crucible_utils::{
