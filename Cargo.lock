@@ -3051,6 +3051,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crucible-utils",
+ "memchr",
  "naga 22.0.0",
 ]
 

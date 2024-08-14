@@ -1,6 +1,6 @@
 use std::{cell::RefCell, fmt};
 
-use crucible_utils::lifetimes::DropBump;
+use crucible_utils::mem::DropBump;
 use main_loop::GfxContext;
 use typed_wgpu::{BufferAddress, GpuStruct};
 

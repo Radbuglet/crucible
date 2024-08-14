@@ -1,10 +1,12 @@
 use crucible_utils::{
     define_index,
     hash::{FxHashMap, FxStrMap},
-    newtypes::{Index, IndexVec, LargeIndex},
+    newtypes::{IndexVec, LargeIndex as _},
     polyfill::{copy_hygiene, OptionExt},
 };
 use naga::Span;
+
+use crate::mangle::{mangle_mut, try_demangle, MangleIndex};
 
 use super::{
     fold::{folders, Foldable as _, FolderExt as _},
@@ -16,7 +18,6 @@ use super::{
 
 define_index! {
     pub struct FileHandle: u32;
-    pub struct MangleIndex: u64;
 }
 
 #[derive(Default)]
@@ -60,7 +61,7 @@ impl ModuleLinker {
                 'a: {
                     let name = $name;
 
-                    if let Some((_, mangle_idx)) = NameMangler::try_demangle(name) {
+                    if let Some((_, mangle_idx)) = try_demangle(name) {
                         break 'a Some(self.mangle_idx_to_handle[mangle_idx].as_typed());
                     }
 
@@ -449,25 +450,10 @@ enum ExportKind {
 struct NameMangler(u64);
 
 impl NameMangler {
-    const MANGLE_SEP: &'static str = "_MANGLE_";
-
     pub fn mangle_mut(&mut self, name: &mut String) -> MangleIndex {
-        use std::fmt::Write as _;
         let idx = MangleIndex::from_raw(self.0);
-        write!(name, "{}{:x}_", Self::MANGLE_SEP, self.0).unwrap();
         self.0 += 1;
+        mangle_mut(name, idx);
         idx
-    }
-
-    pub fn try_demangle(name: &str) -> Option<(&str, MangleIndex)> {
-        let idx = name.rfind(Self::MANGLE_SEP)?;
-
-        let left = &name[..idx];
-
-        let right = &name[idx..][Self::MANGLE_SEP.len()..];
-        let right = &right[..(right.len() - 1)];
-        let right = MangleIndex::from_usize(usize::from_str_radix(right, 16).unwrap());
-
-        Some((left, right))
     }
 }

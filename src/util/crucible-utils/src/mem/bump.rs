@@ -48,7 +48,7 @@ impl Drop for DropBump<'_> {
 
 mod doc_tests {
     /// ```compile_fail
-    /// use crucible_utils::lifetimes::DropBump;
+    /// use crucible_utils::mem::DropBump;
     ///
     /// struct Inspector<'a>(&'a Box<u32>);
     ///
@@ -67,7 +67,7 @@ mod doc_tests {
     fn _dc_1() {}
 
     /// ```
-    /// use crucible_utils::lifetimes::DropBump;
+    /// use crucible_utils::mem::DropBump;
     ///
     /// struct Inspector<'a>(&'a Box<u32>);
     ///

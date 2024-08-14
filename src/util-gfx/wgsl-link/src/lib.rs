@@ -13,4 +13,5 @@
 //
 
 pub mod driver;
+pub mod mangle;
 pub mod module;
