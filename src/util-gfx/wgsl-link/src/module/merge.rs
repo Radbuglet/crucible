@@ -1,7 +1,5 @@
 //! Utilities for merging `naga` arenas.
 
-#![allow(unused)]
-
 use std::{hash, num::NonZeroU32};
 
 use crucible_utils::{
@@ -11,7 +9,7 @@ use crucible_utils::{
 };
 use naga::{Arena, Handle, Span, UniqueArena};
 
-use crate::fold::Folder;
+use super::fold::Folder;
 
 // === Helpers === //
 

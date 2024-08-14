@@ -6,7 +6,7 @@ use crucible_utils::{
 };
 use naga::Span;
 
-use crate::{
+use super::{
     fold::{folders, Foldable as _, FolderExt as _},
     merge::{ArenaMerger, MapResult, RawNagaHandle, UniqueArenaMerger},
     shake::{ArenaShakeSession, ArenaShaker, UniqueArenaShaker},
@@ -298,7 +298,7 @@ impl ModuleLinker {
 
         // Construct tree-shaken stub arenas using the seeded names of the previous step.
         sess.run(|| {
-            constants.run(|span, val, rename_to| {
+            constants.run(|_constants, span, val, rename_to| {
                 (
                     span,
                     naga::Constant {
@@ -310,7 +310,7 @@ impl ModuleLinker {
                 )
             });
 
-            overrides.run(|span, val, rename_to| {
+            overrides.run(|_overrides, span, val, rename_to| {
                 (
                     span,
                     naga::Override {
@@ -323,7 +323,7 @@ impl ModuleLinker {
                 )
             });
 
-            global_variables.run(|span, val, rename_to| {
+            global_variables.run(|_global_variables, span, val, rename_to| {
                 (
                     span,
                     naga::GlobalVariable {
@@ -337,15 +337,14 @@ impl ModuleLinker {
                 )
             });
 
-            global_expressions.run(|span, val, ()| {
+            global_expressions.run(|global_expressions, span, val, ()| {
                 (
                     span,
                     val.clone().fold(&folders!(
                         a: &constants.folder(&|| None),
                         b: &overrides.folder(&|| None),
                         c: &types.folder(&|| None),
-                        // TODO: Shakers need to be self-referential
-                        d: &|_exp: naga::Handle<naga::Expression>| todo!(),
+                        d: &global_expressions.folder(&|| ()),
                         e: &global_variables.folder(&|| None),
                         f: &|_var: naga::Handle<naga::LocalVariable>| unreachable!("global expressions should not reference local variables"),
                         g: &functions.folder(&|| None),
@@ -353,7 +352,7 @@ impl ModuleLinker {
                 )
             });
 
-            functions.run(|span, val, rename_to| {
+            functions.run(|_functions, span, val, rename_to| {
                 (
                     span,
                     naga::Function {

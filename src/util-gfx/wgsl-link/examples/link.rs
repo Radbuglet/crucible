@@ -1,4 +1,4 @@
-use wgsl_link::linker::{ImportStubs, ModuleLinker};
+use wgsl_link::module::linker::{ImportStubs, ModuleLinker};
 
 fn main() {
     let mut linker = ModuleLinker::new();

@@ -12,7 +12,5 @@
 // - Emit a giant file for the entire linked module.
 //
 
-mod fold;
-pub mod linker;
-mod merge;
-mod shake;
+pub mod driver;
+pub mod module;

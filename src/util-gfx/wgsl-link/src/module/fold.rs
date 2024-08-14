@@ -2,7 +2,7 @@ use std::any::{type_name, Any};
 
 use naga::{Arena, Handle, Span};
 
-use crate::merge::{ArenaMerger, RawNagaHandle};
+use super::merge::{ArenaMerger, RawNagaHandle};
 
 // === Helpers === //
 
@@ -113,13 +113,14 @@ impl FoldReq<'_> {
 }
 
 // Macro
+#[macro_export]
 macro_rules! folders {
     ($($name:ident: $folder:expr),+$(,)?) => {{
         #[allow(non_camel_case_types)]
-        fn produce<'a, $($name: 'static),*>($($name: &'a (impl ?Sized + $crate::fold::Folder<$name>),)*)
-            -> impl 'a $(+ $crate::fold::Folder<$name>)*
+        fn produce<'a, $($name: 'static),*>($($name: &'a (impl ?Sized + $crate::module::fold::Folder<$name>),)*)
+            -> impl 'a $(+ $crate::module::fold::Folder<$name>)*
         {
-            $crate::fold::CompositeFolder(|req| {
+            $crate::module::fold::CompositeFolder(|req| {
                 req $(.fold($name))* ;
             })
         }
@@ -128,7 +129,7 @@ macro_rules! folders {
     }};
 }
 
-pub(crate) use folders;
+pub use folders;
 
 // === Foldable Implementations === //
 

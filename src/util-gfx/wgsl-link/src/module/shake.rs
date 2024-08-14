@@ -1,7 +1,6 @@
-#![allow(unused)]
-
 use std::{
     cell::{Cell, RefCell},
+    collections::VecDeque,
     hash,
     marker::PhantomData,
 };
@@ -12,7 +11,7 @@ use crucible_utils::{
 };
 use naga::Span;
 
-use crate::{fold::Folder, merge::RawNagaHandle};
+use super::{fold::Folder, merge::RawNagaHandle};
 
 // === ArenaShakeSession === //
 
@@ -43,7 +42,7 @@ pub struct ArenaShaker<'a, T, A> {
     sess: &'a ArenaShakeSession,
     src_arena: &'a naga::Arena<T>,
     dst_arena: naga::Arena<T>,
-    src_handles_to_add: Vec<(naga::Handle<T>, A)>,
+    src_handles_to_add: VecDeque<(naga::Handle<T>, A)>,
     src_to_dst: FxHashMap<naga::Handle<T>, naga::Handle<T>>,
 }
 
@@ -53,7 +52,7 @@ impl<'a, T, A> ArenaShaker<'a, T, A> {
             sess,
             src_arena: source,
             dst_arena: naga::Arena::new(),
-            src_handles_to_add: Vec::new(),
+            src_handles_to_add: VecDeque::new(),
             src_to_dst: FxHashMap::default(),
         }
     }
@@ -75,16 +74,16 @@ impl<'a, T, A> ArenaShaker<'a, T, A> {
                 .as_typed();
 
         self.sess.is_dirty.set(true);
-        self.src_handles_to_add.push((src_handle, meta()));
+        self.src_handles_to_add.push_back((src_handle, meta()));
         entry.insert(dst_handle);
         dst_handle
     }
 
-    pub fn run(&mut self, mut f: impl FnMut(Span, &T, A) -> (Span, T)) {
-        for (src_handle, meta) in self.src_handles_to_add.drain(..) {
+    pub fn run(&mut self, mut f: impl FnMut(&mut Self, Span, &T, A) -> (Span, T)) {
+        while let Some((src_handle, meta)) = self.src_handles_to_add.pop_front() {
             let src_span = self.src_arena.get_span(src_handle);
             let src_value = &self.src_arena[src_handle];
-            let (dst_span, dst_value) = f(src_span, src_value, meta);
+            let (dst_span, dst_value) = f(self, src_span, src_value, meta);
             self.dst_arena.append(dst_value, dst_span);
         }
     }
