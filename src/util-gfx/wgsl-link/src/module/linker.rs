@@ -6,7 +6,7 @@ use crucible_utils::{
 };
 use naga::Span;
 
-use crate::mangle::{mangle_mut, try_demangle, MangleIndex};
+use crate::mangle::{mangle_mut, replace_mangles, try_demangle, MangleIndex};
 
 use super::{
     fold::{folders, Foldable as _, FolderExt as _},
@@ -252,25 +252,23 @@ impl ModuleLinker {
         let mut global_expressions = ArenaShaker::new(&sess, &self.module.global_expressions);
         let mut functions = ArenaShaker::new(&sess, &self.module.functions);
 
-        let mut types =
-            UniqueArenaShaker::new(&self.module.types, (), &|types, span, val, rename_to| {
-                let mut val = val.clone().fold(&folders!(
+        let mut types = UniqueArenaShaker::new(&self.module.types, (), &|types, span, val, ()| {
+            (
+                span,
+                val.clone().fold(&folders!(
                     a: &|v: Span| v,
-                    b: &types.folder(&|| None),
-                ));
-                if let Some(rename_to) = rename_to {
-                    let name = val.name.as_mut().unwrap();
-                    name.clear();
-                    name.push_str(rename_to);
-                }
-                (span, val.clone())
-            });
+                    b: &types.folder(&|| ()),
+                )),
+            )
+        });
 
         // Seed each shaker with their base set of imports. Record where these new names map to.
         let mut names_to_handle = FxStrMap::new();
+        let mut exported_mangles = FxHashMap::default();
 
         for (file, orig_name, rename_to) in imports {
             let rename_to = rename_to.unwrap_or(orig_name);
+
             let file = &self.files[file];
             let Some(&handle) = file.exports.get(orig_name) else {
                 panic!("failed to find import {orig_name:?}");
@@ -278,61 +276,86 @@ impl ModuleLinker {
 
             names_to_handle.insert(rename_to, handle);
 
-            match handle.kind {
+            let mangled_name = match handle.kind {
                 ExportKind::Types => {
-                    types.include(handle.raw.as_typed(), || Some(rename_to));
+                    types.include(handle.raw.as_typed(), || ());
+                    self.module.types[handle.raw.as_typed()]
+                        .name
+                        .as_ref()
+                        .unwrap()
                 }
                 ExportKind::Constants => {
-                    constants.include(handle.raw.as_typed(), || Some(rename_to));
+                    constants.include(handle.raw.as_typed(), || ());
+                    self.module.constants[handle.raw.as_typed()]
+                        .name
+                        .as_ref()
+                        .unwrap()
                 }
                 ExportKind::Overrides => {
-                    overrides.include(handle.raw.as_typed(), || Some(rename_to));
+                    overrides.include(handle.raw.as_typed(), || ());
+                    self.module.overrides[handle.raw.as_typed()]
+                        .name
+                        .as_ref()
+                        .unwrap()
                 }
                 ExportKind::GlobalVariables => {
-                    global_variables.include(handle.raw.as_typed(), || Some(rename_to));
+                    global_variables.include(handle.raw.as_typed(), || ());
+                    self.module.global_variables[handle.raw.as_typed()]
+                        .name
+                        .as_ref()
+                        .unwrap()
                 }
                 ExportKind::Functions => {
-                    functions.include(handle.raw.as_typed(), || Some(rename_to));
+                    functions.include(handle.raw.as_typed(), || ());
+                    self.module.functions[handle.raw.as_typed()]
+                        .name
+                        .as_ref()
+                        .unwrap()
                 }
-            }
+            };
+
+            exported_mangles.insert(
+                try_demangle(mangled_name).unwrap().1,
+                ExportedMangle {
+                    mangle_len: mangled_name.len(),
+                    new_name: rename_to.to_string().into_boxed_str(),
+                },
+            );
         }
 
         // Construct tree-shaken stub arenas using the seeded names of the previous step.
         sess.run(|| {
-            constants.run(|_constants, span, val, rename_to| {
+            constants.run(|_constants, span, val, ()| {
                 (
                     span,
                     naga::Constant {
-                        name: rename_to
-                            .map_or_else(|| val.name.clone(), |name| Some(name.to_string())),
-                        ty: types.include(val.ty, || None),
+                        name: val.name.clone(),
+                        ty: types.include(val.ty, || ()),
                         init: global_expressions.include(val.init, || ()),
                     },
                 )
             });
 
-            overrides.run(|_overrides, span, val, rename_to| {
+            overrides.run(|_overrides, span, val, ()| {
                 (
                     span,
                     naga::Override {
-                        name: rename_to
-                            .map_or_else(|| val.name.clone(), |name| Some(name.to_string())),
+                        name: val.name.clone(),
                         id: val.id,
-                        ty: types.include(val.ty, || None),
+                        ty: types.include(val.ty, || ()),
                         init: val.init.map(|expr| global_expressions.include(expr, || ())),
                     },
                 )
             });
 
-            global_variables.run(|_global_variables, span, val, rename_to| {
+            global_variables.run(|_global_variables, span, val, ()| {
                 (
                     span,
                     naga::GlobalVariable {
-                        name: rename_to
-                            .map_or_else(|| val.name.clone(), |name| Some(name.to_string())),
+                        name: val.name.clone(),
                         space: val.space,
                         binding: val.binding.clone(),
-                        ty: types.include(val.ty, || None),
+                        ty: types.include(val.ty, || ()),
                         init: val.init.map(|expr| global_expressions.include(expr, || ())),
                     },
                 )
@@ -342,32 +365,31 @@ impl ModuleLinker {
                 (
                     span,
                     val.clone().fold(&folders!(
-                        a: &constants.folder(&|| None),
-                        b: &overrides.folder(&|| None),
-                        c: &types.folder(&|| None),
+                        a: &constants.folder(&|| ()),
+                        b: &overrides.folder(&|| ()),
+                        c: &types.folder(&|| ()),
                         d: &global_expressions.folder(&|| ()),
-                        e: &global_variables.folder(&|| None),
+                        e: &global_variables.folder(&|| ()),
                         f: &|_var: naga::Handle<naga::LocalVariable>| unreachable!("global expressions should not reference local variables"),
-                        g: &functions.folder(&|| None),
+                        g: &functions.folder(&|| ()),
                     )),
                 )
             });
 
-            functions.run(|_functions, span, val, rename_to| {
+            functions.run(|_functions, span, val, ()| {
                 (
                     span,
                     naga::Function {
-                        name: rename_to
-                            .map_or_else(|| val.name.clone(), |name| Some(name.to_string())),
+                        name: val.name.clone(),
                         arguments: val
                             .arguments
                             .iter()
-                            .map(|arg| arg.clone().fold(&types.folder(&|| None)))
+                            .map(|arg| arg.clone().fold(&types.folder(&|| ())))
                             .collect(),
                         result: val
                             .result
                             .clone()
-                            .map(|res| res.fold(&types.folder(&|| None))),
+                            .map(|res| res.fold(&types.folder(&|| ()))),
                         local_variables: naga::Arena::new(),
                         expressions: naga::Arena::new(),
                         named_expressions: naga::FastIndexMap::default(),
@@ -391,6 +413,7 @@ impl ModuleLinker {
         ImportStubs {
             module,
             names_to_handle,
+            exported_mangles,
         }
     }
 
@@ -403,6 +426,13 @@ impl ModuleLinker {
 pub struct ImportStubs {
     module: naga::Module,
     names_to_handle: FxStrMap<AnyNagaHandle>,
+    exported_mangles: FxHashMap<MangleIndex, ExportedMangle>,
+}
+
+#[derive(Debug)]
+struct ExportedMangle {
+    mangle_len: usize,
+    new_name: Box<str>,
 }
 
 impl ImportStubs {
@@ -410,11 +440,25 @@ impl ImportStubs {
         ImportStubs {
             module: naga::Module::default(),
             names_to_handle: FxStrMap::new(),
+            exported_mangles: FxHashMap::default(),
         }
     }
 
     pub fn module(&self) -> &naga::Module {
         &self.module
+    }
+
+    pub fn apply_names_to_stub_mut(&self, stub: &mut String) {
+        replace_mangles(stub, |idx, out| {
+            if let Some(rename) = self.exported_mangles.get(&idx) {
+                out.replace_known_len(rename.mangle_len, &rename.new_name);
+            }
+        })
+    }
+
+    pub fn apply_names_to_stub(&self, mut stub: String) -> String {
+        self.apply_names_to_stub_mut(&mut stub);
+        stub
     }
 
     fn name_to_handle(&self, name: &str) -> Option<AnyNagaHandle> {

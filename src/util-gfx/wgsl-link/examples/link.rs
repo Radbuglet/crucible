@@ -14,7 +14,7 @@ fn main() {
     );
 
     let b_stubs = linker.gen_stubs([
-        (file_a, "whee", Some("whee_new")),
+        (file_a, "whee", Some("whee2")),
         (file_a, "Bar", None),
         (file_a, "Foo", Some("FooNew")),
         (file_a, "FOO", None),
@@ -23,12 +23,14 @@ fn main() {
     let mut b_src = include_str!("b.wgsl").to_string();
     b_src.push_str("\n// === Stubs === //\n\n");
     b_src.push_str(
-        &naga::back::wgsl::write_string(
-            b_stubs.module(),
-            &validator.validate(b_stubs.module()).unwrap(),
-            naga::back::wgsl::WriterFlags::all(),
-        )
-        .unwrap(),
+        &b_stubs.apply_names_to_stub(
+            naga::back::wgsl::write_string(
+                b_stubs.module(),
+                &validator.validate(b_stubs.module()).unwrap(),
+                naga::back::wgsl::WriterFlags::all(),
+            )
+            .unwrap(),
+        ),
     );
     eprintln!("{b_src}");
     linker.link(naga::front::wgsl::parse_str(&b_src).unwrap(), &b_stubs, 0);

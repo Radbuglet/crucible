@@ -42,10 +42,13 @@ impl MangleReplaceOut<'_, '_> {
             &self.splicer.remaining()[(self.end_pos - mangled_name.len())..self.end_pos],
             mangled_name.as_bytes(),
         );
+        self.replace_known_len(mangled_name.len(), new_name);
+    }
 
+    pub fn replace_known_len(self, mangled_name_len: usize, new_name: &str) {
         self.splicer.splice(
-            self.end_pos - mangled_name.len(),
-            mangled_name.len(),
+            self.end_pos - mangled_name_len,
+            mangled_name_len,
             new_name.as_bytes(),
         );
     }

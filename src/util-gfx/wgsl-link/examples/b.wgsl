@@ -12,5 +12,5 @@ struct Foo {
 
 fn quux(v: Foo) {
     let kaz = Baz(v.jg.faz);
-    whee_new(v.foo);
+    whee2(v.foo);
 }
