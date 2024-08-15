@@ -1412,6 +1412,7 @@ dependencies = [
  "autoken",
  "bumpalo",
  "crucible-utils",
+ "unicode-xid",
 ]
 
 [[package]]

@@ -35,11 +35,11 @@ pub trait SegmentationLocaleExt: SegmentationLocale {
 impl<T: ?Sized + SegmentationLocale> SegmentationLocaleExt for T {}
 
 pub trait SegmentationHandler {
-    fn push_pos_loc(&mut self, pos: usize, loc: SourceLoc);
+    fn push_pos_loc(&mut self, pos: usize, loc: FileLoc);
 }
 
-impl<F: FnMut(usize, SourceLoc)> SegmentationHandler for F {
-    fn push_pos_loc(&mut self, pos: usize, loc: SourceLoc) {
+impl<F: FnMut(usize, FileLoc)> SegmentationHandler for F {
+    fn push_pos_loc(&mut self, pos: usize, loc: FileLoc) {
         self(pos, loc)
     }
 }
@@ -60,7 +60,7 @@ impl Default for NaiveUtf8Segmenter {
 
 impl SegmentationLocale for NaiveUtf8Segmenter {
     fn segment(&mut self, source: &str, handler: &mut impl SegmentationHandler) {
-        let mut loc = SourceLoc::default();
+        let mut loc = FileLoc::default();
 
         for (idx, char) in source.char_indices() {
             handler.push_pos_loc(idx, loc);
@@ -86,7 +86,7 @@ pub struct SpanManager {
     buffer: String,
 
     /// The start indices of each source.
-    source_starts: IndexVec<SourceIndex, SpanPos>,
+    file_starts: IndexVec<FileIndex, SpanPos>,
 
     /// Control directives sorted by `SpanPos` which indicate the line number for all characters from
     /// the current `SpanPos` (inclusive) to the `SpanPos` (exclusive) of the next tuple in this list.
@@ -117,8 +117,8 @@ impl SpanManager {
         &mut self,
         locale: &mut impl SegmentationLocale,
         load: impl FnOnce(&mut String) -> anyhow::Result<()>,
-    ) -> anyhow::Result<(SourceIndex, Span)> {
-        const ERR_CAP: &str = "loaded too many sources";
+    ) -> anyhow::Result<(FileIndex, Span)> {
+        const ERR_CAP: &str = "loaded too many source files";
 
         // Write to buffer
         let start = SpanPos::try_from_usize(self.buffer.len()).context(ERR_CAP)?;
@@ -129,17 +129,17 @@ impl SpanManager {
         let end = SpanPos::try_from_usize(buffer_trunc_guard.len()).context(ERR_CAP)?;
         defuse(buffer_trunc_guard);
 
-        let source = &self.buffer[start.as_usize()..];
+        let file = &self.buffer[start.as_usize()..];
 
         // Push controls
-        if !source.is_empty() {
+        if !file.is_empty() {
             // We always want `line_no` and `column_no` to give an actual answer, even if it's a bit
             // nonsensical, since panicking during diagnostics is arguably worse.
             self.line_ctrls.push((start, 0));
             self.column_ctrls.push((start, 0));
         }
 
-        locale.segment_checked(source, &mut |pos, loc: SourceLoc| {
+        locale.segment_checked(file, &mut |pos, loc: FileLoc| {
             let pos = SpanPos::from_usize(start.as_usize() + pos);
 
             // Push control directives
@@ -158,12 +158,12 @@ impl SpanManager {
         });
 
         // Commit source information
-        Ok((self.source_starts.push(start), Span { start, end }))
+        Ok((self.file_starts.push(start), Span { start, end }))
     }
 
-    pub fn source_idx(&self, pos: SpanPos) -> SourceIndex {
+    pub fn file(&self, pos: SpanPos) -> FileIndex {
         let idx = match self
-            .source_starts
+            .file_starts
             .raw
             .binary_search_by(|other| pos.cmp(other))
         {
@@ -171,14 +171,14 @@ impl SpanManager {
             Err(idx) => idx - 1,
         };
 
-        SourceIndex::from_usize(idx)
+        FileIndex::from_usize(idx)
     }
 
-    pub fn source_span(&self, index: SourceIndex) -> Span {
-        let start = self.source_starts[index];
+    pub fn file_span(&self, index: FileIndex) -> Span {
+        let start = self.file_starts[index];
         let end = self
-            .source_starts
-            .get(index)
+            .file_starts
+            .get(index.map_usize(|v| v + 1))
             .copied()
             .unwrap_or_else(|| SpanPos::from_usize(self.buffer.len()));
 
@@ -211,8 +211,8 @@ impl SpanManager {
         (pos.as_raw() - col_pos_base.as_raw()) + col_no_base
     }
 
-    pub fn pos_to_loc(&self, pos: SpanPos) -> SourceLoc {
-        SourceLoc {
+    pub fn pos_to_loc(&self, pos: SpanPos) -> FileLoc {
+        FileLoc {
             line: self.line_no(pos),
             column: self.column_no(pos),
         }
@@ -235,40 +235,6 @@ pub struct Span {
     pub end: SpanPos,
 }
 
-define_index! {
-    pub struct SourceIndex: u32;
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Default)]
-pub struct SourceLoc {
-    pub line: u32,
-    pub column: u32,
-}
-
-// === Dependency Injection === //
-
-cap! {
-    pub SpanManagerCap = SpanManager;
-}
-
-impl SpanPos {
-    pub fn source_idx(self) -> SourceIndex {
-        cap!(ref SpanManagerCap).source_idx(self)
-    }
-
-    pub fn line_no(self) -> u32 {
-        cap!(ref SpanManagerCap).line_no(self)
-    }
-
-    pub fn column_no(self) -> u32 {
-        cap!(ref SpanManagerCap).column_no(self)
-    }
-
-    pub fn to_loc(self) -> SourceLoc {
-        cap!(ref SpanManagerCap).pos_to_loc(self)
-    }
-}
-
 impl Span {
     pub fn new(pos_a: SpanPos, pos_b: SpanPos) -> Self {
         let mut pos = [pos_a, pos_b];
@@ -276,15 +242,6 @@ impl Span {
         let [start, end] = pos;
 
         Self { start, end }
-    }
-
-    pub fn source_idx(self) -> SourceIndex {
-        self.start.source_idx()
-    }
-
-    pub fn text<'a>(self) -> &'a str {
-        tie!('a => ref SpanManagerCap);
-        cap!(ref SpanManagerCap).span_text(self)
     }
 
     pub fn to(self, other: Self) -> Self {
@@ -300,15 +257,60 @@ impl Span {
     }
 }
 
-impl SourceIndex {
+define_index! {
+    pub struct FileIndex: u32;
+}
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Default)]
+pub struct FileLoc {
+    pub line: u32,
+    pub column: u32,
+}
+
+// === Dependency Injection === //
+
+cap! {
+    pub SpanManagerCap = SpanManager;
+}
+
+impl SpanPos {
+    pub fn file(self) -> FileIndex {
+        cap!(ref SpanManagerCap).file(self)
+    }
+
+    pub fn line_no(self) -> u32 {
+        cap!(ref SpanManagerCap).line_no(self)
+    }
+
+    pub fn column_no(self) -> u32 {
+        cap!(ref SpanManagerCap).column_no(self)
+    }
+
+    pub fn to_loc(self) -> FileLoc {
+        cap!(ref SpanManagerCap).pos_to_loc(self)
+    }
+}
+
+impl Span {
+    pub fn file(self) -> FileIndex {
+        self.start.file()
+    }
+
+    pub fn text<'a>(self) -> &'a str {
+        tie!('a => ref SpanManagerCap);
+        cap!(ref SpanManagerCap).span_text(self)
+    }
+}
+
+impl FileIndex {
     pub fn new(
         locale: &mut impl SegmentationLocale,
         load: impl FnOnce(&mut String) -> anyhow::Result<()>,
-    ) -> anyhow::Result<(Self, Span)> {
-        cap!(mut SpanManagerCap).load(locale, load)
+    ) -> anyhow::Result<Self> {
+        cap!(mut SpanManagerCap).load(locale, load).map(|(v, _)| v)
     }
 
     pub fn span(self) -> Span {
-        cap!(ref SpanManagerCap).source_span(self)
+        cap!(ref SpanManagerCap).file_span(self)
     }
 }

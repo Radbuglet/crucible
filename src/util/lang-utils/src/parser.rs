@@ -4,11 +4,11 @@ use std::{
     thread::panicking,
 };
 
-use crucible_utils::hash::FxHashSet;
+use crucible_utils::{hash::FxHashSet, newtypes::Index as _};
 
 use crate::{
     diagnostic::{report_diagnostic, Diagnostic},
-    span::Span,
+    span::{FileIndex, Span, SpanPos},
     symbol::Symbol,
 };
 
@@ -373,8 +373,9 @@ where
     }
 }
 
-// === ParseCursor === //
+// === Cursors === //
 
+// Core
 pub trait ForkableCursor: Iterator + Clone {
     fn peek(&self) -> Option<Self::Item> {
         self.clone().next()
@@ -397,6 +398,68 @@ pub trait ParseCursor: ForkableCursor {
 
 pub trait LookBackParseCursor: ParseCursor {
     fn prev_span(&self) -> Span;
+}
+
+// StrCursor
+pub type StrSequence<'a> = ParseSequence<'a, StrCursor<'a>>;
+
+#[derive(Debug, Clone)]
+pub struct StrCursor<'a> {
+    full_span: Span,
+    prev_span: Span,
+    iter: std::str::CharIndices<'a>,
+}
+
+impl<'a> StrCursor<'a> {
+    pub fn new(start_pos: SpanPos, text: &'a str) -> Self {
+        Self {
+            full_span: Span::new(start_pos, start_pos.map_usize(|v| v + text.len())),
+            prev_span: Span::new(start_pos, start_pos),
+            iter: text.char_indices(),
+        }
+    }
+
+    pub fn new_span(span: Span) -> Self {
+        Self::new(span.start, span.text())
+    }
+
+    pub fn new_file(file: FileIndex) -> Self {
+        Self::new_span(file.span())
+    }
+}
+
+impl Iterator for StrCursor<'_> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(_, c)| c)
+    }
+}
+
+impl ForkableCursor for StrCursor<'_> {}
+
+impl ParseCursor for StrCursor<'_> {
+    fn next_span(&self) -> Span {
+        let mut iter = self.iter.clone();
+
+        let start = iter
+            .next()
+            .map(|(i, _)| self.full_span.start.map_usize(|b| b + i))
+            .unwrap_or(self.full_span.end);
+
+        let end = iter
+            .next()
+            .map(|(i, _)| self.full_span.start.map_usize(|b| b + i))
+            .unwrap_or(self.full_span.end);
+
+        Span { start, end }
+    }
+}
+
+impl LookBackParseCursor for StrCursor<'_> {
+    fn prev_span(&self) -> Span {
+        self.prev_span
+    }
 }
 
 // === MaybePlaceholder === //

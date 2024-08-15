@@ -1,3 +1,5 @@
+use std::fmt;
+
 use autoken::cap;
 
 use crate::span::Span;
@@ -11,6 +13,10 @@ pub struct DiagnosticReporter {
 }
 
 impl DiagnosticReporter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn report(&mut self, diagnostic: Diagnostic) {
         if diagnostic.kind == DiagnosticKind::Error {
             self.has_errors = true;
@@ -147,4 +153,8 @@ cap! {
 
 pub fn report_diagnostic(diagnostic: Diagnostic) {
     cap!(mut DiagnosticReporterCap).report(diagnostic);
+}
+
+pub fn has_diagnostic_errors() -> bool {
+    cap!(ref DiagnosticReporterCap).has_errors()
 }
