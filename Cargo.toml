@@ -11,6 +11,7 @@ members = [
     "src/util/crucible-assets",
     "src/util/crucible-utils-proc",
     "src/util/crucible-utils",
+    "src/util/lang-utils",
     "src/util/typed-glam",
 ]
 

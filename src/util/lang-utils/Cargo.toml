@@ -1,0 +1,10 @@
+[package]
+name = "lang-utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.86"
+autoken = { git = "https://github.com/Radbuglet/autoken.git", rev = "c0941f1506fda81dc388f9a52e3770792ee0c822", version = "0.1.0" }
+bumpalo = "3.16.0"
+crucible-utils = { version = "0.1.0", path = "../crucible-utils" }
