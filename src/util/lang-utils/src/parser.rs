@@ -242,7 +242,7 @@ impl<'cx, I> ParseSequence<'cx, I> {
                     stack
                         .iter()
                         .rev()
-                        .map(|(loc, what)| format!("{} starting at {loc:?}", what.as_str()))
+                        .map(|(loc, what)| format!("{} starting at {}", what.as_str(), loc.fmt()))
                         .collect::<Vec<_>>()
                         .join(" in ")
                 )

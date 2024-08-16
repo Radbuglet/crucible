@@ -3061,7 +3061,9 @@ name = "wgsl-link"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "autoken",
  "crucible-utils",
+ "lang-utils",
  "memchr",
  "naga 22.0.0",
 ]

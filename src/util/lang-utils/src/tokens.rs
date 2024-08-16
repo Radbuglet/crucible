@@ -8,7 +8,7 @@ use crate::{
         ForkableCursor, LookBackParseCursor, LookaheadResult, OptionParser, ParseContext,
         ParseCursor, ParseHinter, ParseSequence, StrCursor, StrSequence,
     },
-    span::{FileIndex, Span},
+    span::Span,
     symbol::Symbol,
 };
 
@@ -296,10 +296,10 @@ pub use punct;
 
 // === Tokenizer === //
 
-pub fn tokenize(file: FileIndex) -> TokenGroup {
+pub fn tokenize(file: Span) -> TokenGroup {
     let cx = ParseContext::new();
     {
-        let mut c = cx.enter(StrCursor::new_file(file));
+        let mut c = cx.enter(StrCursor::new_span(file));
         let open_span = Span::new(c.next_span().start, c.next_span().start);
         parse_group(&mut c, open_span, GroupDelimiter::File)
     }
@@ -579,7 +579,7 @@ fn parse_ident(c: &mut StrSequence, start: Span, is_raw: bool) -> Option<TokenId
 
     // Match first character
     builder.push(c.expect(Symbol::new_static("identifier"), |c| {
-        c.next().filter(|c| c.is_xid_start())
+        c.next().filter(|c| c.is_xid_start() || *c == '_')
     })?);
 
     // Match subsequent characters

@@ -1,5 +1,3 @@
-use std::fmt;
-
 use autoken::cap;
 
 use crate::span::Span;
