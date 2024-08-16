@@ -1,12 +1,22 @@
 use autoken::cap;
 use lang_utils::{
+    define_keywords,
     diagnostic::{DiagnosticReporter, DiagnosticReporterCap},
-    parser::ParseContext,
+    parser::{OptionParser, ParseContext},
     punct,
     span::{Span, SpanManager, SpanManagerCap},
     symbol::{Interner, InternerCap, Symbol},
-    tokens::{tokenize, Token},
+    tokens::tokenize,
+    tokens_parse::{eof, identifier, keyword, punct, str_lit},
 };
+
+define_keywords! {
+    enum DirectiveKeyword {
+        As = "as",
+        In = "in",
+        Use = "use",
+    }
+}
 
 pub fn parse_directives(
     diagnostics: &mut DiagnosticReporter,
@@ -69,10 +79,7 @@ fn parse_directive(span: Span) {
 
     let directive_start = p.next_span();
 
-    if !p.expect(Symbol::new_static("`use`"), |p| {
-        p.next()
-            .is_some_and(|v| matches!(v, Token::Ident(i) if i.text == Symbol::new_static("use")))
-    }) {
+    if keyword(DirectiveKeyword::Use).expect(&mut p).is_none() {
         p.stuck(|_| ());
         return;
     }
@@ -84,20 +91,18 @@ fn parse_directive(span: Span) {
     let mut names = Vec::new();
 
     loop {
-        let Some(name) = p.expect(Symbol::new_static("<imported symbol name>"), |p| {
-            p.next().and_then(|v| v.as_ident())
-        }) else {
+        let Some(name) =
+            identifier::<DirectiveKeyword>(Symbol::new_static("<imported symbol name>"))
+                .expect(&mut p)
+        else {
             p.stuck(|_| ());
             return;
         };
 
-        let rename = if p.expect(Symbol::new_static("`as`"), |p| {
-            p.next()
-                .is_some_and(|v| matches!(v, Token::Ident(i) if i.text == Symbol::new_static("as")))
-        }) {
-            let rename = p.expect(Symbol::new_static("<renamed symbol name>"), |p| {
-                p.next().and_then(|v| v.as_ident())
-            });
+        let rename = if keyword(DirectiveKeyword::As).expect(&mut p).is_some() {
+            let rename =
+                identifier::<DirectiveKeyword>(Symbol::new_static("<renamed symbol name>"))
+                    .expect(&mut p);
 
             if rename.is_none() {
                 p.stuck(|_| ());
@@ -110,31 +115,22 @@ fn parse_directive(span: Span) {
 
         names.push((name, rename));
 
-        if !p.expect(Symbol::new_static("`,`"), |p| {
-            p.next()
-                .and_then(|c| c.as_punct())
-                .is_some_and(|c| c.char == punct!(','))
-        }) {
+        if punct(punct!(',')).expect(&mut p).is_none() {
             break;
         }
     }
 
-    if !p.expect(Symbol::new_static("`in`"), |c| {
-        c.next()
-            .is_some_and(|v| matches!(v, Token::Ident(i) if i.text == Symbol::new_static("in")))
-    }) {
+    if keyword(DirectiveKeyword::In).expect(&mut p).is_none() {
         p.stuck(|_| ());
         return;
     }
 
-    let Some(file) = p.expect(Symbol::new_static("<file path>"), |c| {
-        c.next().and_then(|t| t.as_string_lit())
-    }) else {
+    let Some(file) = str_lit(Symbol::new_static("<file path>")).expect(&mut p) else {
         p.stuck(|_| ());
         return;
     };
 
-    if !p.expect(Symbol::new_static("newline"), |c| c.next().is_none()) {
+    if !eof(Symbol::new_static("newline")).expect(&mut p) {
         p.stuck(|_| ());
     }
 
