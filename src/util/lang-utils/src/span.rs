@@ -91,10 +91,10 @@ pub struct SpanManager {
     buffer: String,
 
     /// The names of each file.
-    file_names: IndexVec<FileIndex, Box<str>>,
+    file_names: IndexVec<SpanFile, Box<str>>,
 
     /// The start indices of each file.
-    file_starts: IndexVec<FileIndex, SpanPos>,
+    file_starts: IndexVec<SpanFile, SpanPos>,
 
     /// Control directives sorted by `SpanPos` which indicate the line number for all characters from
     /// the current `SpanPos` (inclusive) to the `SpanPos` (exclusive) of the next tuple in this list.
@@ -126,7 +126,7 @@ impl SpanManager {
         locale: &mut impl SegmentationLocale,
         name: &str,
         load: impl FnOnce(&mut String) -> anyhow::Result<()>,
-    ) -> anyhow::Result<FileIndex> {
+    ) -> anyhow::Result<SpanFile> {
         const ERR_CAP: &str = "loaded too many source files";
 
         // Write to buffer
@@ -172,7 +172,7 @@ impl SpanManager {
         Ok(self.file_starts.push(start))
     }
 
-    pub fn file(&self, pos: SpanPos) -> FileIndex {
+    pub fn file(&self, pos: SpanPos) -> SpanFile {
         let idx = match self
             .file_starts
             .raw
@@ -182,10 +182,10 @@ impl SpanManager {
             Err(idx) => idx - 1,
         };
 
-        FileIndex::from_usize(idx)
+        SpanFile::from_usize(idx)
     }
 
-    pub fn file_span(&self, index: FileIndex) -> Span {
+    pub fn file_span(&self, index: SpanFile) -> Span {
         let start = self.file_starts[index];
         let end = self
             .file_starts
@@ -196,7 +196,7 @@ impl SpanManager {
         Span { start, end }
     }
 
-    pub fn file_name(&self, file: FileIndex) -> &str {
+    pub fn file_name(&self, file: SpanFile) -> &str {
         &self.file_names[file]
     }
 
@@ -300,7 +300,7 @@ impl Span {
 }
 
 define_index! {
-    pub struct FileIndex: u32;
+    pub struct SpanFile: u32;
 }
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Default)]
@@ -353,7 +353,7 @@ cap! {
 }
 
 impl SpanPos {
-    pub fn file(self) -> FileIndex {
+    pub fn file(self) -> SpanFile {
         cap!(ref SpanManagerCap).file(self)
     }
 
@@ -371,7 +371,7 @@ impl SpanPos {
 }
 
 impl Span {
-    pub fn file(self) -> FileIndex {
+    pub fn file(self) -> SpanFile {
         self.start.file()
     }
 
@@ -386,7 +386,7 @@ impl Span {
     }
 }
 
-impl FileIndex {
+impl SpanFile {
     pub fn new(
         locale: &mut impl SegmentationLocale,
         name: &str,

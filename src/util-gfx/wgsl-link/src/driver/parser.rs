@@ -1,12 +1,10 @@
-use autoken::cap;
 use lang_utils::{
     define_keywords,
-    diagnostic::{DiagnosticReporter, DiagnosticReporterCap},
     parser::{OptionParser, ParseContext},
     punct,
-    span::{Span, SpanManager, SpanManagerCap},
-    symbol::{Interner, InternerCap, Symbol},
-    tokens::tokenize,
+    span::Span,
+    symbol::Symbol,
+    tokens::{tokenize, TokenIdent, TokenStringLit},
     tokens_parse::{eof, identifier, keyword, punct, str_lit},
 };
 
@@ -19,21 +17,9 @@ define_keywords! {
 }
 
 pub fn parse_directives(
-    diagnostics: &mut DiagnosticReporter,
-    interns: &mut Interner,
-    spans: &SpanManager,
     source: Span,
+    mut f: impl FnMut(TokenStringLit, &[(TokenIdent, Option<TokenIdent>)]),
 ) {
-    cap! {
-        DiagnosticReporterCap: diagnostics,
-        InternerCap: interns,
-        SpanManagerCap: spans,
-    =>
-        parse_directives_inner(source);
-    }
-}
-
-fn parse_directives_inner(source: Span) {
     let source_txt = source.text();
 
     // Handle directives on the first line
@@ -50,7 +36,7 @@ fn parse_directives_inner(source: Span) {
         }
 
         // Parse the directive
-        parse_directive(source.range(start..end));
+        parse_single_directive(source.range(start..end), &mut f);
     }
 
     // Handle directives on subsequent lines
@@ -67,11 +53,14 @@ fn parse_directives_inner(source: Span) {
         }
 
         // Parse the directive
-        parse_directive(source.range(start..end));
+        parse_single_directive(source.range(start..end), &mut f);
     }
 }
 
-fn parse_directive(span: Span) {
+fn parse_single_directive(
+    span: Span,
+    mut f: impl FnMut(TokenStringLit, &[(TokenIdent, Option<TokenIdent>)]),
+) {
     let tokens = tokenize(span);
 
     let cx = ParseContext::new();
@@ -134,11 +123,5 @@ fn parse_directive(span: Span) {
         p.stuck(|_| ());
     }
 
-    dbg!(
-        names
-            .iter()
-            .map(|(a, b)| (a.text.as_str(), b.map(|b| b.text.as_str())))
-            .collect::<Vec<_>>(),
-        file.inner.as_str()
-    );
+    f(file, &names);
 }

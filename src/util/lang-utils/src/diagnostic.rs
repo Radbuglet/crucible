@@ -81,6 +81,26 @@ impl Diagnostic {
         Self::new_help(message).with_offending_span(span)
     }
 
+    pub fn opt_span_err(span: Option<Span>, message: impl Into<String>) -> Self {
+        Self::new_err(message).with_opt_offending_span(span)
+    }
+
+    pub fn opt_span_warn(span: Option<Span>, message: impl Into<String>) -> Self {
+        Self::new_warn(message).with_opt_offending_span(span)
+    }
+
+    pub fn opt_span_info(span: Option<Span>, message: impl Into<String>) -> Self {
+        Self::new_info(message).with_opt_offending_span(span)
+    }
+
+    pub fn opt_span_note(span: Option<Span>, message: impl Into<String>) -> Self {
+        Self::new_note(message).with_opt_offending_span(span)
+    }
+
+    pub fn opt_span_help(span: Option<Span>, message: impl Into<String>) -> Self {
+        Self::new_help(message).with_opt_offending_span(span)
+    }
+
     // Un-spanned
     pub fn new_err(message: impl Into<String>) -> Self {
         Self::new(DiagnosticKind::Error, message)
@@ -106,6 +126,11 @@ impl Diagnostic {
 
     pub fn with_offending_span(mut self, span: Span) -> Self {
         self.offending_span = Some(span);
+        self
+    }
+
+    pub fn with_opt_offending_span(mut self, span: Option<Span>) -> Self {
+        self.offending_span = span;
         self
     }
 

@@ -17,7 +17,7 @@ use super::{
 // === ModuleLinker === //
 
 define_index! {
-    pub struct FileHandle: u32;
+    pub struct ModuleHandle: u32;
 }
 
 #[derive(Default)]
@@ -27,7 +27,7 @@ pub struct ModuleLinker {
     module: naga::Module,
 
     // Maps individual files and their exports into handles into the giant module we're constructing.
-    files: IndexVec<FileHandle, File>,
+    files: IndexVec<ModuleHandle, LinkedModule>,
 
     // ID generator for de-mangling.
     mangler: NameMangler,
@@ -46,8 +46,8 @@ impl ModuleLinker {
         module: naga::Module,
         stubs: &ImportStubs,
         span_offset: u32,
-    ) -> FileHandle {
-        let mut file = File::default();
+    ) -> ModuleHandle {
+        let mut file = LinkedModule::default();
 
         let map_span = |span: naga::Span| -> naga::Span {
             span.to_range().map_or(naga::Span::UNDEFINED, |v| {
@@ -242,7 +242,7 @@ impl ModuleLinker {
 
     pub fn gen_stubs<'s>(
         &self,
-        imports: impl IntoIterator<Item = (FileHandle, &'s str, Option<&'s str>)>,
+        imports: impl IntoIterator<Item = (ModuleHandle, &'s str, Option<&'s str>)>,
     ) -> ImportStubs {
         // Create a shaker for each arena.
         let sess = ArenaShakeSession::new();
@@ -466,10 +466,10 @@ impl ImportStubs {
     }
 }
 
-// === File === //
+// === LinkedModule === //
 
 #[derive(Default)]
-struct File {
+struct LinkedModule {
     exports: FxHashMap<String, AnyNagaHandle>,
 }
 
