@@ -7,10 +7,13 @@ use autoken::cap;
 use crucible_utils::{
     hash::FxHashMap,
     mem::{defuse, guard},
+    newtypes::Index,
 };
 use lang_utils::{
-    diagnostic::{report_diagnostic, Diagnostic, DiagnosticReporter, DiagnosticReporterCap},
-    span::{NaiveUtf8Segmenter, Span, SpanFile, SpanManager, SpanManagerCap},
+    diagnostic::{
+        report_diagnostic, Diagnostic, DiagnosticReporter, DiagnosticReporterCap, DiagnosticWindow,
+    },
+    span::{NaiveUtf8Segmenter, Span, SpanFile, SpanManager, SpanManagerCap, SpanPos},
     symbol::{Interner, InternerCap},
     tokens::TokenIdent,
 };
@@ -20,6 +23,16 @@ use crate::{
     module::linker::{ModuleHandle, ModuleLinker},
 };
 
+// === Helpers === //
+
+fn naga_to_internal_span(span: naga::Span) -> Span {
+    let span = span.to_range().unwrap();
+    Span::new(
+        SpanPos::from_usize(span.start),
+        SpanPos::from_usize(span.end),
+    )
+}
+
 // === Language === //
 
 // Core
@@ -28,10 +41,10 @@ pub trait Language {
 
     fn parse(
         &mut self,
-        diag: &mut DiagnosticReporter,
+        diags: &mut DiagnosticReporter,
         spans: &mut SpanManager,
         file: SpanFile,
-        text: &str,
+        text_and_stubs: &str,
     ) -> Option<naga::Module>;
 }
 
@@ -63,31 +76,63 @@ impl Language for Wgsl {
 
     fn parse(
         &mut self,
-        diag: &mut DiagnosticReporter,
+        diags: &mut DiagnosticReporter,
         spans: &mut SpanManager,
         file: SpanFile,
-        text: &str,
+        text_and_stubs: &str,
     ) -> Option<naga::Module> {
-        // TODO: Improve diagnostic spans
-        let module = match naga::front::wgsl::parse_str(text) {
+        let file_len = spans.file_text(file).len();
+
+        let module = match naga::front::wgsl::parse_str(text_and_stubs) {
             Ok(module) => module,
             Err(err) => {
-                diag.report(Diagnostic::span_err(
-                    spans.file_span(file),
-                    format!("failed to parse WGSL module: {}", err.message()),
-                ));
+                let mut diag = Diagnostic::new_err(err.message().to_string());
+
+                for (i, (label_span, label_msg)) in err.labels().enumerate() {
+                    let label_span = label_span.to_range().unwrap();
+                    if label_span.end > file_len {
+                        // TODO: Handle these!
+                        continue;
+                    }
+
+                    let label_span = spans.range_to_span(file, label_span);
+
+                    if i == 0 {
+                        diag.offending_span = Some(label_span);
+                    }
+
+                    diag.windows.push(DiagnosticWindow {
+                        span: label_span,
+                        label: Some(label_msg.to_string()),
+                    });
+                }
+
+                // TODO: Include notes
+
+                diags.report(diag);
                 return None;
             }
         };
 
         if let Err(err) = self.validator.validate(&module) {
-            diag.report(Diagnostic::span_err(
-                spans.file_span(file),
-                format!(
-                    "failed to validate WGSL module: {}",
-                    err.emit_to_string(spans.file_name(file)),
-                ),
-            ));
+            let mut diag = Diagnostic::new_err(err.emit_to_string(spans.file_name(file)));
+
+            // FIXME: These diagnostics are incomplete
+
+            for (i, (span, info)) in err.spans().enumerate() {
+                let span = naga_to_internal_span(*span);
+
+                if i == 0 {
+                    diag.offending_span = Some(span);
+                }
+
+                diag.windows.push(DiagnosticWindow {
+                    span,
+                    label: Some(info.to_string()),
+                });
+            }
+
+            diags.report(diag);
             return None;
         }
 
@@ -139,16 +184,20 @@ impl Session {
         }
     }
 
-    pub fn link(&mut self, path: &Path) -> String {
+    pub fn link(&mut self, path: &Path) -> Result<String, DiagnosticReporter> {
         let mut diag = DiagnosticReporter::new();
 
         self.ensure_imported(&mut diag, None, path);
 
-        // TODO: Emit useful diagnostic messages
-        dbg!(diag);
+        if !diag.has_errors() {
+            Ok(self.language.emit(self.linker.full_module()))
+        } else {
+            Err(diag)
+        }
+    }
 
-        // TODO: Perform tree-shaking
-        self.language.emit(self.linker.full_module())
+    pub fn span_mgr(&self) -> &SpanManager {
+        &self.services.span_mgr
     }
 
     fn ensure_imported(
@@ -193,7 +242,7 @@ impl Session {
                             diag.report(Diagnostic::opt_span_err(
                                 origin,
                                 format!(
-                                    "error ocurred while attempting to read shader from {}: {err}",
+                                    "failed to read shader at {:?}: {err}",
                                     path.to_string_lossy()
                                 ),
                             ));
@@ -221,14 +270,19 @@ impl Session {
 
         me.services.bind(diag, || {
             parse_directives(file.span(), |rel_path, imports| {
-                let abs_path = path.ancestors().nth(1).unwrap().join(rel_path.inner.as_str());
+                let abs_path = path
+                    .ancestors()
+                    .nth(1)
+                    .unwrap_or(path)
+                    .join(rel_path.inner.as_str());
+
                 let abs_path = match abs_path.canonicalize() {
                     Ok(abs_path) => abs_path,
                     Err(err) => {
                         report_diagnostic(Diagnostic::opt_span_err(
-                            origin,
+                            Some(rel_path.span),
                             format!(
-                                "error ocurred while attempting to canonicalize shader path at {}: {err}",
+                                "failed to read shader at {:?}: {err}",
                                 abs_path.to_string_lossy(),
                             ),
                         ));
@@ -252,6 +306,8 @@ impl Session {
 
         // Link the modules.
         let interner = &me.services.interner;
+
+        // TODO: Produce diagnostics for missing imports instead of panicking.
         let stubs = me.linker.gen_stubs(
             directives
                 .iter()
@@ -274,21 +330,21 @@ impl Session {
         );
 
         let mut output = String::new();
-        output.push_str(
-            me.services
-                .span_mgr
-                .span_text(me.services.span_mgr.file_span(file)),
-        );
+        output.push_str(me.services.span_mgr.file_text(file));
         output.push_str("\n\n// === Stubs === //\n\n");
         output.push_str(&stubs.apply_names_to_stub(me.language.emit(stubs.module())));
 
         let module = {
             let me = &mut *me;
-            me.language
-                .parse(diag, &mut me.services.span_mgr, file, &output)?
-        };
+            let module = me
+                .language
+                .parse(diag, &mut me.services.span_mgr, file, &output)?;
 
-        let module = me.linker.link(module, &stubs, 0);
+            let file_span = me.services.span_mgr.file_span(file);
+
+            me.linker
+                .link(module, &stubs, file_span.start.0..file_span.end.0)
+        };
 
         defuse(me);
         *self.files.get_mut(path).unwrap() = ModuleLoadStatus::Loaded(module);

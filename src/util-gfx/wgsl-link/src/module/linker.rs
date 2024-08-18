@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crucible_utils::{
     define_index,
     hash::{FxHashMap, FxStrMap},
@@ -45,13 +47,19 @@ impl ModuleLinker {
         &mut self,
         module: naga::Module,
         stubs: &ImportStubs,
-        span_offset: u32,
+        parent_span: Range<u32>,
     ) -> ModuleHandle {
         let mut file = LinkedModule::default();
+        let parent_span_start = parent_span.start;
+        let parent_span_len = parent_span.end - parent_span.start;
 
         let map_span = |span: naga::Span| -> naga::Span {
             span.to_range().map_or(naga::Span::UNDEFINED, |v| {
-                naga::Span::new(v.start as u32 + span_offset, v.end as u32 + span_offset)
+                debug_assert!(v.end as u32 <= parent_span_len);
+                naga::Span::new(
+                    parent_span_start + v.start as u32,
+                    parent_span_start + v.end as u32,
+                )
             })
         };
 

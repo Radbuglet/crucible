@@ -10,3 +10,6 @@ crucible-utils = { version = "0.1.0", path = "../../util/crucible-utils" }
 lang-utils = { version = "0.1.0", path = "../../util/lang-utils" }
 memchr = "2.7.4"
 naga = { version = "22.0.0", features = ["wgsl-in", "wgsl-out"] }
+
+[dev-dependencies]
+termcolor = "1.4.1"

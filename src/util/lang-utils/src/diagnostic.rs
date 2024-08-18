@@ -1,6 +1,10 @@
-use autoken::cap;
+use std::io;
 
-use crate::span::Span;
+use autoken::cap;
+use codespan_reporting::term::{self, termcolor::WriteColor};
+use crucible_utils::newtypes::Index;
+
+use crate::span::{Span, SpanManager};
 
 // === DiagnosticReporter === //
 
@@ -61,6 +65,10 @@ impl Diagnostic {
     }
 
     // Span
+    pub fn span_bug(span: Span, message: impl Into<String>) -> Self {
+        Self::new_bug(message).with_offending_span(span)
+    }
+
     pub fn span_err(span: Span, message: impl Into<String>) -> Self {
         Self::new_err(message).with_offending_span(span)
     }
@@ -79,6 +87,10 @@ impl Diagnostic {
 
     pub fn span_help(span: Span, message: impl Into<String>) -> Self {
         Self::new_help(message).with_offending_span(span)
+    }
+
+    pub fn opt_span_bug(span: Option<Span>, message: impl Into<String>) -> Self {
+        Self::new_bug(message).with_opt_offending_span(span)
     }
 
     pub fn opt_span_err(span: Option<Span>, message: impl Into<String>) -> Self {
@@ -102,6 +114,10 @@ impl Diagnostic {
     }
 
     // Un-spanned
+    pub fn new_bug(message: impl Into<String>) -> Self {
+        Self::new(DiagnosticKind::Bug, message)
+    }
+
     pub fn new_err(message: impl Into<String>) -> Self {
         Self::new(DiagnosticKind::Error, message)
     }
@@ -155,6 +171,7 @@ impl Diagnostic {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum DiagnosticKind {
+    Bug,
     Error,
     Warn,
     Info,
@@ -180,4 +197,65 @@ pub fn report_diagnostic(diagnostic: Diagnostic) {
 
 pub fn has_diagnostic_errors() -> bool {
     cap!(ref DiagnosticReporterCap).has_errors()
+}
+
+// === Printing === //
+
+pub fn emit_pretty_diagnostics(
+    writer: &mut dyn WriteColor,
+    spans: &SpanManager,
+    diags: &DiagnosticReporter,
+) -> io::Result<()> {
+    use codespan_reporting::{
+        diagnostic::{Diagnostic, Label, LabelStyle, Severity},
+        files::{Error, SimpleFiles},
+        term::Config,
+    };
+
+    let mut files = SimpleFiles::new();
+
+    for file in spans.file_indices() {
+        files.add(spans.file_name(file), spans.file_text(file));
+    }
+
+    for diag in diags.diagnostics() {
+        let new_diag = Diagnostic::new(match diag.kind {
+            DiagnosticKind::Bug => Severity::Bug,
+            DiagnosticKind::Error => Severity::Error,
+            DiagnosticKind::Warn => Severity::Warning,
+            DiagnosticKind::Info => unimplemented!("root diagnostic cannot have kind `info`"),
+            DiagnosticKind::Note => Severity::Note,
+            DiagnosticKind::Help => unimplemented!("root diagnostic cannot have kind `help`"),
+        })
+        .with_message(diag.message.clone())
+        .with_labels(
+            diag.windows
+                .iter()
+                .map(|window| {
+                    let (file, span) = spans.span_to_range(window.span);
+                    Label::new(LabelStyle::Secondary, file.as_usize(), span)
+                })
+                .chain(diag.offending_span.map(|span| {
+                    let (file, span) = spans.span_to_range(span);
+                    Label::new(LabelStyle::Primary, file.as_usize(), span)
+                }))
+                .collect(),
+        )
+        .with_notes(diag.subs.iter().map(|diag| diag.message.clone()).collect());
+
+        let new_diag = if diag.code != u32::MAX {
+            new_diag.with_code(format!("E{}", diag.code))
+        } else {
+            new_diag
+        };
+
+        if let Err(err) = term::emit(writer, &Config::default(), &files, &new_diag) {
+            match err {
+                Error::Io(err) => return Err(err),
+                err => panic!("{err}"),
+            }
+        }
+    }
+
+    Ok(())
 }

@@ -36,7 +36,7 @@ pub fn parse_directives(
         }
 
         // Parse the directive
-        parse_single_directive(source.range(start..end), &mut f);
+        parse_single_directive(source.sub_range(start..end), &mut f);
     }
 
     // Handle directives on subsequent lines
@@ -53,7 +53,7 @@ pub fn parse_directives(
         }
 
         // Parse the directive
-        parse_single_directive(source.range(start..end), &mut f);
+        parse_single_directive(source.sub_range(start..end), &mut f);
     }
 }
 

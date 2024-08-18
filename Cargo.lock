@@ -1411,6 +1411,7 @@ dependencies = [
  "anyhow",
  "autoken",
  "bumpalo",
+ "codespan-reporting",
  "crucible-utils",
  "unicode-xid",
 ]
@@ -3066,6 +3067,7 @@ dependencies = [
  "lang-utils",
  "memchr",
  "naga 22.0.0",
+ "termcolor",
 ]
 
 [[package]]

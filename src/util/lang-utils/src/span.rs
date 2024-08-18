@@ -1,6 +1,6 @@
 use std::{
     fmt,
-    ops::{Bound, RangeBounds},
+    ops::{Bound, Range, RangeBounds},
 };
 
 use anyhow::Context;
@@ -172,6 +172,10 @@ impl SpanManager {
         Ok(self.file_starts.push(start))
     }
 
+    pub fn file_indices(&self) -> impl Iterator<Item = SpanFile> + Clone {
+        self.file_starts.keys()
+    }
+
     pub fn file(&self, pos: SpanPos) -> SpanFile {
         let idx = match self
             .file_starts
@@ -194,6 +198,21 @@ impl SpanManager {
             .unwrap_or_else(|| SpanPos::from_usize(self.buffer.len()));
 
         Span { start, end }
+    }
+
+    pub fn file_text(&self, index: SpanFile) -> &str {
+        self.span_text(self.file_span(index))
+    }
+
+    pub fn span_to_range(&self, span: Span) -> (SpanFile, Range<usize>) {
+        let file = self.file(span.start);
+        let file_offset = self.file_span(file).start.as_usize();
+        let range = (span.start.as_usize() - file_offset)..(span.end.as_usize() - file_offset);
+        (file, range)
+    }
+
+    pub fn range_to_span(&self, file: SpanFile, range: Range<usize>) -> Span {
+        self.file_span(file).sub_range(range)
     }
 
     pub fn file_name(&self, file: SpanFile) -> &str {
@@ -259,7 +278,7 @@ impl Span {
         Self { start, end }
     }
 
-    pub fn range(self, range: impl RangeBounds<usize>) -> Self {
+    pub fn sub_range(self, range: impl RangeBounds<usize>) -> Self {
         let start = match range.start_bound() {
             Bound::Included(i) => self.start.map_usize(|v| v + i),
             Bound::Excluded(_) => unimplemented!(),
@@ -371,6 +390,10 @@ impl SpanPos {
 }
 
 impl Span {
+    pub fn from_range(file: SpanFile, range: Range<usize>) -> Self {
+        cap!(ref SpanManagerCap).range_to_span(file, range)
+    }
+
     pub fn file(self) -> SpanFile {
         self.start.file()
     }
@@ -384,6 +407,10 @@ impl Span {
         tie!('a => ref SpanManagerCap);
         self.fmt_with(cap!(ref SpanManagerCap))
     }
+
+    pub fn to_range(self) -> (SpanFile, Range<usize>) {
+        cap!(ref SpanManagerCap).span_to_range(self)
+    }
 }
 
 impl SpanFile {
@@ -395,8 +422,17 @@ impl SpanFile {
         cap!(mut SpanManagerCap).load(locale, name, load)
     }
 
+    pub fn all() -> impl Iterator<Item = Self> + Clone {
+        cap!(ref SpanManagerCap).file_indices()
+    }
+
     pub fn span(self) -> Span {
         cap!(ref SpanManagerCap).file_span(self)
+    }
+
+    pub fn text<'a>(self) -> &'a str {
+        tie!('a => ref SpanManagerCap);
+        cap!(ref SpanManagerCap).file_text(self)
     }
 
     pub fn name<'a>(self) -> &'a str {
