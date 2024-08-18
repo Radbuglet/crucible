@@ -235,7 +235,30 @@ impl ModuleLinker {
         });
 
         // Finally, let's import the entry-points.
-        // TODO
+        self.module
+            .entry_points
+            .extend(
+                module
+                    .entry_points
+                    .into_iter()
+                    .map(|entry| naga::EntryPoint {
+                        name: entry.name,
+                        stage: entry.stage,
+                        early_depth_test: entry.early_depth_test,
+                        workgroup_size: entry.workgroup_size,
+                        function: entry.function.fold(&folders!(
+                            // `.upcast()` normalizes both plain `Folder` objects and references
+                            // thereto into proper references to `Folder`s.
+                            a: &constants,
+                            b: &overrides,
+                            c: &types,
+                            e: &global_variables,
+                            g: &functions,
+                            h: &map_span,
+                            i: &global_expressions,
+                        )),
+                    }),
+            );
 
         self.files.push(file)
     }

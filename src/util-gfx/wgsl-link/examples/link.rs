@@ -6,6 +6,6 @@ fn main() {
     let mut sess = Session::new(Wgsl::default());
     eprintln!(
         "{}",
-        sess.link(Path::new("src/util-gfx/wgsl-link/examples/b.wgsl"))
+        sess.link(Path::new("src/util-gfx/wgsl-link/examples/entry.wgsl"))
     );
 }

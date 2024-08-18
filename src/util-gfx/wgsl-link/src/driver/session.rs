@@ -10,7 +10,7 @@ use crucible_utils::{
 };
 use lang_utils::{
     diagnostic::{report_diagnostic, Diagnostic, DiagnosticReporter, DiagnosticReporterCap},
-    span::{NaiveUtf8Segmenter, Span, SpanManager, SpanManagerCap},
+    span::{NaiveUtf8Segmenter, Span, SpanFile, SpanManager, SpanManagerCap},
     symbol::{Interner, InternerCap},
     tokens::TokenIdent,
 };
@@ -26,7 +26,13 @@ use crate::{
 pub trait Language {
     fn emit(&mut self, module: &naga::Module) -> String;
 
-    fn parse(&self, diag: &mut DiagnosticReporter, span: Span, text: &str) -> Option<naga::Module>;
+    fn parse(
+        &mut self,
+        diag: &mut DiagnosticReporter,
+        spans: &mut SpanManager,
+        file: SpanFile,
+        text: &str,
+    ) -> Option<naga::Module>;
 }
 
 // Wgsl
@@ -55,17 +61,37 @@ impl Language for Wgsl {
         .unwrap()
     }
 
-    fn parse(&self, diag: &mut DiagnosticReporter, span: Span, text: &str) -> Option<naga::Module> {
-        match naga::front::wgsl::parse_str(text) {
-            Ok(module) => Some(module),
+    fn parse(
+        &mut self,
+        diag: &mut DiagnosticReporter,
+        spans: &mut SpanManager,
+        file: SpanFile,
+        text: &str,
+    ) -> Option<naga::Module> {
+        // TODO: Improve diagnostic spans
+        let module = match naga::front::wgsl::parse_str(text) {
+            Ok(module) => module,
             Err(err) => {
                 diag.report(Diagnostic::span_err(
-                    span,
+                    spans.file_span(file),
                     format!("failed to parse WGSL module: {}", err.message()),
                 ));
-                None
+                return None;
             }
+        };
+
+        if let Err(err) = self.validator.validate(&module) {
+            diag.report(Diagnostic::span_err(
+                spans.file_span(file),
+                format!(
+                    "failed to validate WGSL module: {}",
+                    err.emit_to_string(spans.file_name(file)),
+                ),
+            ));
+            return None;
         }
+
+        Some(module)
     }
 }
 
@@ -117,7 +143,11 @@ impl Session {
         let mut diag = DiagnosticReporter::new();
 
         self.ensure_imported(&mut diag, None, path);
+
+        // TODO: Emit useful diagnostic messages
         dbg!(diag);
+
+        // TODO: Perform tree-shaking
         self.language.emit(self.linker.full_module())
     }
 
@@ -252,9 +282,11 @@ impl Session {
         output.push_str("\n\n// === Stubs === //\n\n");
         output.push_str(&stubs.apply_names_to_stub(me.language.emit(stubs.module())));
 
-        let module = me
-            .language
-            .parse(diag, me.services.span_mgr.file_span(file), &output)?;
+        let module = {
+            let me = &mut *me;
+            me.language
+                .parse(diag, &mut me.services.span_mgr, file, &output)?
+        };
 
         let module = me.linker.link(module, &stubs, 0);
 
