@@ -32,6 +32,7 @@ pub fn try_demangle(name: &str) -> Option<(&str, MangleIndex)> {
 // === Replace Mangles === //
 
 pub struct MangleReplaceOut<'a, 'b> {
+    did_replace: &'a mut bool,
     splicer: &'a mut StrSplicer<'b>,
     end_pos: usize,
 }
@@ -46,6 +47,7 @@ impl MangleReplaceOut<'_, '_> {
     }
 
     pub fn replace_known_len(self, mangled_name_len: usize, new_name: &str) {
+        *self.did_replace = true;
         self.splicer.splice(
             self.end_pos - mangled_name_len,
             mangled_name_len,
@@ -73,13 +75,19 @@ pub fn replace_mangles(
         let end_pos = end_pos + 1;
 
         // Allow user to replace string
+        let mut did_replace = false;
         replace(
             idx,
             MangleReplaceOut {
+                did_replace: &mut did_replace,
                 splicer: &mut splicer,
                 end_pos,
             },
         );
+
+        if !did_replace {
+            splicer.splice(end_pos, 0, &[]);
+        }
     }
 }
 

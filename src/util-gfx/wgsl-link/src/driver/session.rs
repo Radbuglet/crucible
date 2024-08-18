@@ -1,4 +1,5 @@
 use std::{
+    error::Error,
     fs,
     path::{Path, PathBuf},
 };
@@ -7,31 +8,20 @@ use autoken::cap;
 use crucible_utils::{
     hash::FxHashMap,
     mem::{defuse, guard},
-    newtypes::Index,
 };
 use lang_utils::{
     diagnostic::{
         report_diagnostic, Diagnostic, DiagnosticReporter, DiagnosticReporterCap, DiagnosticWindow,
     },
-    span::{NaiveUtf8Segmenter, Span, SpanFile, SpanManager, SpanManagerCap, SpanPos},
+    span::{NaiveUtf8Segmenter, Span, SpanFile, SpanManager, SpanManagerCap},
     symbol::{Interner, InternerCap},
     tokens::TokenIdent,
 };
 
 use crate::{
     driver::parser::parse_directives,
-    module::linker::{ModuleHandle, ModuleLinker},
+    module::linker::{LinkerImport, LinkerImportError, ModuleHandle, ModuleLinker},
 };
-
-// === Helpers === //
-
-fn naga_to_internal_span(span: naga::Span) -> Span {
-    let span = span.to_range().unwrap();
-    Span::new(
-        SpanPos::from_usize(span.start),
-        SpanPos::from_usize(span.end),
-    )
-}
 
 // === Language === //
 
@@ -115,21 +105,22 @@ impl Language for Wgsl {
         };
 
         if let Err(err) = self.validator.validate(&module) {
-            let mut diag = Diagnostic::new_err(err.emit_to_string(spans.file_name(file)));
+            let mut diag = Diagnostic::new_err(err.as_inner().to_string());
 
-            // FIXME: These diagnostics are incomplete
-
-            for (i, (span, info)) in err.spans().enumerate() {
-                let span = naga_to_internal_span(*span);
-
-                if i == 0 {
-                    diag.offending_span = Some(span);
-                }
+            for (span, label) in err.spans() {
+                let span = span.to_range().unwrap();
+                let span = spans.range_to_span(file, span);
 
                 diag.windows.push(DiagnosticWindow {
                     span,
-                    label: Some(info.to_string()),
+                    label: Some(label.clone()),
                 });
+            }
+
+            let mut iter = err.source();
+            while let Some(curr) = iter {
+                diag.subs.push(Diagnostic::new_note(curr.to_string()));
+                iter = curr.source();
             }
 
             diags.report(diag);
@@ -307,7 +298,6 @@ impl Session {
         // Link the modules.
         let interner = &me.services.interner;
 
-        // TODO: Produce diagnostics for missing imports instead of panicking.
         let stubs = me.linker.gen_stubs(
             directives
                 .iter()
@@ -319,14 +309,45 @@ impl Session {
                 })
                 // Flatten their imports
                 .flat_map(|(module, imports)| {
-                    imports.iter().map(move |(base, target)| {
-                        (
-                            module,
-                            interner.lookup(base.text),
-                            target.map(|target| interner.lookup(target.text)),
-                        )
+                    imports.iter().map(move |(base, target)| LinkerImport {
+                        file: module,
+                        orig_name: interner.lookup(base.text),
+                        rename_to: target.map(|target| interner.lookup(target.text)),
+                        meta: (*base, *target),
                     })
                 }),
+            |err| match err {
+                LinkerImportError::UnknownImport(directive) => {
+                    diag.report(Diagnostic::span_err(
+                        directive.meta.0.span,
+                        format!("shader does not export {:?}", directive.orig_name),
+                    ));
+                }
+                LinkerImportError::DuplicateSources(first, second) => {
+                    diag.report(
+                        Diagnostic::span_err(
+                            second.meta.0.span,
+                            format!(
+                                "shader export {:?} was imported two different times",
+                                first.orig_name
+                            ),
+                        )
+                        .with_window(first.meta.0.span, Some("first import")),
+                    );
+                }
+                LinkerImportError::DuplicateDestinations(first, second) => {
+                    diag.report(
+                        Diagnostic::span_err(
+                            second.meta.1.map_or(second.meta.0.span, |v| v.span),
+                            format!(
+                                "shader exports were imported with the same name {:?} two different times",
+                                second.rename_to.unwrap_or(second.orig_name),
+                            ),
+                        )
+                        .with_window(first.meta.1.map_or(first.meta.0.span, |v| v.span), Some("first import")),
+                    );
+                },
+            },
         );
 
         let mut output = String::new();

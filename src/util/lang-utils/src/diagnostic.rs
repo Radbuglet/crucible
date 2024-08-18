@@ -233,7 +233,9 @@ pub fn emit_pretty_diagnostics(
                 .iter()
                 .map(|window| {
                     let (file, span) = spans.span_to_range(window.span);
-                    Label::new(LabelStyle::Secondary, file.as_usize(), span)
+                    let mut label = Label::new(LabelStyle::Secondary, file.as_usize(), span);
+                    label.message = window.label.clone().unwrap_or_default();
+                    label
                 })
                 .chain(diag.offending_span.map(|span| {
                     let (file, span) = spans.span_to_range(span);

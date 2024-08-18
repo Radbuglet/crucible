@@ -3064,6 +3064,7 @@ dependencies = [
  "anyhow",
  "autoken",
  "crucible-utils",
+ "derive-where",
  "lang-utils",
  "memchr",
  "naga 22.0.0",

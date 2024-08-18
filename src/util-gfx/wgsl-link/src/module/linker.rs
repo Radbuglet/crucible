@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crucible_utils::{
     define_index,
-    hash::{FxHashMap, FxStrMap},
+    hash::{hashbrown::hash_map, FxHashMap, FxStrMap},
     newtypes::{IndexVec, LargeIndex as _},
     polyfill::{copy_hygiene, OptionExt},
 };
@@ -271,9 +271,10 @@ impl ModuleLinker {
         self.files.push(file)
     }
 
-    pub fn gen_stubs<'s>(
+    pub fn gen_stubs<'s, M>(
         &self,
-        imports: impl IntoIterator<Item = (ModuleHandle, &'s str, Option<&'s str>)>,
+        imports: impl IntoIterator<Item = LinkerImport<'s, M>>,
+        mut handle_err: impl FnMut(LinkerImportError<'_, M>),
     ) -> ImportStubs {
         // Create a shaker for each arena.
         let sess = ArenaShakeSession::new();
@@ -296,13 +297,16 @@ impl ModuleLinker {
         // Seed each shaker with their base set of imports. Record where these new names map to.
         let mut names_to_handle = FxStrMap::new();
         let mut exported_mangles = FxHashMap::default();
+        let mut exported_mangle_directives = FxHashMap::<MangleIndex, LinkerImport<M>>::default();
+        let mut exported_mangle_targets = FxStrMap::<MangleIndex>::new();
 
-        for (file, orig_name, rename_to) in imports {
-            let rename_to = rename_to.unwrap_or(orig_name);
+        for import in imports {
+            let rename_to = import.rename_to.unwrap_or(import.orig_name);
 
-            let file = &self.files[file];
-            let Some(&handle) = file.exports.get(orig_name) else {
-                panic!("failed to find import {orig_name:?}");
+            let file = &self.files[import.file];
+            let Some(&handle) = file.exports.get(import.orig_name) else {
+                handle_err(LinkerImportError::UnknownImport(&import));
+                continue;
             };
 
             names_to_handle.insert(rename_to, handle);
@@ -345,8 +349,31 @@ impl ModuleLinker {
                 }
             };
 
+            let demangle_idx = try_demangle(mangled_name).unwrap().1;
+
+            // Ensure that the rename target hasn't been used yet.
+            if let Some(first) = exported_mangle_targets.get(rename_to) {
+                handle_err(LinkerImportError::DuplicateDestinations(
+                    &exported_mangle_directives[first],
+                    &import,
+                ));
+                continue;
+            }
+            exported_mangle_targets.insert(rename_to, demangle_idx);
+
+            // Ensure that the source symbol hasn't been used yet.
+            match exported_mangle_directives.entry(demangle_idx) {
+                hash_map::Entry::Occupied(first) => {
+                    handle_err(LinkerImportError::DuplicateSources(first.get(), &import));
+                    continue;
+                }
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(import);
+                }
+            }
+
             exported_mangles.insert(
-                try_demangle(mangled_name).unwrap().1,
+                demangle_idx,
                 ExportedMangle {
                     mangle_len: mangled_name.len(),
                     new_name: rename_to.to_string().into_boxed_str(),
@@ -495,6 +522,21 @@ impl ImportStubs {
     fn name_to_handle(&self, name: &str) -> Option<AnyNagaHandle> {
         self.names_to_handle.get(name).copied()
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct LinkerImport<'s, M> {
+    pub file: ModuleHandle,
+    pub orig_name: &'s str,
+    pub rename_to: Option<&'s str>,
+    pub meta: M,
+}
+
+#[derive(Debug, Clone)]
+pub enum LinkerImportError<'a, M> {
+    UnknownImport(&'a LinkerImport<'a, M>),
+    DuplicateSources(&'a LinkerImport<'a, M>, &'a LinkerImport<'a, M>),
+    DuplicateDestinations(&'a LinkerImport<'a, M>, &'a LinkerImport<'a, M>),
 }
 
 // === LinkedModule === //
