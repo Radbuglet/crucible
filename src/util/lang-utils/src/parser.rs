@@ -8,7 +8,7 @@ use crucible_utils::{hash::FxHashSet, newtypes::Index as _};
 
 use crate::{
     diagnostic::{report_diagnostic, Diagnostic},
-    span::{Span, SpanFile, SpanPos},
+    span::{Span, SpanFile, SpanManagerCap, SpanPos},
     symbol::Symbol,
 };
 
@@ -420,10 +420,12 @@ impl<'a> StrCursor<'a> {
     }
 
     pub fn new_span(span: Span) -> Self {
+        autoken::tie!('a => ref SpanManagerCap);
         Self::new(span.start, span.text())
     }
 
     pub fn new_file(file: SpanFile) -> Self {
+        autoken::tie!('a => ref SpanManagerCap);
         Self::new_span(file.span())
     }
 }

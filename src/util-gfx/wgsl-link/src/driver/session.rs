@@ -26,6 +26,7 @@ use crate::{
 // === Language === //
 
 // Core
+// TODO: Stop double-validating
 pub trait Language {
     fn emit(&mut self, module: &naga::Module) -> String;
 
@@ -175,20 +176,32 @@ impl Session {
         }
     }
 
-    pub fn link(&mut self, path: &Path) -> Result<String, DiagnosticReporter> {
+    pub fn span_mgr(&self) -> &SpanManager {
+        &self.services.span_mgr
+    }
+
+    pub fn linker(&self) -> &ModuleLinker {
+        &self.linker
+    }
+
+    pub fn linker_and_language(&mut self) -> (&mut dyn Language, &ModuleLinker) {
+        (&mut *self.language, &self.linker)
+    }
+
+    pub fn parse(&mut self, path: &Path) -> Result<ModuleHandle, DiagnosticReporter> {
         let mut diag = DiagnosticReporter::new();
 
-        self.ensure_imported(&mut diag, None, path);
+        let module = self.ensure_imported(&mut diag, None, path);
 
         if !diag.has_errors() {
-            Ok(self.language.emit(self.linker.full_module()))
+            Ok(module.unwrap())
         } else {
             Err(diag)
         }
     }
 
-    pub fn span_mgr(&self) -> &SpanManager {
-        &self.services.span_mgr
+    pub fn build(&mut self, modules: impl IntoIterator<Item = ModuleHandle>) -> String {
+        self.language.emit(&self.linker.shake_module(modules))
     }
 
     fn ensure_imported(

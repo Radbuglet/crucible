@@ -243,6 +243,7 @@ impl ModuleLinker {
         });
 
         // Finally, let's import the entry-points.
+        let first_entry_point = self.module.entry_points.len();
         self.module
             .entry_points
             .extend(
@@ -267,6 +268,8 @@ impl ModuleLinker {
                         )),
                     }),
             );
+
+        file.entry_point_range = first_entry_point..self.module.entry_points.len();
 
         self.files.push(file)
     }
@@ -478,6 +481,149 @@ impl ModuleLinker {
     pub fn full_module(&self) -> &naga::Module {
         &self.module
     }
+
+    pub fn shake_module(&self, modules: impl IntoIterator<Item = ModuleHandle>) -> naga::Module {
+        // Create a shaker for each arena.
+        let sess = ArenaShakeSession::new();
+        let mut types =
+            UniqueArenaShaker::new(&self.module.types, (), &|types, span, value, ()| {
+                let value = value
+                    .clone()
+                    .fold(&folders!(a: &types.folder(&|| ()), b: &|v: naga::Span| v));
+
+                (span, value)
+            });
+
+        let mut constants = ArenaShaker::new(&sess, &self.module.constants);
+        let mut overrides = ArenaShaker::new(&sess, &self.module.overrides);
+        let mut global_variables = ArenaShaker::new(&sess, &self.module.global_variables);
+        let mut global_expressions = ArenaShaker::new(&sess, &self.module.global_expressions);
+        let mut functions = ArenaShaker::new(&sess, &self.module.functions);
+        let mut entry_points = Vec::new();
+
+        // Seed each shaker with the modules' exports.
+        for module in modules {
+            let module = &self.files[module];
+
+            for (_name, export) in module.exports.iter() {
+                match export.kind {
+                    ExportKind::Types => {
+                        types.include(export.raw.as_typed(), || ());
+                    }
+                    ExportKind::Constants => {
+                        constants.include(export.raw.as_typed(), || ());
+                    }
+                    ExportKind::Overrides => {
+                        overrides.include(export.raw.as_typed(), || ());
+                    }
+                    ExportKind::GlobalVariables => {
+                        global_variables.include(export.raw.as_typed(), || ());
+                    }
+                    ExportKind::Functions => {
+                        functions.include(export.raw.as_typed(), || ());
+                    }
+                }
+            }
+
+            entry_points.extend(
+                self.module.entry_points[module.entry_point_range.clone()]
+                    .iter()
+                    .map(|entry| naga::EntryPoint {
+                        name: entry.name.clone(),
+                        stage: entry.stage,
+                        early_depth_test: entry.early_depth_test,
+                        workgroup_size: entry.workgroup_size,
+                        function: entry.function.clone().fold(&folders!(
+                            a: &constants.folder(&|| ()),
+                            b: &overrides.folder(&|| ()),
+                            c: &types.folder(&|| ()),
+                            d: &global_variables.folder(&|| ()),
+                            e: &functions.folder(&|| ()),
+                            f: &|v: naga::Span| v,
+                        )),
+                    }),
+            );
+        }
+
+        // Construct the tree-shaken arenas.
+        sess.run(|| {
+            constants.run(|_constants, span, val, ()| {
+                (
+                    span,
+                    naga::Constant {
+                        name: val.name.clone(),
+                        ty: types.include(val.ty, || ()),
+                        init: global_expressions.include(val.init, || ()),
+                    },
+                )
+            });
+
+            overrides.run(|_overrides, span, val, ()| {
+                (
+                    span,
+                    naga::Override {
+                        name: val.name.clone(),
+                        id: val.id,
+                        ty: types.include(val.ty, || ()),
+                        init: val.init.map(|expr| global_expressions.include(expr, || ())),
+                    },
+                )
+            });
+
+            global_variables.run(|_global_variables, span, val, ()| {
+                (
+                    span,
+                    naga::GlobalVariable {
+                        name: val.name.clone(),
+                        space: val.space,
+                        binding: val.binding.clone(),
+                        ty: types.include(val.ty, || ()),
+                        init: val.init.map(|expr| global_expressions.include(expr, || ())),
+                    },
+                )
+            });
+
+            global_expressions.run(|global_expressions, span, val, ()| {
+                (
+                    span,
+                    val.clone().fold(&folders!(
+                        a: &constants.folder(&|| ()),
+                        b: &overrides.folder(&|| ()),
+                        c: &types.folder(&|| ()),
+                        d: &global_expressions.folder(&|| ()),
+                        e: &global_variables.folder(&|| ()),
+                        f: &|_var: naga::Handle<naga::LocalVariable>| unreachable!("global expressions should not reference local variables"),
+                        g: &functions.folder(&|| ()),
+                    )),
+                )
+            });
+
+            functions.run(|functions, span, val, ()| {
+                (
+                    span,
+                    val.clone().fold(&folders!(
+                        a: &constants.folder(&|| ()),
+                        b: &overrides.folder(&|| ()),
+                        c: &types.folder(&|| ()),
+                        d: &global_variables.folder(&|| ()),
+                        e: &functions.folder(&|| ()),
+                        f: &|v: naga::Span| v,
+                    )),
+                )
+            });
+        });
+
+        naga::Module {
+            types: types.finish(),
+            special_types: naga::SpecialTypes::default(),
+            constants: constants.finish(),
+            overrides: overrides.finish(),
+            global_variables: global_variables.finish(),
+            global_expressions: global_expressions.finish(),
+            functions: functions.finish(),
+            entry_points,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -544,6 +690,8 @@ pub enum LinkerImportError<'a, M> {
 #[derive(Default)]
 struct LinkedModule {
     exports: FxHashMap<String, AnyNagaHandle>,
+    // TODO: Allow entry points to be imported?
+    entry_point_range: Range<usize>,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
