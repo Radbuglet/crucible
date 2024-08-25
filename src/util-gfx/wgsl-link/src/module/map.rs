@@ -101,30 +101,71 @@ impl<T> MapCombinatorsExt for T {}
 // `map_alias` macro
 #[doc(hidden)]
 pub mod map_alias_internals {
-    pub use {crucible_utils::macros::gen_names, Sized};
+    pub use {super::Map, crucible_utils::macros::gen_names, Sized};
 }
 
 #[macro_export]
 macro_rules! map_alias {
     ($(
-        $vis:vis trait $name:ident $(<$($generic:ident),*$(,)?>)? = $($ty:ty),*$(,)?;
+        $vis:vis trait $name:ident $(<$($generic:ident),*$(,)?>)?
+            $(: $([$($inherit_base:tt)*]$([$($inherit_arg:ty),*$(,)?])?),*$(,)?)?
+            $( = $($ty:ty),*$(,)? )?;
     )*) => {$(
         $crate::module::map::map_alias_internals::gen_names! {
-            $crate::module::map::map_alias [$({ $ty })*] {
-                @internal
-                $vis trait $name<$($($generic),*)?> = $($ty),*;
+            $crate::module::map::map_alias [$($({ $ty })*)? $($({ $($inherit_base)* })*)?] [
+                __Disamb1,
+                __Disamb2,
+                __Disamb3,
+                __Disamb4,
+                __Disamb5,
+                __Disamb6,
+                __Disamb7,
+                __Disamb8,
+                __Disamb9,
+                __Disamb10,
+                __Disamb11,
+                __Disamb12,
+            ] {
+                @internal($name<Disambiguator, $($generic,)*>)
+                $vis trait $name<$($($generic),*)?>:
+                    $($( [$crate::module::map::map_alias_internals::Map][$ty], )*)?
+                    $($( [$($inherit_base)*][$($($inherit_arg),*)?], )*)?;
             }
         }
     )*};
-    (@internal
-        $vis:vis trait $name:ident <$($generic:ident),*> = $($ty:ty),*;
+    (@internal($self_trait:ty)
+        $vis:vis trait $name:ident <$($generic:ident),*>: $(
+            [$($inherit_base:tt)*][$($inherit_arg:ty),*$(,)?]
+        ),* $(,)?;
+
         $($disamb_name:ident)*
     ) => {
-        $vis trait $name<Disambiguator, $($generic,)*>: $($crate::module::map::Map<$ty, Self::$disamb_name>+)* $crate::module::map::map_alias_internals::Sized {
+        $vis trait $name<
+            Disambiguator,
+            $($generic,)*
+        >:
+            $($($inherit_base)*<$($inherit_arg,)* <Self as $self_trait>::$disamb_name,> + )*
+                $crate::module::map::map_alias_internals::Sized
+        {
             $(type $disamb_name;)*
         }
 
-        impl<$($disamb_name,)* $($generic,)* __T: $($crate::module::map::Map<$ty, $disamb_name>+)* $crate::module::map::map_alias_internals::Sized> $name<$($generic,)* ($($disamb_name,)*),> for __T {
+        impl<
+            $($disamb_name,)*
+            $($generic,)*
+            __T:
+                $(
+                    $($inherit_base)* <
+                        $($inherit_arg,)*
+                        $disamb_name,
+                    >
+                    +
+                )*
+                $crate::module::map::map_alias_internals::Sized,
+        > $name<
+            $($generic,)*
+            ( $($disamb_name,)* ),
+        > for __T {
             $(type $disamb_name = $disamb_name;)*
         }
     };
@@ -145,8 +186,89 @@ pub fn map_option<T, D>(v: Option<T>, f: &impl Map<T, D>) -> Option<T> {
     v.map(|v| f.map(v))
 }
 
-pub fn map_composite<D>(v: Vec<Option<u32>>, f: &impl Map<u32, D>) -> Vec<Option<u32>> {
-    f.and_complete(map_option)
-        .and_complete(map_collection)
-        .map(v)
+// === Naga Mappers === //
+
+map_alias! {
+    pub trait MapNagaType = naga::Handle<naga::Type>, naga::Span;
+}
+
+pub fn map_naga_type<D>(v: naga::Type, f: &impl MapNagaType<D>) -> naga::Type {
+    use naga::TypeInner::*;
+
+    naga::Type {
+        name: v.name,
+        inner: match v.inner {
+            value @ Scalar(_)
+            | value @ Vector { .. }
+            | value @ Matrix { .. }
+            | value @ Atomic(_)
+            | value @ ValuePointer { .. }
+            | value @ Image { .. }
+            | value @ Sampler { .. }
+            | value @ AccelerationStructure
+            | value @ RayQuery => value,
+            Pointer { base, space } => Pointer {
+                base: f.map(base),
+                space,
+            },
+            Array { base, size, stride } => Array {
+                base: f.map(base),
+                size,
+                stride,
+            },
+            Struct { members, span } => Struct {
+                members: members
+                    .into_iter()
+                    .map(|member| naga::StructMember {
+                        name: member.name,
+                        ty: f.map(member.ty),
+                        binding: member.binding,
+                        offset: member.offset,
+                    })
+                    .collect(),
+                // TODO: How do we map this??
+                span,
+            },
+            BindingArray { base, size } => BindingArray {
+                base: f.map(base),
+                size,
+            },
+        },
+    }
+}
+
+map_alias! {
+    pub trait MapNagaGlobal = naga::Handle<naga::Type>, naga::Handle<naga::Expression>;
+}
+
+pub fn map_naga_constant<D>(v: naga::Constant, f: &impl MapNagaGlobal<D>) -> naga::Constant {
+    naga::Constant {
+        name: v.name,
+        ty: f.map(v.ty),
+        init: f.map(v.init),
+    }
+}
+
+pub fn map_naga_override<D>(v: naga::Override, f: &impl MapNagaGlobal<D>) -> naga::Override {
+    let f = f.and_complete(map_option);
+
+    naga::Override {
+        name: v.name,
+        id: v.id,
+        ty: f.map(v.ty),
+        init: f.map(v.init),
+    }
+}
+
+pub fn map_naga_global_variable<D>(
+    v: naga::GlobalVariable,
+    f: &impl MapNagaGlobal<D>,
+) -> naga::GlobalVariable {
+    naga::GlobalVariable {
+        name: v.name,
+        space: v.space,
+        binding: v.binding,
+        ty: f.map(v.ty),
+        init: map_option(v.init, f),
+    }
 }

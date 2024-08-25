@@ -1,23 +1,10 @@
 #[macro_export]
 macro_rules! gen_names {
     (
-        $target:path [$($counter:tt)*] { $($regular:tt)* }
+        $target:path [$($counter:tt)*] [$($banked_name:ident),*$(,)?] { $($regular:tt)* }
     ) => {
         $crate::gen_names! {
-            @internal [] [
-                __Macro1
-                __Macro2
-                __Macro3
-                __Macro4
-                __Macro5
-                __Macro6
-                __Macro7
-                __Macro8
-                __Macro9
-                __Macro10
-                __Macro11
-                __Macro12
-            ]
+            @internal [] [$($banked_name)*]
             $target [$($counter)*] { $($regular)* }
         }
     };
