@@ -1,4 +1,4 @@
-use crucible_utils::{impl_tuples, newtypes::transparent};
+use crucible_utils::{macros::impl_tuples, newtypes::transparent};
 use derive_where::derive_where;
 use std::{any::type_name, fmt, hash::Hash, marker::PhantomData, num::NonZeroU32};
 

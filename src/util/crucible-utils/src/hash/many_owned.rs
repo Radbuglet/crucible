@@ -1,6 +1,6 @@
 use std::{borrow::Borrow, hash};
 
-use crate::newtypes::impl_tuples;
+use crate::macros::impl_tuples;
 
 pub trait ManyToOwned: Copy + hash::Hash + Eq {
     type Owned;

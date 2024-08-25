@@ -1,6 +1,6 @@
 use std::{any::TypeId, borrow::Cow, marker::PhantomData, num::NonZeroU32};
 
-use crucible_utils::newtypes::{impl_tuples, transparent};
+use crucible_utils::{macros::impl_tuples, newtypes::transparent};
 use derive_where::derive_where;
 
 use crate::{

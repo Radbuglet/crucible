@@ -1,6 +1,9 @@
 use std::{borrow::Cow, marker::PhantomData};
 
-use crucible_utils::newtypes::{enum_index, impl_tuples, transparent};
+use crucible_utils::{
+    macros::impl_tuples,
+    newtypes::{enum_index, transparent},
+};
 use derive_where::derive_where;
 
 use crate::{

@@ -1,5 +1,5 @@
 use crucible_assets::{Asset, AssetArgs, AssetManager};
-use crucible_utils::newtypes::impl_tuples;
+use crucible_utils::macros::impl_tuples;
 use main_loop::GfxContext;
 use typed_wgpu::{BindGroup, BindGroupInstance, BindGroupLayout, PipelineLayout, PipelineSet};
 
