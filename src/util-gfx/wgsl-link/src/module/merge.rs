@@ -9,7 +9,7 @@ use crucible_utils::{
 };
 use naga::{Arena, Handle, Span, UniqueArena};
 
-use super::fold::Folder;
+use super::{fold::Folder, map::Map};
 
 // === Helpers === //
 
@@ -165,6 +165,12 @@ impl<T> Folder<Handle<T>> for ArenaMerger<'_, T> {
     }
 }
 
+impl<T> Map<Handle<T>, ()> for ArenaMerger<'_, T> {
+    fn map(&self, value: Handle<T>) -> Handle<T> {
+        self.src_to_dest(value)
+    }
+}
+
 // === UniqueArenaMerger === //
 
 pub struct UniqueArenaMerger<T> {
@@ -214,6 +220,12 @@ impl<T> UniqueArenaMerger<T> {
 
 impl<T> Folder<Handle<T>> for UniqueArenaMerger<T> {
     fn fold(&self, value: Handle<T>) -> Handle<T> {
+        self.src_to_dest(value)
+    }
+}
+
+impl<T> Map<Handle<T>, ()> for UniqueArenaMerger<T> {
+    fn map(&self, value: Handle<T>) -> Handle<T> {
         self.src_to_dest(value)
     }
 }

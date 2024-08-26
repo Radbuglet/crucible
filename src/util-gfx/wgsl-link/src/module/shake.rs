@@ -11,7 +11,7 @@ use crucible_utils::{
 };
 use naga::Span;
 
-use super::{fold::Folder, merge::RawNagaHandle};
+use super::{fold::Folder, map::Map, merge::RawNagaHandle};
 
 // === ArenaShakeSession === //
 
@@ -114,6 +114,12 @@ impl<'r, 'a, T, A> Folder<naga::Handle<T>> for ArenaShakerFolder<'r, 'a, T, A> {
     }
 }
 
+impl<'r, 'a, T, A> Map<naga::Handle<T>, ()> for ArenaShakerFolder<'r, 'a, T, A> {
+    fn map(&self, value: naga::Handle<T>) -> naga::Handle<T> {
+        self.shaker.borrow_mut().include(value, || (self.arg_gen)())
+    }
+}
+
 // === UniqueArenaShaker === //
 
 #[allow(clippy::type_complexity)]
@@ -195,6 +201,15 @@ where
     T: hash::Hash + Eq,
 {
     fn fold(&self, value: naga::Handle<T>) -> naga::Handle<T> {
+        self.shaker.borrow_mut().include(value, || (self.arg_gen)())
+    }
+}
+
+impl<'r, 'a, T, A, D> Map<naga::Handle<T>, ()> for UniqueArenaShakerFolder<'r, 'a, T, A, D>
+where
+    T: hash::Hash + Eq,
+{
+    fn map(&self, value: naga::Handle<T>) -> naga::Handle<T> {
         self.shaker.borrow_mut().include(value, || (self.arg_gen)())
     }
 }
