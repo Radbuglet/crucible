@@ -153,9 +153,7 @@ pub fn map_naga_function<D>(v: naga::Function, f: &impl MapNagaFunction<D>) -> n
         &MapFn(|(expr, name)| (expressions.map(expr), name)),
     );
 
-    // FIXME: This line prevents everything from compiling!
-    // let body = map_naga_block(v.body, &f.and(&expressions).and(&local_variables));
-    let body = v.body;
+    let body = map_naga_block(v.body, &f.and(&expressions).and(&local_variables));
 
     naga::Function {
         name: v.name,
@@ -406,7 +404,8 @@ pub fn map_naga_statement<D>(v: naga::Statement, f: &impl MapNagaBlock<D>) -> na
         },
         Switch { selector, cases } => Switch {
             selector: f.map(selector),
-            cases: map_collection(cases, &map_naga_switch_case.complete(f)),
+            // This awkward syntax exists to ensure that our mapper doesn't grow unbounded in size.
+            cases: map_collection(cases, &MapFn(|v| map_naga_switch_case(v, f))),
         },
         Loop {
             body,
