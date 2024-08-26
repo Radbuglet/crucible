@@ -1,3 +1,7 @@
+use std::marker::PhantomData;
+
+use derive_where::derive_where;
+
 // === Core === //
 
 mod sealed {
@@ -26,6 +30,36 @@ pub struct MapFn<F>(pub F);
 impl<T, F: Fn(T) -> T> Map<T, ()> for MapFn<F> {
     fn map(&self, value: T) -> T {
         self.0(value)
+    }
+}
+
+#[derive_where(Copy, Clone, Default)]
+pub struct MapNever<T>(PhantomData<fn() -> T>);
+
+impl<T> MapNever<T> {
+    pub const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> Map<T, ()> for MapNever<T> {
+    fn map(&self, _value: T) -> T {
+        unimplemented!()
+    }
+}
+
+#[derive_where(Copy, Clone, Default)]
+pub struct MapIdentity<T>(PhantomData<fn() -> T>);
+
+impl<T> MapIdentity<T> {
+    pub const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> Map<T, ()> for MapIdentity<T> {
+    fn map(&self, value: T) -> T {
+        value
     }
 }
 

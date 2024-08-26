@@ -152,7 +152,10 @@ pub fn map_naga_function<D>(v: naga::Function, f: &impl MapNagaFunction<D>) -> n
         v.named_expressions,
         &MapFn(|(expr, name)| (expressions.map(expr), name)),
     );
-    let body = map_naga_block(v.body, &f.and(&expressions).and(&local_variables));
+
+    // FIXME: This line prevents everything from compiling!
+    // let body = map_naga_block(v.body, &f.and(&expressions).and(&local_variables));
+    let body = v.body;
 
     naga::Function {
         name: v.name,

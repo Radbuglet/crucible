@@ -9,7 +9,7 @@ use crucible_utils::{
 };
 use naga::{Arena, Handle, Span, UniqueArena};
 
-use super::{fold::Folder, map::Map};
+use super::map::Map;
 
 // === Helpers === //
 
@@ -159,12 +159,6 @@ impl<'a, T> ArenaMerger<'a, T> {
     }
 }
 
-impl<T> Folder<Handle<T>> for ArenaMerger<'_, T> {
-    fn fold(&self, value: Handle<T>) -> Handle<T> {
-        self.src_to_dest(value)
-    }
-}
-
 impl<T> Map<Handle<T>, ()> for ArenaMerger<'_, T> {
     fn map(&self, value: Handle<T>) -> Handle<T> {
         self.src_to_dest(value)
@@ -215,12 +209,6 @@ impl<T> UniqueArenaMerger<T> {
 
     pub fn src_to_dest(&self, src_arena: Handle<T>) -> Handle<T> {
         self.map[src_arena.index()]
-    }
-}
-
-impl<T> Folder<Handle<T>> for UniqueArenaMerger<T> {
-    fn fold(&self, value: Handle<T>) -> Handle<T> {
-        self.src_to_dest(value)
     }
 }
 

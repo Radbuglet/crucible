@@ -6,12 +6,21 @@ use crucible_utils::{
     newtypes::{IndexVec, LargeIndex as _},
     polyfill::{copy_hygiene, OptionExt},
 };
-use naga::Span;
 
-use crate::mangle::{mangle_mut, replace_mangles, try_demangle, MangleIndex};
+use crate::{
+    mangle::{mangle_mut, replace_mangles, try_demangle, MangleIndex},
+    module::{
+        map::{Map as _, MapCombinatorsExt, MapFn, MapNever},
+        map_naga::{
+            map_naga_constant, map_naga_expression, map_naga_function, map_naga_global_variable,
+            map_naga_override, map_naga_type,
+        },
+    },
+};
 
 use super::{
-    fold::{folders, Foldable as _, FolderExt as _},
+    map::{map_collection, map_option, MapIdentity},
+    map_naga::{map_naga_function_arg, map_naga_function_result},
     merge::{ArenaMerger, MapResult, RawNagaHandle, UniqueArenaMerger},
     shake::{ArenaShakeSession, ArenaShaker, UniqueArenaShaker},
 };
@@ -53,7 +62,7 @@ impl ModuleLinker {
         let parent_span_start = parent_span.start;
         let parent_span_len = parent_span.end - parent_span.start;
 
-        let map_span = |span: naga::Span| -> naga::Span {
+        let map_span = MapFn(|span: naga::Span| -> naga::Span {
             span.to_range().map_or(naga::Span::UNDEFINED, |v| {
                 debug_assert!(v.end as u32 <= parent_span_len);
                 naga::Span::new(
@@ -61,7 +70,7 @@ impl ModuleLinker {
                     parent_span_start + v.end as u32,
                 )
             })
-        };
+        });
 
         // Since everything depends on types, let's import those first.
         macro_rules! dedup_name {
@@ -93,7 +102,7 @@ impl ModuleLinker {
                 }
 
                 // Otherwise, map it so that it can be integrated into the current arena.
-                let mut ty = ty.fold(&folders!(a: types, b: &map_span));
+                let mut ty = map_naga_type(ty, &types.and(&map_span));
 
                 // If it has a name, mangle it.
                 let demangle_to;
@@ -105,7 +114,7 @@ impl ModuleLinker {
                     demangle_to = None
                 }
 
-                (MapResult::Map(map_span(span), ty), demangle_to)
+                (MapResult::Map(map_span.map(span), ty), demangle_to)
             })
             .post_map(
                 |_types, _dest_arena, demangle_to, _src_handle, dest_handle| {
@@ -187,7 +196,7 @@ impl ModuleLinker {
 
         // Let's fold the new (un-stubbed) values to properly integrate them into the new arena.
         macro_rules! apply_stubs {
-            ($($name:ident as $kind:expr),*$(,)?) => {$(
+            ($(($name:ident, $mapper:expr, $kind:expr)),*$(,)?) => {$(
                 $name.apply(|$name, handle, span, mut val| {
                     if let Some(name) = &mut val.name {
                         file.exports.insert(name.clone(), AnyNagaHandle {
@@ -201,44 +210,46 @@ impl ModuleLinker {
                     }
 
                     (
-                        map_span(span),
-                        val.fold(&folders!(
-                            // `.upcast()` normalizes both plain `Folder` objects and references
-                            // thereto into proper references to `Folder`s.
-                            a: copy_hygiene!($name, constants.upcast()),
-                            b: copy_hygiene!($name, overrides.upcast()),
-                            c: copy_hygiene!($name, types.upcast()),
-                            e: copy_hygiene!($name, global_variables.upcast()),
-                            g: copy_hygiene!($name, functions.upcast()),
-                            h: copy_hygiene!($name, map_span.upcast()),
-                            i: copy_hygiene!($name, global_expressions.upcast()),
-                        )),
+                        map_span.map(span),
+                        ($mapper)(
+                            val,
+                            &copy_hygiene!($name, &constants)
+                                .and(copy_hygiene!($name, &overrides))
+                                .and(copy_hygiene!($name, &types))
+                                .and(copy_hygiene!($name, &global_variables))
+                                .and(copy_hygiene!($name, &functions))
+                                .and(copy_hygiene!($name, &map_span))
+                                .and(copy_hygiene!($name, &global_expressions)),
+                        ),
                     )
                 });
             )*};
         }
 
+        #[rustfmt::skip]
         apply_stubs!(
-            constants as ExportKind::Constants,
-            overrides as ExportKind::Overrides,
-            global_variables as ExportKind::GlobalVariables,
-            functions as ExportKind::Functions,
+            (constants, map_naga_constant, ExportKind::Constants),
+            (overrides, map_naga_override, ExportKind::Overrides),
+            (global_variables, map_naga_global_variable, ExportKind::GlobalVariables),
+            (functions, map_naga_function, ExportKind::Functions),
         );
 
         global_expressions.apply(|global_expressions, _handle, span, val| {
             // (expressions do not have names to mangle)
 
             (
-                map_span(span),
-                val.fold(&folders!(
-                    a: &constants,
-                    b: &overrides,
-                    c: &types,
-                    d: global_expressions,
-                    e: &global_variables,
-                    f: &|_lv| unreachable!("global expressions should not reference local variables"),
-                    g: &functions,
-                )),
+                map_span.map(span),
+                map_naga_expression(
+                    val,
+                    &(&constants)
+                        .and(&overrides)
+                        .and(&types)
+                        .and(&global_expressions)
+                        .and(&global_variables)
+                        .and(&MapNever::<naga::Handle<naga::LocalVariable>>::new())
+                        .and(&functions)
+                        .and(&map_span),
+                ),
             )
         });
 
@@ -246,28 +257,24 @@ impl ModuleLinker {
         let first_entry_point = self.module.entry_points.len();
         self.module
             .entry_points
-            .extend(
-                module
-                    .entry_points
-                    .into_iter()
-                    .map(|entry| naga::EntryPoint {
-                        name: entry.name,
-                        stage: entry.stage,
-                        early_depth_test: entry.early_depth_test,
-                        workgroup_size: entry.workgroup_size,
-                        function: entry.function.fold(&folders!(
-                            // `.upcast()` normalizes both plain `Folder` objects and references
-                            // thereto into proper references to `Folder`s.
-                            a: &constants,
-                            b: &overrides,
-                            c: &types,
-                            e: &global_variables,
-                            g: &functions,
-                            h: &map_span,
-                            i: &global_expressions,
-                        )),
-                    }),
-            );
+            .extend(module.entry_points.into_iter().map(|entry| {
+                naga::EntryPoint {
+                    name: entry.name,
+                    stage: entry.stage,
+                    early_depth_test: entry.early_depth_test,
+                    workgroup_size: entry.workgroup_size,
+                    function: map_naga_function(
+                        entry.function,
+                        &(&constants)
+                            .and(&overrides)
+                            .and(&types)
+                            .and(&global_variables)
+                            .and(&functions)
+                            .and(&map_span)
+                            .and(&global_expressions),
+                    ),
+                }
+            }));
 
         file.entry_point_range = first_entry_point..self.module.entry_points.len();
 
@@ -290,10 +297,10 @@ impl ModuleLinker {
         let mut types = UniqueArenaShaker::new(&self.module.types, (), &|types, span, val, ()| {
             (
                 span,
-                val.clone().fold(&folders!(
-                    a: &|v: Span| v,
-                    b: &types.folder(&|| ()),
-                )),
+                map_naga_type(
+                    val.clone(),
+                    &MapIdentity::<naga::Span>::new().and(types.folder(&|| ())),
+                ),
             )
         });
 
@@ -425,15 +432,18 @@ impl ModuleLinker {
             global_expressions.run(|global_expressions, span, val, ()| {
                 (
                     span,
-                    val.clone().fold(&folders!(
-                        a: &constants.folder(&|| ()),
-                        b: &overrides.folder(&|| ()),
-                        c: &types.folder(&|| ()),
-                        d: &global_expressions.folder(&|| ()),
-                        e: &global_variables.folder(&|| ()),
-                        f: &|_var: naga::Handle<naga::LocalVariable>| unreachable!("global expressions should not reference local variables"),
-                        g: &functions.folder(&|| ()),
-                    )),
+                    map_naga_expression(
+                        val.clone(),
+                        &constants
+                            .folder(&|| ())
+                            .and(overrides.folder(&|| ()))
+                            .and(types.folder(&|| ()))
+                            .and(global_expressions.folder(&|| ()))
+                            .and(global_variables.folder(&|| ()))
+                            .and(functions.folder(&|| ()))
+                            .and(MapNever::<naga::Handle<naga::LocalVariable>>::new())
+                            .and(MapIdentity::<naga::Span>::new()),
+                    ),
                 )
             });
 
@@ -442,15 +452,14 @@ impl ModuleLinker {
                     span,
                     naga::Function {
                         name: val.name.clone(),
-                        arguments: val
-                            .arguments
-                            .iter()
-                            .map(|arg| arg.clone().fold(&types.folder(&|| ())))
-                            .collect(),
-                        result: val
-                            .result
-                            .clone()
-                            .map(|res| res.fold(&types.folder(&|| ()))),
+                        arguments: map_collection(
+                            val.arguments.clone(),
+                            &map_naga_function_arg.complete(types.folder(&|| ())),
+                        ),
+                        result: map_option(
+                            val.result.clone(),
+                            &map_naga_function_result.complete(types.folder(&|| ())),
+                        ),
                         local_variables: naga::Arena::new(),
                         expressions: naga::Arena::new(),
                         named_expressions: naga::FastIndexMap::default(),
@@ -487,9 +496,10 @@ impl ModuleLinker {
         let sess = ArenaShakeSession::new();
         let mut types =
             UniqueArenaShaker::new(&self.module.types, (), &|types, span, value, ()| {
-                let value = value
-                    .clone()
-                    .fold(&folders!(a: &types.folder(&|| ()), b: &|v: naga::Span| v));
+                let value = map_naga_type(
+                    value.clone(),
+                    &types.folder(&|| ()).and(MapIdentity::<naga::Span>::new()),
+                );
 
                 (span, value)
             });
@@ -533,14 +543,16 @@ impl ModuleLinker {
                         stage: entry.stage,
                         early_depth_test: entry.early_depth_test,
                         workgroup_size: entry.workgroup_size,
-                        function: entry.function.clone().fold(&folders!(
-                            a: &constants.folder(&|| ()),
-                            b: &overrides.folder(&|| ()),
-                            c: &types.folder(&|| ()),
-                            d: &global_variables.folder(&|| ()),
-                            e: &functions.folder(&|| ()),
-                            f: &|v: naga::Span| v,
-                        )),
+                        function: map_naga_function(
+                            entry.function.clone(),
+                            &constants
+                                .folder(&|| ())
+                                .and(overrides.folder(&|| ()))
+                                .and(types.folder(&|| ()))
+                                .and(global_variables.folder(&|| ()))
+                                .and(functions.folder(&|| ()))
+                                .and(MapIdentity::<naga::Span>::new()),
+                        ),
                     }),
             );
         }
@@ -586,29 +598,34 @@ impl ModuleLinker {
             global_expressions.run(|global_expressions, span, val, ()| {
                 (
                     span,
-                    val.clone().fold(&folders!(
-                        a: &constants.folder(&|| ()),
-                        b: &overrides.folder(&|| ()),
-                        c: &types.folder(&|| ()),
-                        d: &global_expressions.folder(&|| ()),
-                        e: &global_variables.folder(&|| ()),
-                        f: &|_var: naga::Handle<naga::LocalVariable>| unreachable!("global expressions should not reference local variables"),
-                        g: &functions.folder(&|| ()),
-                    )),
+                    map_naga_expression(
+                        val.clone(),
+                        &constants
+                            .folder(&|| ())
+                            .and(overrides.folder(&|| ()))
+                            .and(types.folder(&|| ()))
+                            .and(global_expressions.folder(&|| ()))
+                            .and(global_variables.folder(&|| ()))
+                            .and(&functions.folder(&|| ()))
+                            .and(MapNever::<naga::Handle<naga::LocalVariable>>::new())
+                            .and(MapIdentity::<naga::Span>::new()),
+                    ),
                 )
             });
 
             functions.run(|functions, span, val, ()| {
                 (
                     span,
-                    val.clone().fold(&folders!(
-                        a: &constants.folder(&|| ()),
-                        b: &overrides.folder(&|| ()),
-                        c: &types.folder(&|| ()),
-                        d: &global_variables.folder(&|| ()),
-                        e: &functions.folder(&|| ()),
-                        f: &|v: naga::Span| v,
-                    )),
+                    map_naga_function(
+                        val.clone(),
+                        &constants
+                            .folder(&|| ())
+                            .and(overrides.folder(&|| ()))
+                            .and(types.folder(&|| ()))
+                            .and(global_variables.folder(&|| ()))
+                            .and(functions.folder(&|| ()))
+                            .and(MapIdentity::<naga::Span>::new()),
+                    ),
                 )
             });
         });

@@ -1,4 +1,3 @@
-pub mod fold;
 pub mod linker;
 pub mod map;
 pub mod map_naga;
