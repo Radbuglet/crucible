@@ -2,7 +2,7 @@ use crate::module::map::{map_alias, map_collection, Map, MapCombinatorsExt as _}
 
 use super::{
     map::{map_option, MapFn},
-    merge::{ArenaMerger, RawNagaHandle},
+    merge::ArenaMerger,
 };
 
 // === Helpers === //
@@ -11,16 +11,15 @@ fn map_naga_range<T>(
     range: naga::Range<T>,
     f: impl FnOnce(naga::Handle<T>, naga::Handle<T>) -> (naga::Handle<T>, naga::Handle<T>),
 ) -> naga::Range<T> {
-    range.first_and_last().map_or(
-        naga::Range::new_from_bounds(
-            RawNagaHandle::default().as_typed(),
-            RawNagaHandle::default().as_typed(),
-        ),
-        |(l, r)| {
-            let (l, r) = f(l, r);
-            naga::Range::new_from_bounds(l, r)
-        },
-    )
+    match range.first_and_last() {
+        // Everything here is done with inclusive ranges.
+        Some((first, last)) => {
+            let (first, last) = f(first, last);
+            naga::Range::new_from_bounds(first, last)
+        }
+        // If we found an empty range, return it unchanged.
+        None => range,
+    }
 }
 
 // === Mappers === //
