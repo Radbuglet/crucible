@@ -52,24 +52,11 @@ impl ModuleLinker {
         Self::default()
     }
 
-    pub fn link(
-        &mut self,
-        module: naga::Module,
-        stubs: &ImportStubs,
-        parent_span: Range<u32>,
-    ) -> ModuleHandle {
+    pub fn link(&mut self, module: naga::Module, stubs: &ImportStubs) -> ModuleHandle {
         let mut file = LinkedModule::default();
-        let parent_span_start = parent_span.start;
-        let parent_span_len = parent_span.end - parent_span.start;
-
         let map_span = MapFn(|span: naga::Span| -> naga::Span {
-            span.to_range().map_or(naga::Span::UNDEFINED, |v| {
-                debug_assert!(v.end as u32 <= parent_span_len);
-                naga::Span::new(
-                    parent_span_start + v.start as u32,
-                    parent_span_start + v.end as u32,
-                )
-            })
+            let _ = span;
+            naga::Span::UNDEFINED
         });
 
         // Since everything depends on types, let's import those first.

@@ -1,5 +1,4 @@
-// TODO: Does wgsl not support pi?!
-const pi = 3.14159265359;
+//#use PI in "utils/constants.wgsl"
 
 @group(0) @binding(0)
 var<uniform> inv_proj_and_view: mat4x4<f32>;
@@ -50,17 +49,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 	let view_pos_norm = normalize(view_pos);
 
 	// The latitude of the fragment position on the normalized skybox sphere.
-	// Ranges from `-pi/2` to `pi/2`.
-	let latitude = pi / 2.0 - acos(view_pos_norm.y);
+	// Ranges from `-PI/2` to `PI/2`.
+	let latitude = PI / 2.0 - acos(view_pos_norm.y);
 
 	// The longitude of the fragment position on the normalized skybox sphere.
-	// By default, `arctan2` ranges from `-pi` to `pi`. We normalize this to `0` to `tau`.
-	let longitude = atan2(view_pos_norm.z, view_pos_norm.x) + pi;
+	// By default, `arctan2` ranges from `-PI` to `PI`. We normalize this to `0` to `tau`.
+	let longitude = atan2(view_pos_norm.z, view_pos_norm.x) + PI;
 
 	// The equirectangular projection of this point.
 	let eqp = vec2<f32>(
-		longitude / (2.0 * pi),
-		(latitude + pi / 2.0) / pi,
+		longitude / (2.0 * PI),
+		(latitude + PI / 2.0) / PI,
 	);
 
 	return textureSample(panorama_tex, panorama_sampler, vec2<f32>(eqp.x, 1.0 - eqp.y));

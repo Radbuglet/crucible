@@ -16,7 +16,7 @@ pub fn mangle_mut(name: &mut String, idx: MangleIndex) {
     use std::fmt::Write as _;
 
     assert!(!has_stray_mangles(name));
-    write!(name, "{}{:x}_", MANGLE_SEP, idx.0).unwrap();
+    write!(name, "{}{}_", MANGLE_SEP, idx.0).unwrap();
 }
 
 pub fn try_demangle(name: &str) -> Option<(&str, MangleIndex)> {
@@ -24,7 +24,7 @@ pub fn try_demangle(name: &str) -> Option<(&str, MangleIndex)> {
     let left = &name[..idx];
     let right = &name[idx..][MANGLE_SEP.len()..];
     let right = &right[..(right.len() - 1)];
-    let right = MangleIndex::from_usize(usize::from_str_radix(right, 16).unwrap());
+    let right = MangleIndex::from_usize(right.parse().unwrap());
 
     Some((left, right))
 }
@@ -66,11 +66,10 @@ pub fn replace_mangles(
         // Parse mangle index
         let pos = pos + MANGLE_SEP.len();
         let end_pos = pos + memchr::memchr(b'_', &splicer.remaining()[pos..]).unwrap();
-        let idx = usize::from_str_radix(
-            std::str::from_utf8(&splicer.remaining()[pos..end_pos]).unwrap(),
-            16,
-        )
-        .unwrap();
+        let idx = std::str::from_utf8(&splicer.remaining()[pos..end_pos])
+            .unwrap()
+            .parse()
+            .unwrap();
         let idx = MangleIndex::from_usize(idx);
         let end_pos = end_pos + 1;
 

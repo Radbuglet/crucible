@@ -374,10 +374,7 @@ impl Session {
                 .language
                 .parse(diag, &mut me.services.span_mgr, file, &output)?;
 
-            let file_span = me.services.span_mgr.file_span(file);
-
-            me.linker
-                .link(module, &stubs, file_span.start.0..file_span.end.0)
+            me.linker.link(module, &stubs)
         };
 
         defuse(me);
