@@ -31,3 +31,6 @@ winit = "0.30.0"
 git = "https://github.com/Radbuglet/crevice.git"
 rev = "b57559deff995ec5657f7866717600a055f756d5"
 features = ["glam"]
+
+[build-dependencies]
+wgsl-link = { version = "0.1.0", path = "../../util-gfx/wgsl-link" }

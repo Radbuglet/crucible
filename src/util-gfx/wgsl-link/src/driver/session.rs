@@ -27,7 +27,7 @@ use crate::{
 
 // Core
 // TODO: Stop double-validating
-pub trait Language {
+pub trait Language: 'static {
     fn emit(&mut self, module: &naga::Module) -> String;
 
     fn parse(

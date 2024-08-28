@@ -526,6 +526,7 @@ dependencies = [
  "typed-glam",
  "typed-wgpu",
  "wgpu",
+ "wgsl-link",
  "winit",
 ]
 

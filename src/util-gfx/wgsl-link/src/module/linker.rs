@@ -259,7 +259,7 @@ impl ModuleLinker {
             .entry_points
             .extend(module.entry_points.into_iter().map(|entry| {
                 naga::EntryPoint {
-                    name: entry.name,
+                    name: self.mangler.mangle_owned(entry.name),
                     stage: entry.stage,
                     early_depth_test: entry.early_depth_test,
                     workgroup_size: entry.workgroup_size,
@@ -539,7 +539,7 @@ impl ModuleLinker {
                 self.module.entry_points[module.entry_point_range.clone()]
                     .iter()
                     .map(|entry| naga::EntryPoint {
-                        name: entry.name.clone(),
+                        name: try_demangle(&entry.name).unwrap().0.to_string(),
                         stage: entry.stage,
                         early_depth_test: entry.early_depth_test,
                         workgroup_size: entry.workgroup_size,
@@ -737,5 +737,10 @@ impl NameMangler {
         self.0 += 1;
         mangle_mut(name, idx);
         idx
+    }
+
+    pub fn mangle_owned(&mut self, mut name: String) -> String {
+        self.mangle_mut(&mut name);
+        name
     }
 }
