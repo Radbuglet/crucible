@@ -1,22 +1,7 @@
-// Settings
-const DBM_NONE: i32 = 1;
-const DBM_SHOW_LUXEL_GRID: i32 = 2;
-
-const DEBUG_MODE: i32 = DBM_NONE;
-
-const SHADOW_BIAS: f32 = 0.0003;
+//#use VertexInput, Uniforms, PerChunkUniforms in "shared/voxel.wgsl"
+//#use is_lit in "shared/light_map.wgsl"
 
 // Uniforms
-struct Uniforms {
-    camera: mat4x4f,
-    light: mat4x4f,
-    light_dir: vec3f,
-}
-
-struct PerChunkUniforms {
-    offset: vec3f,
-}
-
 @group(0) @binding(0)
 var<uniform> uniforms: Uniforms;
 
@@ -32,14 +17,7 @@ var light_map: texture_2d<f32>;
 @group(2) @binding(0)
 var<uniform> uniforms_pc: PerChunkUniforms;
 
-// Vertex definitions
-struct VertexInput {
-	@location(0) position: vec3f,
-	@location(1) uv: vec2f,
-    @location(2) light: f32,
-    @location(3) normal: vec3f,
-}
-
+// Entry points
 struct VertexOutput {
 	@builtin(position) clip_position: vec4f,
     @location(0) light_space: vec4f,
@@ -48,7 +26,6 @@ struct VertexOutput {
     @location(3) normal: vec3f,
 }
 
-// Entry points
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
 	var out: VertexOutput;
@@ -65,38 +42,11 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     var albedo = vec4f(textureSample(texture, nearest_sampler, in.uv)) * in.light;
+    var is_lit = is_lit(light_map, nearest_sampler, uniforms.light_dir, in.light_space, in.normal);
 
-    // Determine position in light-space
-    var light_space: vec3f = in.light_space.xyz;
-    light_space /= in.light_space.w;
-
-    // Determine depth in CSM
-    var max_lit_depth: f32 = textureSample(
-        light_map,
-        nearest_sampler,
-        light_space.xy * vec2f(0.5, -0.5) + 0.5,
-    ).r;
-    var my_lit_depth: f32 = light_space.z - SHADOW_BIAS;
-
-    // Determine whether this pixel is lit
-    var is_lit = my_lit_depth < max_lit_depth && dot(in.normal, uniforms.light_dir) < 0.;
-
-    // Process shading mode
-    if (DEBUG_MODE == DBM_SHOW_LUXEL_GRID) {
-        // Determine pixel position in light-space
-        var luxel = light_space.xy * vec2f(0.5, -0.5) + 0.5;
-        var luxel_discrete = floor(luxel * vec2f(textureDimensions(light_map)));
-
-        if ((luxel_discrete.x + luxel_discrete.y) % 2. == 0. || !is_lit) {
-            return albedo / 2.;
-        } else {
-            return albedo;
-        }
+    if is_lit {
+        return albedo;
     } else {
-        if is_lit {
-            return albedo;
-        } else {
-            return albedo / 2.;
-        }
+        return albedo / 2.;
     }
 }

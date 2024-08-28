@@ -50,7 +50,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 	// The latitude of the fragment position on the normalized skybox sphere.
 	// Ranges from `-PI/2` to `PI/2`.
-	let latitude = PI / 2.0 - acos(view_pos_norm.y);
+    let latitude = PI / 2.0 - acos(view_pos_norm.y);
 
 	// The longitude of the fragment position on the normalized skybox sphere.
 	// By default, `arctan2` ranges from `-PI` to `PI`. We normalize this to `0` to `tau`.

@@ -1,9 +1,4 @@
-// Uniforms
-struct Uniforms {
-    camera: mat4x4f,
-    light: mat4x4f,
-    light_dir: vec3f,
-}
+//#use VertexInput, Uniforms in "shared/voxel.wgsl"
 
 @group(0) @binding(0)
 var<uniform> uniforms: Uniforms;
@@ -14,18 +9,10 @@ var texture: texture_2d<f32>;
 @group(0) @binding(2)
 var nearest_sampler: sampler;
 
-// Vertex definitions
-struct VertexInput {
-	@location(0) position: vec3f,
-	@location(1) uv: vec2f,
-    @location(2) color: f32,
-}
-
 struct VertexOutput {
 	@builtin(position) clip_position: vec4f,
 }
 
-// Entry points
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
 	var out: VertexOutput;
