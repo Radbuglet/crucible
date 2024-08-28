@@ -4,22 +4,25 @@ use bevy_autoken::{random_component, Obj, RandomEntityExt};
 use bevy_ecs::entity::Entity;
 use crucible_assets::AssetManager;
 use crucible_math::{Angle3D, Angle3DExt};
-use helpers::{
-    AtlasTexture, AtlasTextureGfx, CameraManager, CameraSettings, CameraSnapshot, CameraViewState,
-    DynamicBuffer, FullScreenTexture, MultiPassDriver,
-};
 use image::Rgba32FImage;
 use main_loop::{GfxContext, Viewport};
-use shaders::{
-    skybox::{load_skybox_pipeline, SkyboxUniforms},
-    voxel::{load_voxel_csm_pipeline, load_voxel_opaque_pipeline, VoxelUniforms},
-};
 use typed_glam::glam::{UVec2, Vec2, Vec3, Vec4};
-use voxel::WorldVoxelMesh;
 use wgpu::util::DeviceExt;
 
+use self::{
+    helpers::{
+        AtlasTexture, AtlasTextureGfx, CameraManager, CameraSettings, CameraSnapshot,
+        CameraViewState, DynamicBuffer, FullScreenTexture, MultiPassDriver,
+    },
+    pipelines::{
+        skybox::{load_skybox_pipeline, SkyboxUniforms},
+        voxel::{load_voxel_csm_pipeline, load_voxel_opaque_pipeline, VoxelUniforms},
+    },
+    voxel::WorldVoxelMesh,
+};
+
 pub mod helpers;
-pub mod shaders;
+pub mod pipelines;
 pub mod voxel;
 
 // === ViewportRenderer === //

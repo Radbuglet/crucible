@@ -120,7 +120,7 @@ pub fn load_opaque_actor_shader(
         gfx.device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("actor/opaque.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("actor_opaque.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(include_shader!("actor_opaque.wgsl").into()),
             })
     })
 }

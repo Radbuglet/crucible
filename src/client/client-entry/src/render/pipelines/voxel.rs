@@ -163,7 +163,7 @@ pub fn load_voxel_opaque_shader(
         gfx.device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("voxel_opaque.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("voxel_opaque.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(include_shader!("voxel_opaque.wgsl").into()),
             })
     })
 }
@@ -192,7 +192,7 @@ pub fn load_voxel_csm_shader(assets: &AssetManager, gfx: &GfxContext) -> Asset<w
         gfx.device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("voxel_csm.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("voxel_csm.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(include_shader!("voxel_csm.wgsl").into()),
             })
     })
 }

@@ -63,7 +63,7 @@ pub fn load_skybox_shader_module(
         gfx.device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Skybox shader module"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("skybox.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(include_shader!("skybox.wgsl").into()),
             })
     })
 }

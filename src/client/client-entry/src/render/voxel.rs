@@ -23,13 +23,11 @@ use main_loop::GfxContext;
 use typed_glam::glam::{UVec2, Vec3};
 use typed_wgpu::BufferBinding;
 
-use crate::render::shaders::voxel::VoxelVertex;
-
 use super::{
     helpers::{AtlasTexture, BindGroupExt, MultiPass},
-    shaders::voxel::{
+    pipelines::voxel::{
         VoxelChunkInstanceBindGroup, VoxelChunkUniformData, VoxelCsmPipeline, VoxelOpaquePipeline,
-        VoxelUniforms,
+        VoxelUniforms, VoxelVertex,
     },
 };
 
