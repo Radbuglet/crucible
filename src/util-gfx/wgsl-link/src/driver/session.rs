@@ -80,13 +80,14 @@ impl Language for Wgsl {
                 let mut diag = Diagnostic::new_err(err.message().to_string());
 
                 for (i, (label_span, label_msg)) in err.labels().enumerate() {
-                    let label_span = label_span.to_range().unwrap();
-                    if label_span.end > file_len {
-                        // TODO: Handle these!
+                    let Some(label_span) = label_span
+                        .to_range()
+                        .filter(|label_span| label_span.end > file_len)
+                        .map(|label_span| spans.range_to_span(file, label_span))
+                    else {
+                        // TODO: Handle these
                         continue;
-                    }
-
-                    let label_span = spans.range_to_span(file, label_span);
+                    };
 
                     if i == 0 {
                         diag.offending_span = Some(label_span);
