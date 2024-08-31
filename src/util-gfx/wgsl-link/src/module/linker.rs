@@ -19,10 +19,13 @@ use crate::{
 };
 
 use super::{
-    map::{map_collection, map_option, MapIdentity},
+    map::{map_collection, map_option, MapIdentity, UpcastCollection},
     map_naga::{map_naga_function_arg, map_naga_function_result},
     merge::{ArenaMerger, MapResult, RawNagaHandle, UniqueArenaMerger},
-    shake::{ArenaShakeSession, ArenaShaker, UniqueArenaShaker},
+    shake::{
+        AnyMultiShaker, ArenaShaker as _, MultiArenaShaker, MultiArenaShakerReq, NagaArenaShaker,
+        NagaUniqueArenaShaker,
+    },
 };
 
 // === ModuleLinker === //
@@ -274,22 +277,99 @@ impl ModuleLinker {
         mut handle_err: impl FnMut(LinkerImportError<'_, M>),
     ) -> ImportStubs {
         // Create a shaker for each arena.
-        let sess = ArenaShakeSession::new();
-        let mut constants = ArenaShaker::new(&sess, &self.module.constants);
-        let mut overrides = ArenaShaker::new(&sess, &self.module.overrides);
-        let mut global_variables = ArenaShaker::new(&sess, &self.module.global_variables);
-        let mut global_expressions = ArenaShaker::new(&sess, &self.module.global_expressions);
-        let mut functions = ArenaShaker::new(&sess, &self.module.functions);
+        let constants = NagaArenaShaker::new(&self.module.constants).wrap(());
+        let overrides = NagaArenaShaker::new(&self.module.overrides).wrap(());
+        let global_variables = NagaArenaShaker::new(&self.module.global_variables).wrap(());
+        let global_expressions = NagaArenaShaker::new(&self.module.global_expressions).wrap(());
+        let functions = NagaArenaShaker::new(&self.module.functions).wrap(());
+        let types = NagaUniqueArenaShaker::new(&self.module.types).wrap(());
 
-        let mut types = UniqueArenaShaker::new(&self.module.types, (), &|types, span, val, ()| {
-            (
-                span,
-                map_naga_type(
-                    val.clone(),
-                    &MapIdentity::<naga::Span>::new().and(types.folder(&|| ())),
-                ),
-            )
-        });
+        let shaker = |req: MultiArenaShakerReq<'_>| {
+            req.process(&types, |req, span, val| {
+                (
+                    span,
+                    map_naga_type(
+                        val.clone(),
+                        &MapIdentity::<naga::Span>::new()
+                            .and(req.mapper().upcast(types.upcaster())),
+                    ),
+                )
+            })
+            .process(&constants, |req, span, val| {
+                (
+                    span,
+                    naga::Constant {
+                        name: val.name.clone(),
+                        ty: req.include(val.ty),
+                        init: req.include(val.init),
+                    },
+                )
+            })
+            .process(&overrides, |req, span, val| {
+                (
+                    span,
+                    naga::Override {
+                        name: val.name.clone(),
+                        id: val.id,
+                        ty: req.include(val.ty),
+                        init: val.init.map(|expr| req.include(expr)),
+                    },
+                )
+            })
+            .process(&global_variables, |req, span, val| {
+                (
+                    span,
+                    naga::GlobalVariable {
+                        name: val.name.clone(),
+                        space: val.space,
+                        binding: val.binding.clone(),
+                        ty: req.include(val.ty),
+                        init: val.init.map(|expr| req.include(expr)),
+                    },
+                )
+            })
+            .process(&global_expressions, |req, span, val| {
+                (
+                    span,
+                    map_naga_expression(
+                        val.clone(),
+                        &req.mapper()
+                            .upcast(
+                                constants
+                                    .upcaster()
+                                    .union(overrides.upcaster())
+                                    .union(types.upcaster())
+                                    .union(global_expressions.upcaster())
+                                    .union(global_variables.upcaster())
+                                    .union(functions.upcaster()),
+                            )
+                            .and(MapNever::<naga::Handle<naga::LocalVariable>>::new())
+                            .and(MapIdentity::<naga::Span>::new()),
+                    ),
+                )
+            })
+            .process(&functions, |req, span, val| {
+                (
+                    span,
+                    naga::Function {
+                        name: val.name.clone(),
+                        arguments: map_collection(
+                            val.arguments.clone(),
+                            &map_naga_function_arg.complete(req.mapper()),
+                        ),
+                        result: map_option(
+                            val.result.clone(),
+                            &map_naga_function_result.complete(req.mapper()),
+                        ),
+                        local_variables: naga::Arena::new(),
+                        expressions: naga::Arena::new(),
+                        named_expressions: naga::FastIndexMap::default(),
+                        body: naga::Block::from_vec(vec![naga::Statement::Kill]),
+                    },
+                )
+            });
+        };
+        let mut shaker = MultiArenaShaker::new(&shaker);
 
         // Seed each shaker with their base set of imports. Record where these new names map to.
         let mut names_to_handle = FxStrMap::new();
@@ -310,35 +390,35 @@ impl ModuleLinker {
 
             let mangled_name = match handle.kind {
                 ExportKind::Types => {
-                    types.include(handle.raw.as_typed(), || ());
+                    shaker.include(handle.raw.as_typed::<naga::Type>());
                     self.module.types[handle.raw.as_typed()]
                         .name
                         .as_ref()
                         .unwrap()
                 }
                 ExportKind::Constants => {
-                    constants.include(handle.raw.as_typed(), || ());
+                    shaker.include(handle.raw.as_typed::<naga::Constant>());
                     self.module.constants[handle.raw.as_typed()]
                         .name
                         .as_ref()
                         .unwrap()
                 }
                 ExportKind::Overrides => {
-                    overrides.include(handle.raw.as_typed(), || ());
+                    shaker.include(handle.raw.as_typed::<naga::Override>());
                     self.module.overrides[handle.raw.as_typed()]
                         .name
                         .as_ref()
                         .unwrap()
                 }
                 ExportKind::GlobalVariables => {
-                    global_variables.include(handle.raw.as_typed(), || ());
+                    shaker.include(handle.raw.as_typed::<naga::GlobalVariable>());
                     self.module.global_variables[handle.raw.as_typed()]
                         .name
                         .as_ref()
                         .unwrap()
                 }
                 ExportKind::Functions => {
-                    functions.include(handle.raw.as_typed(), || ());
+                    shaker.include(handle.raw.as_typed::<naga::Function>());
                     self.module.functions[handle.raw.as_typed()]
                         .name
                         .as_ref()
@@ -378,84 +458,6 @@ impl ModuleLinker {
             );
         }
 
-        // Construct tree-shaken stub arenas using the seeded names of the previous step.
-        sess.run(|| {
-            constants.run(|_constants, span, val, ()| {
-                (
-                    span,
-                    naga::Constant {
-                        name: val.name.clone(),
-                        ty: types.include(val.ty, || ()),
-                        init: global_expressions.include(val.init, || ()),
-                    },
-                )
-            });
-
-            overrides.run(|_overrides, span, val, ()| {
-                (
-                    span,
-                    naga::Override {
-                        name: val.name.clone(),
-                        id: val.id,
-                        ty: types.include(val.ty, || ()),
-                        init: val.init.map(|expr| global_expressions.include(expr, || ())),
-                    },
-                )
-            });
-
-            global_variables.run(|_global_variables, span, val, ()| {
-                (
-                    span,
-                    naga::GlobalVariable {
-                        name: val.name.clone(),
-                        space: val.space,
-                        binding: val.binding.clone(),
-                        ty: types.include(val.ty, || ()),
-                        init: val.init.map(|expr| global_expressions.include(expr, || ())),
-                    },
-                )
-            });
-
-            global_expressions.run(|global_expressions, span, val, ()| {
-                (
-                    span,
-                    map_naga_expression(
-                        val.clone(),
-                        &constants
-                            .folder(&|| ())
-                            .and(overrides.folder(&|| ()))
-                            .and(types.folder(&|| ()))
-                            .and(global_expressions.folder(&|| ()))
-                            .and(global_variables.folder(&|| ()))
-                            .and(functions.folder(&|| ()))
-                            .and(MapNever::<naga::Handle<naga::LocalVariable>>::new())
-                            .and(MapIdentity::<naga::Span>::new()),
-                    ),
-                )
-            });
-
-            functions.run(|_functions, span, val, ()| {
-                (
-                    span,
-                    naga::Function {
-                        name: val.name.clone(),
-                        arguments: map_collection(
-                            val.arguments.clone(),
-                            &map_naga_function_arg.complete(types.folder(&|| ())),
-                        ),
-                        result: map_option(
-                            val.result.clone(),
-                            &map_naga_function_result.complete(types.folder(&|| ())),
-                        ),
-                        local_variables: naga::Arena::new(),
-                        expressions: naga::Arena::new(),
-                        named_expressions: naga::FastIndexMap::default(),
-                        body: naga::Block::from_vec(vec![naga::Statement::Kill]),
-                    },
-                )
-            });
-        });
-
         let module = naga::Module {
             types: types.finish(),
             special_types: naga::SpecialTypes::default(),
@@ -480,22 +482,98 @@ impl ModuleLinker {
 
     pub fn shake_module(&self, modules: impl IntoIterator<Item = ModuleHandle>) -> naga::Module {
         // Create a shaker for each arena.
-        let sess = ArenaShakeSession::new();
-        let mut types =
-            UniqueArenaShaker::new(&self.module.types, (), &|types, span, value, ()| {
+        let types = NagaUniqueArenaShaker::new(&self.module.types).wrap(());
+        let constants = NagaArenaShaker::new(&self.module.constants).wrap(());
+        let overrides = NagaArenaShaker::new(&self.module.overrides).wrap(());
+        let global_variables = NagaArenaShaker::new(&self.module.global_variables).wrap(());
+        let global_expressions = NagaArenaShaker::new(&self.module.global_expressions).wrap(());
+        let functions = NagaArenaShaker::new(&self.module.functions).wrap(());
+
+        let shaker = |req: MultiArenaShakerReq<'_>| {
+            req.process(&types, |req, span, value| {
                 let value = map_naga_type(
                     value.clone(),
-                    &types.folder(&|| ()).and(MapIdentity::<naga::Span>::new()),
+                    &req.mapper()
+                        .upcast(types.upcaster())
+                        .and(MapIdentity::<naga::Span>::new()),
                 );
 
                 (span, value)
+            })
+            .process(&constants, |req, span, value| {
+                (
+                    span,
+                    naga::Constant {
+                        name: value.name.clone(),
+                        ty: req.include(value.ty),
+                        init: req.include(value.init),
+                    },
+                )
+            })
+            .process(&overrides, |req, span, value| {
+                (
+                    span,
+                    naga::Override {
+                        name: value.name.clone(),
+                        id: value.id,
+                        ty: req.include(value.ty),
+                        init: value.init.map(|expr| req.include(expr)),
+                    },
+                )
+            })
+            .process(&global_variables, |req, span, value| {
+                (
+                    span,
+                    naga::GlobalVariable {
+                        name: value.name.clone(),
+                        space: value.space,
+                        binding: value.binding.clone(),
+                        ty: req.include(value.ty),
+                        init: value.init.map(|expr| req.include(expr)),
+                    },
+                )
+            })
+            .process(&global_expressions, |req, span, value| {
+                (
+                    span,
+                    map_naga_expression(
+                        value.clone(),
+                        &req.mapper()
+                            .upcast(
+                                constants
+                                    .upcaster()
+                                    .union(overrides.upcaster())
+                                    .union(types.upcaster())
+                                    .union(global_expressions.upcaster())
+                                    .union(global_variables.upcaster())
+                                    .union(functions.upcaster()),
+                            )
+                            .and(MapNever::<naga::Handle<naga::LocalVariable>>::new())
+                            .and(MapIdentity::<naga::Span>::new()),
+                    ),
+                )
+            })
+            .process(&functions, |req, span, val| {
+                (
+                    span,
+                    map_naga_function(
+                        val.clone(),
+                        &req.mapper()
+                            .upcast(
+                                constants
+                                    .upcaster()
+                                    .union(overrides.upcaster())
+                                    .union(types.upcaster())
+                                    .union(global_variables.upcaster())
+                                    .union(functions.upcaster()),
+                            )
+                            .and(MapIdentity::<naga::Span>::new()),
+                    ),
+                )
             });
+        };
+        let mut shaker = MultiArenaShaker::new(&shaker);
 
-        let mut constants = ArenaShaker::new(&sess, &self.module.constants);
-        let mut overrides = ArenaShaker::new(&sess, &self.module.overrides);
-        let mut global_variables = ArenaShaker::new(&sess, &self.module.global_variables);
-        let mut global_expressions = ArenaShaker::new(&sess, &self.module.global_expressions);
-        let mut functions = ArenaShaker::new(&sess, &self.module.functions);
         let mut entry_points = Vec::new();
 
         // Seed each shaker with the modules' exports.
@@ -505,19 +583,19 @@ impl ModuleLinker {
             for (_name, export) in module.exports.iter() {
                 match export.kind {
                     ExportKind::Types => {
-                        types.include(export.raw.as_typed(), || ());
+                        shaker.include::<naga::Type>(export.raw.as_typed());
                     }
                     ExportKind::Constants => {
-                        constants.include(export.raw.as_typed(), || ());
+                        shaker.include::<naga::Constant>(export.raw.as_typed());
                     }
                     ExportKind::Overrides => {
-                        overrides.include(export.raw.as_typed(), || ());
+                        shaker.include::<naga::Override>(export.raw.as_typed());
                     }
                     ExportKind::GlobalVariables => {
-                        global_variables.include(export.raw.as_typed(), || ());
+                        shaker.include::<naga::GlobalVariable>(export.raw.as_typed());
                     }
                     ExportKind::Functions => {
-                        functions.include(export.raw.as_typed(), || ());
+                        shaker.include::<naga::Function>(export.raw.as_typed());
                     }
                 }
             }
@@ -532,90 +610,21 @@ impl ModuleLinker {
                         workgroup_size: entry.workgroup_size,
                         function: map_naga_function(
                             entry.function.clone(),
-                            &constants
-                                .folder(&|| ())
-                                .and(overrides.folder(&|| ()))
-                                .and(types.folder(&|| ()))
-                                .and(global_variables.folder(&|| ()))
-                                .and(functions.folder(&|| ()))
+                            &shaker
+                                .mapper()
+                                .upcast(
+                                    constants
+                                        .upcaster()
+                                        .union(overrides.upcaster())
+                                        .union(types.upcaster())
+                                        .union(global_variables.upcaster())
+                                        .union(functions.upcaster()),
+                                )
                                 .and(MapIdentity::<naga::Span>::new()),
                         ),
                     }),
             );
         }
-
-        // Construct the tree-shaken arenas.
-        sess.run(|| {
-            constants.run(|_constants, span, val, ()| {
-                (
-                    span,
-                    naga::Constant {
-                        name: val.name.clone(),
-                        ty: types.include(val.ty, || ()),
-                        init: global_expressions.include(val.init, || ()),
-                    },
-                )
-            });
-
-            overrides.run(|_overrides, span, val, ()| {
-                (
-                    span,
-                    naga::Override {
-                        name: val.name.clone(),
-                        id: val.id,
-                        ty: types.include(val.ty, || ()),
-                        init: val.init.map(|expr| global_expressions.include(expr, || ())),
-                    },
-                )
-            });
-
-            global_variables.run(|_global_variables, span, val, ()| {
-                (
-                    span,
-                    naga::GlobalVariable {
-                        name: val.name.clone(),
-                        space: val.space,
-                        binding: val.binding.clone(),
-                        ty: types.include(val.ty, || ()),
-                        init: val.init.map(|expr| global_expressions.include(expr, || ())),
-                    },
-                )
-            });
-
-            global_expressions.run(|global_expressions, span, val, ()| {
-                (
-                    span,
-                    map_naga_expression(
-                        val.clone(),
-                        &constants
-                            .folder(&|| ())
-                            .and(overrides.folder(&|| ()))
-                            .and(types.folder(&|| ()))
-                            .and(global_expressions.folder(&|| ()))
-                            .and(global_variables.folder(&|| ()))
-                            .and(&functions.folder(&|| ()))
-                            .and(MapNever::<naga::Handle<naga::LocalVariable>>::new())
-                            .and(MapIdentity::<naga::Span>::new()),
-                    ),
-                )
-            });
-
-            functions.run(|functions, span, val, ()| {
-                (
-                    span,
-                    map_naga_function(
-                        val.clone(),
-                        &constants
-                            .folder(&|| ())
-                            .and(overrides.folder(&|| ()))
-                            .and(types.folder(&|| ()))
-                            .and(global_variables.folder(&|| ()))
-                            .and(functions.folder(&|| ()))
-                            .and(MapIdentity::<naga::Span>::new()),
-                    ),
-                )
-            });
-        });
 
         naga::Module {
             types: types.finish(),

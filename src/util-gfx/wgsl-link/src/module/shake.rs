@@ -1,200 +1,311 @@
+// FIXME: The old shaker does not properly push the arena values in toposorted order.
+//  Rewrite it and fix it!
+
 use std::{
-    cell::{Cell, RefCell},
-    collections::VecDeque,
+    any::Any,
+    cell::{RefCell, RefMut},
     hash,
-    marker::PhantomData,
 };
 
-use crucible_utils::{
-    hash::{hashbrown::hash_map, FxHashMap},
-    newtypes::Index,
-};
-use naga::Span;
+use crucible_utils::hash::{hashbrown::hash_map, FxHashMap};
 
-use super::{map::Map, merge::RawNagaHandle};
+use super::map::{Map, UpcastCollectionUnit};
 
-// === ArenaShakeSession === //
+// === Core === //
 
-#[derive(Debug, Default)]
-pub struct ArenaShakeSession {
-    is_dirty: Cell<bool>,
-}
+// AnyMultiShaker
+pub trait AnyMultiShaker: Sized {
+    fn include<T: 'static>(&mut self, handle: naga::Handle<T>) -> naga::Handle<T>;
 
-impl ArenaShakeSession {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn run(&self, mut f: impl FnMut()) {
-        loop {
-            self.is_dirty.set(false);
-            f();
-            if !self.is_dirty.get() {
-                break;
-            }
-        }
+    fn mapper(&mut self) -> AnyMultiShakerMapper<'_, Self> {
+        AnyMultiShakerMapper(RefCell::new(self))
     }
 }
 
-// === ArenaShaker === //
+pub struct AnyMultiShakerMapper<'a, S>(RefCell<&'a mut S>);
 
-pub struct ArenaShaker<'a, T, A> {
-    sess: &'a ArenaShakeSession,
-    src_arena: &'a naga::Arena<T>,
-    dst_arena: naga::Arena<T>,
-    src_handles_to_add: VecDeque<(naga::Handle<T>, A)>,
-    src_to_dst: FxHashMap<naga::Handle<T>, naga::Handle<T>>,
-}
-
-impl<'a, T, A> ArenaShaker<'a, T, A> {
-    pub fn new(sess: &'a ArenaShakeSession, source: &'a naga::Arena<T>) -> Self {
-        Self {
-            sess,
-            src_arena: source,
-            dst_arena: naga::Arena::new(),
-            src_handles_to_add: VecDeque::new(),
-            src_to_dst: FxHashMap::default(),
-        }
-    }
-
-    pub fn include(
-        &mut self,
-        src_handle: naga::Handle<T>,
-        meta: impl FnOnce() -> A,
-    ) -> naga::Handle<T> {
-        let entry = match self.src_to_dst.entry(src_handle) {
-            hash_map::Entry::Occupied(entry) => {
-                return *entry.get();
-            }
-            hash_map::Entry::Vacant(entry) => entry,
-        };
-
-        let dst_handle =
-            RawNagaHandle::from_usize(self.dst_arena.len() + self.src_handles_to_add.len())
-                .as_typed();
-
-        self.sess.is_dirty.set(true);
-        self.src_handles_to_add.push_back((src_handle, meta()));
-        entry.insert(dst_handle);
-        dst_handle
-    }
-
-    pub fn run(&mut self, mut f: impl FnMut(&mut Self, Span, &T, A) -> (Span, T)) {
-        while let Some((src_handle, meta)) = self.src_handles_to_add.pop_front() {
-            let src_span = self.src_arena.get_span(src_handle);
-            let src_value = &self.src_arena[src_handle];
-            let (dst_span, dst_value) = f(self, src_span, src_value, meta);
-            self.dst_arena.append(dst_value, dst_span);
-        }
-    }
-
-    pub fn folder<'r>(
-        &'r mut self,
-        arg_gen: &'r impl Fn() -> A,
-    ) -> ArenaShakerFolder<'r, 'a, T, A> {
-        ArenaShakerFolder {
-            shaker: RefCell::new(self),
-            arg_gen,
-        }
-    }
-
-    pub fn finish(self) -> naga::Arena<T> {
-        self.dst_arena
-    }
-}
-
-pub struct ArenaShakerFolder<'r, 'a, T, A> {
-    shaker: RefCell<&'r mut ArenaShaker<'a, T, A>>,
-    arg_gen: &'r dyn Fn() -> A,
-}
-
-impl<'r, 'a, T, A> Map<naga::Handle<T>, ()> for ArenaShakerFolder<'r, 'a, T, A> {
-    fn map(&self, value: naga::Handle<T>) -> naga::Handle<T> {
-        self.shaker.borrow_mut().include(value, || (self.arg_gen)())
-    }
-}
-
-// === UniqueArenaShaker === //
-
-#[allow(clippy::type_complexity)]
-pub struct UniqueArenaShaker<'a, T, A, D = ()> {
-    _ty: PhantomData<fn(A)>,
-    data: D,
-    src_arena: &'a naga::UniqueArena<T>,
-    dst_arena: naga::UniqueArena<T>,
-    src_to_dst: FxHashMap<naga::Handle<T>, naga::Handle<T>>,
-    mapper: &'a dyn Fn(&mut Self, Span, &T, A) -> (Span, T),
-}
-
-impl<'a, T, A, D> UniqueArenaShaker<'a, T, A, D>
+impl<S, T> Map<naga::Handle<T>, ()> for AnyMultiShakerMapper<'_, S>
 where
-    T: hash::Hash + Eq,
+    S: AnyMultiShaker,
+    T: 'static,
 {
-    pub fn new(
-        src_arena: &'a naga::UniqueArena<T>,
-        data: D,
-        mapper: &'a impl Fn(&mut Self, Span, &T, A) -> (Span, T),
+    fn map(&self, value: naga::Handle<T>) -> naga::Handle<T> {
+        self.0.borrow_mut().include(value)
+    }
+}
+
+// ShakerContext
+pub struct ShakerContext<A, D>(RefCell<(A, D)>);
+
+impl<A, D> ShakerContext<A, D> {
+    pub fn new(arena: A, data: D) -> Self {
+        Self(RefCell::new((arena, data)))
+    }
+
+    pub fn finish_raw(self) -> (A, D) {
+        self.0.into_inner()
+    }
+
+    pub fn finish(self) -> A::Finished
+    where
+        A: ArenaShaker,
+    {
+        self.finish_raw().0.finish()
+    }
+
+    pub fn upcaster(&self) -> UpcastCollectionUnit<naga::Handle<A::Handle>>
+    where
+        A: ArenaShaker,
+    {
+        UpcastCollectionUnit::new()
+    }
+}
+
+pub trait ArenaShaker: Sized {
+    type Handle: 'static;
+    type Finished;
+
+    fn finish(self) -> Self::Finished;
+
+    fn wrap<D>(self, data: D) -> ShakerContext<Self, D> {
+        ShakerContext::new(self, data)
+    }
+}
+
+pub trait ArenaShakerFor<'a, 'b, D, F>: ArenaShaker {
+    fn process(
+        req: MultiArenaShakerReqBound<'a, 'b, Self, D>,
+        handle: naga::Handle<Self::Handle>,
+        f: F,
+    ) -> naga::Handle<Self::Handle>;
+}
+
+// MultiArenaShaker
+pub struct MultiArenaShaker<'a> {
+    handler: &'a dyn Fn(MultiArenaShakerReq<'_>),
+}
+
+impl<'a> MultiArenaShaker<'a> {
+    pub fn new(handler: &'a dyn Fn(MultiArenaShakerReq<'_>)) -> Self {
+        Self { handler }
+    }
+
+    pub fn include<T: 'static>(&mut self, handle: naga::Handle<T>) -> naga::Handle<T> {
+        let mut input_output = (handle, None);
+        (self.handler)(MultiArenaShakerReq {
+            shaker: MultiArenaShaker {
+                handler: &self.handler,
+            },
+            input_output: &mut input_output,
+        });
+
+        input_output.1.expect("no shaker provided")
+    }
+}
+
+impl AnyMultiShaker for MultiArenaShaker<'_> {
+    fn include<T: 'static>(&mut self, handle: naga::Handle<T>) -> naga::Handle<T> {
+        self.include(handle)
+    }
+}
+
+// MultiArenaShakerReq
+pub struct MultiArenaShakerReq<'a> {
+    shaker: MultiArenaShaker<'a>,
+    input_output: &'a mut dyn Any,
+}
+
+impl<'a> MultiArenaShakerReq<'a> {
+    pub fn process<'b, A, D, F>(self, cx: &'b ShakerContext<A, D>, f: F) -> Self
+    where
+        A: ArenaShakerFor<'a, 'b, D, F>,
+    {
+        self.process_raw(cx, |req, handle| A::process(req, handle, f))
+    }
+
+    pub fn process_raw<'b, A, D, T: 'static>(
+        self,
+        cx: &'b ShakerContext<A, D>,
+        f: impl FnOnce(MultiArenaShakerReqBound<'a, 'b, A, D>, naga::Handle<T>) -> naga::Handle<T>,
     ) -> Self {
-        Self {
-            _ty: PhantomData,
-            data,
-            src_arena,
-            dst_arena: naga::UniqueArena::new(),
-            src_to_dst: FxHashMap::default(),
-            mapper,
+        if let Some((input, output)) = self
+            .input_output
+            .downcast_mut::<(naga::Handle<T>, Option<naga::Handle<T>>)>()
+        {
+            *output = Some(f(
+                MultiArenaShakerReqBound {
+                    shaker: MultiArenaShaker {
+                        handler: self.shaker.handler,
+                    },
+                    context: cx,
+                    context_bound: Some(cx.0.borrow_mut()),
+                },
+                *input,
+            ));
         }
+
+        self
+    }
+}
+
+// MultiArenaShakerReqBound
+pub struct MultiArenaShakerReqBound<'a, 'b, A, D> {
+    shaker: MultiArenaShaker<'a>,
+    context: &'b ShakerContext<A, D>,
+    context_bound: Option<RefMut<'b, (A, D)>>,
+}
+
+impl<'a, 'b, A, D> MultiArenaShakerReqBound<'a, 'b, A, D> {
+    pub fn cx(&self) -> &(A, D) {
+        self.context_bound.as_ref().unwrap()
+    }
+
+    pub fn cx_mut(&mut self) -> &mut (A, D) {
+        self.context_bound.as_mut().unwrap()
+    }
+
+    pub fn arena(&self) -> &A {
+        &self.cx().0
+    }
+
+    pub fn arena_mut(&mut self) -> &mut A {
+        &mut self.cx_mut().0
     }
 
     pub fn data(&self) -> &D {
-        &self.data
+        &self.cx().1
     }
 
     pub fn data_mut(&mut self) -> &mut D {
-        &mut self.data
+        &mut self.cx_mut().1
     }
 
-    pub fn include(
-        &mut self,
-        src_handle: naga::Handle<T>,
-        args: impl FnOnce() -> A,
-    ) -> naga::Handle<T> {
-        if let Some(&existing) = self.src_to_dst.get(&src_handle) {
-            return existing;
-        }
-
-        let src_span = self.src_arena.get_span(src_handle);
-        let src_value = &self.src_arena[src_handle];
-        let (dst_span, dst_value) = (self.mapper)(self, src_span, src_value, args());
-        let dst_handle = self.dst_arena.insert(dst_value, dst_span);
-        self.src_to_dst.insert(src_handle, dst_handle);
-        dst_handle
-    }
-
-    pub fn folder<'r>(
-        &'r mut self,
-        arg_gen: &'r impl Fn() -> A,
-    ) -> UniqueArenaShakerFolder<'r, 'a, T, A, D> {
-        UniqueArenaShakerFolder {
-            shaker: RefCell::new(self),
-            arg_gen,
-        }
-    }
-
-    pub fn finish(self) -> naga::UniqueArena<T> {
-        self.dst_arena
+    pub fn include<T: 'static>(&mut self, handle: naga::Handle<T>) -> naga::Handle<T> {
+        self.context_bound = None;
+        let handle = self.shaker.include(handle);
+        self.context_bound = Some(self.context.0.borrow_mut());
+        handle
     }
 }
 
-pub struct UniqueArenaShakerFolder<'r, 'a, T, A, D = ()> {
-    shaker: RefCell<&'r mut UniqueArenaShaker<'a, T, A, D>>,
-    arg_gen: &'r dyn Fn() -> A,
+impl<'a, 'b, A, D> AnyMultiShaker for MultiArenaShakerReqBound<'a, 'b, A, D> {
+    fn include<T: 'static>(&mut self, handle: naga::Handle<T>) -> naga::Handle<T> {
+        self.include(handle)
+    }
 }
 
-impl<'r, 'a, T, A, D> Map<naga::Handle<T>, ()> for UniqueArenaShakerFolder<'r, 'a, T, A, D>
+// === NagaArenaShaker === //
+
+pub struct NagaArenaShaker<'a, T> {
+    src: &'a naga::Arena<T>,
+    dst: naga::Arena<T>,
+    map: FxHashMap<naga::Handle<T>, Option<naga::Handle<T>>>,
+}
+
+impl<'a, T> NagaArenaShaker<'a, T> {
+    pub fn new(src: &'a naga::Arena<T>) -> Self {
+        Self {
+            src,
+            dst: naga::Arena::new(),
+            map: FxHashMap::default(),
+        }
+    }
+}
+
+impl<T: 'static> ArenaShaker for NagaArenaShaker<'_, T> {
+    type Handle = T;
+    type Finished = naga::Arena<T>;
+
+    fn finish(self) -> Self::Finished {
+        self.dst
+    }
+}
+
+impl<'a, 'b, T, D, F> ArenaShakerFor<'a, 'b, D, F> for NagaArenaShaker<'_, T>
 where
-    T: hash::Hash + Eq,
+    T: 'static,
+    F: FnOnce(&mut MultiArenaShakerReqBound<'a, 'b, Self, D>, naga::Span, &T) -> (naga::Span, T),
 {
-    fn map(&self, value: naga::Handle<T>) -> naga::Handle<T> {
-        self.shaker.borrow_mut().include(value, || (self.arg_gen)())
+    fn process(
+        mut req: MultiArenaShakerReqBound<'a, 'b, Self, D>,
+        handle: naga::Handle<Self::Handle>,
+        f: F,
+    ) -> naga::Handle<Self::Handle> {
+        match req.arena_mut().map.entry(handle) {
+            hash_map::Entry::Occupied(entry) => {
+                return entry.get().expect("handle has a cyclic definition")
+            }
+            hash_map::Entry::Vacant(entry) => {
+                entry.insert(None);
+            }
+        }
+
+        let src = req.arena().src;
+        let span = src.get_span(handle);
+        let value = &src[handle];
+
+        let (span, value) = f(&mut req, span, value);
+
+        let new_handle = req.arena_mut().dst.append(value, span);
+        *req.arena_mut().map.get_mut(&handle).unwrap() = Some(new_handle);
+        new_handle
+    }
+}
+
+// === NagaUniqueArenaShaker === //
+
+pub struct NagaUniqueArenaShaker<'a, T> {
+    src: &'a naga::UniqueArena<T>,
+    dst: naga::UniqueArena<T>,
+    map: FxHashMap<naga::Handle<T>, Option<naga::Handle<T>>>,
+}
+
+impl<'a, T> NagaUniqueArenaShaker<'a, T> {
+    pub fn new(src: &'a naga::UniqueArena<T>) -> Self {
+        Self {
+            src,
+            dst: naga::UniqueArena::new(),
+            map: FxHashMap::default(),
+        }
+    }
+}
+
+impl<T: 'static> ArenaShaker for NagaUniqueArenaShaker<'_, T> {
+    type Handle = T;
+    type Finished = naga::UniqueArena<T>;
+
+    fn finish(self) -> Self::Finished {
+        self.dst
+    }
+}
+
+impl<'a, 'b, T, D, F> ArenaShakerFor<'a, 'b, D, F> for NagaUniqueArenaShaker<'_, T>
+where
+    T: 'static + hash::Hash + Eq,
+    F: FnOnce(&mut MultiArenaShakerReqBound<'a, 'b, Self, D>, naga::Span, &T) -> (naga::Span, T),
+{
+    fn process(
+        mut req: MultiArenaShakerReqBound<'a, 'b, Self, D>,
+        handle: naga::Handle<Self::Handle>,
+        f: F,
+    ) -> naga::Handle<Self::Handle> {
+        match req.arena_mut().map.entry(handle) {
+            hash_map::Entry::Occupied(entry) => {
+                return entry.get().expect("handle has a cyclic definition")
+            }
+            hash_map::Entry::Vacant(entry) => {
+                entry.insert(None);
+            }
+        }
+
+        let src = req.arena().src;
+        let span = src.get_span(handle);
+        let value = &src[handle];
+
+        let (span, value) = f(&mut req, span, value);
+
+        let new_handle = req.arena_mut().dst.insert(value, span);
+        *req.arena_mut().map.get_mut(&handle).unwrap() = Some(new_handle);
+        new_handle
     }
 }

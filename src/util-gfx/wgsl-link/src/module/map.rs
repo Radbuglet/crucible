@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{fmt, marker::PhantomData};
 
 use derive_where::derive_where;
 
@@ -109,6 +109,18 @@ where
     }
 }
 
+pub struct MapUpcastMany<M, C: UpcastCollection>(pub M, pub PhantomData<fn() -> C>);
+
+impl<T, D1, D2, M, C> Map<T, (D1, D2)> for MapUpcastMany<M, C>
+where
+    M: Map<T, D1>,
+    C: UpcastCollectionHas<T, D2>,
+{
+    fn map(&self, value: T) -> T {
+        self.0.map(value)
+    }
+}
+
 pub trait MapCombinatorsExt: Sized {
     fn and<R>(self, other: R) -> MapCombine<Self, R> {
         MapCombine(self, other)
@@ -122,11 +134,15 @@ pub trait MapCombinatorsExt: Sized {
         MapComplete(self, other)
     }
 
-    fn upcast<T, D>(&self) -> &impl Map<T, D>
+    fn upcast_one<T, D>(&self) -> &impl Map<T, D>
     where
         Self: Map<T, D>,
     {
         self
+    }
+
+    fn upcast<C: UpcastCollection>(self, _collection: C) -> MapUpcastMany<Self, C> {
+        MapUpcastMany(self, PhantomData)
     }
 }
 
@@ -206,6 +222,53 @@ macro_rules! map_alias {
 }
 
 pub use map_alias;
+
+// Upcast collection
+pub trait UpcastCollection: Sized + fmt::Debug + Copy + Default {
+    fn union<R: UpcastCollection>(self, other: R) -> UpcastCollectionAnd<Self, R> {
+        UpcastCollectionAnd(self, other)
+    }
+}
+
+pub trait UpcastCollectionHas<T, D>: UpcastCollection {}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct UpcastCollectionEmpty;
+
+impl UpcastCollection for UpcastCollectionEmpty {}
+
+#[derive_where(Debug, Copy, Clone, Default)]
+pub struct UpcastCollectionUnit<T>(pub PhantomData<fn() -> T>);
+
+impl<T> UpcastCollectionUnit<T> {
+    pub const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> UpcastCollection for UpcastCollectionUnit<T> {}
+
+impl<T> UpcastCollectionHas<T, ()> for UpcastCollectionUnit<T> {}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct UpcastCollectionAnd<L: UpcastCollection, R: UpcastCollection>(pub L, pub R);
+
+impl<L: UpcastCollection, R: UpcastCollection> UpcastCollection for UpcastCollectionAnd<L, R> {}
+
+impl<T, D, L, R> UpcastCollectionHas<T, (Disamb<0>, D)> for UpcastCollectionAnd<L, R>
+where
+    L: UpcastCollectionHas<T, D>,
+    R: UpcastCollection,
+{
+}
+
+impl<T, D, L, R: UpcastCollectionHas<T, D>> UpcastCollectionHas<T, (Disamb<1>, D)>
+    for UpcastCollectionAnd<L, R>
+where
+    L: UpcastCollection,
+    R: UpcastCollectionHas<T, D>,
+{
+}
 
 // === Generic Mappers === //
 
