@@ -1,5 +1,5 @@
 //#use VertexInput, Uniforms, PerChunkUniforms in "shared/voxel.wgsl"
-//#use is_lit in "shared/light_map.wgsl"
+//#use shadow_level in "shared/light_map.wgsl"
 
 // Uniforms
 @group(0) @binding(0)
@@ -41,12 +41,8 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-    var albedo = vec4f(textureSample(texture, nearest_sampler, in.uv)) * in.light;
-    var is_lit = is_lit(light_map, nearest_sampler, uniforms.light_dir, in.light_space, in.normal);
+    let albedo = vec4f(textureSample(texture, nearest_sampler, in.uv)) * in.light;
+    let shadow_level = shadow_level(light_map, nearest_sampler, uniforms.light_dir, in.light_space, in.normal);
 
-    if is_lit {
-        return albedo;
-    } else {
-        return albedo / 2.;
-    }
+    return albedo * (1f + shadow_level) / 2f;
 }
