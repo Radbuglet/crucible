@@ -29,6 +29,20 @@ pub fn try_demangle(name: &str) -> Option<(&str, MangleIndex)> {
     Some((left, right))
 }
 
+pub fn try_demangle_string(name: &mut String) -> Option<MangleIndex> {
+    let (new_name, idx) = try_demangle(name)?;
+    name.truncate(new_name.len());
+    Some(idx)
+}
+
+pub fn try_demangle_opt_string(name: &mut Option<String>) -> Option<MangleIndex> {
+    name.as_mut().and_then(try_demangle_string)
+}
+
+pub fn try_demangle_opt_str_to_owned(name: Option<&str>) -> Option<String> {
+    name.and_then(try_demangle).map(|v| v.0.to_string())
+}
+
 // === Replace Mangles === //
 
 pub struct MangleReplaceOut<'a, 'b> {

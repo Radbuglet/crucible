@@ -8,7 +8,10 @@ use crucible_utils::{
 };
 
 use crate::{
-    mangle::{mangle_mut, replace_mangles, try_demangle, MangleIndex},
+    mangle::{
+        mangle_mut, replace_mangles, try_demangle, try_demangle_opt_str_to_owned,
+        try_demangle_opt_string, MangleIndex,
+    },
     module::{
         map::{Map as _, MapCombinatorsExt, MapFn, MapNever},
         map_naga::{
@@ -491,12 +494,13 @@ impl ModuleLinker {
 
         let shaker = |req: MultiArenaShakerReq<'_>| {
             req.process(&types, |req, span, value| {
-                let value = map_naga_type(
+                let mut value = map_naga_type(
                     value.clone(),
                     &req.mapper()
                         .upcast(types.upcaster())
                         .and(MapIdentity::<naga::Span>::new()),
                 );
+                try_demangle_opt_string(&mut value.name);
 
                 (span, value)
             })
@@ -504,7 +508,7 @@ impl ModuleLinker {
                 (
                     span,
                     naga::Constant {
-                        name: value.name.clone(),
+                        name: try_demangle_opt_str_to_owned(value.name.as_deref()),
                         ty: req.include(value.ty),
                         init: req.include(value.init),
                     },
@@ -514,7 +518,7 @@ impl ModuleLinker {
                 (
                     span,
                     naga::Override {
-                        name: value.name.clone(),
+                        name: try_demangle_opt_str_to_owned(value.name.as_deref()),
                         id: value.id,
                         ty: req.include(value.ty),
                         init: value.init.map(|expr| req.include(expr)),
@@ -525,7 +529,7 @@ impl ModuleLinker {
                 (
                     span,
                     naga::GlobalVariable {
-                        name: value.name.clone(),
+                        name: try_demangle_opt_str_to_owned(value.name.as_deref()),
                         space: value.space,
                         binding: value.binding.clone(),
                         ty: req.include(value.ty),
@@ -553,23 +557,22 @@ impl ModuleLinker {
                     ),
                 )
             })
-            .process(&functions, |req, span, val| {
-                (
-                    span,
-                    map_naga_function(
-                        val.clone(),
-                        &req.mapper()
-                            .upcast(
-                                constants
-                                    .upcaster()
-                                    .union(overrides.upcaster())
-                                    .union(types.upcaster())
-                                    .union(global_variables.upcaster())
-                                    .union(functions.upcaster()),
-                            )
-                            .and(MapIdentity::<naga::Span>::new()),
-                    ),
-                )
+            .process(&functions, |req, span, value| {
+                let mut value = map_naga_function(
+                    value.clone(),
+                    &req.mapper()
+                        .upcast(
+                            constants
+                                .upcaster()
+                                .union(overrides.upcaster())
+                                .union(types.upcaster())
+                                .union(global_variables.upcaster())
+                                .union(functions.upcaster()),
+                        )
+                        .and(MapIdentity::<naga::Span>::new()),
+                );
+                try_demangle_opt_string(&mut value.name);
+                (span, value)
             });
         };
         let mut shaker = MultiArenaShaker::new(&shaker);

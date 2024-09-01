@@ -249,7 +249,7 @@ pub fn sys_process_camera_controller(
 
             let camera_aabb = Aabb3::from_origin_size(
                 camera.state.pos.as_dvec3().cast_glam(),
-                EntityVec::splat(0.9),
+                EntityVec::splat(0.5),
                 EntityVec::splat(0.5),
             );
 
