@@ -1,6 +1,6 @@
 #![feature(arbitrary_self_types)]
 
-mod dummy_game;
+mod game;
 mod main_loop;
 mod render;
 

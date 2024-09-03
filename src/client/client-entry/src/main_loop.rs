@@ -31,7 +31,7 @@ use winit::{
 };
 
 use crate::{
-    dummy_game::{sys_process_camera_controller, PlayerCameraController},
+    game::player::{sys_process_camera_controller, PlayerCameraController},
     render::{
         helpers::{CameraManager, VirtualCamera},
         voxel::{
@@ -279,7 +279,7 @@ fn init_engine_root(
     let _input_mgr = engine_root.insert(InputManager::default());
 
     // Allow game to initialize itself
-    world_mut().use_random(|cx| crate::dummy_game::init_engine_root(cx, engine_root));
+    world_mut().use_random(|cx| crate::game::init_engine_root(cx, engine_root));
 
     // Make main viewport visible
     main_viewport_vp.window().set_visible(true);

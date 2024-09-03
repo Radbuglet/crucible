@@ -85,7 +85,7 @@ impl GlobalRenderer {
         let csm_view = csm.create_view(&wgpu::TextureViewDescriptor::default());
 
         // load skybox subsystem
-        let skybox = image::load_from_memory(include_bytes!("embedded_res/default_skybox.png"))
+        let skybox = image::load_from_memory(include_bytes!("../game/res/default_skybox.png"))
             .unwrap()
             .into_rgba8();
 
