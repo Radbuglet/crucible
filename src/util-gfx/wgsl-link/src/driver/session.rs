@@ -9,7 +9,7 @@ use crucible_utils::{
     hash::FxHashMap,
     mem::{defuse, guard},
 };
-use lang_utils::{
+use dsl_utils::{
     diagnostic::{
         report_diagnostic, Diagnostic, DiagnosticReporter, DiagnosticReporterCap, DiagnosticWindow,
     },

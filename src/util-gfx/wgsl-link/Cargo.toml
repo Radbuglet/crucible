@@ -8,7 +8,7 @@ anyhow = "1.0.86"
 autoken = { git = "https://github.com/Radbuglet/autoken.git", rev = "c0941f1506fda81dc388f9a52e3770792ee0c822", version = "0.1.0" }
 crucible-utils = { version = "0.1.0", path = "../../util/crucible-utils" }
 derive-where = "1.2.7"
-lang-utils = { version = "0.1.0", path = "../../util/lang-utils" }
+dsl-utils = { version = "0.1.0", path = "../../util/dsl-utils" }
 memchr = "2.7.4"
 naga = { version = "22.0.0", features = ["wgsl-in", "wgsl-out"] }
 termcolor = "1.4.1"

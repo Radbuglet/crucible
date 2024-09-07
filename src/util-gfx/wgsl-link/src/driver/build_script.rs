@@ -5,7 +5,7 @@ use std::{
     process::exit,
 };
 
-use lang_utils::diagnostic::emit_pretty_diagnostics;
+use dsl_utils::diagnostic::emit_pretty_diagnostics;
 
 use crate::driver::session::Session;
 
