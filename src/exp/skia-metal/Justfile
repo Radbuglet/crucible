@@ -1,0 +1,4 @@
+run:
+    cargo build
+    cp ./target/debug/skia-metal bundle/skia-metal
+    cd bundle && ./skia-metal
