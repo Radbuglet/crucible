@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+chrono = "0.4.38"
 cocoa = "0.26.0"
 core-graphics-types = "0.1.1"
 fastrand = "2.1.1"
-foreign-types-shared = "0.1.1"
 libc = "0.2.158"
-metal-rs = { package = "metal", version = "0.24.0" }
+metal = "0.29.0"
 objc = "0.2.7"
 raw-window-handle = "0.6.2"
 skia-safe = { version = "0.75.0", features = ["metal"] }
