@@ -9,3 +9,6 @@ pub use smuggle::*;
 
 mod splice;
 pub use splice::*;
+
+mod unsafe_cell;
+pub use unsafe_cell::*;

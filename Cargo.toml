@@ -13,7 +13,7 @@ members = [
     "src/util/crucible-utils-proc",
     "src/util/crucible-utils",
     "src/util/dsl-utils",
-    "src/util/typed-glam",
+    "src/util/typed-glam", "src/util/crude",
 ]
 exclude = ["src/exp"]
 

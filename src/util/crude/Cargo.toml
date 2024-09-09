@@ -1,0 +1,10 @@
+[package]
+name = "crude"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crucible-utils = { version = "0.1.0", path = "../crucible-utils" }
+dashmap = "6.1.0"
+derive-where = "1.2.7"
+thiserror = "1.0.63"

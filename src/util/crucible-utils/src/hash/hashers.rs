@@ -1,13 +1,29 @@
 use std::{
-    hash::{self, BuildHasher},
+    hash::{self, BuildHasher, Hasher},
     marker::PhantomData,
+    num::NonZeroU64,
 };
 
 use derive_where::derive_where;
 
 pub use rustc_hash::FxHasher;
 
-use super::StrMap;
+use super::{SliceMap, StrMap};
+
+// == Aliases === //
+
+pub type FxBuildHasher = ConstBuildHasherDefault<FxHasher>;
+pub type FxHashMap<K, V> = hashbrown::HashMap<K, V, FxBuildHasher>;
+pub type FxHashSet<T> = hashbrown::HashSet<T, FxBuildHasher>;
+
+pub type NopBuildHasher = ConstBuildHasherDefault<NopHasher>;
+pub type NopHashMap<K, V> = hashbrown::HashMap<K, V, NopBuildHasher>;
+pub type NopHashSet<T> = hashbrown::HashSet<T, NopBuildHasher>;
+
+pub type FxSliceMap<K, V> = SliceMap<K, V, FxBuildHasher>;
+pub type FxStrMap<V> = StrMap<V, FxBuildHasher>;
+
+// === Hashers === //
 
 #[derive_where(Debug, Copy, Clone, Default)]
 pub struct ConstBuildHasherDefault<T> {
@@ -45,16 +61,37 @@ impl hash::Hasher for NopHasher {
     }
 }
 
-pub type FxBuildHasher = ConstBuildHasherDefault<FxHasher>;
-pub type FxHashMap<K, V> = hashbrown::HashMap<K, V, FxBuildHasher>;
-pub type FxHashSet<T> = hashbrown::HashSet<T, FxBuildHasher>;
-
-pub type NopBuildHasher = ConstBuildHasherDefault<NopHasher>;
-pub type NopHashMap<K, V> = hashbrown::HashMap<K, V, NopBuildHasher>;
-pub type NopHashSet<T> = hashbrown::HashSet<T, NopBuildHasher>;
-
-pub type FxStrMap<V> = StrMap<V, FxBuildHasher>;
+// === Hash functions === //
 
 pub fn fx_hash_one(value: impl hash::Hash) -> u64 {
     FxBuildHasher::new().hash_one(value)
 }
+
+pub const fn xorshift64_raw(state: u64) -> u64 {
+    // Adapted from: https://en.wikipedia.org/w/index.php?title=Xorshift&oldid=1123949358
+    let state = state ^ (state << 13);
+    let state = state ^ (state >> 7);
+    let state = state ^ (state << 17);
+    state
+}
+
+pub const fn xorshift64(state: NonZeroU64) -> NonZeroU64 {
+    unsafe { NonZeroU64::new_unchecked(xorshift64_raw(state.get())) }
+}
+
+// === Hash Adapters === //
+
+pub trait BuildHasherExt: BuildHasher {
+    fn hash_iter<T: hash::Hash>(&self, iter: impl IntoIterator<Item = T>) -> u64 {
+        let mut hasher = self.build_hasher();
+        let mut iter_len = 0;
+        for elem in iter {
+            elem.hash(&mut hasher);
+            iter_len += 1;
+        }
+        hasher.write_usize(iter_len);
+        hasher.finish()
+    }
+}
+
+impl<H: ?Sized + BuildHasher> BuildHasherExt for H {}

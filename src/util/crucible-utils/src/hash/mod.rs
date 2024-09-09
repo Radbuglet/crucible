@@ -6,5 +6,5 @@ pub use many_owned::*;
 
 pub use ::hashbrown;
 
-mod str_map;
-pub use str_map::*;
+mod slice_map;
+pub use slice_map::*;
