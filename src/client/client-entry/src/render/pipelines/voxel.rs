@@ -6,8 +6,7 @@ use typed_wgpu::{
     BindGroup, BindGroupBuilder, BindGroupInstance, BufferBinding, DynamicOffset, GpuStruct,
     NoDynamicOffsets, PipelineLayout, RenderPipeline, Std430VertexFormat, VertexBufferLayout,
 };
-
-use crate::render::helpers::{BindGroupExt as _, PipelineLayoutExt, SamplerDesc};
+use wgpu_ext::{BindGroupExt as _, PipelineLayoutExt as _, SamplerDesc};
 
 // === Uniforms === //
 

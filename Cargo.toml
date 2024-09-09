@@ -6,6 +6,7 @@ members = [
     "src/shared/crucible-world",
     "src/util-gfx/main-loop",
     "src/util-gfx/typed-wgpu",
+    "src/util-gfx/wgpu-ext",
     "src/util-gfx/wgsl-link",
     "src/util/bevy-autoken",
     "src/util/crucible-assets",

@@ -22,13 +22,11 @@ use crucible_world::{
 use main_loop::GfxContext;
 use typed_glam::glam::{UVec2, Vec3};
 use typed_wgpu::BufferBinding;
+use wgpu_ext::{AtlasTexture, BindGroupExt as _, MultiPass};
 
-use super::{
-    helpers::{AtlasTexture, BindGroupExt, MultiPass},
-    pipelines::voxel::{
-        VoxelChunkInstanceBindGroup, VoxelChunkUniformData, VoxelCsmPipeline, VoxelOpaquePipeline,
-        VoxelUniforms, VoxelVertex,
-    },
+use super::pipelines::voxel::{
+    VoxelChunkInstanceBindGroup, VoxelChunkUniformData, VoxelCsmPipeline, VoxelOpaquePipeline,
+    VoxelUniforms, VoxelVertex,
 };
 
 // === WorldVoxelMesh === //

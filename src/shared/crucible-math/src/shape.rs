@@ -1,12 +1,11 @@
+use crucible_utils::iter::VolumetricIter;
 use num_traits::Signed;
 use typed_glam::{
     glam,
     traits::{NumericVector3, SignedNumericVector2, SignedNumericVector3},
 };
 
-use crate::{
-    lerp_percent_at, BlockFace, EntityVec, EntityVecExt, Sign, VecCompExt, VolumetricIter, WorldVec,
-};
+use crate::{lerp_percent_at, BlockFace, EntityVec, EntityVecExt, Sign, VecCompExt, WorldVec};
 
 // === Line3 === //
 

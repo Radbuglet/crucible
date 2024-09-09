@@ -8,12 +8,10 @@ use image::Rgba32FImage;
 use main_loop::{GfxContext, Viewport};
 use typed_glam::glam::{UVec2, Vec2, Vec3, Vec4};
 use wgpu::util::DeviceExt;
+use wgpu_ext::{AtlasTexture, AtlasTextureGfx, DynamicBuffer, FullScreenTexture, MultiPassDriver};
 
 use self::{
-    helpers::{
-        AtlasTexture, AtlasTextureGfx, CameraManager, CameraSettings, CameraSnapshot,
-        CameraViewState, DynamicBuffer, FullScreenTexture, MultiPassDriver,
-    },
+    helpers::{CameraManager, CameraSettings, CameraSnapshot, CameraViewState},
     pipelines::{
         skybox::{load_skybox_pipeline, SkyboxUniforms},
         voxel::{load_voxel_csm_pipeline, load_voxel_opaque_pipeline, VoxelUniforms},

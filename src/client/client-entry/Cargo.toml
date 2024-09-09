@@ -8,7 +8,7 @@ anyhow = { version = "1.0.86", features = ["backtrace"] }
 bevy-autoken = { version = "0.1.0", path = "../../util/bevy-autoken" }
 bevy_app = "0.14.0"
 bevy_ecs = "0.14.0"
-bytemuck = "1.16.0"
+bytemuck = "1.16.1"
 cbit = "0.1.0"
 color-backtrace = "0.6.1"
 crucible-assets = { version = "0.1.0", path = "../../util/crucible-assets" }
@@ -25,6 +25,7 @@ tracing-subscriber = "0.3.18"
 typed-glam = { version = "0.1.0", path = "../../util/typed-glam" }
 typed-wgpu = { version = "0.1.0", path = "../../util-gfx/typed-wgpu" }
 wgpu = "0.20.0"
+wgpu-ext = { version = "0.1.0", path = "../../util-gfx/wgpu-ext" }
 winit = "0.30.0"
 
 [dependencies.crevice]
