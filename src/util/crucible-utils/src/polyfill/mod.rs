@@ -3,6 +3,3 @@ pub use extension_for::*;
 
 mod option;
 pub use option::*;
-
-mod hygiene;
-pub use hygiene::*;

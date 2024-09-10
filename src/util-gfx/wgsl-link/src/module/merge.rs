@@ -3,9 +3,8 @@
 use std::{hash, num::NonZeroU32};
 
 use crucible_utils::{
-    define_index,
-    multi_closure::multi_closure,
-    newtypes::{Index as _, IndexVec, LargeIndex as _},
+    mem::multi_closure,
+    newtypes::{define_index, Index as _, IndexVec, LargeIndex as _},
 };
 use naga::{Arena, Handle, Span, UniqueArena};
 

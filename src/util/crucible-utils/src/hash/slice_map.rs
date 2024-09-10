@@ -1,12 +1,12 @@
-use core::hash;
-use std::{fmt, ops::Range};
+use core::{hash, str};
+use std::{fmt, marker::PhantomData, mem, ops::Range};
 
 use crucible_utils_proc::iterator;
 use derive_where::derive_where;
 use hashbrown::{hash_map, HashMap};
 
 use super::BuildHasherExt as _;
-use crate::mem::{defuse, guard};
+use crate::mem::{defuse, guard, smuggle_drop};
 
 // === SliceMap === //
 
@@ -82,6 +82,10 @@ impl<K, V, S> SliceMap<K, V, S> {
             iter: self.map.values_mut(),
         }
     }
+
+    pub fn key_buf(&self) -> &[K] {
+        &self.buf
+    }
 }
 
 impl<K, V, S> SliceMap<K, V, S>
@@ -89,7 +93,7 @@ where
     K: hash::Hash + Eq,
     S: hash::BuildHasher,
 {
-    pub fn insert(&mut self, key: impl IntoIterator<Item = K>, value: V) -> Option<V> {
+    pub fn entry(&mut self, key: impl IntoIterator<Item = K>) -> SliceMapEntry<'_, K, V, S> {
         // Stash the key away in `buf`.
         let old_buf_len = self.buf.len();
         let mut buf = guard(&mut self.buf, |buf| {
@@ -105,17 +109,34 @@ where
             .raw_entry_mut()
             .from_hash(hash, |k| k.hash == hash && &buf[k.range()] == key);
 
-        // Insert the entry.
+        // Wrap the entry.
         match entry {
-            hash_map::RawEntryMut::Occupied(mut entry) => Some(entry.insert(value)),
+            hash_map::RawEntryMut::Occupied(entry) => {
+                drop(buf); // (truncate the buffer)
+                SliceMapEntry::Occupied(SliceMapEntryOccupied {
+                    _ty: PhantomData,
+                    key_buf: &self.buf,
+                    key_range: entry.key().range(),
+                    value: entry.into_mut(),
+                })
+            }
             hash_map::RawEntryMut::Vacant(entry) => {
-                let key = Key {
+                defuse(buf); // (transfer authority over truncation to `SliceMapEntryVacant`'s destructor)
+                SliceMapEntry::Vacant(SliceMapEntryVacant(SliceMapEntryVacantInner {
+                    key_buf: &mut self.buf,
+                    retain_len: old_buf_len,
                     hash,
-                    from: old_buf_len,
-                    to: buf.len(),
-                };
-                entry.insert_with_hasher(hash, key, value, |v| v.hash);
-                defuse(buf);
+                    entry,
+                }))
+            }
+        }
+    }
+
+    pub fn insert(&mut self, key: impl IntoIterator<Item = K>, value: V) -> Option<V> {
+        match self.entry(key) {
+            SliceMapEntry::Occupied(mut entry) => Some(entry.insert(value)),
+            SliceMapEntry::Vacant(entry) => {
+                entry.insert(value);
                 None
             }
         }
@@ -124,7 +145,6 @@ where
     pub fn get<'v, KI>(&self, key: KI) -> Option<&V>
     where
         KI: IntoIterator<Item = &'v K> + Clone,
-        KI::IntoIter: ExactSizeIterator,
         K: 'v,
     {
         let hash = self.map.hasher().hash_iter(key.clone());
@@ -138,7 +158,6 @@ where
     pub fn get_mut<'v, KI>(&mut self, key: KI) -> Option<&mut V>
     where
         KI: IntoIterator<Item = &'v K> + Clone,
-        KI::IntoIter: ExactSizeIterator,
         K: 'v,
     {
         let hash = self.map.hasher().hash_iter(key.clone());
@@ -156,7 +175,6 @@ where
     pub fn contains<'v, KI>(&self, key: KI) -> bool
     where
         KI: IntoIterator<Item = &'v K> + Clone,
-        KI::IntoIter: ExactSizeIterator,
         K: 'v,
     {
         self.get(key).is_some()
@@ -191,6 +209,198 @@ struct Key {
 impl Key {
     fn range(self) -> Range<usize> {
         self.from..self.to
+    }
+}
+
+// === SliceMapEntryMut === //
+
+pub enum SliceMapEntry<'a, K, V, S> {
+    Occupied(SliceMapEntryOccupied<'a, K, V, S>),
+    Vacant(SliceMapEntryVacant<'a, K, V, S>),
+}
+
+impl<'a, K, V, S> SliceMapEntry<'a, K, V, S> {
+    pub fn insert(self, value: V) -> SliceMapEntryOccupied<'a, K, V, S> {
+        match self {
+            SliceMapEntry::Occupied(mut entry) => {
+                entry.insert(value);
+                entry
+            }
+            SliceMapEntry::Vacant(entry) => entry.insert_entry(value),
+        }
+    }
+
+    pub fn or_insert(self, value: V) -> &'a mut V {
+        match self {
+            SliceMapEntry::Occupied(entry) => entry.into_mut(),
+            SliceMapEntry::Vacant(entry) => entry.insert(value),
+        }
+    }
+
+    pub fn or_insert_with(
+        self,
+        value: impl FnOnce(&SliceMapEntryVacant<'a, K, V, S>) -> V,
+    ) -> &'a mut V {
+        match self {
+            SliceMapEntry::Occupied(entry) => entry.into_mut(),
+            SliceMapEntry::Vacant(entry) => {
+                let value = value(&entry);
+                entry.insert(value)
+            }
+        }
+    }
+
+    pub fn and_modify(mut self, f: impl FnOnce(&mut SliceMapEntryOccupied<'a, K, V, S>)) -> Self {
+        if let SliceMapEntry::Occupied(entry) = &mut self {
+            f(entry);
+        }
+        self
+    }
+}
+
+pub struct SliceMapEntryOccupied<'a, K, V, S> {
+    _ty: PhantomData<&'a S>,
+    key_buf: &'a [K],
+    key_range: Range<usize>,
+    value: &'a mut V,
+}
+
+impl<'a, K, V, S> SliceMapEntryOccupied<'a, K, V, S> {
+    // === Key Getters === //
+
+    pub fn key_range(&self) -> Range<usize> {
+        self.key_range.clone()
+    }
+
+    pub fn key_buf(&self) -> &[K] {
+        &self.key_buf
+    }
+
+    pub fn key(&self) -> &[K] {
+        &self.key_buf[self.key_range()]
+    }
+
+    pub fn into_key_buf(self) -> &'a [K] {
+        self.key_buf
+    }
+
+    pub fn into_key(self) -> &'a [K] {
+        &self.key_buf[self.key_range()]
+    }
+
+    // === Value Getters === //
+
+    pub fn get(&self) -> &V {
+        &self.value
+    }
+
+    pub fn get_mut(&mut self) -> &mut V {
+        &mut self.value
+    }
+
+    pub fn into_mut(self) -> &'a mut V {
+        self.value
+    }
+
+    // === Composite Getters === //
+
+    pub fn get_key_value(&mut self) -> (&[K], &mut V) {
+        (&self.key_buf[self.key_range()], self.value)
+    }
+
+    pub fn get_buf_key_value(&mut self) -> (&[K], &[K], &mut V) {
+        (self.key_buf, &self.key_buf[self.key_range()], self.value)
+    }
+
+    pub fn into_key_value(self) -> (&'a [K], &'a mut V) {
+        (&self.key_buf[self.key_range()], self.value)
+    }
+
+    pub fn into_buf_key_value(self) -> (&'a [K], &'a [K], &'a mut V) {
+        (self.key_buf, &self.key_buf[self.key_range()], self.value)
+    }
+
+    pub fn insert(&mut self, value: V) -> V {
+        mem::replace(&mut self.value, value)
+    }
+}
+
+pub struct SliceMapEntryVacant<'a, K, V, S>(SliceMapEntryVacantInner<'a, K, V, S>);
+
+struct SliceMapEntryVacantInner<'a, K, V, S> {
+    key_buf: &'a mut Vec<K>,
+    retain_len: usize,
+    hash: u64,
+    entry: hash_map::RawVacantEntryMut<'a, Key, V, S>,
+}
+
+impl<'a, K, V, S> SliceMapEntryVacant<'a, K, V, S> {
+    fn into_inner(self) -> SliceMapEntryVacantInner<'a, K, V, S> {
+        smuggle_drop(self, |v| &v.0)
+    }
+
+    // === Insertion === //
+
+    pub fn insert_entry(self, value: V) -> SliceMapEntryOccupied<'a, K, V, S> {
+        let me = self.into_inner();
+        let (_, value) = me.entry.insert_with_hasher(
+            me.hash,
+            Key {
+                hash: me.hash,
+                from: me.retain_len,
+                to: me.key_buf.len(),
+            },
+            value,
+            |k| k.hash,
+        );
+
+        SliceMapEntryOccupied {
+            _ty: PhantomData,
+            key_buf: me.key_buf,
+            key_range: me.retain_len..me.key_buf.len(),
+            value,
+        }
+    }
+
+    pub fn insert_buf_key_value(self, value: V) -> (&'a [K], &'a [K], &'a mut V) {
+        self.insert_entry(value).into_buf_key_value()
+    }
+
+    pub fn insert_key_value(self, value: V) -> (&'a [K], &'a mut V) {
+        self.insert_entry(value).into_key_value()
+    }
+
+    pub fn insert(self, value: V) -> &'a mut V {
+        self.insert_entry(value).into_mut()
+    }
+
+    // === Key Getters === //
+
+    pub fn key_range(&self) -> Range<usize> {
+        self.0.retain_len..self.0.key_buf.len()
+    }
+
+    pub fn key_buf(&self) -> &[K] {
+        &self.0.key_buf
+    }
+
+    pub fn key(&self) -> &[K] {
+        &self.0.key_buf[self.key_range()]
+    }
+
+    pub fn into_key_buf(self) -> &'a [K] {
+        self.into_inner().key_buf
+    }
+
+    pub fn into_key(self) -> &'a [K] {
+        let retain_len = self.0.retain_len;
+        &self.into_inner().key_buf[retain_len..]
+    }
+}
+
+impl<K, V, S> Drop for SliceMapEntryVacant<'_, K, V, S> {
+    fn drop(&mut self) {
+        self.0.key_buf.truncate(self.0.retain_len);
     }
 }
 

@@ -12,3 +12,5 @@ pub use splice::*;
 
 mod unsafe_cell;
 pub use unsafe_cell::*;
+
+pub use crucible_utils_proc::multi_closure;

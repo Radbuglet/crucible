@@ -3,8 +3,9 @@ use std::ops::Range;
 use crucible_utils::{
     define_index,
     hash::{hashbrown::hash_map, FxHashMap, FxStrMap},
+    macros::copy_hygiene,
     newtypes::{IndexVec, LargeIndex as _},
-    polyfill::{copy_hygiene, OptionExt},
+    polyfill::OptionExt as _,
 };
 
 use crate::{
