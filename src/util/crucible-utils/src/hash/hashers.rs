@@ -1,7 +1,6 @@
 use std::{
     hash::{self, BuildHasher, Hasher},
     marker::PhantomData,
-    num::NonZeroU64,
 };
 
 use derive_where::derive_where;
@@ -65,18 +64,6 @@ impl hash::Hasher for NopHasher {
 
 pub fn fx_hash_one(value: impl hash::Hash) -> u64 {
     FxBuildHasher::new().hash_one(value)
-}
-
-pub const fn xorshift64_raw(state: u64) -> u64 {
-    // Adapted from: https://en.wikipedia.org/w/index.php?title=Xorshift&oldid=1123949358
-    let state = state ^ (state << 13);
-    let state = state ^ (state >> 7);
-    let state = state ^ (state << 17);
-    state
-}
-
-pub const fn xorshift64(state: NonZeroU64) -> NonZeroU64 {
-    unsafe { NonZeroU64::new_unchecked(xorshift64_raw(state.get())) }
 }
 
 // === Hash Adapters === //

@@ -8,3 +8,6 @@ pub use ::hashbrown;
 
 mod slice_map;
 pub use slice_map::*;
+
+mod xorshift;
+pub use xorshift::*;

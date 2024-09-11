@@ -11,9 +11,11 @@ members = [
     "src/util/bevy-autoken",
     "src/util/crucible-assets",
     "src/util/crucible-utils-proc",
+    "src/util/crucible-utils-tools",
     "src/util/crucible-utils",
+    "src/util/crude",
     "src/util/dsl-utils",
-    "src/util/typed-glam", "src/util/crude",
+    "src/util/typed-glam",
 ]
 exclude = ["src/exp"]
 
