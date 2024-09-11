@@ -784,10 +784,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crucible-utils-tools"
-version = "0.1.0"
-
-[[package]]
 name = "crucible-world"
 version = "0.1.0"
 dependencies = [

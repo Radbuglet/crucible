@@ -1,46 +1,43 @@
-use std::{
-    borrow::Cow,
-    fmt,
-    num::NonZeroU64,
-    sync::{
-        atomic::{AtomicU64, Ordering::*},
-        OnceLock,
-    },
+use std::{borrow::Cow, fmt, num::NonZeroU64, sync::OnceLock};
+
+use crucible_utils::{
+    fmt::CowDisplay,
+    hash::{NopBuildHasher, Xorshift, XorshiftPool},
 };
 
-use crucible_utils::hash::{xorshift64_raw, NopBuildHasher};
+// === EntityAllocator === //
 
-// === Debug Labels === //
+static POOL: XorshiftPool = XorshiftPool::new();
 
-fn debug_labels() -> &'static dashmap::DashMap<Entity, Cow<'static, str>, NopBuildHasher> {
-    static DEBUG_LABELS: OnceLock<dashmap::DashMap<Entity, Cow<'static, str>, NopBuildHasher>> =
-        OnceLock::new();
-
-    DEBUG_LABELS.get_or_init(Default::default)
+pub struct EntityAllocator {
+    local: Xorshift,
 }
 
-pub(crate) fn set_debug_label(entity: Entity, label: impl Into<Cow<'static, str>>) {
-    debug_labels().insert(entity, label.into());
+impl fmt::Debug for EntityAllocator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Entity").finish_non_exhaustive()
+    }
 }
 
-pub(crate) fn unset_debug_label(entity: Entity) {
-    debug_labels().remove(&entity);
+impl EntityAllocator {
+    pub const fn new() -> Self {
+        Self {
+            local: Xorshift::new_empty(),
+        }
+    }
+
+    pub fn spawn(&mut self, label: impl CowDisplay) -> Entity {
+        let id = unsafe { NonZeroU64::new_unchecked(POOL.gen_local(&mut self.local)) };
+        let entity = Entity { id };
+        entity.set_debug_label(label.fmt_cow());
+        entity
+    }
 }
 
-// === Reservations === //
-
-static ENTITY_ALLOC: AtomicU64 = AtomicU64::new(xorshift64_raw(1));
-
-pub(crate) fn reserve_entity() -> Entity {
-    let id = unsafe {
-        NonZeroU64::new_unchecked(
-            ENTITY_ALLOC
-                .fetch_update(Relaxed, Relaxed, |v| Some(xorshift64_raw(v)))
-                .unwrap_unchecked(),
-        )
-    };
-
-    Entity { id }
+impl Drop for EntityAllocator {
+    fn drop(&mut self) {
+        POOL.dealloc_local(self.local.clone());
+    }
 }
 
 // === Entity === //
@@ -56,10 +53,27 @@ impl fmt::Debug for Entity {
 
         f.field(&self.id);
 
-        if let Some(label) = debug_labels().get(&self) {
+        if let Some(label) = Self::debug_labels().get(&self) {
             f.field(&label);
         }
 
         f.finish()
+    }
+}
+
+impl Entity {
+    fn debug_labels() -> &'static dashmap::DashMap<Entity, Cow<'static, str>, NopBuildHasher> {
+        static DEBUG_LABELS: OnceLock<dashmap::DashMap<Entity, Cow<'static, str>, NopBuildHasher>> =
+            OnceLock::new();
+
+        DEBUG_LABELS.get_or_init(Default::default)
+    }
+
+    pub(crate) fn set_debug_label(self, label: impl Into<Cow<'static, str>>) {
+        Self::debug_labels().insert(self, label.into());
+    }
+
+    pub(crate) fn unset_debug_label(self) {
+        Self::debug_labels().remove(&self);
     }
 }

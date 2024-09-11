@@ -1,5 +1,7 @@
 use core::fmt;
 
+// === DisplayFromFn === //
+
 #[derive(Copy, Clone)]
 pub struct DisplayFromFn<F>(pub F)
 where
