@@ -1,6 +1,7 @@
 use std::{
     array,
     ops::{Add, AddAssign, Mul, MulAssign},
+    u64,
 };
 
 // === Standard Linear Algebra === //
@@ -198,4 +199,5 @@ fn main() {
         xorshift64_regular(1, 100),
         (xorshift_mat().exp(100) * Vector(1)).0
     );
+    assert_eq!(xorshift_mat().exp(u64::MAX), Matrix::identity());
 }
