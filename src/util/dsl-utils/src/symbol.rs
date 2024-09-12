@@ -1,5 +1,4 @@
-use core::fmt;
-use std::{cell::UnsafeCell, hash::BuildHasher as _, ptr::NonNull};
+use std::{cell::UnsafeCell, fmt, hash::BuildHasher as _, ptr::NonNull};
 
 use crucible_utils::{
     define_index,

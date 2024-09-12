@@ -1,5 +1,4 @@
-use core::fmt;
-use std::hash;
+use std::{fmt, hash};
 
 use crate::{
     parser::{LookBackParseCursor as _, ParseCursor as _},

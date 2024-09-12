@@ -15,7 +15,6 @@ crate::define_index! {
     pub struct ArenaSlotIndex: u32;
 }
 
-#[derive_where(Default)]
 pub struct Arena<T> {
     // Invariant: this vector can never be u32::MAX elements in length.
     slots: IndexVec<ArenaSlotIndex, ArenaSlot<T>>,
@@ -36,9 +35,18 @@ impl<T> Drop for ArenaSlot<T> {
     }
 }
 
+impl<T> Default for Arena<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> Arena<T> {
-    pub fn new() -> Self {
-        Self::default()
+    pub const fn new() -> Self {
+        Self {
+            slots: IndexVec::new(),
+            free_slots: Vec::new(),
+        }
     }
 
     pub fn contains(&self, index: Handle<T>) -> bool {

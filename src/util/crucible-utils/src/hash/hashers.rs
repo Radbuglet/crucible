@@ -22,6 +22,22 @@ pub type NopHashSet<T> = hashbrown::HashSet<T, NopBuildHasher>;
 pub type FxSliceMap<K, V> = SliceMap<K, V, FxBuildHasher>;
 pub type FxStrMap<V> = StrMap<V, FxBuildHasher>;
 
+pub const fn new_fx_hash_map<K, V>() -> FxHashMap<K, V> {
+    FxHashMap::with_hasher(ConstBuildHasherDefault::new())
+}
+
+pub const fn new_fx_hash_set<T>() -> FxHashSet<T> {
+    FxHashSet::with_hasher(ConstBuildHasherDefault::new())
+}
+
+pub const fn new_nop_hash_map<K, V>() -> NopHashMap<K, V> {
+    NopHashMap::with_hasher(ConstBuildHasherDefault::new())
+}
+
+pub const fn new_nop_hash_set<T>() -> NopHashSet<T> {
+    NopHashSet::with_hasher(ConstBuildHasherDefault::new())
+}
+
 // === Hashers === //
 
 #[derive_where(Debug, Copy, Clone, Default)]
