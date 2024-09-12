@@ -4,8 +4,8 @@ pub use archetype::*;
 mod entity;
 pub use entity::*;
 
-mod schedule;
-pub use schedule::*;
+mod storage;
+pub use storage::*;
 
 mod storage_rand;
 pub use storage_rand::*;
