@@ -69,11 +69,11 @@ impl Entity {
         DEBUG_LABELS.get_or_init(Default::default)
     }
 
-    pub(crate) fn set_debug_label(self, label: impl Into<Cow<'static, str>>) {
+    pub fn set_debug_label(self, label: impl Into<Cow<'static, str>>) {
         Self::debug_labels().insert(self, label.into());
     }
 
-    pub(crate) fn unset_debug_label(self) {
+    pub fn unset_debug_label(self) {
         Self::debug_labels().remove(&self);
     }
 }

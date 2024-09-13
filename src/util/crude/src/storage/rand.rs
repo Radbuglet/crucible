@@ -1,7 +1,7 @@
 use std::{cell::UnsafeCell, fmt};
 
 use crucible_utils::{
-    hash::{hashbrown::hash_map, new_fx_hash_map, FxHashMap},
+    hash::{hashbrown::hash_map, new_fx_hash_map, new_nop_hash_map, FxHashMap, NopHashMap},
     newtypes::{Arena, Handle},
 };
 use derive_where::derive_where;
@@ -23,7 +23,7 @@ impl<T> fmt::Debug for StorageRandHandle<T> {
 
 pub struct StorageRand<T> {
     arena: Arena<Slot<T>>,
-    entity_map: FxHashMap<Entity, StorageRandHandle<T>>,
+    entity_map: NopHashMap<Entity, StorageRandHandle<T>>,
     archetypes: FxHashMap<ArchetypeId, Vec<StorageRandHandle<T>>>,
 }
 
@@ -52,7 +52,7 @@ impl<T> StorageRand<T> {
     pub const fn new() -> Self {
         Self {
             arena: Arena::new(),
-            entity_map: new_fx_hash_map(),
+            entity_map: new_nop_hash_map(),
             archetypes: new_fx_hash_map(),
         }
     }

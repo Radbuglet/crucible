@@ -1,12 +1,6 @@
-use crate::{ArchetypeId, Entity};
+use crate::{ArchetypeId, Entity, EntityLocation};
 
 // === Traits === //
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub struct EntityLocation {
-    pub archetype: ArchetypeId,
-    pub slot: usize,
-}
 
 /// A storage is a three-way map between [`Entity`] handles, a storage-defined
 /// [`Handle`](StorageBase::Handle), and the corresponding [`Component`](StorageBase::Component) value.
@@ -140,7 +134,3 @@ pub unsafe trait StorageBase {
         handle: Self::Handle,
     ) -> Option<(Entity, *mut Self::Component)>;
 }
-
-// === Queries === //
-
-// TODO

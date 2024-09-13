@@ -90,3 +90,33 @@ where
         }
     }
 }
+
+#[derive_where(Clone; I, I::Item)]
+pub struct DedupSortedIter<I: Iterator> {
+    pub iter: iter::Peekable<I>,
+}
+
+impl<I: Iterator> DedupSortedIter<I> {
+    pub fn new(iter: impl IntoIterator<IntoIter = I>) -> Self {
+        Self {
+            iter: iter.into_iter().peekable(),
+        }
+    }
+}
+
+impl<I: Iterator> Iterator for DedupSortedIter<I>
+where
+    I::Item: Ord,
+{
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let first = self.iter.next()?;
+
+        while Some(&first) == self.iter.peek() {
+            self.iter.next();
+        }
+
+        Some(first)
+    }
+}
