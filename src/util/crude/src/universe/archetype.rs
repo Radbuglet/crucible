@@ -1,5 +1,4 @@
-use core::fmt;
-use std::{any::TypeId, ops::Range, sync::OnceLock};
+use std::{any::TypeId, fmt, ops::Range, sync::OnceLock};
 
 use crucible_utils::{
     define_index,
@@ -19,8 +18,8 @@ pub struct ArchetypeManager {
 
 struct Archetype {
     comp_range: Range<usize>,
-    extensions: FxHashMap<TypeId, ArchetypeId>,
-    de_extensions: FxHashMap<TypeId, ArchetypeId>,
+    extensions: FxHashMap<ErasedBundle, ArchetypeId>,
+    de_extensions: FxHashMap<ErasedBundle, ArchetypeId>,
 }
 
 impl Default for ArchetypeManager {
@@ -46,25 +45,24 @@ impl ArchetypeManager {
     fn find_generic<M: FindGenericMode>(
         &mut self,
         start: ArchetypeId,
-        bundle_ty: TypeId,
-        bundle_comps: ErasedBundle,
+        bundle: ErasedBundle,
     ) -> ArchetypeId {
         // See whether the bundle extension shortcut is already present.
         let start_arch = &mut self.archetypes[start];
-        if let Some(extension) = M::pos(start_arch).get(&bundle_ty) {
+        if let Some(extension) = M::pos(start_arch).get(&bundle) {
             return *extension;
         }
 
         // See whether the archetype already exists.
         let components = DedupSortedIter::new(M::make_iter(
             &self.archetype_map.key_buf()[start_arch.comp_range.clone()],
-            bundle_comps.normalized(),
+            bundle.normalized(),
         ));
 
         if let Some(&end) = self.archetype_map.get(components.clone()) {
             // Add the shortcut.
-            M::pos(&mut self.archetypes[start]).insert(bundle_ty, end);
-            M::neg(&mut self.archetypes[end]).insert(bundle_ty, start);
+            M::pos(&mut self.archetypes[start]).insert(bundle, end);
+            M::neg(&mut self.archetypes[end]).insert(bundle, start);
 
             return end;
         }
@@ -80,35 +78,25 @@ impl ArchetypeManager {
         self.archetypes[end].comp_range = comp_range;
 
         // ...and add the shortcut.
-        M::pos(&mut self.archetypes[start]).insert(bundle_ty, end);
-        M::neg(&mut self.archetypes[end]).insert(bundle_ty, start);
+        M::pos(&mut self.archetypes[start]).insert(bundle, end);
+        M::neg(&mut self.archetypes[end]).insert(bundle, start);
 
         end
     }
 
-    pub fn find_extension(
-        &mut self,
-        start: ArchetypeId,
-        bundle_ty: TypeId,
-        bundle_comps: ErasedBundle,
-    ) -> ArchetypeId {
-        self.find_generic::<FindInsertMode>(start, bundle_ty, bundle_comps)
+    pub fn find_extension(&mut self, start: ArchetypeId, bundle: ErasedBundle) -> ArchetypeId {
+        self.find_generic::<FindInsertMode>(start, bundle)
     }
 
-    pub fn find_de_extension(
-        &mut self,
-        start: ArchetypeId,
-        bundle_ty: TypeId,
-        bundle_comps: ErasedBundle,
-    ) -> ArchetypeId {
-        self.find_generic::<FindRemoveMode>(start, bundle_ty, bundle_comps)
+    pub fn find_de_extension(&mut self, start: ArchetypeId, bundle: ErasedBundle) -> ArchetypeId {
+        self.find_generic::<FindRemoveMode>(start, bundle)
     }
 }
 
 trait FindGenericMode {
-    fn pos(arch: &mut Archetype) -> &mut FxHashMap<TypeId, ArchetypeId>;
+    fn pos(arch: &mut Archetype) -> &mut FxHashMap<ErasedBundle, ArchetypeId>;
 
-    fn neg(arch: &mut Archetype) -> &mut FxHashMap<TypeId, ArchetypeId>;
+    fn neg(arch: &mut Archetype) -> &mut FxHashMap<ErasedBundle, ArchetypeId>;
 
     fn make_iter<'a>(
         source: &'a [ComponentId],
@@ -119,11 +107,11 @@ trait FindGenericMode {
 struct FindInsertMode;
 
 impl FindGenericMode for FindInsertMode {
-    fn pos(arch: &mut Archetype) -> &mut FxHashMap<TypeId, ArchetypeId> {
+    fn pos(arch: &mut Archetype) -> &mut FxHashMap<ErasedBundle, ArchetypeId> {
         &mut arch.extensions
     }
 
-    fn neg(arch: &mut Archetype) -> &mut FxHashMap<TypeId, ArchetypeId> {
+    fn neg(arch: &mut Archetype) -> &mut FxHashMap<ErasedBundle, ArchetypeId> {
         &mut arch.de_extensions
     }
 
@@ -138,11 +126,11 @@ impl FindGenericMode for FindInsertMode {
 struct FindRemoveMode;
 
 impl FindGenericMode for FindRemoveMode {
-    fn pos(arch: &mut Archetype) -> &mut FxHashMap<TypeId, ArchetypeId> {
+    fn pos(arch: &mut Archetype) -> &mut FxHashMap<ErasedBundle, ArchetypeId> {
         &mut arch.de_extensions
     }
 
-    fn neg(arch: &mut Archetype) -> &mut FxHashMap<TypeId, ArchetypeId> {
+    fn neg(arch: &mut Archetype) -> &mut FxHashMap<ErasedBundle, ArchetypeId> {
         &mut arch.extensions
     }
 

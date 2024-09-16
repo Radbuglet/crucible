@@ -1,5 +1,5 @@
-mod core;
-pub use core::*;
+mod base;
+pub use base::*;
 
 mod rand;
 pub use rand::*;
