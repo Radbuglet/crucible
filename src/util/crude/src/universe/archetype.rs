@@ -11,11 +11,13 @@ use dashmap::DashMap;
 
 // === ArchetypeManager === //
 
+#[derive(Debug)]
 pub struct ArchetypeManager {
     archetypes: IndexVec<ArchetypeId, Archetype>,
     archetype_map: FxSliceMap<ComponentId, ArchetypeId>,
 }
 
+#[derive(Debug)]
 struct Archetype {
     comp_range: Range<usize>,
     extensions: FxHashMap<ErasedBundle, ArchetypeId>,
@@ -38,7 +40,7 @@ impl ArchetypeManager {
             }]),
             archetype_map: FxSliceMap::default(),
         };
-        manager.archetype_map.insert([], ArchetypeId(0));
+        manager.archetype_map.insert([], ArchetypeId::EMPTY);
         manager
     }
 
@@ -90,6 +92,10 @@ impl ArchetypeManager {
 
     pub fn find_de_extension(&mut self, start: ArchetypeId, bundle: ErasedBundle) -> ArchetypeId {
         self.find_generic::<FindRemoveMode>(start, bundle)
+    }
+
+    pub fn components_of(&self, id: ArchetypeId) -> &[ComponentId] {
+        &self.archetype_map.key_buf()[self.archetypes[id].comp_range.clone()]
     }
 }
 

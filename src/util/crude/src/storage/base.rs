@@ -1,4 +1,8 @@
-use crate::{ArchetypeId, Entity, EntityLocation};
+use std::cell::UnsafeCell;
+
+use crucible_utils::hash::FxHashMap;
+
+use crate::{ArchetypeId, Entity, EntityLocation, ErasedBundle};
 
 // === Traits === //
 
@@ -31,7 +35,7 @@ use crate::{ArchetypeId, Entity, EntityLocation};
 ///
 /// The implementor must satisfy each methods' "contract safety" section.
 ///
-pub unsafe trait StorageBase {
+pub unsafe trait StorageBase: Sized {
     /// The type of value stored in this storage.
     type Component;
 
@@ -133,4 +137,49 @@ pub unsafe trait StorageBase {
         me: &Self,
         handle: Self::Handle,
     ) -> Option<(Entity, *mut Self::Component)>;
+}
+
+// === ChangeQueue === //
+
+#[derive(Debug, Default)]
+pub struct ChangeQueue(UnsafeCell<ChangeQueueFinished>);
+
+impl ChangeQueue {
+    pub fn push_destroy(&self, target: Entity) {
+        unsafe { (*self.0.get()).removed_entities.push(target) };
+    }
+
+    pub fn push_component_remove(&self, target: Entity, bundle: ErasedBundle) {
+        unsafe { (*self.0.get()).removed_components.push((target, bundle)) };
+    }
+
+    pub fn push_component_add(&self, target: Entity, bundle: ErasedBundle) {
+        unsafe { (*self.0.get()).added_components.push((target, bundle)) };
+    }
+
+    pub fn push_component_add_de_novo(
+        &self,
+        bundle: ErasedBundle,
+        targets: impl IntoIterator<Item = Entity>,
+    ) {
+        unsafe {
+            (*self.0.get())
+                .added_components_de_novo
+                .entry(bundle)
+                .or_default()
+                .extend(targets)
+        };
+    }
+
+    pub fn into_inner(self) -> ChangeQueueFinished {
+        self.0.into_inner()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ChangeQueueFinished {
+    pub removed_entities: Vec<Entity>,
+    pub removed_components: Vec<(Entity, ErasedBundle)>,
+    pub added_components: Vec<(Entity, ErasedBundle)>,
+    pub added_components_de_novo: FxHashMap<ErasedBundle, Vec<Entity>>,
 }
