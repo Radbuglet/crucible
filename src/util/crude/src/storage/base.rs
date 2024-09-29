@@ -1,5 +1,13 @@
 use core::fmt;
-use std::{any::type_name, cell::RefCell, hash, marker::PhantomData, sync::Arc};
+use std::{
+    any::type_name,
+    cell::RefCell,
+    hash,
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    ptr::NonNull,
+    sync::Arc,
+};
 
 use crucible_utils::{fmt::CowDisplay, hash::FxHashMap, impl_tuples, mem::CellVec};
 
@@ -293,16 +301,16 @@ pub trait StorageViewModify {
     }
 }
 
-impl<'q, T: Component> StorageViewModify for StorageViewMut<'q, T> {
+impl<T: Component> StorageViewModify for StorageView<T> {
     type Values = T;
     type Results = Obj<T>;
 
     fn queue(&self) -> &ChangeQueue {
-        self.queue
+        self.queue()
     }
 
     fn insert_no_record(&mut self, entity: Entity, values: Self::Values) -> Obj<T> {
-        Obj::from_raw(<T::Storage>::insert(&mut self.storage, entity, values).handle)
+        Obj::from_raw(<T::Storage>::insert(self.storage_mut(), entity, values).handle)
     }
 }
 
@@ -338,7 +346,7 @@ macro_rules! impl_storage_view_modify {
 
 impl_tuples!(impl_storage_view_modify; no_unit);
 
-// === View === //
+// === StorageView === //
 
 pub struct InsertionResult<'a, T: Component> {
     pub old_value: Option<T>,
@@ -346,13 +354,93 @@ pub struct InsertionResult<'a, T: Component> {
     pub handle: Obj<T>,
 }
 
-#[derive(Debug)]
+// Bare view types
+pub struct StorageView<T: Component> {
+    queue: NonNull<ChangeQueue>,
+    storage: NonNull<T::Storage>,
+}
+
+impl<T: Component> StorageView<T> {
+    pub fn queue(&self) -> &ChangeQueue {
+        unsafe { self.queue.as_ref() }
+    }
+
+    pub fn storage(&self) -> &T::Storage {
+        unsafe { self.storage.as_ref() }
+    }
+
+    pub fn storage_mut(&mut self) -> &mut T::Storage {
+        unsafe { self.storage.as_mut() }
+    }
+
+    pub fn queue_storage_and_mut(&mut self) -> (&ChangeQueue, &mut T::Storage) {
+        let queue = unsafe { self.queue.as_ref() };
+        let storage = unsafe { self.storage.as_mut() };
+
+        (queue, storage)
+    }
+}
+
+#[repr(transparent)]
+pub struct StorageViewRef<'a, T: Component> {
+    _ty: PhantomData<&'a ()>,
+    view: StorageView<T>,
+}
+
+impl<'a, T: Component> StorageViewRef<'a, T> {
+    pub fn new(queue: &'a ChangeQueue, storage: &'a T::Storage) -> Self {
+        Self {
+            _ty: PhantomData,
+            view: StorageView {
+                queue: NonNull::from(queue),
+                storage: NonNull::from(storage),
+            },
+        }
+    }
+}
+
+impl<'a, T: Component> Deref for StorageViewRef<'a, T> {
+    type Target = StorageView<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.view
+    }
+}
+
+#[repr(transparent)]
 pub struct StorageViewMut<'a, T: Component> {
-    pub queue: &'a ChangeQueue,
-    pub storage: &'a mut T::Storage,
+    _ty: PhantomData<&'a ()>,
+    view: StorageView<T>,
 }
 
 impl<'a, T: Component> StorageViewMut<'a, T> {
+    pub fn new(queue: &'a ChangeQueue, storage: &'a mut T::Storage) -> Self {
+        Self {
+            _ty: PhantomData,
+            view: StorageView {
+                queue: NonNull::from(queue),
+                storage: NonNull::from(storage),
+            },
+        }
+    }
+}
+
+impl<'a, T: Component> Deref for StorageViewMut<'a, T> {
+    type Target = StorageView<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.view
+    }
+}
+
+impl<'a, T: Component> DerefMut for StorageViewMut<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.view
+    }
+}
+
+// View API
+impl<'a, T: Component> StorageView<T> {
     fn missing_error(handle: impl fmt::Debug) -> ! {
         panic!(
             "{handle:?} is missing component {}",
@@ -361,11 +449,11 @@ impl<'a, T: Component> StorageViewMut<'a, T> {
     }
 
     pub fn try_get_entity(&self, entity: Entity) -> Option<&T> {
-        <T::Storage>::entity_to_value(&self.storage, entity).map(|v| unsafe { &*v })
+        <T::Storage>::entity_to_value(&self.storage(), entity).map(|v| unsafe { &*v })
     }
 
     pub fn try_get_entity_mut(&mut self, entity: Entity) -> Option<&mut T> {
-        <T::Storage>::entity_to_value(&self.storage, entity).map(|v| unsafe { &mut *v })
+        <T::Storage>::entity_to_value(&self.storage(), entity).map(|v| unsafe { &mut *v })
     }
 
     pub fn get_entity(&self, entity: Entity) -> &T {
@@ -379,11 +467,11 @@ impl<'a, T: Component> StorageViewMut<'a, T> {
     }
 
     pub fn try_get(&self, handle: Obj<T>) -> Option<&T> {
-        <T::Storage>::handle_to_value(&self.storage, handle.raw()).map(|v| unsafe { &*v })
+        <T::Storage>::handle_to_value(&self.storage(), handle.raw()).map(|v| unsafe { &*v })
     }
 
     pub fn try_get_mut(&mut self, handle: Obj<T>) -> Option<&mut T> {
-        <T::Storage>::handle_to_value(&self.storage, handle.raw()).map(|v| unsafe { &mut *v })
+        <T::Storage>::handle_to_value(&self.storage(), handle.raw()).map(|v| unsafe { &mut *v })
     }
 
     pub fn get(&self, handle: Obj<T>) -> &T {
