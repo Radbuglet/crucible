@@ -5,7 +5,7 @@ use crucible_utils::{
 };
 use dashmap::DashMap;
 
-use crate::{ChangeQueueFinished, StorageBase};
+use crate::{ChangeQueueFinished, Storage};
 
 use super::{ArchetypeId, ArchetypeManager, ComponentId, Entity, EntityLocation};
 
@@ -20,6 +20,10 @@ pub struct Universe {
 }
 
 impl Universe {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn apply(&mut self, changes: &[ChangeQueueFinished]) {
         // Apply de-novo entity insertions. We do these first to avoid later modifications from
         // removing the de-novo assumption.
@@ -184,7 +188,7 @@ trait StorageErased {
     fn remove_entity_erased(&mut self, entity: Entity, location: Option<EntityLocation>);
 }
 
-impl<T: StorageBase> StorageErased for T {
+impl<T: Storage> StorageErased for T {
     fn reshape_erased(&mut self, entity: Entity, src: Option<EntityLocation>, dst: ArchetypeId) {
         Self::reshape(self, entity, src, dst);
     }

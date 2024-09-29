@@ -1,6 +1,9 @@
 mod bump;
 pub use bump::*;
 
+mod cell;
+pub use cell::*;
+
 mod drop_guard;
 pub use drop_guard::*;
 

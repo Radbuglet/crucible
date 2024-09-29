@@ -1,10 +1,19 @@
-use std::cell::UnsafeCell;
+use core::fmt;
+use std::{any::type_name, cell::RefCell, hash, marker::PhantomData, sync::Arc};
 
-use crucible_utils::hash::FxHashMap;
+use crucible_utils::{fmt::CowDisplay, hash::FxHashMap, impl_tuples, mem::CellVec};
 
-use crate::{ArchetypeId, Entity, EntityLocation, ErasedBundle};
+use crate::{
+    ArchetypeId, Bundle, Component, Entity, EntityAllocator, EntityLocation, ErasedBundle, Obj,
+};
 
 // === Traits === //
+
+pub struct InsertionResultGeneric<'a, S: Storage> {
+    pub old_value: Option<S::Component>,
+    pub new_value: &'a mut S::Component,
+    pub handle: S::Handle,
+}
 
 /// A storage is a three-way map between [`Entity`] handles, a storage-defined
 /// [`Handle`](StorageBase::Handle), and the corresponding [`Component`](StorageBase::Component) value.
@@ -35,17 +44,26 @@ use crate::{ArchetypeId, Entity, EntityLocation, ErasedBundle};
 ///
 /// The implementor must satisfy each methods' "contract safety" section.
 ///
-pub unsafe trait StorageBase: Sized {
+pub unsafe trait Storage: Sized {
     /// The type of value stored in this storage.
     type Component;
 
     /// The type of the handle used to access these values.
-    type Handle: Copy + Ord;
+    type Handle: fmt::Debug + Copy + hash::Hash + Ord;
+
+    /// Fetches the friendly-name of the component being stored in this storage.
+    fn friendly_name() -> impl fmt::Display {
+        type_name::<Self::Component>()
+    }
 
     /// Inserts the given component `value` into the storage, associating it with `entity` and the
     /// returned handle immediately. If the entity was previously *missing*, it will become *unhoused.
     /// Otherwise, it will stay in whatever state it was previously.
-    fn insert(me: &mut Self, entity: Entity, value: Self::Component) -> Self::Handle;
+    fn insert(
+        me: &mut Self,
+        entity: Entity,
+        value: Self::Component,
+    ) -> InsertionResultGeneric<'_, Self>;
 
     /// Removes the entity from the storage, disassociating it from its `handle`, its `value`, and
     /// whatever archetypal state it had. In other words, it transitions the `entity` to the *missing*
@@ -142,37 +160,69 @@ pub unsafe trait StorageBase: Sized {
 // === ChangeQueue === //
 
 #[derive(Debug, Default)]
-pub struct ChangeQueue(UnsafeCell<ChangeQueueFinished>);
+pub struct ChangeQueue {
+    removed_entities: CellVec<Entity>,
+    removed_components: CellVec<(Entity, ErasedBundle)>,
+    added_components: CellVec<(Entity, ErasedBundle)>,
+    added_components_de_novo: RefCell<FxHashMap<ErasedBundle, Arc<CellVec<Entity>>>>,
+}
 
 impl ChangeQueue {
     pub fn push_destroy(&self, target: Entity) {
-        unsafe { (*self.0.get()).removed_entities.push(target) };
+        self.removed_entities.push(target);
     }
 
     pub fn push_component_remove(&self, target: Entity, bundle: ErasedBundle) {
-        unsafe { (*self.0.get()).removed_components.push((target, bundle)) };
+        self.removed_components.push((target, bundle));
     }
 
     pub fn push_component_add(&self, target: Entity, bundle: ErasedBundle) {
-        unsafe { (*self.0.get()).added_components.push((target, bundle)) };
+        self.added_components.push((target, bundle));
     }
 
-    pub fn push_component_add_de_novo(
-        &self,
-        bundle: ErasedBundle,
-        targets: impl IntoIterator<Item = Entity>,
-    ) {
-        unsafe {
-            (*self.0.get())
+    pub fn components_de_novo(&self, bundle: ErasedBundle) -> DeNovoChangeQueue<'_> {
+        DeNovoChangeQueue {
+            _ty: PhantomData,
+            value: self
                 .added_components_de_novo
+                .borrow_mut()
                 .entry(bundle)
                 .or_default()
-                .extend(targets)
-        };
+                .clone(),
+        }
     }
 
     pub fn into_inner(self) -> ChangeQueueFinished {
-        self.0.into_inner()
+        ChangeQueueFinished {
+            removed_entities: self.removed_entities.finish(),
+            removed_components: self.removed_components.finish(),
+            added_components: self.added_components.finish(),
+            added_components_de_novo: self
+                .added_components_de_novo
+                .into_inner()
+                .into_iter()
+                .map(|(k, v)| (k, Arc::into_inner(v).unwrap().finish()))
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DeNovoChangeQueue<'a> {
+    _ty: PhantomData<&'a ChangeQueue>,
+    value: Arc<CellVec<Entity>>,
+}
+
+impl<'a> DeNovoChangeQueue<'a> {
+    pub fn erase(self) -> DeNovoChangeQueue<'static> {
+        DeNovoChangeQueue {
+            _ty: PhantomData,
+            value: self.value,
+        }
+    }
+
+    pub fn push(&self, value: Entity) {
+        self.value.push(value);
     }
 }
 
@@ -182,4 +232,167 @@ pub struct ChangeQueueFinished {
     pub removed_components: Vec<(Entity, ErasedBundle)>,
     pub added_components: Vec<(Entity, ErasedBundle)>,
     pub added_components_de_novo: FxHashMap<ErasedBundle, Vec<Entity>>,
+}
+
+// === StorageViewModify === //
+
+pub trait StorageViewModify {
+    type Values: Bundle;
+    type Results;
+
+    // === Required methods === //
+
+    fn queue(&self) -> &ChangeQueue;
+
+    fn insert_no_record(&mut self, entity: Entity, values: Self::Values) -> Self::Results;
+
+    // === Public Surface === //
+
+    fn spawn_many<L: CowDisplay>(
+        &mut self,
+        alloc: &mut EntityAllocator,
+        entries: impl IntoIterator<Item = (L, Self::Values)>,
+    ) -> impl Iterator<Item = Self::Results> {
+        let queue = self
+            .queue()
+            .components_de_novo(ErasedBundle::of::<Self::Values>())
+            .erase();
+
+        entries.into_iter().map(move |(label, values)| {
+            let entity = alloc.spawn(label);
+            queue.push(entity);
+            self.insert_no_record(entity, values)
+        })
+    }
+
+    fn spawn_arr<L: CowDisplay, const N: usize>(
+        &mut self,
+        alloc: &mut EntityAllocator,
+        entries: [(L, Self::Values); N],
+    ) -> [Self::Results; N] {
+        let queue = self
+            .queue()
+            .components_de_novo(ErasedBundle::of::<Self::Values>())
+            .erase();
+
+        entries.map(|(label, values)| {
+            let entity = alloc.spawn(label);
+            queue.push(entity);
+            self.insert_no_record(entity, values)
+        })
+    }
+
+    fn spawn(
+        &mut self,
+        alloc: &mut EntityAllocator,
+        label: impl CowDisplay,
+        values: Self::Values,
+    ) -> Self::Results {
+        let [res] = self.spawn_arr(alloc, [(label, values)]);
+        res
+    }
+}
+
+impl<'q, T: Component> StorageViewModify for StorageViewMut<'q, T> {
+    type Values = T;
+    type Results = Obj<T>;
+
+    fn queue(&self) -> &ChangeQueue {
+        self.queue
+    }
+
+    fn insert_no_record(&mut self, entity: Entity, values: Self::Values) -> Obj<T> {
+        Obj::from_raw(<T::Storage>::insert(&mut self.storage, entity, values).handle)
+    }
+}
+
+impl<'a, T: ?Sized + StorageViewModify> StorageViewModify for &'a mut T {
+    type Values = T::Values;
+    type Results = T::Results;
+
+    fn queue(&self) -> &ChangeQueue {
+        (**self).queue()
+    }
+
+    fn insert_no_record(&mut self, entity: Entity, values: Self::Values) -> Self::Results {
+        (*self).insert_no_record(entity, values)
+    }
+}
+
+macro_rules! impl_storage_view_modify {
+    ($($param:ident:$field:tt),*) => {
+        impl<$($param: StorageViewModify),*> StorageViewModify for ($($param,)*) {
+            type Values = ($($param::Values,)*);
+            type Results = ($($param::Results,)*);
+
+            fn queue(&self) -> &ChangeQueue {
+                self.0.queue()
+            }
+
+            fn insert_no_record(&mut self, entity: Entity, values: Self::Values) -> Self::Results {
+                ($(self.$field.insert_no_record(entity, values.$field),)*)
+            }
+        }
+    };
+}
+
+impl_tuples!(impl_storage_view_modify; no_unit);
+
+// === View === //
+
+pub struct InsertionResult<'a, T: Component> {
+    pub old_value: Option<T>,
+    pub new_value: &'a mut T,
+    pub handle: Obj<T>,
+}
+
+#[derive(Debug)]
+pub struct StorageViewMut<'a, T: Component> {
+    pub queue: &'a ChangeQueue,
+    pub storage: &'a mut T::Storage,
+}
+
+impl<'a, T: Component> StorageViewMut<'a, T> {
+    fn missing_error(handle: impl fmt::Debug) -> ! {
+        panic!(
+            "{handle:?} is missing component {}",
+            <T::Storage>::friendly_name()
+        )
+    }
+
+    pub fn try_get_entity(&self, entity: Entity) -> Option<&T> {
+        <T::Storage>::entity_to_value(&self.storage, entity).map(|v| unsafe { &*v })
+    }
+
+    pub fn try_get_entity_mut(&mut self, entity: Entity) -> Option<&mut T> {
+        <T::Storage>::entity_to_value(&self.storage, entity).map(|v| unsafe { &mut *v })
+    }
+
+    pub fn get_entity(&self, entity: Entity) -> &T {
+        self.try_get_entity(entity)
+            .unwrap_or_else(|| Self::missing_error(entity))
+    }
+
+    pub fn get_entity_mut(&mut self, entity: Entity) -> &mut T {
+        self.try_get_entity_mut(entity)
+            .unwrap_or_else(|| Self::missing_error(entity))
+    }
+
+    pub fn try_get(&self, handle: Obj<T>) -> Option<&T> {
+        <T::Storage>::handle_to_value(&self.storage, handle.raw()).map(|v| unsafe { &*v })
+    }
+
+    pub fn try_get_mut(&mut self, handle: Obj<T>) -> Option<&mut T> {
+        <T::Storage>::handle_to_value(&self.storage, handle.raw()).map(|v| unsafe { &mut *v })
+    }
+
+    pub fn get(&self, handle: Obj<T>) -> &T {
+        self.try_get(handle)
+            .unwrap_or_else(|| Self::missing_error(handle))
+    }
+
+    pub fn get_mut(&mut self, handle: Obj<T>) -> &mut T {
+        self.try_get_mut(handle)
+            .unwrap_or_else(|| Self::missing_error(handle))
+    }
 }

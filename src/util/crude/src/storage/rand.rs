@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, fmt};
+use std::{cell::UnsafeCell, fmt, mem};
 
 use crucible_utils::{
     hash::{hashbrown::hash_map, new_fx_hash_map, new_nop_hash_map, FxHashMap, NopHashMap},
@@ -6,7 +6,9 @@ use crucible_utils::{
 };
 use derive_where::derive_where;
 
-use crate::{ArchetypeId, Entity, EntityLocation, StorageBase};
+use crate::{ArchetypeId, Entity, EntityLocation, Storage};
+
+use super::InsertionResultGeneric;
 
 // === StorageRandHandle === //
 
@@ -58,17 +60,27 @@ impl<T> StorageRand<T> {
     }
 }
 
-unsafe impl<T> StorageBase for StorageRand<T> {
+unsafe impl<T> Storage for StorageRand<T> {
     type Component = T;
     type Handle = StorageRandHandle<T>;
 
-    fn insert(me: &mut Self, entity: Entity, value: Self::Component) -> Self::Handle {
+    fn insert(
+        me: &mut Self,
+        entity: Entity,
+        value: Self::Component,
+    ) -> InsertionResultGeneric<'_, Self> {
         let entry = match me.entity_map.entry(entity) {
             hash_map::Entry::Vacant(entry) => entry,
             hash_map::Entry::Occupied(entry) => {
                 let handle = *entry.get();
-                *me.arena[handle.0].value.get_mut() = value;
-                return handle;
+                let slot = me.arena[handle.0].value.get_mut();
+                let old_value = mem::replace(slot, value);
+
+                return InsertionResultGeneric {
+                    handle,
+                    old_value: Some(old_value),
+                    new_value: slot,
+                };
             }
         };
 
@@ -78,8 +90,13 @@ unsafe impl<T> StorageBase for StorageRand<T> {
         }));
 
         entry.insert(handle);
+        let slot = &mut me.arena[handle.0];
 
-        handle
+        InsertionResultGeneric {
+            handle,
+            old_value: None,
+            new_value: slot.value.get_mut(),
+        }
     }
 
     fn remove_entity(

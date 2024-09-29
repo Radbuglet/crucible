@@ -1,13 +1,13 @@
-use std::{any::TypeId, fmt, ops::Range, sync::OnceLock};
+use std::ops::Range;
 
 use crucible_utils::{
     define_index,
     hash::{FxHashMap, FxSliceMap},
     iter::{DedupSortedIter, MergeSortedIter, RemoveSortedIter},
-    mem::Splicer,
     newtypes::IndexVec,
 };
-use dashmap::DashMap;
+
+use super::{ComponentId, ErasedBundle};
 
 // === ArchetypeManager === //
 
@@ -164,76 +164,4 @@ impl ArchetypeId {
 pub struct EntityLocation {
     pub archetype: ArchetypeId,
     pub slot: usize,
-}
-
-// ComponentId
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct ComponentId(TypeId);
-
-impl ComponentId {
-    pub fn of<T: 'static>() -> Self {
-        Self(TypeId::of::<T>())
-    }
-}
-
-// === Bundles === //
-
-#[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct ErasedBundle(fn(&mut Vec<ComponentId>));
-
-impl fmt::Debug for ErasedBundle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ReifiedBundle").finish_non_exhaustive()
-    }
-}
-
-impl ErasedBundle {
-    pub fn of<B: Bundle>() -> Self {
-        Self(B::write_component_list)
-    }
-
-    pub fn normalized(self) -> &'static [ComponentId] {
-        static CACHE: OnceLock<DashMap<ErasedBundle, &'static [ComponentId]>> = OnceLock::new();
-
-        let cache = CACHE.get_or_init(Default::default);
-
-        if let Some(cached) = cache.get(&self) {
-            return *cached;
-        }
-
-        *cache.entry(self).or_insert_with(|| {
-            let mut components = Vec::new();
-            self.0(&mut components);
-            components.sort();
-
-            let mut splicer = Splicer::new(&mut components);
-            loop {
-                let remaining = splicer.remaining();
-                let Some((first_dup_idx, _)) = remaining
-                    .windows(2)
-                    .enumerate()
-                    .find(|(_, win)| win[0] == win[1])
-                else {
-                    break;
-                };
-
-                let first_dup = remaining[first_dup_idx];
-                let after_dup = &remaining[first_dup_idx..][1..];
-                let dup_seq_len = after_dup
-                    .iter()
-                    .enumerate()
-                    .find(|(_, &other)| first_dup != other)
-                    .map_or(after_dup.len(), |v| v.0);
-
-                splicer.splice(first_dup_idx, dup_seq_len, &[]);
-            }
-            drop(splicer);
-
-            Box::leak(components.into_boxed_slice())
-        })
-    }
-}
-
-pub trait Bundle {
-    fn write_component_list(target: &mut Vec<ComponentId>);
 }
